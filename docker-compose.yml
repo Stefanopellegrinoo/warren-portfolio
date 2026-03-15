@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:alpine
+    container_name: warren-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: always
+
+  redis-insight:
+    image: redislabs/redisinsight:latest
+    container_name: warren-redis-insight
+    ports:
+      - "8001:8001"
+    restart: always
+
+volumes:
+  redis_data:

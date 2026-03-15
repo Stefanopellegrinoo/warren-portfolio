@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/portfolio-history",
+      "schedule": "0 22 * * 1-5"
+    }
+  ]
+}
