@@ -85,6 +85,8 @@ export interface PortfolioSummary {
   total_invested: number
   open_pnl: number
   open_pnl_pct: number
+  day_pnl: number
+  day_pnl_pct: number
   realized_pnl: number
   realized_pnl_pct: number
   positions_count: number

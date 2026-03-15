@@ -49,7 +49,7 @@ export default function ImportModal({ onClose, onSuccess }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-lg glass rounded-2xl p-6 animate-slide-up border border-white/10">
+      <div className="relative w-full max-w-lg glass rounded-2xl p-4 md:p-6 animate-slide-up border border-white/10">
 
         <div className="flex items-center justify-between mb-6">
           <div>

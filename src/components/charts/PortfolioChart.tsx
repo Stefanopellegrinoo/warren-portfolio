@@ -6,8 +6,8 @@ import type { PortfolioSnapshot } from '@/types'
 
 interface Props {
   data: PortfolioSnapshot[]
-  period: '30' | '90' | '180' | '365'
-  onPeriodChange: (p: '30' | '90' | '180' | '365') => void
+  period: '30' | '90' | '180' | '365' | 'all'
+  onPeriodChange: (p: '30' | '90' | '180' | '365' | 'all') => void
 }
 
 const PERIODS = [
@@ -15,6 +15,7 @@ const PERIODS = [
   { label: '3M', value: '90' },
   { label: '6M', value: '180' },
   { label: '1A', value: '365' },
+  { label: 'MÁX', value: 'all' },
 ] as const
 
 function CustomTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number; name: string }>; label?: string }) {
@@ -48,7 +49,7 @@ export default function PortfolioChart({ data, period, onPeriodChange }: Props) 
     : true
 
   return (
-    <div className="glass rounded-2xl p-5">
+    <div className="glass rounded-2xl p-4 md:p-5">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h3 className="font-display font-700 text-white">Evolución del Portfolio</h3>
@@ -57,7 +58,7 @@ export default function PortfolioChart({ data, period, onPeriodChange }: Props) 
         <div className="flex gap-1">
           {PERIODS.map(({ label, value }) => (
             <button key={value} onClick={() => onPeriodChange(value)}
-              className={`px-3 py-1 rounded-lg text-xs font-mono transition-all duration-150
+              className={`px-2 md:px-3 py-1 rounded-lg text-xs font-mono transition-all duration-150
                 ${period === value ? 'bg-amber/20 text-amber border border-amber/30' : 'text-slate-500 hover:text-slate-300'}`}>
               {label}
             </button>

@@ -62,7 +62,7 @@ export default function AddTransactionModal({ onClose, onSuccess }: Props) {
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
 
       {/* Modal */}
-      <div className="relative w-full max-w-md glass rounded-2xl p-6 animate-slide-up border border-white/10">
+      <div className="relative w-full max-w-md glass rounded-2xl p-4 md:p-6 animate-slide-up border border-white/10">
         <div className="flex items-center justify-between mb-6">
           <div>
             <h2 className="font-display font-700 text-lg text-white">Nueva Operación</h2>

@@ -1,10 +1,6 @@
-import type { Transaction, Position, ClosedTrade, TransactionInput } from '@/types'
+import type { Transaction, Position, ClosedTrade, TransactionInput, Quote, PortfolioSummary } from '@/types'
 import { createServiceClient } from './supabase-server'
-import redisClient from './redis'
-import { addPriceUpdateJob } from './queue'
-
-const PRICE_CACHE_PREFIX = 'stock-price:'
-const PRICE_CACHE_TTL = 3600 // 1 hour
+import { getRedis, isRedisReady } from './redis'
 
 /**
  * THE CORE ENGINE
@@ -162,105 +158,75 @@ export async function processTransaction(
     if (!posErr) updatedPosition = pos
   }
 
+  // 6. INVALIDATE CACHE
+  if (isRedisReady()) {
+    try {
+      await getRedis()?.del(`summary:${userId}`)
+      console.log(`[Cache] Invalidated summary for ${userId} due to new transaction`)
+    } catch (err) {
+      console.error('[Cache] Error invalidating summary:', err)
+    }
+  }
+
   return { transaction: newTx, position: updatedPosition, closedTrade }
 }
 
 /**
- * Fetch quotes from Yahoo Finance for a list of tickers
+ * Calculates a complete portfolio summary given positions and current quotes.
+ * This is used for Dashboard rendering and proactively caching.
  */
-export async function fetchQuotes(tickers: string[]): Promise<Map<string, number>> {
-  const prices = new Map<string, number>()
-  if (!tickers.length) return prices
+export function calculatePortfolioSummary(
+  positions: Position[],
+  quotes: Map<string, Quote>,
+  realizedPnl: number = 0
+): { positions: Position[]; summary: PortfolioSummary } {
+  // 1. Enrich positions
+  const enriched: Position[] = positions.map((pos) => {
+    const quote = quotes.get(pos.ticker)
+    const price = quote?.price
+    const market_value = price ? price * pos.quantity : undefined
+    const pnl = market_value !== undefined ? market_value - pos.total_invested : undefined
+    const pnl_pct = pnl !== undefined && pos.total_invested > 0 ? pnl / pos.total_invested : undefined
+    
+    const day_change = quote ? quote.change * pos.quantity : undefined
+    const day_change_pct = quote ? quote.changePercent : undefined
 
-  const unique = Array.from(new Set(tickers))
-  const missing: string[] = []
-
-  // 1. Try to get from Redis
-  try {
-    const cached = await redisClient.mget(...unique.map(t => `${PRICE_CACHE_PREFIX}${t}`))
-    unique.forEach((ticker, i) => {
-      if (cached[i]) {
-        prices.set(ticker, parseFloat(cached[i]!))
-      } else {
-        missing.push(ticker)
-      }
-    })
-  } catch (err) {
-    console.error('Redis cache error:', err)
-    missing.push(...unique)
-  }
-
-  // 2. If missing, fetch from Yahoo and cache
-  if (missing.length > 0) {
-    try {
-      const yahooModule = await import('yahoo-finance2')
-      const YahooFinance = (yahooModule as any).default || yahooModule
-      const yahooFinance = typeof YahooFinance === 'function' ? new YahooFinance() : YahooFinance
-
-      // Set a real browser User-Agent to avoid 429s
-      if (typeof (yahooFinance as any).setGlobalConfig === 'function') {
-        (yahooFinance as any).setGlobalConfig({
-          fetchOptions: {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-            }
-          }
-        })
-      }
-
-      if (typeof (yahooFinance as any).suppressNotices === 'function') {
-        (yahooFinance as any).suppressNotices(['yahooSurvey'])
-      }
-
-      // Map our tickers to Yahoo symbols
-      const symbolToTicker = new Map<string, string>()
-      const symbols = missing.map(ticker => {
-        const symbol = normalizeTickerForYahoo(ticker)
-        symbolToTicker.set(symbol, ticker)
-        return symbol
-      })
-
-      // Fetch ALL at once
-      const quotes: any[] = await (yahooFinance as any).quote(symbols, {}, { return: 'array' })
-
-      for (const quote of quotes) {
-        if (quote?.regularMarketPrice) {
-          const ticker = symbolToTicker.get(quote.symbol)
-          if (ticker) {
-            const price = quote.regularMarketPrice
-            prices.set(ticker, price)
-            // Cache in Redis
-            await redisClient.setex(`${PRICE_CACHE_PREFIX}${ticker}`, PRICE_CACHE_TTL, price.toString())
-          }
-        }
-      }
-    } catch (err) {
-      console.error('Yahoo Finance overall error:', err)
+    return { 
+      ...pos, 
+      current_price: price, 
+      market_value, 
+      pnl, 
+      pnl_pct,
+      day_change,
+      day_change_pct
     }
-  }
+  })
 
-  return prices
-}
+  // 2. Aggregate Summary
+  const withPrices = enriched.filter(p => p.market_value !== undefined)
+  const total_market_value = withPrices.reduce((s, p) => s + (p.market_value ?? 0), 0)
+  const total_invested = enriched.reduce((s, p) => s + p.total_invested, 0)
+  const open_pnl = total_market_value - total_invested
+  const open_pnl_pct = total_invested > 0 ? open_pnl / total_invested : 0
+  const day_pnl = withPrices.reduce((s, p) => s + (p.day_change ?? 0), 0)
 
-/**
- * Force a background refresh of quotes via BullMQ
- */
-export async function refreshQuotes(tickers: string[]) {
-  if (!tickers.length) return
-  await addPriceUpdateJob(tickers)
-}
+  // Sort by performance (best first)
+  const sorted = [...withPrices].sort((a, b) => (b.pnl_pct ?? 0) - (a.pnl_pct ?? 0))
 
-export function normalizeTickerForYahoo(ticker: string): string {
-  const parts = ticker.split(':')
-  if (parts.length === 1) return ticker
-
-  const [exchange, symbol] = parts
-  switch (exchange.toUpperCase()) {
-    case 'BCBA': return `${symbol}.BA`    // Buenos Aires
-    case 'NYSE':
-    case 'NASDAQ':
-    case 'NYSEARCA':
-    case 'AMEX': return symbol
-    default: return symbol
+  return {
+    positions: enriched,
+    summary: {
+      total_market_value,
+      total_invested,
+      open_pnl,
+      open_pnl_pct,
+      day_pnl,
+      day_pnl_pct: total_invested > 0 ? day_pnl / total_invested : 0,
+      realized_pnl: realizedPnl,
+      realized_pnl_pct: total_invested > 0 ? realizedPnl / total_invested : 0,
+      positions_count: enriched.length,
+      best_performer: sorted[0] ?? null,
+      worst_performer: sorted[sorted.length - 1] ?? null,
+    }
   }
 }

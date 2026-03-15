@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClientInstance } from '@/lib/supabase-server'
 import { processTransaction } from '@/lib/portfolio-engine'
 import { parseExcelTransactions } from '@/lib/excel-import'
+import { invalidateUserCache } from '@/lib/redis'
 import type { TransactionInput } from '@/types'
 
 export async function POST(req: NextRequest) {
@@ -62,6 +63,10 @@ export async function POST(req: NextRequest) {
         results.errors++
         results.details.push(`${tx.date} ${tx.ticker}: ${err instanceof Error ? err.message : 'Unknown error'}`)
       }
+    }
+
+    if (results.imported > 0) {
+      await invalidateUserCache(user.id)
     }
 
     return NextResponse.json(results, { status: 201 })

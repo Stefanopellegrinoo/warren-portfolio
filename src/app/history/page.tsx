@@ -35,7 +35,7 @@ export default function HistoryPage() {
   const winRate = trades.length > 0 ? winners.length / trades.length : 0
 
   return (
-    <div className="min-h-screen pl-56">
+    <div className="min-h-screen md:pl-56 pb-20 md:pb-0">
       <div className="max-w-7xl mx-auto px-6 py-8">
 
         <div className="mb-8 animate-fade-in">
@@ -76,9 +76,10 @@ export default function HistoryPage() {
             className="input-field w-64" />
         </div>
 
-        {/* Table */}
+        {/* Table & Mobile Cards */}
         <div className="glass rounded-2xl overflow-hidden">
-          <div className="overflow-x-auto">
+          {/* DESKTOP TABLE */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-white/[0.04]">
@@ -143,6 +144,53 @@ export default function HistoryPage() {
               </tbody>
             </table>
           </div>
+
+          {/* MOBILE CARDS */}
+          <div className="flex md:hidden flex-col divide-y divide-white/[0.05]">
+            {loading ? (
+              <div className="py-12 flex justify-center">
+                <div className="w-6 h-6 border-2 border-amber/30 border-t-amber rounded-full animate-spin" />
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="text-center py-10 text-slate-600 font-mono text-sm">
+                Sin operaciones cerradas
+              </div>
+            ) : filtered.map((t, i) => {
+              const isPos = t.pnl > 0
+              return (
+                <div key={`mob-${t.id}`} className="p-4 animate-fade-in flex flex-col gap-3" style={{ animationDelay: `${i * 20}ms`, animationFillMode: 'both' }}>
+                  
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <p className="font-display font-800 text-lg text-white leading-none">
+                          {t.ticker.split(':')[1] ?? t.ticker}
+                        </p>
+                      </div>
+                      <p className="text-[10px] text-slate-500 font-mono">
+                        {formatDate(t.open_date)} → {formatDate(t.close_date)} ({t.days_held}d)
+                      </p>
+                    </div>
+
+                    <div className="text-right flex flex-col items-end">
+                      <p className={cn('font-mono text-base font-600 mb-1.5', isPos ? 'text-emerald' : 'text-rose')}>
+                        {isPos ? '+' : ''}{formatUSD(t.pnl)}
+                      </p>
+                      <span className={cn(
+                        'inline-flex items-center gap-1 text-[11px] font-mono font-600 px-2 py-0.5 rounded-full border',
+                        isPos ? 'tag-positive' : 'tag-negative'
+                      )}>
+                        {isPos ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                        {formatPct(t.pnl_pct)}
+                      </span>
+                    </div>
+                  </div>
+
+                </div>
+              )
+            })}
+          </div>
+
         </div>
 
       </div>

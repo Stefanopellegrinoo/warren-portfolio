@@ -61,7 +61,7 @@ export default function CashflowPage() {
   const isOverdue = (item: Cashflow) => item.status === 'PENDIENTE' && new Date(item.date) < new Date()
 
   return (
-    <div className="min-h-screen pl-56">
+    <div className="min-h-screen md:pl-56 pb-20 md:pb-0">
       <div className="max-w-5xl mx-auto px-6 py-8">
 
         <div className="flex items-start justify-between mb-8 animate-fade-in">
@@ -78,7 +78,7 @@ export default function CashflowPage() {
         </div>
 
         {/* KPIs */}
-        <div className="grid grid-cols-3 gap-3 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
           <div className="kpi-card animate-slide-up" style={{ animationFillMode: 'both' }}>
             <span className="text-[11px] font-mono text-slate-500 uppercase tracking-widest">Pendiente</span>
             <span className={cn('text-2xl font-display font-800 mt-1', stats.totalPending > 0 ? 'text-amber' : 'text-white')}>
@@ -102,9 +102,9 @@ export default function CashflowPage() {
 
         {/* Add form */}
         {showForm && (
-          <form onSubmit={handleSave} className="glass rounded-2xl p-5 mb-5 border border-amber/20 animate-slide-up">
+          <form onSubmit={handleSave} className="glass rounded-2xl p-4 md:p-5 mb-5 border border-amber/20 animate-slide-up">
             <h3 className="font-display font-700 text-white mb-4">Nueva entrada</h3>
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               <div>
                 <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Fecha</label>
                 <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
@@ -129,7 +129,7 @@ export default function CashflowPage() {
                   onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                   className="input-field w-full" />
               </div>
-              <div>
+              <div className="sm:col-span-2 lg:col-span-1">
                 <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Estado</label>
                 <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
                   className="input-field w-full">
@@ -140,7 +140,7 @@ export default function CashflowPage() {
             </div>
             <div className="flex justify-end gap-2 mt-4">
               <button type="button" onClick={() => setShowForm(false)} className="btn-ghost text-xs">Cancelar</button>
-              <button type="submit" disabled={saving} className="btn-primary text-xs flex items-center gap-2">
+              <button type="submit" disabled={saving} className="btn-primary flex-1 sm:flex-none justify-center text-xs flex items-center gap-2">
                 {saving ? <div className="w-3.5 h-3.5 border-2 border-bg-900/30 border-t-bg-900 rounded-full animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
                 Guardar
               </button>
@@ -148,9 +148,10 @@ export default function CashflowPage() {
           </form>
         )}
 
-        {/* Table */}
+        {/* Table & Mobile Cards */}
         <div className="glass rounded-2xl overflow-hidden">
-          <div className="overflow-x-auto">
+          {/* DESKTOP TABLE */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-white/[0.04]">
@@ -198,6 +199,52 @@ export default function CashflowPage() {
                 })}
               </tbody>
             </table>
+          </div>
+
+          {/* MOBILE CARDS */}
+          <div className="flex md:hidden flex-col divide-y divide-white/[0.05]">
+            {loading ? (
+              <div className="py-12 flex justify-center">
+                <div className="w-6 h-6 border-2 border-amber/30 border-t-amber rounded-full animate-spin" />
+              </div>
+            ) : items.length === 0 ? (
+              <div className="text-center py-10 text-slate-600 font-mono text-sm">
+                Sin registros · Agregá tu primer gasto
+              </div>
+            ) : items.map((item, i) => {
+              const overdue = isOverdue(item)
+              return (
+                <div key={`mob-${item.id}`} className={cn('p-4 flex flex-col gap-3 animate-fade-in', overdue && 'bg-rose/5')} style={{ animationDelay: `${i * 20}ms`, animationFillMode: 'both' }}>
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-display font-700 text-base text-white">{item.category}</p>
+                      <p className="text-[10px] text-slate-500 font-mono mt-0.5">{formatDate(item.date)}</p>
+                    </div>
+                    <p className="font-mono font-600 text-lg text-white">
+                      {formatUSD(item.amount_usd)}
+                    </p>
+                  </div>
+                  {item.description && (
+                    <p className="text-sm text-slate-400">{item.description}</p>
+                  )}
+                  <div className="pt-1">
+                    <button onClick={() => toggleStatus(item)}
+                      className={cn('inline-flex items-center gap-1.5 text-xs font-mono px-2.5 py-1 rounded-full border transition-all duration-150',
+                        item.status === 'PAGADO'
+                          ? 'tag-positive hover:opacity-70'
+                          : overdue
+                            ? 'bg-rose/10 text-rose border-rose/30 hover:opacity-70'
+                            : 'bg-amber/10 text-amber border-amber/30 hover:opacity-70')}>
+                      {item.status === 'PAGADO'
+                        ? <><CheckCircle className="w-3 h-3" /> PAGADO</>
+                        : overdue
+                          ? <><AlertCircle className="w-3 h-3" /> VENCIDO</>
+                          : <><Clock className="w-3 h-3" /> PENDIENTE</>}
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </div>
       </div>

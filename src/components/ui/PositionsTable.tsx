@@ -32,11 +32,12 @@ export default function PositionsTable({ positions, loading, onRefresh }: Props)
         )}
       </div>
 
-      <div className="overflow-x-auto">
+      {/* --- DESKTOP VIEW (Table) --- */}
+      <div className="hidden md:block overflow-x-auto">
         <table className="w-full">
           <thead>
             <tr className="border-b border-white/[0.04]">
-              {['TICKER', 'PRECIO', 'POSICIÓN', 'COSTO PROM.', 'INVERTIDO', 'VALOR HOY', 'P&L USD', 'P&L %', '% CARTERA'].map(h => (
+              {['TICKER', 'PRECIO', 'POSICIÓN', 'COSTO PROM.', 'INVERTIDO', 'VALOR HOY', 'P&L DÍA', 'VAR. DÍA %', 'P&L USD', 'P&L %', '% CARTERA'].map(h => (
                 <th key={h} className="text-left px-4 py-3 text-[10px] font-mono text-slate-600 uppercase tracking-widest whitespace-nowrap">
                   {h}
                 </th>
@@ -45,7 +46,7 @@ export default function PositionsTable({ positions, loading, onRefresh }: Props)
           </thead>
           <tbody>
             {positions.length === 0 ? (
-              <tr><td colSpan={9} className="text-center py-12 text-slate-600 font-mono text-sm">
+              <tr><td colSpan={11} className="text-center py-12 text-slate-600 font-mono text-sm">
                 Sin posiciones abiertas · Agregá tu primera operación
               </td></tr>
             ) : positions.map((pos, i) => {
@@ -98,6 +99,28 @@ export default function PositionsTable({ positions, loading, onRefresh }: Props)
                     {pos.market_value ? formatUSD(pos.market_value) : <span className="text-slate-600">—</span>}
                   </td>
 
+                  {/* P&L DÍA */}
+                  <td className="px-4 py-3">
+                    {pos.day_change !== undefined ? (
+                      <span className={cn('font-mono text-sm font-600', pos.day_change > 0 ? 'text-emerald' : pos.day_change < 0 ? 'text-rose' : 'text-slate-400')}>
+                        {pos.day_change > 0 ? '+' : ''}{formatUSD(pos.day_change)}
+                      </span>
+                    ) : <span className="text-slate-600">—</span>}
+                  </td>
+
+                  {/* VAR. DÍA % */}
+                  <td className="px-4 py-3">
+                    {pos.day_change_pct !== undefined ? (
+                      <span className={cn(
+                        'inline-flex items-center gap-1 text-xs font-mono font-600 px-2 py-0.5 rounded-full border',
+                        pos.day_change_pct > 0 ? 'tag-positive' : pos.day_change_pct < 0 ? 'tag-negative' : 'tag-neutral'
+                      )}>
+                        {pos.day_change_pct > 0 ? <TrendingUp className="w-3 h-3" /> : pos.day_change_pct < 0 ? <TrendingDown className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
+                        {formatPct(pos.day_change_pct)}
+                      </span>
+                    ) : <span className="text-slate-600">—</span>}
+                  </td>
+
                   {/* P&L USD */}
                   <td className="px-4 py-3">
                     {hasPnl ? (
@@ -136,6 +159,58 @@ export default function PositionsTable({ positions, loading, onRefresh }: Props)
             })}
           </tbody>
         </table>
+      </div>
+
+      {/* --- MOBILE VIEW (Cards) --- */}
+      <div className="flex flex-col md:hidden divide-y divide-white/[0.05]">
+        {positions.length === 0 ? (
+          <div className="text-center py-10 text-slate-600 font-mono text-sm">
+            Sin posiciones abiertas
+          </div>
+        ) : positions.map((pos, i) => {
+          const hasPnl = pos.pnl !== undefined
+          const isPos = (pos.pnl ?? 0) > 0
+          const isNeg = (pos.pnl ?? 0) < 0
+          const totalPortfolio = positions.reduce((s, p) => s + (p.market_value ?? 0), 0)
+          const pctCartera = totalPortfolio > 0 && pos.market_value ? pos.market_value / totalPortfolio : 0
+
+          return (
+            <div key={`mob-${pos.id}`} className="p-4 animate-fade-in flex items-center justify-between" style={{ animationDelay: `${i * 30}ms`, animationFillMode: 'both' }}>
+              
+              {/* Left Column: Ticker & Position */}
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-amber animate-pulse-slow" />
+                  <p className="font-display font-800 text-lg text-white leading-none">
+                    {pos.ticker.split(':')[1] ?? pos.ticker}
+                  </p>
+                </div>
+                <p className="text-[11px] text-slate-500 font-mono">
+                  {pos.quantity.toLocaleString('en-US', { maximumFractionDigits: 3 })} nom.
+                </p>
+              </div>
+
+              {/* Right Column: Value & Badge */}
+              <div className="text-right flex flex-col items-end">
+                <p className="font-mono text-base font-600 text-white mb-1.5">
+                  {pos.market_value ? formatUSD(pos.market_value) : <span className="text-slate-600">—</span>}
+                </p>
+
+                {pos.pnl_pct !== undefined ? (
+                  <span className={cn(
+                    'inline-flex items-center gap-1 text-[11px] font-mono font-600 px-2 py-0.5 rounded-full border',
+                    isPos ? 'tag-positive' : isNeg ? 'tag-negative' : 'tag-neutral'
+                  )}>
+                    {isPos ? <TrendingUp className="w-3 h-3" /> : isNeg ? <TrendingDown className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
+                    {formatPct(pos.pnl_pct)}
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-slate-600 border border-white/5 rounded-full px-2 py-0.5">N/A</span>
+                )}
+              </div>
+            </div>
+          )
+        })}
       </div>
     </div>
   )

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClientInstance } from '@/lib/supabase-server'
 import { processTransaction } from '@/lib/portfolio-engine'
+import { invalidateUserCache } from '@/lib/redis'
 import type { TransactionInput } from '@/types'
 
 export async function GET(req: NextRequest) {
@@ -54,6 +55,9 @@ export async function POST(req: NextRequest) {
     }
 
     const result = await processTransaction(user.id, body)
+    
+    // Invalidate Cache since portfolio mutated
+    await invalidateUserCache(user.id)
 
     return NextResponse.json(result, { status: 201 })
   } catch (err) {
