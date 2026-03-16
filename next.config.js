@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: 'standalone',
   experimental: { serverComponentsExternalPackages: ['yahoo-finance2'] },
   webpack: (config) => {
     config.resolve.fallback = {

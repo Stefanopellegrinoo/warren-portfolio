@@ -52,8 +52,19 @@ export async function GET(req: NextRequest) {
   fromDate.setHours(0, 0, 0, 0)
   today.setHours(23, 59, 59, 999)
 
-  // 3. Get all unique tickers
-  const tickers = Array.from(new Set(transactions.map(t => t.ticker)))
+  // 3. Get tickers from active positions
+  const { data: currentPositions } = await supabase
+    .from('positions')
+    .select('ticker')
+    .eq('user_id', user.id)
+  
+  const activeTickers = (currentPositions || []).map(p => p.ticker)
+  
+  if (activeTickers.length === 0) {
+    // If no active positions, we can't really show a meaningful value chart 
+    // but let's at least show something or an empty list.
+    return NextResponse.json({ data: [] })
+  }
 
   // 4. Fetch historical prices for all tickers
   // We need prices from the very first transaction to accurately calculate value, 
@@ -62,7 +73,7 @@ export async function GET(req: NextRequest) {
   
   const historicalData = new Map<string, Map<string, number>>() // Map<Ticker, Map<DateString, Price>>
   
-  await Promise.all(tickers.map(async (ticker) => {
+  await Promise.all(activeTickers.map(async (ticker) => {
     const quotes = await fetchHistoricalQuotes(ticker, firstTxDate, today)
     const priceMap = new Map<string, number>()
     
@@ -138,7 +149,7 @@ export async function GET(req: NextRequest) {
       const holdingEntries = Array.from(holdings.entries())
       for (let i = 0; i < holdingEntries.length; i++) {
         const [t, qty] = holdingEntries[i]
-        if (qty > 0) {
+        if (qty > 0 && activeTickers.includes(t)) {
           const prices = historicalData.get(t)
           // If it's the exact 'today' date, try to use the live quote!
           let price = prices?.get(dateStr) || 0
@@ -173,7 +184,7 @@ export async function GET(req: NextRequest) {
   // we patch the last entry using the live Redis quotes `fetchQuotes`
   if (data.length > 0) {
      const lastData = data[data.length - 1]
-     const liveQuotes = await fetchQuotes(tickers) // Hits extremely fast Redis Memory cache 
+     const liveQuotes = await fetchQuotes(activeTickers) // Hits extremely fast Redis Memory cache 
      
      let live_total_value = 0
      
