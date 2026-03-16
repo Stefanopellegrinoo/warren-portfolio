@@ -3,12 +3,31 @@
 import { useState, useEffect, useCallback } from 'react'
 import { formatUSD, formatPct, formatDate, cn } from '@/lib/utils'
 import type { ClosedTrade } from '@/types'
-import { TrendingUp, TrendingDown } from 'lucide-react'
+import { TrendingUp, TrendingDown, ChevronUp, ChevronDown } from 'lucide-react'
+
+type SortKey = 'ticker' | 'open_date' | 'close_date' | 'days_held' | 'avg_cost' | 'close_price' | 'quantity' | 'invested' | 'proceeds' | 'pnl' | 'pnl_pct'
+type SortDir = 'asc' | 'desc'
+
+const COLUMNS: { label: string; key: SortKey }[] = [
+  { label: 'TICKER',        key: 'ticker' },
+  { label: 'COMPRA',        key: 'open_date' },
+  { label: 'VENTA',         key: 'close_date' },
+  { label: 'DÍAS',          key: 'days_held' },
+  { label: 'COSTO PROM.',   key: 'avg_cost' },
+  { label: 'PRECIO CIERRE', key: 'close_price' },
+  { label: 'CANTIDAD',      key: 'quantity' },
+  { label: 'INVERTIDO',     key: 'invested' },
+  { label: 'RETORNO',       key: 'proceeds' },
+  { label: 'P&L USD',       key: 'pnl' },
+  { label: 'P&L %',         key: 'pnl_pct' },
+]
 
 export default function HistoryPage() {
   const [trades, setTrades] = useState<ClosedTrade[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('')
+  const [sortKey, setSortKey] = useState<SortKey>('close_date')
+  const [sortDir, setSortDir] = useState<SortDir>('desc')
 
   const fetchClosedTrades = useCallback(async () => {
     setLoading(true)
@@ -29,10 +48,47 @@ export default function HistoryPage() {
     !filter || t.ticker.toLowerCase().includes(filter.toLowerCase())
   )
 
+  function handleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortKey(key)
+      setSortDir('desc')
+    }
+  }
+
+  const sorted = [...filtered].sort((a, b) => {
+    let va: number | string = 0
+    let vb: number | string = 0
+
+    if (sortKey === 'ticker') {
+      va = (a.ticker.split(':')[1] ?? a.ticker).toLowerCase()
+      vb = (b.ticker.split(':')[1] ?? b.ticker).toLowerCase()
+      return sortDir === 'asc' ? (va < vb ? -1 : 1) : (va > vb ? -1 : 1)
+    }
+
+    if (sortKey === 'open_date' || sortKey === 'close_date') {
+      va = new Date((a as any)[sortKey]).getTime()
+      vb = new Date((b as any)[sortKey]).getTime()
+    } else {
+      va = (a as any)[sortKey] ?? 0
+      vb = (b as any)[sortKey] ?? 0
+    }
+
+    return sortDir === 'asc' ? (va as number) - (vb as number) : (vb as number) - (va as number)
+  })
+
   const totalPnl = trades.reduce((s, t) => s + t.pnl, 0)
   const totalInvested = trades.reduce((s, t) => s + t.invested, 0)
   const winners = trades.filter(t => t.pnl > 0)
   const winRate = trades.length > 0 ? winners.length / trades.length : 0
+
+  function SortIcon({ colKey }: { colKey: SortKey }) {
+    if (sortKey !== colKey) return <ChevronDown className="w-3 h-3 text-slate-700 opacity-0 group-hover:opacity-100 transition-opacity" />
+    return sortDir === 'asc'
+      ? <ChevronUp className="w-3 h-3 text-amber" />
+      : <ChevronDown className="w-3 h-3 text-amber" />
+  }
 
   return (
     <div className="min-h-screen md:pl-56 pb-20 md:pb-0">
@@ -83,8 +139,17 @@ export default function HistoryPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-white/[0.04]">
-                  {['TICKER','COMPRA','VENTA','DÍAS','COSTO PROM.','PRECIO CIERRE','CANTIDAD','INVERTIDO','RETORNO','P&L USD','P&L %'].map(h => (
-                    <th key={h} className="text-left px-4 py-3 text-[10px] font-mono text-slate-600 uppercase tracking-widest whitespace-nowrap">{h}</th>
+                  {COLUMNS.map(col => (
+                    <th
+                      key={col.key}
+                      onClick={() => handleSort(col.key)}
+                      className="group text-left px-4 py-3 text-[10px] font-mono text-slate-600 uppercase tracking-widest whitespace-nowrap cursor-pointer select-none hover:text-slate-400 transition-colors"
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        {col.label}
+                        <SortIcon colKey={col.key} />
+                      </span>
+                    </th>
                   ))}
                 </tr>
               </thead>
@@ -93,11 +158,11 @@ export default function HistoryPage() {
                   <tr><td colSpan={11} className="text-center py-12">
                     <div className="w-6 h-6 border-2 border-amber/30 border-t-amber rounded-full animate-spin mx-auto" />
                   </td></tr>
-                ) : filtered.length === 0 ? (
+                ) : sorted.length === 0 ? (
                   <tr><td colSpan={11} className="text-center py-12 text-slate-600 font-mono text-sm">
                     Sin operaciones cerradas todavía
                   </td></tr>
-                ) : filtered.map((t, i) => {
+                ) : sorted.map((t, i) => {
                   const isPos = t.pnl > 0
                   return (
                     <tr key={t.id} className="table-row animate-fade-in"
@@ -151,11 +216,11 @@ export default function HistoryPage() {
               <div className="py-12 flex justify-center">
                 <div className="w-6 h-6 border-2 border-amber/30 border-t-amber rounded-full animate-spin" />
               </div>
-            ) : filtered.length === 0 ? (
+            ) : sorted.length === 0 ? (
               <div className="text-center py-10 text-slate-600 font-mono text-sm">
                 Sin operaciones cerradas
               </div>
-            ) : filtered.map((t, i) => {
+            ) : sorted.map((t, i) => {
               const isPos = t.pnl > 0
               return (
                 <div key={`mob-${t.id}`} className="p-4 animate-fade-in flex flex-col gap-3" style={{ animationDelay: `${i * 20}ms`, animationFillMode: 'both' }}>

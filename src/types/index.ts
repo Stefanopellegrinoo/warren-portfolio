@@ -78,6 +78,7 @@ export interface Quote {
   change: number
   changePercent: number
   previousClose: number
+  updatedAt?: string
 }
 
 export interface PortfolioSummary {

@@ -6,6 +6,7 @@ import type { Position, Transaction } from '@/types'
 
 // GET: Generate dynamic portfolio history from transactions & historical prices
 export async function GET(req: NextRequest) {
+  try {
   const supabase = createServerClientInstance()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -209,6 +210,10 @@ export async function GET(req: NextRequest) {
   await cacheRoute(cacheKey, responseData, 300) // General 5m cache for the final constructed graph
 
   return NextResponse.json(responseData)
+  } catch (err) {
+    console.error('[Portfolio History] Error:', err)
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+  }
 }
 
 // POST: take a snapshot of current portfolio value (call daily via cron or manually)

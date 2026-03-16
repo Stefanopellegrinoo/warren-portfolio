@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(cachedStats)
     }
 
-    // 1. Get Snapshots for Drawdown and CAGR approximation
+    // 1. Get Snapshots for Drawdown and historical analysis
     const { data: snapshots, error: snapErr } = await supabase
       .from('portfolio_snapshots')
       .select('*')
@@ -36,7 +36,6 @@ export async function GET(req: NextRequest) {
       if (snap.total_value > peakValue) {
         peakValue = snap.total_value
       }
-      
       if (peakValue > 0) {
         const drawdown = (snap.total_value - peakValue) / peakValue
         if (drawdown < maxDrawdown) {
@@ -45,7 +44,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 2. Get Positions for Allocation and Win Rate
+    // 2. Get Positions for Allocation
     const { data: positions, error: posErr } = await supabase
       .from('positions')
       .select('*')
@@ -56,15 +55,16 @@ export async function GET(req: NextRequest) {
     const tickers = (positions || []).map((p: Position) => p.ticker)
     const quotes = await fetchQuotes(tickers)
 
-    // 3. Get Closed Trades for Realized PnL and historical best/worst
+    // 3. Get Closed Trades
     const { data: closed, error: closedErr } = await supabase
       .from('closed_trades')
       .select('*')
       .eq('user_id', user.id)
+      .order('close_date', { ascending: true })
 
     if (closedErr) throw closedErr
 
-    const realizedPnl = (closed || []).reduce((sum, t) => sum + (t.pnl || 0), 0)
+    const realizedPnl = (closed || []).reduce((sum: number, t: any) => sum + (t.pnl || 0), 0)
 
     let openPnl = 0
     let winningPositions = 0
@@ -81,6 +81,7 @@ export async function GET(req: NextRequest) {
 
       return {
         ticker: pos.ticker.split(':')[1] || pos.ticker,
+        fullTicker: pos.ticker,
         market_value,
         pnl,
         pnl_pct: pos.total_invested > 0 ? pnl / pos.total_invested : 0
@@ -89,7 +90,7 @@ export async function GET(req: NextRequest) {
 
     const winRate = positions?.length ? winningPositions / positions.length : 0
 
-    // Calculate allocation percentages
+    // Allocation
     const allocation = enrichedPositions
       .filter(p => p.market_value > 0)
       .map(p => ({
@@ -99,19 +100,80 @@ export async function GET(req: NextRequest) {
       }))
       .sort((a, b) => b.value - a.value)
 
-    // Combine all PnLs to find Biggest Winner & Loser
+    // All PnLs (for bar chart)
     const allPnLs = [
       ...enrichedPositions.map(p => ({ ticker: p.ticker, pnl: p.pnl, pnl_pct: p.pnl_pct, status: 'OPEN' })),
-      ...(closed || []).map(t => ({ 
+      ...(closed || []).map((t: any) => ({ 
         ticker: t.ticker.split(':')[1] || t.ticker, 
         pnl: t.pnl, 
         pnl_pct: t.pnl_pct, 
         status: 'CLOSED' 
       }))
-    ].sort((a, b) => b.pnl - a.pnl) // Descending by PnL USD
+    ].sort((a, b) => b.pnl - a.pnl)
 
     const biggestWinner = allPnLs.length > 0 ? allPnLs[0] : null
     const biggestLoser = allPnLs.length > 0 ? allPnLs[allPnLs.length - 1] : null
+
+    // === ADVANCED ANALYTICS ===
+
+    // Monthly Realized Returns (from closed trades)
+    const monthlyReturns: { month: string; pnl: number; trades: number }[] = []
+    const monthMap = new Map<string, { pnl: number; trades: number }>()
+    
+    for (const trade of (closed || [])) {
+      const d = new Date(trade.close_date)
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      const existing = monthMap.get(key) || { pnl: 0, trades: 0 }
+      existing.pnl += trade.pnl || 0
+      existing.trades += 1
+      monthMap.set(key, existing)
+    }
+    
+    // Sort by month
+    const sortedMonths = Array.from(monthMap.entries()).sort((a, b) => a[0].localeCompare(b[0]))
+    for (const [month, data] of sortedMonths) {
+      monthlyReturns.push({ month, ...data })
+    }
+
+    // Cumulative P&L (realized + open over time from closed trades)
+    let cumPnl = 0
+    const cumulativePnl = (closed || []).map((t: any) => {
+      cumPnl += t.pnl || 0
+      return {
+        date: t.close_date,
+        ticker: t.ticker.split(':')[1] || t.ticker,
+        pnl: t.pnl,
+        cumulative: cumPnl,
+      }
+    })
+
+    // Holding period stats
+    const holdingDays = (closed || []).map((t: any) => t.days_held || 0)
+    const avgHoldingDays = holdingDays.length > 0 ? Math.round(holdingDays.reduce((s: number, d: number) => s + d, 0) / holdingDays.length) : 0
+    const maxHoldingDays = holdingDays.length > 0 ? Math.max(...holdingDays) : 0
+    const minHoldingDays = holdingDays.length > 0 ? Math.min(...holdingDays) : 0
+
+    // Win/Loss detailed
+    const winners = (closed || []).filter((t: any) => t.pnl > 0)
+    const losers = (closed || []).filter((t: any) => t.pnl < 0)
+    const avgWin = winners.length > 0 ? winners.reduce((s: number, t: any) => s + t.pnl, 0) / winners.length : 0
+    const avgLoss = losers.length > 0 ? losers.reduce((s: number, t: any) => s + t.pnl, 0) / losers.length : 0
+    const profitFactor = avgLoss !== 0 ? Math.abs(avgWin / avgLoss) : 0
+
+    // Volatility & Sharpe (from monthly returns)
+    const monthlyPnlValues = monthlyReturns.map(m => m.pnl)
+    const avgMonthlyPnl = monthlyPnlValues.length > 0 ? monthlyPnlValues.reduce((s, v) => s + v, 0) / monthlyPnlValues.length : 0
+    const variance = monthlyPnlValues.length > 1
+      ? monthlyPnlValues.reduce((s, v) => s + Math.pow(v - avgMonthlyPnl, 2), 0) / (monthlyPnlValues.length - 1)
+      : 0
+    const monthlyStdDev = Math.sqrt(variance)
+    const annualizedVol = monthlyStdDev * Math.sqrt(12) // annualize
+    const riskFreeRate = 0 // simplified
+    const sharpeRatio = monthlyStdDev > 0 ? (avgMonthlyPnl - riskFreeRate) / monthlyStdDev : 0
+
+    // Currency exposure
+    const arsExposure = enrichedPositions.filter(p => p.fullTicker.startsWith('BCBA:')).reduce((s, p) => s + p.market_value, 0)
+    const usdExposure = totalPortfolioValue - arsExposure
 
     const responseData = {
       maxDrawdown,
@@ -122,10 +184,27 @@ export async function GET(req: NextRequest) {
       openPnl,
       biggestWinner,
       biggestLoser,
-      allPnLs // Return for the bar chart
+      allPnLs,
+      // New advanced data
+      monthlyReturns,
+      cumulativePnl,
+      avgHoldingDays,
+      maxHoldingDays,
+      minHoldingDays,
+      avgWin,
+      avgLoss,
+      profitFactor,
+      sharpeRatio,
+      annualizedVol,
+      monthlyStdDev,
+      winnersCount: winners.length,
+      losersCount: losers.length,
+      totalTrades: (closed || []).length,
+      arsExposure,
+      usdExposure,
     }
 
-    await cacheRoute(cacheKey, responseData, 300) // 5 minutes cache
+    await cacheRoute(cacheKey, responseData, 300)
 
     return NextResponse.json(responseData)
 

@@ -1,9 +1,9 @@
 /**
  * Standalone Yahoo Finance quote fetcher
- * Redis cache (if available) → in-memory cache → Yahoo Finance direct
+ * Redis LKP (Last Known Price) → in-memory cache → Yahoo Finance direct
  */
 
-import { getRedis, isRedisReady } from './redis'
+import { getRedis, isRedisReady, ensureRedisConnected } from './redis'
 import type { Quote } from '@/types'
 import { getCCLRate } from './currency'
 
@@ -14,9 +14,9 @@ interface CacheEntry {
 }
 
 const memoryCache = new Map<string, CacheEntry>()
-const MEMORY_CACHE_TTL_MS = 60_000     // 60 seconds
-const REDIS_CACHE_PREFIX = 'stock-quote:'
-const REDIS_CACHE_TTL = 300            // 5 minutes
+const MEMORY_CACHE_TTL_MS = 120_000    // 2 minutes (generous)
+const PRICE_STORAGE_PREFIX = 'price:'
+const PRICE_STORAGE_TTL = 604800       // 7 days persistent storage (LKP)
 
 function getMemoryCachedQuote(ticker: string): Quote | null {
   const entry = memoryCache.get(ticker)
@@ -69,57 +69,71 @@ async function getYahooFinance(): Promise<any> {
   return instance
 }
 
-// ── Fetch from Yahoo Finance directly ───────────────────
-export async function fetchQuotesFromYahoo(tickers: string[]): Promise<Map<string, Quote>> {
+// ── Raw Fetch from Yahoo Finance (No ARS→USD normalization) ─────
+export async function fetchRawQuotes(tickers: string[]): Promise<Map<string, Quote>> {
   const quotesMap = new Map<string, Quote>()
   if (!tickers.length) return quotesMap
 
-  try {
-    const yahooFinance = await getYahooFinance()
+  const yahooFinance = await getYahooFinance()
+  const updatedAt = new Date().toISOString()
 
-    const symbolToTicker = new Map<string, string>()
-    const symbols = tickers.map(ticker => {
-      const symbol = normalizeTickerForYahoo(ticker)
-      symbolToTicker.set(symbol, ticker)
-      return symbol
-    })
+  const symbolToTicker = new Map<string, string>()
+  const symbols = tickers.map(ticker => {
+    const symbol = normalizeTickerForYahoo(ticker)
+    symbolToTicker.set(symbol, ticker)
+    return symbol
+  })
 
-    const quotes: any[] = await yahooFinance.quote(symbols, {}, { return: 'array' })
+  // This will THROW on failure — caller handles retry/fallback
+  const quotes: any[] = await yahooFinance.quote(symbols, {}, { return: 'array' })
 
-    // 3. Normalized Prices (USD)
-    const ccl = await getCCLRate()
-
-    for (const quote of quotes) {
-      if (quote?.regularMarketPrice) {
-        const ticker = symbolToTicker.get(quote.symbol)
-        if (ticker) {
-          let price = quote.regularMarketPrice
-          let change = quote.regularMarketChange ?? 0
-          
-          // If it's Argentine stock, convert ARS -> USD
-          if (ticker.startsWith('BCBA:')) {
-            price = price / ccl
-            change = change / ccl
-          }
-
-          quotesMap.set(ticker, {
-            ticker,
-            price,
-            change,
-            changePercent: (quote.regularMarketChangePercent ?? 0) / 100,
-            previousClose: quote.regularMarketPreviousClose ?? quote.regularMarketPrice,
-          })
-        }
+  for (const quote of quotes) {
+    if (quote?.regularMarketPrice) {
+      const ticker = symbolToTicker.get(quote.symbol)
+      if (ticker) {
+        quotesMap.set(ticker, {
+          ticker,
+          price: quote.regularMarketPrice,
+          change: quote.regularMarketChange ?? 0,
+          changePercent: (quote.regularMarketChangePercent ?? 0) / 100,
+          previousClose: quote.regularMarketPreviousClose ?? quote.regularMarketPrice,
+          updatedAt
+        })
       }
     }
-  } catch (err) {
-    console.error('[Yahoo Finance] Error fetching quotes:', err)
   }
 
   return quotesMap
 }
 
-// ── Cache a quote in Redis ──────────────────────────────
+// ── Normalized Fetch (Converts ARS to USD via CCL) ──────────────
+export async function fetchQuotesFromYahoo(tickers: string[]): Promise<Map<string, Quote>> {
+  if (!tickers.length) return new Map()
+
+  try {
+    // 1. Fetch RAW data from Yahoo
+    const quotesMap = await fetchRawQuotes(tickers)
+    
+    // 2. Get CCL Rate for ARS→USD normalization (cached in Redis for 1h)
+    const hasBCBA = tickers.some(t => t.startsWith('BCBA:'))
+    if (hasBCBA) {
+      const ccl = await getCCLRate()
+      quotesMap.forEach((quote, ticker) => {
+        if (ticker.startsWith('BCBA:')) {
+          quote.price = quote.price / ccl
+          quote.change = quote.change / ccl
+        }
+      })
+    }
+    
+    return quotesMap
+  } catch (err) {
+    console.error('[Yahoo Finance] Error in fetchQuotesFromYahoo:', err)
+    return new Map()
+  }
+}
+
+// ── Cache a quote in Redis (LKP) ────────────────────────
 export async function cachePrice(ticker: string, quote: Quote): Promise<void> {
   // Always update memory cache
   setMemoryCachedQuote(ticker, quote)
@@ -129,82 +143,62 @@ export async function cachePrice(ticker: string, quote: Quote): Promise<void> {
     try {
       const redis = getRedis()
       if (redis) {
-        await redis.setex(`${REDIS_CACHE_PREFIX}${ticker}`, REDIS_CACHE_TTL, JSON.stringify(quote))
+        await redis.setex(`${PRICE_STORAGE_PREFIX}${ticker}`, PRICE_STORAGE_TTL, JSON.stringify(quote))
       }
-    } catch {
-      // Redis write failed — memory cache is still valid
+    } catch (err) {
+      console.error(`[Cache] Error saving price for ${ticker}:`, err)
     }
   }
 }
 
-// ── Main entry: Redis → memory cache → Yahoo Finance ───
 /**
- * Fetch quotes for a list of tickers.
- * Priority: Redis cache → in-memory cache → Yahoo Finance direct.
- * Never throws — returns partial results on failure.
+ * Fetch quotes from LKP storage (Redis → Memory).
+ * This function NEVER calls Yahoo Finance.
+ * It only returns what's already been cached by the Worker.
  */
 export async function fetchQuotes(tickers: string[]): Promise<Map<string, Quote>> {
   const quotesMap = new Map<string, Quote>()
   if (!tickers.length) return quotesMap
 
   const unique = Array.from(new Set(tickers))
-  const missing: string[] = []
 
-  // 1. Try Redis cache first
-  if (isRedisReady()) {
+  // 1. Try Memory cache first
+  const missingFromMem: string[] = []
+  unique.forEach(ticker => {
+    const cached = getMemoryCachedQuote(ticker)
+    if (cached) quotesMap.set(ticker, cached)
+    else missingFromMem.push(ticker)
+  })
+
+  if (missingFromMem.length === 0) return quotesMap
+
+  // 2. Try Redis LKP storage (ensure connected first)
+  const redisOk = await ensureRedisConnected()
+  if (redisOk) {
     try {
       const redis = getRedis()
       if (redis) {
-        const keys = unique.map(t => `${REDIS_CACHE_PREFIX}${t}`)
+        const keys = missingFromMem.map(t => `${PRICE_STORAGE_PREFIX}${t}`)
         const cached = await redis.mget(...keys)
-        unique.forEach((ticker, i) => {
+        missingFromMem.forEach((ticker, i) => {
           if (cached[i]) {
             try {
               const quote = JSON.parse(cached[i]!) as Quote
               quotesMap.set(ticker, quote)
-              setMemoryCachedQuote(ticker, quote) // sync memory cache
-            } catch {
-              // Parse error
-              missing.push(ticker)
-            }
-          } else {
-            missing.push(ticker)
+              setMemoryCachedQuote(ticker, quote)
+            } catch {}
           }
         })
-      } else {
-        missing.push(...unique)
       }
-    } catch {
-      missing.push(...unique)
-    }
-  } else {
-    // Redis not available — check memory cache
-    for (const ticker of unique) {
-      const cached = getMemoryCachedQuote(ticker)
-      if (cached !== null) {
-        quotesMap.set(ticker, cached)
-      } else {
-        missing.push(ticker)
-      }
-    }
-  }
-
-  // 2. Fetch missing from Yahoo Finance directly
-  if (missing.length > 0) {
-    const yahooResult = await fetchQuotesFromYahoo(missing)
-    const entries = Array.from(yahooResult.entries())
-    for (let i = 0; i < entries.length; i++) {
-      const [ticker, quote] = entries[i]
-      quotesMap.set(ticker, quote)
-      // Cache for next time
-      await cachePrice(ticker, quote)
+    } catch (err) {
+      console.error('[Cache] Error reading from LKP storage:', err)
     }
   }
 
   return quotesMap
 }
 
-// ── Historical Data Fetching (Caching array for 1h) ───────────
+// ── Historical Data Fetching ───────────────────────────────
 export interface HistoricalQuote {
   date: string // YYYY-MM-DD
   close: number
@@ -220,7 +214,7 @@ export async function fetchHistoricalQuotes(
 ): Promise<HistoricalQuote[]> {
   const cacheKey = `historical:${ticker}`
   
-  // Try to hit Redis cache first (1 hour TTL)
+  // Try to hit Redis cache first
   const cachedData = await getCachedRoute<HistoricalQuote[]>(cacheKey)
   if (cachedData) {
     return cachedData
@@ -230,14 +224,13 @@ export async function fetchHistoricalQuotes(
     const yahooFinance = await getYahooFinance()
     const symbol = normalizeTickerForYahoo(ticker)
     
-    // 2. Fetch from Yahoo
     const result = await yahooFinance.historical(symbol, {
       period1,
       period2,
       interval: '1d'
     })
 
-    // 3. Normalize to USD if it's Argentine stock
+    // Normalize to USD if it's Argentine stock
     let hCcl: Map<string, number> | null = null
     if (ticker.startsWith('BCBA:')) {
       hCcl = await getHistoricalCCL(period1, period2)
@@ -260,7 +253,7 @@ export async function fetchHistoricalQuotes(
       }
     })
     
-    await cacheRoute(cacheKey, parsed, 86400) // cache for 24 hours
+    await cacheRoute(cacheKey, parsed, 86400)
     
     return parsed
   } catch (err) {

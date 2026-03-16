@@ -19,22 +19,14 @@ export async function middleware(req: NextRequest) {
   const { data: { session } } = await supabase.auth.getSession()
   const pathname = req.nextUrl.pathname
 
-  // Redirect to login if not authenticated on protected routes
-  if (!session && pathname.startsWith('/dashboard')) {
-    return NextResponse.redirect(new URL('/auth/login', req.url))
-  }
-  if (!session && pathname.startsWith('/history')) {
-    return NextResponse.redirect(new URL('/auth/login', req.url))
-  }
-  if (!session && pathname.startsWith('/cashflow')) {
+  // Protected routes — redirect to login if not authenticated
+  const protectedPaths = ['/dashboard', '/history', '/cashflow', '/statistics']
+  if (!session && protectedPaths.some(p => pathname.startsWith(p))) {
     return NextResponse.redirect(new URL('/auth/login', req.url))
   }
 
   // Redirect to dashboard if already logged in
-  if (session && pathname === '/auth/login') {
-    return NextResponse.redirect(new URL('/dashboard', req.url))
-  }
-  if (session && pathname === '/') {
+  if (session && (pathname === '/auth/login' || pathname === '/')) {
     return NextResponse.redirect(new URL('/dashboard', req.url))
   }
 
@@ -42,5 +34,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/', '/dashboard/:path*', '/history/:path*', '/cashflow/:path*', '/auth/login'],
+  matcher: ['/', '/dashboard/:path*', '/history/:path*', '/cashflow/:path*', '/statistics/:path*', '/auth/login'],
 }

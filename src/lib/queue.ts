@@ -27,7 +27,7 @@ export async function addPriceUpdateJob(tickers: string[]) {
  * Schedule a repeatable job that fetches all prices every N minutes.
  * Call this once when the worker starts.
  */
-export async function scheduleRepeatingPriceJob(intervalMinutes = 2) {
+export async function scheduleRepeatingPriceJob(intervalMinutes = 5) {
   const queue = getPriceQueue()
 
   // Remove existing repeatable jobs to avoid duplicates

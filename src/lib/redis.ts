@@ -2,6 +2,7 @@ import Redis from 'ioredis'
 
 let redisClient: Redis | null = null
 let redisReady = false
+let connectPromise: Promise<void> | null = null
 
 function getRedisUrl(): string {
   return process.env.REDIS_URL || 'redis://localhost:6379'
@@ -38,8 +39,10 @@ export function getRedis(): Redis | null {
       redisReady = false
     })
 
-    // Attempt to connect (non-blocking)
-    redisClient.connect().catch(() => {
+    // Store the connect promise so we can await it
+    connectPromise = redisClient.connect().then(() => {
+      redisReady = true
+    }).catch(() => {
       console.warn('[Redis] Could not connect — running without cache')
     })
 
@@ -51,7 +54,31 @@ export function getRedis(): Redis | null {
 }
 
 /**
+ * Ensure Redis is connected before reading/writing.
+ * Call this in API routes before accessing Redis.
+ * Returns true if Redis is ready, false otherwise.
+ */
+export async function ensureRedisConnected(): Promise<boolean> {
+  // Trigger creation if not yet created
+  if (!redisClient) {
+    getRedis()
+  }
+  
+  // If already ready, return immediately
+  if (redisReady) return true
+  
+  // Wait for the connection to be established
+  if (connectPromise) {
+    await connectPromise
+  }
+  
+  return redisReady
+}
+
+/**
  * Check if Redis is currently connected and ready.
+ * WARNING: This is synchronous — may return false if connection is still establishing.
+ * For API routes, prefer ensureRedisConnected() instead.
  */
 export function isRedisReady(): boolean {
   return redisReady && redisClient !== null
@@ -131,4 +158,4 @@ export async function invalidateUserCache(userId: string): Promise<void> {
   }
 }
 
-export default { getRedis, isRedisReady, getRedisConnectionOpts, cacheRoute, getCachedRoute, invalidateUserCache }
+export default { getRedis, isRedisReady, ensureRedisConnected, getRedisConnectionOpts, cacheRoute, getCachedRoute, invalidateUserCache }

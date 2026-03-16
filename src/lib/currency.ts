@@ -1,4 +1,4 @@
-import { fetchQuotesFromYahoo } from './yahoo-finance'
+import { fetchRawQuotes } from './yahoo-finance'
 import { getRedis, isRedisReady } from './redis'
 
 const REDIS_KEY_CCL = 'currency:ccl'
@@ -19,7 +19,7 @@ export async function getCCLRate(): Promise<number> {
   try {
     // 2. Fetch GGAL (USD) and GGAL.BA (ARS)
     // GGAL ratio is 1:10 (1 ADR = 10 local shares)
-    const quotes = await fetchQuotesFromYahoo(['GGAL', 'BCBA:GGAL'])
+    const quotes = await fetchRawQuotes(['GGAL', 'BCBA:GGAL'])
     const adr = quotes.get('GGAL')
     const local = quotes.get('BCBA:GGAL')
 

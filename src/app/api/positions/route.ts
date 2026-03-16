@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClientInstance } from '@/lib/supabase-server'
 import { fetchQuotes } from '@/lib/yahoo-finance'
 import { calculatePortfolioSummary } from '@/lib/portfolio-engine'
-import { getRedis, isRedisReady } from '@/lib/redis'
+import { getRedis, ensureRedisConnected } from '@/lib/redis'
 import type { Position } from '@/types'
 
 export async function GET(req: NextRequest) {
@@ -11,16 +11,22 @@ export async function GET(req: NextRequest) {
     const { data: { user }, error: authErr } = await supabase.auth.getUser()
     if (authErr || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+    // ENSURE REDIS IS CONNECTED before any reads
+    const redisOk = await ensureRedisConnected()
+
     // 1. TRY REDIS CACHE (Sub-10ms path)
-    if (isRedisReady()) {
-      const cached = await getRedis()?.get(`summary:${user.id}`)
+    if (redisOk) {
+      const redis = getRedis()
+      const cached = await redis?.get(`summary:${user.id}`)
       if (cached) {
         console.log(`[Cache Hit] Serving summary for ${user.id} from Redis`)
-        return NextResponse.json(JSON.parse(cached))
+        const data = JSON.parse(cached)
+        const lr = await redis?.get('system:last-refresh')
+        return NextResponse.json({ ...data, lastRefresh: lr || null })
       }
     }
 
-    // 2. FALLBACK: Live Calculation
+    // 2. FALLBACK: Build from individual LKP prices in Redis
     const { data: positions, error } = await supabase
       .from('positions')
       .select('*')
@@ -28,9 +34,16 @@ export async function GET(req: NextRequest) {
       .order('total_invested', { ascending: false })
 
     if (error) throw error
-    if (!positions?.length) return NextResponse.json({ positions: [], summary: null })
+    if (!positions?.length) return NextResponse.json({ positions: [], summary: null, lastRefresh: null })
 
-    // Fetch live prices
+    // Get last refresh timestamp
+    let lastRefresh: string | null = null
+    if (redisOk) {
+      const lr = await getRedis()?.get('system:last-refresh')
+      if (lr) lastRefresh = lr
+    }
+
+    // Fetch prices from LKP (Redis persistent storage)
     const tickers = positions.map((p: Position) => p.ticker)
     const quotes = await fetchQuotes(tickers)
 
@@ -45,12 +58,12 @@ export async function GET(req: NextRequest) {
     // Use shared engine helper
     const result = calculatePortfolioSummary(positions, quotes, realized_pnl)
 
-    // Cache the result for next time (expires in 1h, though worker updates it every 2m)
-    if (isRedisReady()) {
-      await getRedis()?.setex(`summary:${user.id}`, 3600, JSON.stringify(result))
+    // Cache the result for next time
+    if (redisOk) {
+      await getRedis()?.setex(`summary:${user.id}`, 600, JSON.stringify(result))
     }
 
-    return NextResponse.json(result)
+    return NextResponse.json({ ...result, lastRefresh })
   } catch (err) {
     console.error(err)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })

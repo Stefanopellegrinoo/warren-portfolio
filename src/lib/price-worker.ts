@@ -13,7 +13,7 @@
 
 import { Worker } from 'bullmq'
 import { PRICE_QUEUE_NAME, scheduleRepeatingPriceJob } from './queue'
-import { fetchQuotesFromYahoo, cachePrice } from './yahoo-finance'
+import { fetchQuotesFromYahoo, cachePrice, fetchQuotes } from './yahoo-finance'
 import { createClient } from '@supabase/supabase-js'
 import { calculatePortfolioSummary } from './portfolio-engine'
 import { getRedis } from './redis'
@@ -51,41 +51,6 @@ async function getAllTickers(): Promise<string[]> {
   return Array.from(tickerSet)
 }
 
-/**
- * Check if the current time is within Buenos Aires market hours
- * Monday to Friday, 10:30 to 17:00 (America/Argentina/Buenos_Aires)
- */
-function isMarketOpenBA(): boolean {
-  // Get current time in BA timezone
-  const now = new Date()
-  const options = { timeZone: 'America/Argentina/Buenos_Aires', hour12: false }
-  
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    ...options,
-    weekday: 'short',
-    hour: 'numeric',
-    minute: 'numeric'
-  })
-  
-  const parts = formatter.formatToParts(now)
-  let weekday = '', hourStr = '', minuteStr = ''
-  for (const part of parts) {
-    if (part.type === 'weekday') weekday = part.value
-    if (part.type === 'hour') hourStr = part.value
-    if (part.type === 'minute') minuteStr = part.value
-  }
-
-  // Check weekday (Mon-Fri)
-  if (weekday === 'Sat' || weekday === 'Sun') return false
-
-  // Check hours (10:30 to 17:00)
-  const hour = parseInt(hourStr, 10)
-  const minute = parseInt(minuteStr, 10)
-  const timeNum = hour * 100 + minute
-
-  return timeNum >= 1030 && timeNum < 1700
-}
-
 // ── Worker ──────────────────────────────────────────────
 const worker = new Worker(
   PRICE_QUEUE_NAME,
@@ -93,12 +58,6 @@ const worker = new Worker(
     let tickers: string[] = []
 
     if (job.name === 'update-all-prices') {
-      // Repeatable job: fetch ALL tickers from all positions
-      if (!isMarketOpenBA()) {
-        console.log('[Worker] Market is closed in Buenos Aires (Mon-Fri 10:30-17:00). Skipping refresh.')
-        return
-      }
-
       tickers = await getAllTickers()
       if (!tickers.length) {
         console.log('[Worker] No positions found — skipping')
@@ -109,21 +68,51 @@ const worker = new Worker(
       tickers = (job.data as { tickers: string[] }).tickers || []
     }
 
-    console.log(`[Worker] Updating ${tickers.length} tickers: ${tickers.join(', ')}`)
+    console.log(`[Worker] Fetching ${tickers.length} tickers: ${tickers.join(', ')}`)
 
-    const prices = await fetchQuotesFromYahoo(tickers)
-
-    const entries = Array.from(prices.entries())
-    for (let i = 0; i < entries.length; i++) {
-      const [ticker, quote] = entries[i]
-      await cachePrice(ticker, quote)
-      console.log(`  ✓ ${ticker}: $${quote.price}`)
+    // 1. TRY YAHOO FINANCE (fresh data)
+    let yahooPrices = new Map<string, any>()
+    try {
+      yahooPrices = await fetchQuotesFromYahoo(tickers)
+      console.log(`[Worker] Yahoo returned ${yahooPrices.size}/${tickers.length} prices`)
+    } catch (err) {
+      console.error('[Worker] Yahoo fetch failed:', err)
     }
 
-    console.log(`[Worker] Done — ${prices.size}/${tickers.length} prices updated`)
+    // 2. CACHE fresh prices to Redis LKP
+    const cacheEntries = Array.from(yahooPrices.entries())
+    for (let i = 0; i < cacheEntries.length; i++) {
+      const [ticker, quote] = cacheEntries[i]
+      await cachePrice(ticker, quote)
+      console.log(`  ✓ ${ticker}: $${quote.price.toFixed(2)}`)
+    }
 
-    // Pro-actively cache user summaries
-    await cacheUserSummaries(prices)
+    // 3. BUILD COMPLETE PRICE MAP (Yahoo fresh + LKP fallback)
+    // This ensures summaries always have ALL prices, even if Yahoo partially failed
+    const allPrices = new Map<string, any>()
+    
+    // First load existing LKP from Redis
+    const lkpPrices = await fetchQuotes(tickers)
+    lkpPrices.forEach((quote, ticker) => allPrices.set(ticker, quote))
+    
+    // Then overwrite with fresh Yahoo data
+    yahooPrices.forEach((quote, ticker) => allPrices.set(ticker, quote))
+    
+    const missing = tickers.filter(t => !allPrices.has(t))
+    if (missing.length > 0) {
+      console.warn(`[Worker] No price available for: ${missing.join(', ')}`)
+    }
+
+    console.log(`[Worker] Done — ${yahooPrices.size} fresh, ${allPrices.size - yahooPrices.size} from LKP, ${missing.length} missing`)
+
+    // 4. UPDATE GLOBAL TIMESTAMP
+    const redis = getRedis()
+    if (redis) {
+      await redis.set('system:last-refresh', new Date().toISOString())
+    }
+
+    // 5. CACHE USER SUMMARIES
+    await cacheUserSummaries(allPrices)
   },
   {
     connection: { url: REDIS_URL },
@@ -144,21 +133,35 @@ async function main() {
   console.log('[Worker] Price update worker started')
   console.log(`[Worker] Redis: ${REDIS_URL}`)
 
-  // Schedule repeating job every 2 minutes
-  await scheduleRepeatingPriceJob(2)
+  // Schedule repeating job every 5 minutes
+  await scheduleRepeatingPriceJob(5)
 
   // Also do an immediate fetch on startup
   const tickers = await getAllTickers()
   if (tickers.length) {
     console.log(`[Worker] Initial fetch for ${tickers.length} tickers...`)
-    const prices = await fetchQuotesFromYahoo(tickers)
-    const initEntries = Array.from(prices.entries())
-    for (let i = 0; i < initEntries.length; i++) {
-      const [ticker, quote] = initEntries[i]
-      await cachePrice(ticker, quote)
+    try {
+      const prices = await fetchQuotesFromYahoo(tickers)
+      const initEntries = Array.from(prices.entries())
+      for (let i = 0; i < initEntries.length; i++) {
+        const [ticker, quote] = initEntries[i]
+        await cachePrice(ticker, quote)
+      }
+      console.log(`[Worker] Initial fetch done — ${prices.size} prices cached`)
+      
+      // Build complete map for summaries (same logic as job)
+      const allPrices = new Map<string, any>()
+      prices.forEach((q, t) => allPrices.set(t, q))
+      
+      const redis = getRedis()
+      if (redis) {
+        await redis.set('system:last-refresh', new Date().toISOString())
+      }
+      
+      await cacheUserSummaries(allPrices)
+    } catch (err) {
+      console.error('[Worker] Initial fetch failed — will retry on next cycle:', err)
     }
-    console.log(`[Worker] Initial fetch done — ${prices.size} prices cached`)
-    await cacheUserSummaries(prices)
   }
 }
 
@@ -167,6 +170,11 @@ async function main() {
  * This makes the Dashboard sub-10ms.
  */
 async function cacheUserSummaries(quotes: Map<string, any>) {
+  if (quotes.size === 0) {
+    console.log('[Worker] No prices available — skipping summary cache')
+    return
+  }
+
   console.log('[Worker] Caching user summaries...')
   const supabase = getSupabase()
   if (!supabase) return
@@ -193,7 +201,7 @@ async function cacheUserSummaries(quotes: Map<string, any>) {
     userRealized.set(t.user_id, current + (t.pnl || 0))
   })
 
-  const redis = await getRedis()
+  const redis = getRedis()
   if (!redis) return
 
   // 3. Process each user
@@ -206,7 +214,7 @@ async function cacheUserSummaries(quotes: Map<string, any>) {
     
     // Cache the full payload that /api/positions expects
     const payload = JSON.stringify({ positions: enriched, summary })
-    await redis.setex(`summary:${userId}`, 3600, payload)
+    await redis.setex(`summary:${userId}`, 600, payload)
   }
 
   console.log(`[Worker] Cached summaries for ${users.length} users.`)
