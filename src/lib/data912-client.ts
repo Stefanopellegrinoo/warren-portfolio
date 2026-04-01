@@ -75,6 +75,12 @@ async function fetchAllData912Quotes(): Promise<Data912RawQuote[]> {
 export async function fetchData912Price(ticker: string): Promise<Quote | null> {
   const upperTicker = ticker.toUpperCase().trim()
   
+  // Only accept Dollar-MEP bonds (ticker ends with 'D')
+  if (!upperTicker.endsWith('D')) {
+    console.warn(`[Data912] Skipping ${upperTicker} — ONs must end with 'D' for Dollar-MEP`)
+    return null
+  }
+  
   try {
     const allQuotes = await fetchAllData912Quotes()
     const rawQuote = allQuotes.find(q => q.symbol === upperTicker)
@@ -117,6 +123,13 @@ export async function fetchData912Prices(tickers: string[]): Promise<Map<string,
 
     for (const ticker of tickers) {
       const upperTicker = ticker.toUpperCase().trim()
+      
+      // Only accept Dollar-MEP bonds (ticker ends with 'D')
+      if (!upperTicker.endsWith('D')) {
+        console.warn(`[Data912] Skipping ${upperTicker} — ONs must end with 'D' for Dollar-MEP`)
+        continue
+      }
+      
       const rawQuote = allQuotes.find(q => q.symbol === upperTicker)
 
       if (rawQuote) {
