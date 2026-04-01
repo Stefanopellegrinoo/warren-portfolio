@@ -36,6 +36,15 @@ export async function processONTransaction(
     throw new Error(`ON tickers must end with 'D' for Dollar-MEP bonds. '${ticker}' is invalid.`)
   }
   
+  // Normalize quantity: user enters NOMINAL VALUE (e.g., 20000 for $20,000 nominal)
+  // but we store quantity as NUMBER OF BONDS (nominal count)
+  // 1 bond = $1,000 nominal value → divide by 1000
+  const normalizedQuantity = Math.round(input.quantity / 1000) // Rounds to nearest bond
+  const normalizedPrice = input.price // Already in USD per bond ($1,046.50)
+  
+  // Log normalization for debugging
+  console.log(`[ON Engine] ${ticker}: ${input.quantity} nominal → ${normalizedQuantity} bonds @ $${normalizedPrice}`)
+  
   // Ensure ON exists in ons table (auto-insert if not)
   const { data: existingON } = await supabase
     .from('ons')
@@ -65,13 +74,15 @@ export async function processONTransaction(
 
   if (input.operation === 'CUPON') {
     // Cupones go to cash_movements, not transactions
+    // For coupons, quantity is already in nominal value, price is rate (e.g., 0.05 for 5%)
+    const couponAmount = normalizedQuantity * normalizedPrice // bonds × rate
     await supabase
       .from('cash_movements')
       .insert({
         user_id: userId,
         date: input.date,
         type: 'CUPON',
-        amount: input.quantity * input.price, // quantity = nominal, price = rate
+        amount: couponAmount,
         description: `Cupón ${input.ticker}`,
         ticker: input.ticker.toUpperCase().trim(),
       })
@@ -97,8 +108,8 @@ export async function processONTransaction(
       date: input.date,
       ticker: input.ticker.toUpperCase().trim(),
       operation: input.operation,
-      quantity: input.operation === 'VENTA' ? -Math.abs(input.quantity) : Math.abs(input.quantity),
-      price: input.price,
+      quantity: input.operation === 'VENTA' ? -Math.abs(normalizedQuantity) : Math.abs(normalizedQuantity),
+      price: normalizedPrice,
       commission: input.commission ?? 0,
       notes: input.notes ?? null,
       avg_cost_after: 0, // will be recalculated
@@ -112,8 +123,15 @@ export async function processONTransaction(
   let updatedPosition: ONPosition | null = null
   let closedTrade: ONClosedTrade | null = null
 
+  // Create normalized input for update functions
+  const normalizedInput = {
+    ...input,
+    quantity: normalizedQuantity,
+    price: normalizedPrice
+  }
+
   try {
-    updatedPosition = await updateONPositionIncremental(userId, input.ticker, input)
+    updatedPosition = await updateONPositionIncremental(userId, input.ticker, normalizedInput)
   } catch (error) {
     // FALLBACK: First transaction OR too much contention → rebuild from scratch
     console.warn('[ON Engine] Incremental update failed, rebuilding position:', error)

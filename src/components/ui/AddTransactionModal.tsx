@@ -696,7 +696,7 @@ export default function AddTransactionModal({ onClose, onSuccess }: Props) {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">
-                  {onForm.operation === 'CUPON' ? 'Monto cupón (USD)' : 'Cantidad nominales'}
+                  {onForm.operation === 'CUPON' ? 'Monto cupón (USD)' : 'Cantidad nominales (1 nominal = $1,000)'}
                 </label>
                 <input type="number" min="0" step="any" placeholder={onForm.operation === 'CUPON' ? '500' : '50000'}
                   value={onForm.quantity || ''}
