@@ -22,22 +22,18 @@ interface Data912RawQuote {
 }
 
 /**
- * Normalizes data912 price to USD.
+ * Data912 API returns prices ALREADY multiplied by 100 for Dollar-MEP bonds.
  * 
- * Data912 API returns prices in TWO different formats:
- * - Tickers ending in "O" (e.g., CS50O): Price in CENTAVOS (152000 = $1,520.00)
- * - Tickers ending in "D" (e.g., AERBD): Price as % of $1000 nominal (102.85 = $1,028.50)
+ * Examples:
+ * - CS50D = 104.65 (not 1.0465)
+ * - AERBD = 102.85 (not 1.0285)
+ * - MGCRD = 97.50 (not 0.9750)
  * 
- * Heuristic (empirically validated):
- * - If price > 1000 → divide by 100 (centavos to USD)
- * - If price <= 1000 → multiply by 10 (% nominal to USD, assuming $1000 nominal)
+ * NO CONVERSION NEEDED for Dollar-MEP bonds (ticker ends with 'D').
+ * We store and compare prices in this same format (×100).
  */
 function normalizePriceToUSD(rawPrice: number): number {
-  if (rawPrice > 1000) {
-    return rawPrice / 100  // centavos → USD
-  } else {
-    return rawPrice * 10   // % of $1000 nominal → USD
-  }
+  return rawPrice  // NO CONVERSION — already in ×100 format
 }
 
 /**
