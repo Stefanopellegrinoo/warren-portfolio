@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClientInstance } from '@/lib/supabase-server'
 import { processTransaction } from '@/lib/portfolio-engine'
 import { invalidateUserCache } from '@/lib/redis'
-import type { TransactionInput } from '@/types'
+import { validateRequest, validateQueryParams, validationErrorResponse } from '@/lib/api/validation'
+import { TransactionSchema, TransactionQuerySchema } from '@/lib/schemas/transaction'
+import { PaginatedResponse } from '@/lib/schemas/common'
+
+export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   try {
@@ -10,10 +14,8 @@ export async function GET(req: NextRequest) {
     const { data: { user }, error: authErr } = await supabase.auth.getUser()
     if (authErr || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { searchParams } = new URL(req.url)
-    const ticker = searchParams.get('ticker')
-    const limit = parseInt(searchParams.get('limit') ?? '100')
-    const offset = parseInt(searchParams.get('offset') ?? '0')
+    // Validate query params
+    const { ticker, limit, offset } = validateQueryParams(TransactionQuerySchema, req.url)
 
     let query = supabase
       .from('transactions')
@@ -28,8 +30,24 @@ export async function GET(req: NextRequest) {
     const { data, error, count } = await query
     if (error) throw error
 
-    return NextResponse.json({ data, count })
-  } catch (err) {
+    const page = Math.floor(offset / limit) + 1
+    const response: PaginatedResponse<any> = {
+      data: data ?? [],
+      pagination: {
+        page,
+        limit,
+        total: count ?? 0,
+        totalPages: count ? Math.ceil(count / limit) : 0,
+      },
+    }
+
+    return NextResponse.json(response)
+  } catch (err: any) {
+    // Handle validation errors
+    if (err.status === 400) {
+      return validationErrorResponse(err)
+    }
+    
     console.error(err)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }
@@ -41,26 +59,20 @@ export async function POST(req: NextRequest) {
     const { data: { user }, error: authErr } = await supabase.auth.getUser()
     if (authErr || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const body: TransactionInput = await req.json()
-
-    // Validate
-    if (!body.date || !body.ticker || !body.operation || !body.quantity || !body.price) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
-    }
-    if (!['COMPRA', 'VENTA', 'DIVIDENDO'].includes(body.operation)) {
-      return NextResponse.json({ error: 'Invalid operation' }, { status: 400 })
-    }
-    if (body.quantity <= 0) {
-      return NextResponse.json({ error: 'Quantity must be positive' }, { status: 400 })
-    }
+    // Validate request body
+    const body = await validateRequest(TransactionSchema, req)
 
     const result = await processTransaction(user.id, body)
-    
     // Invalidate Cache since portfolio mutated
     await invalidateUserCache(user.id)
 
     return NextResponse.json(result, { status: 201 })
-  } catch (err) {
+  } catch (err: any) {
+    // Handle validation errors
+    if (err.status === 400) {
+      return validationErrorResponse(err)
+    }
+    
     console.error(err)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }

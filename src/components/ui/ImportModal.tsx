@@ -29,6 +29,8 @@ export default function ImportModal({ onClose, onSuccess }: Props) {
     if (!file) return
     setLoading(true)
     setError('')
+    setResult(null)
+
     try {
       const fd = new FormData()
       fd.append('file', file)
@@ -37,11 +39,44 @@ export default function ImportModal({ onClose, onSuccess }: Props) {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      setResult(data)
-      if (data.imported > 0) setTimeout(() => { onSuccess(); onClose() }, 2000)
+
+      const jobId = data.jobId
+      if (!jobId) throw new Error('No se recibió ID de proceso')
+
+      // Poll status
+      const interval = setInterval(async () => {
+        try {
+          const sRes = await fetch(`/api/transactions/import/status?jobId=${jobId}`)
+          const sData = await sRes.json()
+          
+          if (!sRes.ok) {
+            clearInterval(interval)
+            throw new Error(sData.error)
+          }
+
+          if (sData.state === 'completed') {
+            clearInterval(interval)
+            setResult(sData.result)
+            setLoading(false)
+            if (sData.result.imported > 0) {
+              setTimeout(() => { onSuccess(); onClose() }, 1500)
+            }
+          } else if (sData.state === 'failed') {
+            clearInterval(interval)
+            setError('El proceso de importación falló')
+            setLoading(false)
+          }
+          // Progress is updated silently via state if we wanted to show a bar, 
+          // but for now we just wait for 'completed'
+        } catch (err) {
+          clearInterval(interval)
+          setError(err instanceof Error ? err.message : 'Error al consultar estado')
+          setLoading(false)
+        }
+      }, 1000)
+
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al importar')
-    } finally {
+      setError(err instanceof Error ? err.message : 'Error al iniciar importación')
       setLoading(false)
     }
   }

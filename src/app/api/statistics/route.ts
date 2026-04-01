@@ -4,6 +4,8 @@ import { fetchQuotes } from '@/lib/yahoo-finance'
 import { getCachedRoute, cacheRoute } from '@/lib/redis'
 import type { Position, PortfolioSnapshot } from '@/types'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET(req: NextRequest) {
   try {
     const supabase = createServerClientInstance()
@@ -92,24 +94,24 @@ export async function GET(req: NextRequest) {
 
     // Allocation
     const allocation = enrichedPositions
-      .filter(p => p.market_value > 0)
-      .map(p => ({
+      .filter((p: any) => p.market_value > 0)
+      .map((p: any) => ({
         name: p.ticker,
         value: p.market_value,
         pct: totalPortfolioValue > 0 ? p.market_value / totalPortfolioValue : 0
       }))
-      .sort((a, b) => b.value - a.value)
+      .sort((a: any, b: any) => b.value - a.value)
 
     // All PnLs (for bar chart)
     const allPnLs = [
-      ...enrichedPositions.map(p => ({ ticker: p.ticker, pnl: p.pnl, pnl_pct: p.pnl_pct, status: 'OPEN' })),
+      ...enrichedPositions.map((p: any) => ({ ticker: p.ticker, pnl: p.pnl, pnl_pct: p.pnl_pct, status: 'OPEN' })),
       ...(closed || []).map((t: any) => ({ 
         ticker: t.ticker.split(':')[1] || t.ticker, 
         pnl: t.pnl, 
         pnl_pct: t.pnl_pct, 
         status: 'CLOSED' 
       }))
-    ].sort((a, b) => b.pnl - a.pnl)
+    ].sort((a: any, b: any) => b.pnl - a.pnl)
 
     const biggestWinner = allPnLs.length > 0 ? allPnLs[0] : null
     const biggestLoser = allPnLs.length > 0 ? allPnLs[allPnLs.length - 1] : null
@@ -172,7 +174,7 @@ export async function GET(req: NextRequest) {
     const sharpeRatio = monthlyStdDev > 0 ? (avgMonthlyPnl - riskFreeRate) / monthlyStdDev : 0
 
     // Currency exposure
-    const arsExposure = enrichedPositions.filter(p => p.fullTicker.startsWith('BCBA:')).reduce((s, p) => s + p.market_value, 0)
+    const arsExposure = enrichedPositions.filter((p: any) => p.fullTicker.startsWith('BCBA:')).reduce((s: number, p: any) => s + p.market_value, 0)
     const usdExposure = totalPortfolioValue - arsExposure
 
     const responseData = {

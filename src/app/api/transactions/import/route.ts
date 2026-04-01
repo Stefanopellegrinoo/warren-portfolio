@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClientInstance } from '@/lib/supabase-server'
-import { processTransaction } from '@/lib/portfolio-engine'
+import { addImportJob } from '@/lib/queue'
 import { parseExcelTransactions } from '@/lib/excel-import'
-import { invalidateUserCache } from '@/lib/redis'
+import { TransactionImportSchema } from '@/lib/schemas/transaction'
+import { validationErrorResponse } from '@/lib/api/validation'
 import type { TransactionInput } from '@/types'
+
+export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,15 +15,27 @@ export async function POST(req: NextRequest) {
     if (authErr || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const contentType = req.headers.get('content-type') ?? ''
-
     let transactions: TransactionInput[] = []
 
     if (contentType.includes('application/json')) {
-      // Direct JSON array import
-      const body = await req.json()
-      transactions = body.transactions ?? []
+      // Validate JSON body
+      try {
+        const body = await req.json()
+        const validated = TransactionImportSchema.parse(body)
+        transactions = validated.transactions
+      } catch (error: any) {
+        const errors = error.errors?.map((err: any) => ({
+          path: err.path.join('.'),
+          message: err.message,
+        })) || [{ message: 'Invalid request body' }]
+        
+        return validationErrorResponse({
+          status: 400,
+          message: 'Validation failed',
+          errors,
+        })
+      }
     } else if (contentType.includes('multipart/form-data')) {
-      // Excel file upload
       const formData = await req.formData()
       const file = formData.get('file') as File | null
       if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 })
@@ -33,44 +48,30 @@ export async function POST(req: NextRequest) {
       const sheet = workbook.Sheets[sheetName]
       const data = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null }) as unknown[][]
       transactions = parseExcelTransactions(data)
+    } else {
+      return NextResponse.json({ error: 'Content-Type must be application/json or multipart/form-data' }, { status: 400 })
     }
-
-
 
     if (!transactions.length) {
       return NextResponse.json({ error: 'No valid transactions found' }, { status: 400 })
     }
 
-    // Sort by date ascending (critical for correct avg cost calculation)
-    transactions.sort((a, b) => a.date.localeCompare(b.date))
-
-    // Clear existing data for fresh import (optional — only if user requests)
+    // Enqueue background job (async)
     const { searchParams } = new URL(req.url)
-    if (searchParams.get('replace') === 'true') {
-      await supabase.from('transactions').delete().eq('user_id', user.id)
-      await supabase.from('positions').delete().eq('user_id', user.id)
-      await supabase.from('closed_trades').delete().eq('user_id', user.id)
+    const replace = searchParams.get('replace') === 'true'
+    const job = await addImportJob(user.id, transactions, replace)
+
+    return NextResponse.json({ 
+      message: 'Importación iniciada en segundo plano',
+      jobId: job.id 
+    }, { status: 202 })
+
+  } catch (err: any) {
+    // Handle validation errors
+    if (err.status === 400) {
+      return validationErrorResponse(err)
     }
-
-    // Process each transaction sequentially (order matters!)
-    const results = { imported: 0, errors: 0, details: [] as string[] }
-
-    for (const tx of transactions) {
-      try {
-        await processTransaction(user.id, tx)
-        results.imported++
-      } catch (err) {
-        results.errors++
-        results.details.push(`${tx.date} ${tx.ticker}: ${err instanceof Error ? err.message : 'Unknown error'}`)
-      }
-    }
-
-    if (results.imported > 0) {
-      await invalidateUserCache(user.id)
-    }
-
-    return NextResponse.json(results, { status: 201 })
-  } catch (err) {
+    
     console.error(err)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }

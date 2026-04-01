@@ -5,6 +5,8 @@ import { getCachedRoute, cacheRoute } from '@/lib/redis'
 import type { Position, Transaction } from '@/types'
 
 // GET: Generate dynamic portfolio history from transactions & historical prices
+export const dynamic = 'force-dynamic'
+
 export async function GET(req: NextRequest) {
   try {
   const supabase = createServerClientInstance()
@@ -59,7 +61,7 @@ export async function GET(req: NextRequest) {
     .select('ticker')
     .eq('user_id', user.id)
   
-  const activeTickers = (currentPositions || []).map(p => p.ticker)
+  const activeTickers = (currentPositions || []).map((p: any) => p.ticker)
   
   if (activeTickers.length === 0) {
     // If no active positions, we can't really show a meaningful value chart 
@@ -74,7 +76,7 @@ export async function GET(req: NextRequest) {
   
   const historicalData = new Map<string, Map<string, number>>() // Map<Ticker, Map<DateString, Price>>
   
-  await Promise.all(activeTickers.map(async (ticker) => {
+  await Promise.all(activeTickers.map(async (ticker: string) => {
     const quotes = await fetchHistoricalQuotes(ticker, firstTxDate, today)
     const priceMap = new Map<string, number>()
     

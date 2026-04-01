@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClientInstance } from '@/lib/supabase-server'
 import { fetchQuotes } from '@/lib/yahoo-finance'
-import { calculatePortfolioSummary } from '@/lib/portfolio-engine'
+import { fetchData912Prices } from '@/lib/data912-client'
+import { calculatePortfolioSummary, getFullPortfolio } from '@/lib/portfolio-engine'
 import { getRedis, ensureRedisConnected } from '@/lib/redis'
-import type { Position } from '@/types'
+import type { Position, ONPosition } from '@/types'
+
+export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   try {
@@ -26,15 +29,8 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 2. FALLBACK: Build from individual LKP prices in Redis
-    const { data: positions, error } = await supabase
-      .from('positions')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('total_invested', { ascending: false })
-
-    if (error) throw error
-    if (!positions?.length) return NextResponse.json({ positions: [], summary: null, lastRefresh: null })
+    // 2. Fetch all portfolio data in parallel
+    const portfolio = await getFullPortfolio(user.id)
 
     // Get last refresh timestamp
     let lastRefresh: string | null = null
@@ -43,22 +39,42 @@ export async function GET(req: NextRequest) {
       if (lr) lastRefresh = lr
     }
 
-    // Fetch prices from LKP (Redis persistent storage)
-    const tickers = positions.map((p: Position) => p.ticker)
-    const quotes = await fetchQuotes(tickers)
+    // Handle empty portfolio case
+    if (portfolio.stockPositions.length === 0 && portfolio.onPositions.length === 0) {
+      // Still return cash balance even if no positions
+      const emptySummary = calculatePortfolioSummary([], [], new Map(), new Map(), portfolio.cashBalance, 0, 0)
+      return NextResponse.json({ ...emptySummary, lastRefresh })
+    }
 
-    // Realized PnL
-    const { data: closed } = await supabase
-      .from('closed_trades')
-      .select('pnl')
-      .eq('user_id', user.id)
+    // 3. Fetch quotes for stocks and ONs in parallel
+    const stockTickers = portfolio.stockPositions.map((p: Position) => p.ticker)
+    const onTickers = portfolio.onPositions.map((p: ONPosition) => p.ticker)
 
-    const realized_pnl = (closed ?? []).reduce((s: number, t: { pnl: number }) => s + (t.pnl ?? 0), 0)
+    const [stockQuotes, onQuotes] = await Promise.all([
+      stockTickers.length > 0 ? fetchQuotes(stockTickers) : Promise.resolve(new Map()),
+      onTickers.length > 0 ? fetchData912Prices(onTickers) : Promise.resolve(new Map()),
+    ])
 
-    // Use shared engine helper
-    const result = calculatePortfolioSummary(positions, quotes, realized_pnl)
+    // 4. Calculate realized P&L from closed trades
+    const stockRealizedPnl = portfolio.stockClosedTrades.reduce(
+      (sum: number, t: { pnl: number }) => sum + (t.pnl ?? 0), 0
+    )
+    const onRealizedPnl = portfolio.onClosedTrades.reduce(
+      (sum: number, t: { pnl: number }) => sum + (t.pnl ?? 0), 0
+    )
 
-    // Cache the result for next time
+    // 5. Calculate complete portfolio summary
+    const result = calculatePortfolioSummary(
+      portfolio.stockPositions,
+      portfolio.onPositions,
+      stockQuotes,
+      onQuotes,
+      portfolio.cashBalance,
+      stockRealizedPnl,
+      onRealizedPnl
+    )
+
+    // 6. Cache the result for next time
     if (redisOk) {
       await getRedis()?.setex(`summary:${user.id}`, 600, JSON.stringify(result))
     }

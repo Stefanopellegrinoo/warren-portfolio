@@ -38,3 +38,26 @@ export function pnlBg(value: number): string {
   if (value < 0) return 'bg-rose/10 text-rose border-rose/20'
   return 'bg-slate-500/10 text-slate-400 border-slate-500/20'
 }
+
+export function isMarketOpen(): boolean {
+  const d = new Date()
+  
+  // Create a new date object for Argentina time (UTC-3)
+  const utc = d.getTime() + (d.getTimezoneOffset() * 60000)
+  const nd = new Date(utc + (3600000 * -3))
+  
+  const day = nd.getDay()
+  // 0 = Sunday, 6 = Saturday
+  if (day === 0 || day === 6) return false
+  
+  const hour = nd.getHours()
+  const minute = nd.getMinutes()
+  const time = hour + minute / 60
+  
+  // 10:30 to 18:00 AR time covers US and AR markets broadly
+  if (time >= 10.5 && time < 18) {
+    return true
+  }
+  
+  return false
+}

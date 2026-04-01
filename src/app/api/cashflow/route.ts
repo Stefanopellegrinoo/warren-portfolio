@@ -8,6 +8,8 @@ const ALLOWED_CATEGORIES = [
   'Retiro', 'Depósito', 'Gastos Fijos', 'Otro'
 ]
 
+export const dynamic = 'force-dynamic'
+
 export async function GET(req: NextRequest) {
   const supabase = createServerClientInstance()
   const { data: { user } } = await supabase.auth.getUser()

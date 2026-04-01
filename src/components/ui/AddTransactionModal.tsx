@@ -698,7 +698,7 @@ export default function AddTransactionModal({ onClose, onSuccess }: Props) {
                 <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">
                   {onForm.operation === 'CUPON' ? 'Monto cupón (USD)' : 'Cantidad (nominales / 100)'}
                 </label>
-                <input type="number" min="0" step="any" placeholder={onForm.operation === 'CUPON' ? '500' : '20'}
+                <input type="number" min="0" step="any" placeholder={onForm.operation === 'CUPON' ? '500' : '200'}
                   value={onForm.quantity || ''}
                   onChange={e => setOnForm(f => ({ ...f, quantity: parseFloat(e.target.value) || 0 }))}
                   className="input-field w-full" required />

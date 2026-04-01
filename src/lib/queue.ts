@@ -1,23 +1,47 @@
 import { Queue } from 'bullmq'
+import Redis from 'ioredis'
 
 export const PRICE_QUEUE_NAME = 'price-updates'
+export const IMPORT_QUEUE_NAME = 'import-transactions'
 
+const redisConnectionOptions = {
+  host: '172.17.0.1',
+  port: 6379,
+  password: '2002Stefano',
+  maxRetriesPerRequest: null,
+}
 let priceQueue: Queue | null = null
+let importQueue: Queue | null = null
 
 export function getPriceQueue(): Queue {
   if (!priceQueue) {
     priceQueue = new Queue(PRICE_QUEUE_NAME, {
-      connection: {
-        url: process.env.REDIS_URL || 'redis://localhost:6379',
-      },
+      connection: new Redis(redisConnectionOptions)
     })
   }
   return priceQueue
 }
 
+export function getImportQueue(): Queue {
+  if (!importQueue) {
+    importQueue = new Queue(IMPORT_QUEUE_NAME, {
+     connection: new Redis(redisConnectionOptions)
+    })
+  }
+  return importQueue
+}
+
 export async function addPriceUpdateJob(tickers: string[]) {
   const queue = getPriceQueue()
   await queue.add('update-prices', { tickers }, {
+    removeOnComplete: true,
+    removeOnFail: { age: 24 * 3600 },
+  })
+}
+
+export async function addImportJob(userId: string, transactions: any[], replace: boolean) {
+  const queue = getImportQueue()
+  return await queue.add('process-import', { userId, transactions, replace }, {
     removeOnComplete: true,
     removeOnFail: { age: 24 * 3600 },
   })

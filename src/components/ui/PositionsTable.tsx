@@ -8,6 +8,7 @@ import { TrendingUp, TrendingDown, Minus, ChevronUp, ChevronDown } from 'lucide-
 interface Props {
   positions: Position[]
   loading?: boolean
+  summary?: any
 }
 
 type SortKey = 'ticker' | 'current_price' | 'quantity' | 'avg_cost' | 'total_invested' | 'market_value' | 'day_change' | 'day_change_pct' | 'pnl' | 'pnl_pct' | 'pct_cartera'
@@ -27,7 +28,7 @@ const COLUMNS: { label: string; key: SortKey }[] = [
   { label: '% CARTERA',   key: 'pct_cartera' },
 ]
 
-export default function PositionsTable({ positions, loading }: Props) {
+export default function PositionsTable({ positions, loading, summary }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>('market_value')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
 
@@ -83,10 +84,27 @@ export default function PositionsTable({ positions, loading }: Props) {
   return (
     <div className="glass rounded-2xl overflow-hidden">
       <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.05]">
-        <div>
-          <h3 className="font-display font-700 text-white">Posiciones Abiertas</h3>
-          <p className="text-[11px] text-slate-500 font-mono mt-0.5">{positions.length} activos · Click en columna para ordenar</p>
+        <div className="flex items-center gap-3">
+          <div>
+            <h3 className="font-display font-700 text-white">Posiciones Abiertas</h3>
+            <p className="text-[11px] text-slate-500 font-mono mt-0.5">{positions.length} activos · Click en columna para ordenar</p>
+          </div>
         </div>
+        {summary && (
+          <div className="text-right hidden sm:block">
+            <p className="text-[10px] font-mono text-slate-500 uppercase">Total Acá</p>
+            <p className="font-mono font-700 text-white">{formatUSD(summary.market_value)}</p>
+            <div className="flex items-center justify-end gap-2 mt-0.5">
+              <span className={cn('text-[11px] font-mono', summary.pnl >= 0 ? 'text-emerald' : 'text-rose')}>
+                Histórico: {summary.pnl >= 0 ? '+' : ''}{formatUSD(summary.pnl)} ({formatPct(summary.pnl_pct)})
+              </span>
+              <span className="text-slate-600">|</span>
+              <span className={cn('text-[11px] font-mono', summary.day_pnl >= 0 ? 'text-emerald' : 'text-rose')}>
+                Diario: {summary.day_pnl >= 0 ? '+' : ''}{formatUSD(summary.day_pnl)} ({formatPct(summary.day_pnl_pct)})
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* --- DESKTOP VIEW (Table) --- */}
@@ -224,54 +242,88 @@ export default function PositionsTable({ positions, loading }: Props) {
         </table>
       </div>
 
-      {/* --- MOBILE VIEW (Cards) --- */}
-      <div className="flex flex-col md:hidden divide-y divide-white/[0.05]">
-        {sorted.length === 0 ? (
-          <div className="text-center py-10 text-slate-600 font-mono text-sm">
-            Sin posiciones abiertas
-          </div>
-        ) : sorted.map((pos, i) => {
-          const hasPnl = pos.pnl !== undefined
-          const isPos = (pos.pnl ?? 0) > 0
-          const isNeg = (pos.pnl ?? 0) < 0
+      {/* --- MOBILE VIEW (table row - equal spacing, no yellow dot) --- */}
+      <div className="flex flex-col md:hidden">
+        {/* Header row */}
+        <div className="flex items-center px-2 py-2 border-b border-white/[0.06] bg-white/[0.02]">
+          <button onClick={() => handleSort('ticker')} className="flex-1 flex items-center justify-start px-1">
+            <span className="text-[9px] font-mono text-slate-500 uppercase tracking-wider">Ticker</span>
+            <SortIcon colKey="ticker" />
+          </button>
+          <button onClick={() => handleSort('day_change')} className="flex-1 flex items-center justify-end px-1">
+            <span className="text-[9px] font-mono text-slate-500 uppercase tracking-wider">P&L Día</span>
+            <SortIcon colKey="day_change" />
+          </button>
+          <button onClick={() => handleSort('day_change_pct')} className="flex-1 flex items-center justify-end px-1">
+            <span className="text-[9px] font-mono text-slate-500 uppercase tracking-wider">Var %</span>
+            <SortIcon colKey="day_change_pct" />
+          </button>
+          <button onClick={() => handleSort('pnl')} className="flex-1 flex items-center justify-end px-1">
+            <span className="text-[9px] font-mono text-slate-500 uppercase tracking-wider">P&L USD</span>
+            <SortIcon colKey="pnl" />
+          </button>
+          <button onClick={() => handleSort('pnl_pct')} className="flex-1 flex items-center justify-end px-1">
+            <span className="text-[9px] font-mono text-slate-500 uppercase tracking-wider">P&L %</span>
+            <SortIcon colKey="pnl_pct" />
+          </button>
+        </div>
 
-          return (
-            <div key={`mob-${pos.id}`} className="p-4 animate-fade-in flex items-center justify-between" style={{ animationDelay: `${i * 30}ms`, animationFillMode: 'both' }}>
-              
-              {/* Left Column: Ticker & Position */}
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <div className="w-1.5 h-1.5 rounded-full bg-amber animate-pulse-slow" />
-                  <p className="font-display font-800 text-lg text-white leading-none">
-                    {pos.ticker.split(':')[1] ?? pos.ticker}
-                  </p>
-                </div>
-                <p className="text-[11px] text-slate-500 font-mono">
-                  {pos.quantity.toLocaleString('en-US', { maximumFractionDigits: 3 })} nom.
-                </p>
-              </div>
-
-              {/* Right Column: Value & Badge */}
-              <div className="text-right flex flex-col items-end">
-                <p className="font-mono text-base font-600 text-white mb-1.5">
-                  {pos.market_value ? formatUSD(pos.market_value) : <span className="text-slate-600">—</span>}
-                </p>
-
-                {pos.pnl_pct !== undefined ? (
-                  <span className={cn(
-                    'inline-flex items-center gap-1 text-[11px] font-mono font-600 px-2 py-0.5 rounded-full border',
-                    isPos ? 'tag-positive' : isNeg ? 'tag-negative' : 'tag-neutral'
-                  )}>
-                    {isPos ? <TrendingUp className="w-3 h-3" /> : isNeg ? <TrendingDown className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
-                    {formatPct(pos.pnl_pct)}
-                  </span>
-                ) : (
-                  <span className="text-[11px] text-slate-600 border border-white/5 rounded-full px-2 py-0.5">N/A</span>
-                )}
-              </div>
+        {/* Data rows */}
+        <div className="divide-y divide-white/[0.04]">
+          {sorted.length === 0 ? (
+            <div className="text-center py-6 text-slate-400 text-xs font-sans">
+              Sin posiciones abiertas
             </div>
-          )
-        })}
+          ) : sorted.map((pos, i) => {
+            const isPosPnl = (pos.pnl ?? 0) > 0
+            const isNegPnl = (pos.pnl ?? 0) < 0
+            const isPosDay = (pos.day_change ?? 0) > 0
+            const isNegDay = (pos.day_change ?? 0) < 0
+
+            return (
+              <div
+                key={`mob-${pos.id}`}
+                className="flex items-center px-2 py-1.5 animate-fade-in font-sans"
+                style={{ animationDelay: `${i * 10}ms`, animationFillMode: 'both' }}
+              >
+                {/* Ticker - sin punto amarillo, menos padding */}
+                <div className="flex-1 px-0.5">
+                  <span className="text-xs font-semibold text-white truncate tracking-tight">
+                    {pos.ticker.split(':')[1] ?? pos.ticker}
+                  </span>
+                </div>
+
+                {/* P&L Día USD - sin decimales */}
+                <div className="flex-1 px-1.5 text-right">
+                  <span className={cn('text-xs font-medium tabular-nums', isPosDay ? 'text-emerald' : isNegDay ? 'text-rose' : 'text-slate-400')}>
+                    {pos.day_change !== undefined ? `${pos.day_change > 0 ? '+' : ''}$${Math.round(pos.day_change).toLocaleString('en-US')}` : '—'}
+                  </span>
+                </div>
+
+                {/* VAR. DÍA % - 1 decimal */}
+                <div className="flex-1 px-1.5 text-right">
+                  <span className={cn('text-xs font-medium tabular-nums', isPosDay ? 'text-emerald' : isNegDay ? 'text-rose' : 'text-slate-400')}>
+                    {pos.day_change_pct !== undefined ? `${(pos.day_change_pct * 100).toFixed(1)}%` : '—'}
+                  </span>
+                </div>
+
+                {/* P&L USD - sin decimales */}
+                <div className="flex-1 px-1.5 text-right">
+                  <span className={cn('text-xs font-medium tabular-nums', isPosPnl ? 'text-emerald' : isNegPnl ? 'text-rose' : 'text-slate-400')}>
+                    {pos.pnl !== undefined ? `${pos.pnl > 0 ? '+' : ''}$${Math.round(pos.pnl).toLocaleString('en-US')}` : '—'}
+                  </span>
+                </div>
+
+                {/* P&L % - 1 decimal */}
+                <div className="flex-1 px-1.5 text-right">
+                  <span className={cn('text-xs font-medium tabular-nums', isPosPnl ? 'text-emerald' : isNegPnl ? 'text-rose' : 'text-slate-400')}>
+                    {pos.pnl_pct !== undefined ? `${(pos.pnl_pct * 100).toFixed(1)}%` : '—'}
+                  </span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </div>
     </div>
   )

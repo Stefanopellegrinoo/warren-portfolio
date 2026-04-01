@@ -5,7 +5,7 @@ let redisReady = false
 let connectPromise: Promise<void> | null = null
 
 function getRedisUrl(): string {
-  return process.env.REDIS_URL || 'redis://localhost:6379'
+  return process.env.REDIS_URL || 'redis://default:2002Stefano@172.17.0.1:6379'
 }
 
 /**
@@ -19,6 +19,7 @@ export function getRedis(): Redis | null {
     redisClient = new Redis(getRedisUrl(), {
       maxRetriesPerRequest: null, // Required for BullMQ
       lazyConnect: true,
+      keyPrefix: 'warren:',
       retryStrategy(times) {
         if (times > 3) return null // Stop retrying after 3 attempts
         return Math.min(times * 200, 2000)
