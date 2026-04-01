@@ -11,7 +11,7 @@ import type { Quote } from '@/types'
 
 interface Data912RawQuote {
   symbol: string
-  c: number           // last price
+  c: number           // last price (inconsistent format — see normalizePriceToUSD)
   pct_change: number  // percentage change (0.53 = 0.53%, not 53%)
   q_bid: number
   px_bid: number
@@ -19,6 +19,25 @@ interface Data912RawQuote {
   q_ask: number
   v: number
   q_op: number
+}
+
+/**
+ * Normalizes data912 price to USD.
+ * 
+ * Data912 API returns prices in TWO different formats:
+ * - Tickers ending in "O" (e.g., CS50O): Price in CENTAVOS (152000 = $1,520.00)
+ * - Tickers ending in "D" (e.g., AERBD): Price as % of $1000 nominal (102.85 = $1,028.50)
+ * 
+ * Heuristic (empirically validated):
+ * - If price > 1000 → divide by 100 (centavos to USD)
+ * - If price <= 1000 → multiply by 10 (% nominal to USD, assuming $1000 nominal)
+ */
+function normalizePriceToUSD(rawPrice: number): number {
+  if (rawPrice > 1000) {
+    return rawPrice / 100  // centavos → USD
+  } else {
+    return rawPrice * 10   // % of $1000 nominal → USD
+  }
 }
 
 /**
@@ -65,7 +84,7 @@ export async function fetchData912Price(ticker: string): Promise<Quote | null> {
       return null
     }
 
-    const price = rawQuote.c
+    const price = normalizePriceToUSD(rawQuote.c)
     const changePercent = rawQuote.pct_change // already in % format (0.53 = 0.53%)
     const change = price * (changePercent / 100) // absolute change in USD
     const previousClose = price - change
@@ -101,7 +120,7 @@ export async function fetchData912Prices(tickers: string[]): Promise<Map<string,
       const rawQuote = allQuotes.find(q => q.symbol === upperTicker)
 
       if (rawQuote) {
-        const price = rawQuote.c
+        const price = normalizePriceToUSD(rawQuote.c)
         const changePercent = rawQuote.pct_change // already in % format (0.53 = 0.53%)
         const change = price * (changePercent / 100) // absolute change in USD
         const previousClose = price - change

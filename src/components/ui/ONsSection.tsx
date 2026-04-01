@@ -183,7 +183,7 @@ export default function ONsSection({ positions, loading, summary }: Props) {
                   {/* Precio promedio */}
                   <td className="px-4 py-3 font-mono text-sm text-slate-400">
                     {pos.avg_cost < 10
-                      ? `${(pos.avg_cost * 100).toFixed(2)}%`  // price as % of nominal
+                      ? `${(pos.avg_cost * 100).toFixed(0)}%`  // price as % of nominal (no decimals)
                       : formatUSD(pos.avg_cost)}
                   </td>
 
