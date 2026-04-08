@@ -5,7 +5,7 @@ let redisReady = false
 let connectPromise: Promise<void> | null = null
 
 function getRedisUrl(): string {
-  return process.env.REDIS_URL || 'redis://default:2002Stefano@172.17.0.1:6379'
+  return process.env.REDIS_URL || 'redis://localhost:6379'
 }
 
 /**
@@ -149,6 +149,7 @@ export async function invalidateUserCache(userId: string): Promise<void> {
 
     // Add exactly matching keys
     keysToDelete.push(`statistics:${userId}`)
+    keysToDelete.push(`summary:${userId}`)
 
     if (keysToDelete.length > 0) {
       await redis.del(...keysToDelete)

@@ -15,23 +15,27 @@ import { Worker } from 'bullmq'
 import { PRICE_QUEUE_NAME, scheduleRepeatingPriceJob } from './queue'
 import { fetchQuotesFromYahoo, cachePrice, fetchQuotes } from './yahoo-finance'
 import { fetchData912Prices } from './data912-client'
-import { createClient } from '@supabase/supabase-js'
+import { createServiceClient } from './supabase-server'
 import { calculatePortfolioSummary } from './portfolio-engine'
 import { getRedis } from './redis'
 import { isMarketOpen } from './utils'
 import { startImportWorker } from './import-worker'
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://default:2002Stefano@172.17.0.1:6379'
+const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
 console.log(REDIS_URL)
-// Service client for fetching all user positions
+
+let supabaseInstance: any = null
+
 function getSupabase() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !key) {
-    console.warn('[Worker] Supabase not configured — cannot fetch all positions')
-    return null
+  if (!supabaseInstance) {
+    try {
+      supabaseInstance = createServiceClient()
+    } catch (err) {
+      console.warn('[Worker] Supabase not configured — cannot fetch all positions', err)
+      return null
+    }
   }
-  return createClient(url, key)
+  return supabaseInstance
 }
 
 /**
@@ -50,7 +54,7 @@ async function getAllTickers(): Promise<string[]> {
     return []
   }
 
-  const tickerSet = new Set((data || []).map((p: any) => p.ticker))
+  const tickerSet = new Set((data || []).map((p: any) => p.ticker) as string[])
   return Array.from(tickerSet)
 }
 
@@ -70,7 +74,7 @@ async function getAllONTickers(): Promise<string[]> {
     return []
   }
 
-  const tickerSet = new Set((data || []).map((p: any) => p.ticker))
+  const tickerSet = new Set((data || []).map((p: any) => p.ticker) as string[])
   return Array.from(tickerSet)
 }
 
@@ -284,31 +288,31 @@ async function cacheUserSummaries(stockQuotes: Map<string, any>, onQuotes: Map<s
 
   // Group by user
   const userStocks = new Map<string, any[]>()
-  allPositions.forEach(p => {
+  allPositions.forEach((p: any) => {
     const list = userStocks.get(p.user_id) || []
     list.push(p)
     userStocks.set(p.user_id, list)
   })
 
   const userONs = new Map<string, any[]>()
-  allONPositions.forEach(p => {
+  allONPositions.forEach((p: any) => {
     const list = userONs.get(p.user_id) || []
     list.push(p)
     userONs.set(p.user_id, list)
   })
 
   const userRealized = new Map<string, number>()
-  ;(closedRes.data || []).forEach(t => {
+  ;(closedRes.data || []).forEach((t: any) => {
     userRealized.set(t.user_id, (userRealized.get(t.user_id) || 0) + (t.pnl || 0))
   })
 
   const userONRealized = new Map<string, number>()
-  ;(onClosedRes.data || []).forEach(t => {
+  ;(onClosedRes.data || []).forEach((t: any) => {
     userONRealized.set(t.user_id, (userONRealized.get(t.user_id) || 0) + (t.pnl || 0))
   })
 
   const userCash = new Map<string, number>()
-  ;(cashRes.data || []).forEach(b => {
+  ;(cashRes.data || []).forEach((b: any) => {
     userCash.set(b.user_id, b.balance || 0)
   })
 

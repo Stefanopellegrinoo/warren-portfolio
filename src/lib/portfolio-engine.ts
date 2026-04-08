@@ -2,6 +2,7 @@ import type { Transaction, Position, ClosedTrade, TransactionInput, Quote, Portf
 import { createServiceClient } from './supabase-server'
 import { getRedis, isRedisReady } from './redis'
 import { updateWithOptimisticLock } from './concurrency'
+import { processCashMovement, rebuildCashBalance } from './cash-engine'
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MULTI-ASSET PORTFOLIO TYPES
@@ -115,6 +116,39 @@ export async function processTransaction(
     updatedPosition = pos ?? null
   }
 
+  // 3. Update cash balance (COMPRA/VENTA/DIVIDENDO/CUPON affect cash)
+  if (input.operation === 'COMPRA' || input.operation === 'VENTA' || input.operation === 'DIVIDENDO' || input.operation === 'CUPON') {
+    const transactionCost = Math.abs(input.quantity * input.price) + (input.commission ?? 0)
+    let type: 'DEPOSITO' | 'RETIRO' = 'DEPOSITO'
+    let amount = 0
+    
+    if (input.operation === 'COMPRA') {
+      type = 'RETIRO'
+      amount = transactionCost
+    } else if (input.operation === 'VENTA') {
+      type = 'DEPOSITO'
+      amount = Math.abs(input.quantity * input.price) - (input.commission ?? 0)
+    } else if (input.operation === 'DIVIDENDO' || input.operation === 'CUPON') {
+      type = 'DEPOSITO'
+      amount = Math.abs(input.quantity * input.price) - (input.commission ?? 0)
+    }
+    
+    try {
+      await processCashMovement(userId, {
+        date: input.date,
+        type,
+        amount,
+        description: `${input.operation} ${input.ticker.toUpperCase().trim()} - ${input.quantity} @ ${input.price}`,
+        ticker: input.ticker.toUpperCase().trim(),
+        transaction_id: newTx.id,  // Link cash_movement to transaction for referential integrity
+      })
+    } catch (cashError) {
+      console.error('[Portfolio Engine] Failed to update cash balance:', cashError)
+      // Don't throw — transaction and position already committed
+      // Cash will be inconsistent but can be corrected via rebuildCashBalance
+    }
+  }
+
   // 4. Fetch the latest closed trade for this ticker if it was a VENTA
   if (input.operation === 'VENTA') {
     const { data: ct } = await supabase
@@ -126,6 +160,15 @@ export async function processTransaction(
       .limit(1)
       .single()
     closedTrade = ct ?? null
+  }
+
+  // 5. Fetch current price for the ticker (non-critical, background operation)
+  try {
+    const { fetchQuotesWithFallback } = await import('./yahoo-finance')
+    await fetchQuotesWithFallback([input.ticker.toUpperCase().trim()])
+  } catch (priceError) {
+    console.warn(`[Portfolio Engine] Failed to fetch price for ${input.ticker}:`, priceError)
+    // Non-critical error — price will be fetched when dashboard loads
   }
 
   return { transaction: newTx, position: updatedPosition ?? null, closedTrade }
@@ -354,12 +397,12 @@ export async function getFullPortfolio(userId: string): Promise<FullPortfolio> {
     // Stock closed trades
     supabase
       .from('closed_trades')
-      .select('pnl')
+      .select('*')
       .eq('user_id', userId),
     // ON closed trades
     supabase
       .from('on_closed_trades')
-      .select('pnl')
+      .select('*')
       .eq('user_id', userId),
     // Cash balance
     supabase
@@ -487,7 +530,7 @@ export async function rebuildPosition(userId: string, ticker: string) {
       .eq('ticker', ticker.toUpperCase().trim())
   } else {
     avgCost = costBasis / quantity
-    await supabase
+    const { error: upsertError } = await supabase
       .from('positions')
       .upsert({
         user_id: userId,
@@ -497,7 +540,13 @@ export async function rebuildPosition(userId: string, ticker: string) {
         total_invested: costBasis,
         first_bought: firstBought || new Date().toISOString(),
         last_updated: new Date().toISOString(),
+        version: 1, // Required for new positions (migration 004)
       }, { onConflict: 'user_id,ticker' })
+    
+    if (upsertError) {
+      console.error(`[rebuildPosition] Failed to upsert position for ${ticker}:`, upsertError)
+      throw new Error(`Failed to upsert position for ${ticker}: ${upsertError.message}`)
+    }
   }
 
   if (isRedisReady()) {
@@ -506,55 +555,202 @@ export async function rebuildPosition(userId: string, ticker: string) {
 }
 
 /**
- * Bulk import: insert all transactions at once, then rebuild each affected ticker once.
- * This avoids the race condition with the price worker during sequential imports.
+ * Bulk import: atomically insert all transactions + cash_movements, then rebuild positions.
+ * 
+ * ATOMICITY:
+ * - Uses Postgres stored procedure (import_transactions_atomic) with BEGIN/COMMIT/ROLLBACK
+ * - If ANY transaction fails validation or insert, the ENTIRE batch is rolled back
+ * - No partial imports = data consistency guaranteed
+ * 
+ * FEATURES:
+ * - Detailed error reporting with line numbers
+ * - Creates cash_movements linked to transactions
+ * - Rebuilds positions after successful import
+ * - Rebuilds cash balance after successful import
+ * 
+ * PROGRESS CALLBACK:
+ * - Optional onProgress(percentage, message) for real-time tracking
  */
 export async function processTransactionBatch(
   userId: string,
   inputs: TransactionInput[],
-): Promise<{ imported: number; errors: number; details: string[] }> {
+  onProgress?: (percentage: number, message: string) => void | Promise<void>
+): Promise<{ 
+  success: boolean
+  imported: number
+  failed: number
+  errors: Array<{ line: number; ticker: string; error: string }>
+}> {
   const supabase = createServiceClient()
 
-  const results = { imported: 0, errors: 0, details: [] as string[] }
+  try {
+    // Report initial progress
+    if (onProgress) await onProgress(10, 'Validating transactions...')
 
-  // 1. Bulk insert all transactions in one shot
-  const rows = inputs.map(input => ({
-    user_id: userId,
-    date: input.date,
-    ticker: input.ticker.toUpperCase().trim(),
-    operation: input.operation,
-    quantity: input.operation === 'VENTA' ? -Math.abs(input.quantity) : Math.abs(input.quantity),
-    price: input.price,
-    commission: input.commission ?? 0,
-    notes: input.notes ?? null,
-    avg_cost_after: 0, // rebuilt below
-    asset_type: input.assetType ?? 'ACCION',
-    moneda: input.moneda ?? 'USD',
-  }))
+    // Convert inputs to JSONB format for stored procedure
+    const transactionsJson = inputs.map(input => ({
+      date: input.date,
+      ticker: input.ticker,
+      operation: input.operation,
+      quantity: input.quantity,
+      price: input.price,
+      commission: input.commission ?? 0,
+      notes: input.notes ?? null,
+      assetType: (input as any).assetType ?? 'ACCION',
+      moneda: (input as any).moneda ?? 'USD',
+    }))
 
-  const { error: insertErr } = await supabase
-    .from('transactions')
-    .insert(rows)
+    if (onProgress) await onProgress(15, 'Ensuring tickers exist in activos...')
 
-  if (insertErr) {
-    results.errors = inputs.length
-    results.details.push(`Bulk insert failed: ${insertErr.message}`)
-    return results
-  }
+    // Auto-create missing tickers in activos table
+    // This prevents FK constraint violations when creating positions
+    const uniqueTickers = Array.from(new Set(inputs.map(i => i.ticker.toUpperCase().trim())))
+    
+    for (const ticker of uniqueTickers) {
+      const { error: activoError } = await supabase
+        .from('activos')
+        .upsert(
+          { 
+            ticker, 
+            nombre: ticker // Fallback: use ticker as name (TODO: fetch from Yahoo Finance)
+          },
+          { onConflict: 'ticker', ignoreDuplicates: true }
+        )
+      
+      if (activoError) {
+        console.warn(`[Batch Import] Failed to upsert activo ${ticker}:`, activoError)
+        // Don't fail the import - the stored procedure will catch FK violations if needed
+      } else {
+        console.log(`[Batch Import] ✓ Ensured activo exists: ${ticker}`)
+      }
+    }
 
-  results.imported = rows.length
+    if (onProgress) await onProgress(20, `Importing ${inputs.length} transactions...`)
 
-  // 2. Rebuild each affected ticker ONCE — after ALL inserts are done
- const tickers = Array.from(new Set(inputs.map(i => i.ticker.toUpperCase().trim())))
+    // Call atomic stored procedure
+    const { data, error } = await supabase.rpc('import_transactions_atomic', {
+      p_user_id: userId,
+      p_transactions: transactionsJson as any,
+    })
 
-  for (const ticker of tickers) {
+    if (error) {
+      console.error('[Batch Import] Stored procedure error:', error)
+      
+      // Extract line number and details from Postgres error message
+      let parsedErrors: any[] = []
+      const errorMessage = error.message || 'Unknown error during batch import'
+      
+      // Try to parse "Line N:" pattern from error message
+      const lineMatch = errorMessage.match(/Line (\d+):/)
+      if (lineMatch) {
+        const lineNumber = parseInt(lineMatch[1])
+        const cleanError = errorMessage.replace(/^Line \d+:\s*/, '')
+        parsedErrors = [{
+          line: lineNumber,
+          ticker: 'UNKNOWN',
+          error: cleanError
+        }]
+      } else {
+        // Generic error without line number
+        parsedErrors = [{ 
+          line: 0, 
+          ticker: 'UNKNOWN', 
+          error: errorMessage
+        }]
+      }
+      
+      return {
+        success: false,
+        imported: 0,
+        failed: inputs.length,
+        errors: parsedErrors,
+      }
+    }
+
+    // Parse stored procedure result
+    const result = Array.isArray(data) ? data[0] : data
+    
+    console.log('[Batch Import] Stored procedure result:', JSON.stringify(result, null, 2))
+    
+    if (!result.success) {
+      // Batch failed, rollback happened
+      const errorDetails = typeof result.error_details === 'string' 
+        ? JSON.parse(result.error_details)
+        : result.error_details || []
+
+      console.log('[Batch Import] Import failed, rollback triggered. Errors:', errorDetails)
+
+      return {
+        success: false,
+        imported: 0,
+        failed: result.failed || inputs.length,
+        errors: Array.isArray(errorDetails) ? errorDetails : [],
+      }
+    }
+
+    console.log(`[Batch Import] Import successful! Imported: ${result.imported}, now rebuilding positions...`)
+
+    // Success! Now rebuild positions and cash
+    if (onProgress) await onProgress(60, 'Rebuilding positions...')
+
+    const tickers = Array.from(new Set(inputs.map(i => i.ticker.toUpperCase().trim())))
+    const tickerErrors: Array<{ line: number; ticker: string; error: string }> = []
+
+    for (let i = 0; i < tickers.length; i++) {
+      const ticker = tickers[i]
+      const percentage = 60 + Math.floor((i / tickers.length) * 20)
+      
+      if (onProgress) await onProgress(percentage, `Rebuilding ${ticker}...`)
+      
+      console.log(`[Batch Import] Rebuilding position for ${ticker}...`)
+      
+      try {
+        await rebuildPosition(userId, ticker)
+        console.log(`[Batch Import] ✓ Successfully rebuilt ${ticker}`)
+      } catch (err) {
+        console.error(`[Batch Import] ✗ Rebuild failed for ${ticker}:`, err)
+        tickerErrors.push({
+          line: 0,
+          ticker,
+          error: `Position rebuild failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        })
+      }
+    }
+
+    // Rebuild cash balance
+    if (onProgress) await onProgress(85, 'Rebuilding cash balance...')
+    
     try {
-      await rebuildPosition(userId, ticker)
+      await rebuildCashBalance(userId)
     } catch (err) {
-      results.errors++
-      results.details.push(`Rebuild failed for ${ticker}: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      console.error('[Batch Import] Cash balance rebuild failed:', err)
+      tickerErrors.push({
+        line: 0,
+        ticker: 'CASH',
+        error: `Cash balance rebuild failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+      })
+    }
+
+    if (onProgress) await onProgress(95, 'Finalizing import...')
+
+    return {
+      success: true,
+      imported: result.imported || 0,
+      failed: tickerErrors.length,
+      errors: tickerErrors,
+    }
+
+  } catch (err) {
+    console.error('[Batch Import] Unexpected error:', err)
+    return {
+      success: false,
+      imported: 0,
+      failed: inputs.length,
+      errors: [{ 
+        line: 0, 
+        ticker: 'UNKNOWN', 
+        error: err instanceof Error ? err.message : 'Unexpected error during import' 
+      }],
     }
   }
-
-  return results
 }

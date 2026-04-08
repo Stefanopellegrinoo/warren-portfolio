@@ -4,12 +4,28 @@ import Redis from 'ioredis'
 export const PRICE_QUEUE_NAME = 'price-updates'
 export const IMPORT_QUEUE_NAME = 'import-transactions'
 
-const redisConnectionOptions = {
-  host: '172.17.0.1',
-  port: 6379,
-  password: '2002Stefano',
-  maxRetriesPerRequest: null,
+/**
+ * Parse Redis connection URL from REDIS_URL env var
+ * Supports formats:
+ * - redis://localhost:6379
+ * - redis://:password@localhost:6379
+ * - redis://user:password@localhost:6379
+ */
+function parseRedisUrl(url: string) {
+  const parsed = new URL(url.startsWith('redis://') ? url : `redis://${url}`)
+  return {
+    host: parsed.hostname || 'localhost',
+    port: parseInt(parsed.port || '6379', 10),
+    password: parsed.password || undefined,
+    username: parsed.username || undefined,
+    maxRetriesPerRequest: null,
+  }
 }
+
+const redisConnectionOptions = parseRedisUrl(
+  process.env.REDIS_URL || 'redis://localhost:6379'
+)
+
 let priceQueue: Queue | null = null
 let importQueue: Queue | null = null
 
@@ -42,7 +58,7 @@ export async function addPriceUpdateJob(tickers: string[]) {
 export async function addImportJob(userId: string, transactions: any[], replace: boolean) {
   const queue = getImportQueue()
   return await queue.add('process-import', { userId, transactions, replace }, {
-    removeOnComplete: true,
+    removeOnComplete: { age: 30, count: 10 }, // Keep for 30 seconds or last 10 jobs
     removeOnFail: { age: 24 * 3600 },
   })
 }
