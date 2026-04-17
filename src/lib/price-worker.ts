@@ -22,7 +22,7 @@ import { isMarketOpen } from './utils'
 import { startImportWorker } from './import-worker'
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
-console.log(REDIS_URL)
+
 
 let supabaseInstance: any = null
 
