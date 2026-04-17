@@ -198,6 +198,117 @@ export async function fetchQuotes(tickers: string[]): Promise<Map<string, Quote>
   return quotesMap
 }
 
+// ── Live Quote Fetching (with on-demand fallback) ───────────────────────────────
+/**
+ * Fetch live quotes with on-demand Yahoo Finance fallback.
+ * This function WILL call Yahoo Finance for missing tickers.
+ */
+export async function fetchQuotesWithFallback(tickers: string[]): Promise<Map<string, Quote>> {
+  console.log(`[Quote Fetch] Starting fetchQuotesWithFallback for ${tickers.length} tickers:`, tickers)
+  
+  const quotesMap = await fetchQuotes(tickers)  // Get cached quotes
+  console.log(`[Quote Fetch] After fetchQuotes, cache hits: ${Array.from(quotesMap.keys()).length}, total requested: ${tickers.length}`)
+  
+  const missingTickers = tickers.filter(t => !quotesMap.has(t))
+  
+  if (missingTickers.length === 0) {
+    console.log(`[Quote Fetch] All tickers found in cache, returning early`)
+    return quotesMap
+  }
+
+  console.log(`[Quote Fetch] Missing ${missingTickers.length} tickers, fetching from Yahoo:`, missingTickers)
+  console.log(`[Quote Fetch] Normalized tickers:`, missingTickers.map(normalizeTickerForYahoo))
+  
+  try {
+    // Fetch missing tickers from Yahoo Finance (rate limited to 5 per call)
+    const BATCH_SIZE = 5
+    for (let i = 0; i < missingTickers.length; i += BATCH_SIZE) {
+      const batch = missingTickers.slice(i, i + BATCH_SIZE)
+      
+      const yahooFinance = await getYahooFinance()
+      const normalizedBatch = batch.map(normalizeTickerForYahoo)
+      
+      // Quote with proper options object (not array)
+      const yahooResults = await yahooFinance.quote(normalizedBatch, {
+        fields: ['regularMarketPrice', 'regularMarketChange', 'regularMarketChangePercent']
+      })
+      
+      console.log(`[Quote Fetch] Yahoo results for batch ${i}/${missingTickers.length}:`, yahooResults)
+      // Log each result individually for debugging
+      normalizedBatch.forEach((normTicker, idx) => {
+        const originalTicker = batch[idx]
+        const result = yahooResults[idx]
+        if (result && result.regularMarketPrice !== undefined) {
+          console.log(`[Quote Fetch] ✓ ${originalTicker} (${normTicker}): $${result.regularMarketPrice}`)
+        } else {
+          console.log(`[Quote Fetch] ✗ ${originalTicker} (${normTicker}): NO PRICE DATA`, result)
+        }
+      })
+      
+      // Process batch results
+      const now = new Date()
+      for (let j = 0; j < batch.length; j++) {
+        const ticker = batch[j]
+        const result = yahooResults[j]
+        
+        if (result && result.regularMarketPrice !== undefined) {
+          const quote: Quote = {
+            ticker,
+            price: result.regularMarketPrice,
+            change: result.regularMarketChange || 0,
+            changePercent: result.regularMarketChangePercent || 0,
+            previousClose: result.regularMarketPrice - (result.regularMarketChange || 0),
+            updatedAt: now.toISOString()
+          }
+          
+          // Add to map
+          quotesMap.set(ticker, quote)
+          
+          // Cache in Redis (7 days)
+          await cacheQuoteInRedis(ticker, quote)
+          console.log(`[Quote Fetch] Successfully cached ${ticker}: ${quote.price}`)
+        } else {
+          console.warn(`[Quote Fetch] No price data for ${ticker}`, result)
+        }
+      }
+      
+      // Small delay between batches to respect rate limits
+      if (i + BATCH_SIZE < missingTickers.length) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+    }
+  } catch (error) {
+    console.error('[Quote Fetch] Error fetching from Yahoo Finance:', error)
+    // Don't throw - return partial results with missing tickers
+  }
+  
+  return quotesMap
+}
+
+/**
+ * Cache a quote in Redis with standard TTL
+ */
+async function cacheQuoteInRedis(ticker: string, quote: Quote): Promise<void> {
+  const redisOk = await ensureRedisConnected()
+  if (!redisOk) {
+    console.warn(`[Cache] Redis not available, skipping cache for ${ticker}`)
+    return
+  }
+  
+  try {
+    const redis = getRedis()
+    if (redis) {
+      await redis.setex(`${PRICE_STORAGE_PREFIX}${ticker}`, PRICE_STORAGE_TTL, JSON.stringify(quote))
+      setMemoryCachedQuote(ticker, quote)
+      console.log(`[Cache] Cached price for ${ticker}: ${quote.price}`)
+    } else {
+      console.warn(`[Cache] Redis instance not available for ${ticker}`)
+    }
+  } catch (err) {
+    console.error(`[Cache] Error caching quote for ${ticker}:`, err)
+  }
+}
+
 // ── Historical Data Fetching ───────────────────────────────
 export interface HistoricalQuote {
   date: string // YYYY-MM-DD

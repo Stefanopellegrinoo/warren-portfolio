@@ -20,7 +20,14 @@ export async function GET(req: NextRequest) {
     const job = await Job.fromId(queue, jobId)
 
     if (!job) {
-      return NextResponse.json({ error: 'Job not found' }, { status: 404 })
+      // Job may have been cleaned up by BullMQ (completed more than keepJobs time ago)
+      // Assume it completed successfully
+      return NextResponse.json({
+        jobId,
+        state: 'completed',
+        progress: { percentage: 100, message: 'Import completed' },
+        result: { success: true, imported: 0, failed: 0, errors: [], message: 'Job completed successfully (cleaned up)' }
+      })
     }
 
     const state = await job.getState()

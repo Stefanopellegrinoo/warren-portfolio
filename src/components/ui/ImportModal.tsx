@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useRef } from 'react'
-import { X, Upload, FileSpreadsheet, CheckCircle, AlertCircle } from 'lucide-react'
+import { X, Upload, FileSpreadsheet } from 'lucide-react'
+import { toast } from 'sonner'
 
 interface Props {
   onClose: () => void
@@ -12,9 +13,8 @@ export default function ImportModal({ onClose, onSuccess }: Props) {
   const [dragging, setDragging] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [replace, setReplace] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<{ imported: number; errors: number; details: string[] } | null>(null)
-  const [error, setError] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
   function handleDrop(e: React.DragEvent) {
@@ -28,8 +28,6 @@ export default function ImportModal({ onClose, onSuccess }: Props) {
   async function handleImport() {
     if (!file) return
     setLoading(true)
-    setError('')
-    setResult(null)
 
     try {
       const fd = new FormData()
@@ -38,12 +36,35 @@ export default function ImportModal({ onClose, onSuccess }: Props) {
         method: 'POST', body: fd,
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
+      
+      if (!res.ok) {
+        // Handle Excel validation errors (fail-fast from parser)
+        if (data.details && data.details.line) {
+          toast.error('❌ Error en archivo Excel', {
+            description: `${data.details.message}`,
+          })
+          setLoading(false)
+          return
+        }
+        throw new Error(data.error)
+      }
 
       const jobId = data.jobId
       if (!jobId) throw new Error('No se recibió ID de proceso')
 
+      // Close modal immediately
+      onClose()
+
+      // Create loading toast
+      const toastId = `import-progress-${jobId}`
+      toast.loading('📤 Importando transacciones...', {
+        id: toastId,
+        description: '0% · Iniciando proceso',
+        duration: Infinity,
+      })
+
       // Poll status
+      let lastValidResult: any = null
       const interval = setInterval(async () => {
         try {
           const sRes = await fetch(`/api/transactions/import/status?jobId=${jobId}`)
@@ -51,32 +72,97 @@ export default function ImportModal({ onClose, onSuccess }: Props) {
           
           if (!sRes.ok) {
             clearInterval(interval)
-            throw new Error(sData.error)
+            toast.error('❌ Error en importación', {
+              id: toastId,
+              description: sData.error,
+            })
+            setLoading(false)
+            return
+          }
+
+          // Update progress in toast if available
+          if (sData.progress) {
+            toast.loading(sData.progress.message || 'Procesando...', {
+              id: toastId,
+              description: `${sData.progress.percentage}% · ${sData.progress.message || ''}`,
+            })
+          }
+
+          // Save valid result (including when completed, before BullMQ cleans it)
+          if (sData.result && sData.result.imported !== undefined && sData.result.imported > 0) {
+            lastValidResult = sData.result
           }
 
           if (sData.state === 'completed') {
             clearInterval(interval)
-            setResult(sData.result)
-            setLoading(false)
-            if (sData.result.imported > 0) {
-              setTimeout(() => { onSuccess(); onClose() }, 1500)
+            // Use last valid result if job was cleaned up (imported = 0 and no errors means cleaned)
+            const finalResult = (sData.result.imported === 0 && !sData.result.errors?.length && lastValidResult) 
+              ? lastValidResult 
+              : sData.result
+            
+            if (finalResult.success && finalResult.imported > 0) {
+              toast.success(`✅ ¡Importación completada!`, {
+                id: toastId,
+                description: `${finalResult.imported} transacción${finalResult.imported > 1 ? 'es' : ''} importada${finalResult.imported > 1 ? 's' : ''} correctamente`,
+                duration: 5000,
+              })
+              // Wait for price caching and position rebuild to complete (worker has 2sec delay)
+              setTimeout(() => {
+                onSuccess()
+              }, 2500)
+            } else if (!finalResult.success) {
+              toast.error(`❌ Importación falló`, {
+                id: toastId,
+                description: `${finalResult.failed} error${finalResult.failed > 1 ? 'es' : ''}. Ninguna transacción importada (rollback automático).`,
+                duration: 5000,
+              })
+            } else {
+              toast.info(`ℹ️ Importación completada`, {
+                id: toastId,
+                description: 'No se importaron transacciones nuevas',
+                duration: 3000,
+              })
             }
+            setLoading(false)
           } else if (sData.state === 'failed') {
             clearInterval(interval)
-            setError('El proceso de importación falló')
+            // Parse failed result to extract error details
+            const failedResult = sData.result || {}
+            const errorCount = failedResult.errors?.length || 0
+            
+            if (errorCount > 0) {
+              const errorDetails = failedResult.errors?.map((err: any) => 
+                `Línea ${err.line}: ${err.error}${err.ticker && err.ticker !== 'UNKNOWN' ? ` · ${err.ticker}` : ''}`
+              ).join('\n')
+              
+              toast.error('❌ Error en importación', {
+                id: toastId,
+                description: `${errorCount} error${errorCount > 1 ? 'es' : ''} encontrado${errorCount > 1 ? 's' : ''}. Ninguna transacción fue importada (rollback automático).\n\n${errorDetails}`,
+              })
+            } else {
+              toast.error('❌ Error en importación', {
+                id: toastId,
+                description: sData.result?.message || 'Error desconocido',
+              })
+            }
             setLoading(false)
           }
-          // Progress is updated silently via state if we wanted to show a bar, 
-          // but for now we just wait for 'completed'
         } catch (err) {
           clearInterval(interval)
-          setError(err instanceof Error ? err.message : 'Error al consultar estado')
+          const errorMessage = err instanceof Error ? err.message : 'Error al consultar estado'
+          toast.error('❌ Error en importación', {
+            id: toastId,
+            description: errorMessage,
+          })
           setLoading(false)
         }
       }, 1000)
 
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al iniciar importación')
+      const errorMessage = err instanceof Error ? err.message : 'Error al iniciar importación'
+      toast.error('❌ Error en importación', {
+        description: errorMessage,
+      })
       setLoading(false)
     }
   }
@@ -135,27 +221,6 @@ export default function ImportModal({ onClose, onSuccess }: Props) {
             <p className="text-[11px] text-slate-600 font-mono">Borra todas las transacciones existentes antes de importar</p>
           </div>
         </label>
-
-        {error && (
-          <div className="flex items-center gap-2 text-rose text-xs font-mono bg-rose/10 rounded-lg px-3 py-2 border border-rose/20 mb-4">
-            <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-            {error}
-          </div>
-        )}
-
-        {result && (
-          <div className="bg-emerald/10 border border-emerald/20 rounded-xl p-4 mb-4">
-            <div className="flex items-center gap-2 mb-2">
-              <CheckCircle className="w-4 h-4 text-emerald" />
-              <span className="text-emerald font-display font-600 text-sm">
-                {result.imported} operaciones importadas
-              </span>
-            </div>
-            {result.errors > 0 && (
-              <p className="text-amber text-xs font-mono">{result.errors} errores omitidos</p>
-            )}
-          </div>
-        )}
 
         <button onClick={handleImport} disabled={!file || loading}
           className="btn-primary w-full flex items-center justify-center gap-2 py-2.5 disabled:opacity-40 disabled:cursor-not-allowed">

@@ -37,7 +37,8 @@ export default function CashSection({ balance, loading, onMovementDeleted }: Pro
       const res = await fetch('/api/cash/movements')
       if (res.ok) {
         const data = await res.json()
-        setMovements(data.movements ?? [])
+        // API returns PaginatedResponse with data.data
+        setMovements(data.data ?? [])
       }
     } catch (err) {
       console.error('Error fetching cash movements', err)

@@ -5,6 +5,13 @@ Full-stack investment portfolio tracker.
 
 ---
 
+## 📚 Documentation
+
+- **[Authentication Flow](./docs/AUTH_FLOW.md)** - Detailed login/logout/refresh diagrams and middleware explanation
+- **[Refresh Token Handling](./docs/REFRESH_TOKEN_HANDLING.md)** - Token lifecycle, storage, and rotation strategy
+
+---
+
 ## Arquitectura
 
 ```
@@ -163,3 +170,77 @@ Para que funcione hay que guardar snapshots periódicamente:
   }]
 }
 ```
+
+---
+
+## 🔐 Autenticación
+
+Warren Portfolio usa **Supabase Auth** con OAuth 2.0 para login seguro.
+
+### Login Flow
+
+1. User clicks "Login with GitHub"
+2. Redirects to GitHub OAuth authorization
+3. GitHub redirects back to `/auth/callback?code={AUTH_CODE}`
+4. Server exchanges code for tokens (access + refresh)
+5. Tokens stored in HTTP-only cookies (secure, auto-managed)
+6. Middleware validates session on every protected route
+7. Access token auto-refreshes when expired (transparent to user)
+
+### Middleware Session Validation
+
+**File:** `src/middleware.ts`
+
+```typescript
+export async function middleware(req: NextRequest) {
+  // Protected routes that require authentication
+  const protectedPaths = ['/dashboard', '/history', '/cashflow', '/statistics'];
+  
+  // Check if current route needs protection
+  const isProtected = protectedPaths.some((p) => req.nextUrl.pathname.startsWith(p));
+  
+  if (!isProtected) return NextResponse.next();
+  
+  // Create Supabase client and check session
+  const supabase = createSupabaseServerClient(req, res);
+  const { data: { session } } = await supabase.auth.getSession();
+  
+  // Auto-refresh happens here if access token expired
+  if (!session) {
+    return NextResponse.redirect(new URL('/auth/login', req.url));
+  }
+  
+  return NextResponse.next();
+}
+```
+
+**Token Auto-Refresh:**
+- Middleware checks session → triggers refresh if access token expired
+- API routes use `createServerClientInstance()` → auto-refresh on `getSession()`
+- Browser-side auth changes trigger automatic sync
+- User never manually needs to refresh
+
+### Security
+
+✅ **HTTP-Only Cookies** - Tokens never exposed to JavaScript (prevents XSS)  
+✅ **Secure Flag** - Cookies only sent over HTTPS  
+✅ **SameSite=Lax** - CSRF protection  
+✅ **Token Rotation** - Access tokens valid 1 hour, refresh tokens valid 7 days  
+✅ **Session Timeout** - Users idle >7 days must re-authenticate  
+
+### Cookie Storage
+
+Supabase SSR manages cookies automatically:
+
+```
+sb-{project-id}-auth-token              → Access token (1 hour)
+sb-{project-id}-auth-token-refreshed    → Refresh token (7 days)
+```
+
+### Detailed Documentation
+
+For complete authentication flow diagrams, token handling, and error scenarios, see:
+- **[Authentication Flow](./docs/AUTH_FLOW.md)** - Login/logout/refresh diagrams + middleware details
+- **[Refresh Token Handling](./docs/REFRESH_TOKEN_HANDLING.md)** - Token lifecycle and rotation strategy
+
+---

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClientInstance } from '@/lib/supabase-server'
+import type { Cashflow } from '@/types'
 
 const ALLOWED_CATEGORIES = [
   'Alquiler', 'Servicios', 'Supermercado', 'Transporte', 'Salud',
@@ -23,9 +24,10 @@ export async function GET(req: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  const pending = data?.filter((c: any) => c.status === 'PENDIENTE') ?? []
-  const totalPending = pending.reduce((s: number, c: any) => s + (c.amount_usd ?? 0), 0)
-  const overdue = pending.filter((c: any) => new Date(c.date) < new Date())
+  const cashflowData = (data as Cashflow[] | null) ?? []
+  const pending = cashflowData.filter((c: Cashflow) => c.status === 'PENDIENTE')
+  const totalPending = pending.reduce((s: number, c: Cashflow) => s + (c.amount_usd ?? 0), 0)
+  const overdue = pending.filter((c: Cashflow) => new Date(c.date) < new Date())
 
   return NextResponse.json({ data, count, totalPending, overdueCount: overdue.length })
 }

@@ -37,53 +37,39 @@ interface StatData {
   usdExposure: number
 }
 
+interface CombinedData {
+  totalValue: number
+  composition: { name: string; value: number; pct: number }[]
+  stocks: {
+    value: number
+    openPnl: number
+    realizedPnl: number
+    totalPnl: number
+    positionCount: number
+    closedTradesCount: number
+  }
+  ons: {
+    value: number
+    openPnl: number
+    realizedPnl: number
+    totalPnl: number
+    positionCount: number
+    closedTradesCount: number
+  }
+}
+
 const COLORS = ['#F59E0B', '#10B981', '#3B82F6', '#6366F1', '#8B5CF6', '#EC4899', '#EF4444', '#64748B', '#06B6D4', '#84CC16']
 const TOOLTIP_STYLE = { backgroundColor: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }
 
-export default function StatisticsPage() {
-  const [data, setData] = useState<StatData | null>(null)
-  const [loading, setLoading] = useState(true)
+type TabType = 'general' | 'stocks' | 'ons'
 
-  useEffect(() => {
-    async function fetchStats() {
-      try {
-        const res = await fetch('/api/statistics')
-        const json = await res.json()
-        setData(json)
-      } catch (err) {
-        console.error(err)
-      } finally {
-        setLoading(false)
-      }
-    }
-    fetchStats()
-  }, [])
-
-  if (loading || !data) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-amber/30 border-t-amber rounded-full animate-spin" />
-      </div>
-    )
-  }
-
+// Component to render detailed statistics
+function DetailedStats({ data, assetLabel }: { data: StatData; assetLabel: string }) {
   const chartData = data.allPnLs.slice(0, 15)
   const totalPnl = data.realizedPnl + data.openPnl
 
   return (
-    <div className="max-w-6xl mx-auto px-6 py-8 md:pl-64 pb-24 md:pb-8">
-
-      {/* Header */}
-      <div className="mb-8 animate-fade-in">
-        <h1 className="font-display font-800 text-2xl md:text-3xl text-white tracking-tight">
-          Estadísticas
-          <span className="text-amber text-glow-amber"> Avanzadas</span>
-        </h1>
-        <p className="text-slate-500 font-mono text-sm mt-1">
-          Análisis profesional de riesgo, rendimiento y rentabilidad de tu cartera
-        </p>
-      </div>
-
+    <>
       {/* ═══════════════ ROW 1: Core KPIs ═══════════════ */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
         <KpiCard
@@ -257,7 +243,7 @@ export default function StatisticsPage() {
 
         {/* Allocation */}
         <div className="glass rounded-2xl p-4 md:p-6 relative">
-          <h3 className="font-display font-700 text-white mb-1">Distribución de Cartera</h3>
+          <h3 className="font-display font-700 text-white mb-1">Distribución de Cartera ({assetLabel})</h3>
           <p className="text-[11px] text-slate-500 font-mono mb-4">Peso por activo (posiciones abiertas)</p>
           
           {data.allocation.length > 0 ? (
@@ -403,6 +389,201 @@ export default function StatisticsPage() {
           </div>
         </div>
       </div>
+    </>
+  )
+}
+
+export default function StatisticsPage() {
+  const [activeTab, setActiveTab] = useState<TabType>('general')
+  const [stocksData, setStocksData] = useState<StatData | null>(null)
+  const [onsData, setOnsData] = useState<StatData | null>(null)
+  const [combinedData, setCombinedData] = useState<CombinedData | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function fetchAllStats() {
+      try {
+        const [stocksRes, onsRes, combinedRes] = await Promise.all([
+          fetch('/api/statistics'),
+          fetch('/api/statistics/ons'),
+          fetch('/api/statistics/combined')
+        ])
+        
+        const [stocks, ons, combined] = await Promise.all([
+          stocksRes.json(),
+          onsRes.json(),
+          combinedRes.json()
+        ])
+        
+        setStocksData(stocks)
+        setOnsData(ons)
+        setCombinedData(combined)
+      } catch (err) {
+        console.error(err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchAllStats()
+  }, [])
+
+  if (loading || !combinedData) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-amber/30 border-t-amber rounded-full animate-spin" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="max-w-6xl mx-auto px-6 py-8 md:pl-64 pb-24 md:pb-8">
+
+      {/* Header */}
+      <div className="mb-6 animate-fade-in">
+        <h1 className="font-display font-800 text-2xl md:text-3xl text-white tracking-tight">
+          Estadísticas
+          <span className="text-amber text-glow-amber"> Avanzadas</span>
+        </h1>
+        <p className="text-slate-500 font-mono text-sm mt-1">
+          Análisis profesional de riesgo, rendimiento y rentabilidad de tu cartera
+        </p>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-2 mb-6">
+        <button
+          onClick={() => setActiveTab('general')}
+          className={`px-4 py-2 rounded-lg font-mono text-sm transition ${
+            activeTab === 'general' 
+              ? 'bg-amber text-slate-900 font-600' 
+              : 'glass text-slate-400 hover:text-white'
+          }`}
+        >
+          General
+        </button>
+        
+        {combinedData.stocks.positionCount > 0 && (
+          <button
+            onClick={() => setActiveTab('stocks')}
+            className={`px-4 py-2 rounded-lg font-mono text-sm transition ${
+              activeTab === 'stocks' 
+                ? 'bg-emerald text-slate-900 font-600' 
+                : 'glass text-slate-400 hover:text-white'
+            }`}
+          >
+            Acciones
+          </button>
+        )}
+        
+        {combinedData.ons.positionCount > 0 && (
+          <button
+            onClick={() => setActiveTab('ons')}
+            className={`px-4 py-2 rounded-lg font-mono text-sm transition ${
+              activeTab === 'ons' 
+                ? 'bg-blue-500 text-slate-900 font-600' 
+                : 'glass text-slate-400 hover:text-white'
+            }`}
+          >
+            ONs
+          </button>
+        )}
+      </div>
+
+      {/* General Tab */}
+      {activeTab === 'general' && (
+        <div>
+          {/* High-level KPIs */}
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+            <KpiCard
+              label="Valor Total Cartera"
+              value={combinedData.totalValue}
+              highlight
+              delay={0}
+            />
+            <KpiCard
+              label="P&L Acciones"
+              value={combinedData.stocks.totalPnl}
+              highlight
+              subValue={`${combinedData.stocks.positionCount} posiciones · ${combinedData.stocks.closedTradesCount} trades`}
+              delay={60}
+            />
+            <KpiCard
+              label="P&L ONs"
+              value={combinedData.ons.totalPnl}
+              highlight
+              subValue={`${combinedData.ons.positionCount} posiciones · ${combinedData.ons.closedTradesCount} trades`}
+              delay={120}
+            />
+          </div>
+
+          {/* Composition Pie Chart */}
+          <div className="glass rounded-2xl p-4 md:p-6 relative mb-6">
+            <h3 className="font-display font-700 text-white mb-1">Composición de Cartera</h3>
+            <p className="text-[11px] text-slate-500 font-mono mb-4">Distribución por clase de activo</p>
+            
+            {combinedData.composition.length > 0 ? (
+              <div className="flex flex-col gap-4">
+                <div className="relative h-[260px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={combinedData.composition}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={70}
+                        outerRadius={110}
+                        paddingAngle={3}
+                        dataKey="value"
+                        stroke="none"
+                      >
+                        {combinedData.composition.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(value: number) => formatUSD(value)}
+                        contentStyle={TOOLTIP_STYLE}
+                        itemStyle={{ color: '#fff', fontSize: '13px', fontFamily: 'monospace' }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                    <span className="text-[10px] font-mono text-slate-500 uppercase tracking-widest">Total</span>
+                    <span className="font-display font-700 text-white text-2xl mt-0.5">
+                      {formatUSD(combinedData.totalValue)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Legend */}
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2">
+                  {combinedData.composition.map((item, i) => (
+                    <div key={item.name} className="flex items-center gap-2 text-[12px] font-mono">
+                      <div className="w-3 h-3 rounded-sm flex-shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+                      <span className="text-slate-300 truncate">{item.name}</span>
+                      <span className="text-slate-500 ml-auto font-600">{(item.pct * 100).toFixed(1)}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="h-[300px] flex items-center justify-center text-slate-500 font-mono text-sm">
+                Sin datos suficientes
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Stocks Tab */}
+      {activeTab === 'stocks' && stocksData && (
+        <DetailedStats data={stocksData} assetLabel="Acciones" />
+      )}
+
+      {/* ONs Tab */}
+      {activeTab === 'ons' && onsData && (
+        <DetailedStats data={onsData} assetLabel="ONs" />
+      )}
 
     </div>
   )

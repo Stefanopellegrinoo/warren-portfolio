@@ -7,6 +7,11 @@ export const UUIDSchema = z.string().uuid({
 
 export const DateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, {
   message: 'Date must be in YYYY-MM-DD format',
+}).refine((val) => {
+  const date = new Date(val);
+  return date instanceof Date && !isNaN(date.getTime()) && val === date.toISOString().split('T')[0];
+}, {
+  message: 'Must be a valid calendar date',
 })
 
 export const PositiveNumberSchema = z.number().positive({

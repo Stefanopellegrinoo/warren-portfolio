@@ -1,5 +1,5 @@
 import type { Transaction, Position, ClosedTrade, TransactionInput, Quote, PortfolioSummary, AssetType, Moneda, ONPosition, ONClosedTrade } from '@/types'
-import { createServiceClient } from './supabase-server'
+import { createServerClientInstance, createServiceClient } from './supabase-server'
 import { getRedis, isRedisReady } from './redis'
 import { updateWithOptimisticLock } from './concurrency'
 import { processCashMovement, rebuildCashBalance } from './cash-engine'
@@ -27,29 +27,31 @@ export interface FullPortfolio {
  * This is the ONLY correct way — no spreadsheet formula can do this.
  */
 export function calculateRunningAvgCost(
-  transactions: Pick<Transaction, 'operation' | 'quantity' | 'price'>[],
+  transactions: Pick<Transaction, 'operation' | 'quantity' | 'price' | 'commission'>[],
 ): { avgCost: number; quantity: number; costBasis: number } {
   let quantity = 0
   let costBasis = 0
 
   for (const tx of transactions) {
     const qty = Math.abs(tx.quantity)
+    const comm = tx.commission || 0
 
     if (tx.operation === 'COMPRA') {
-      costBasis += qty * tx.price
+      // Net Cost Basis: Include commission
+      costBasis += (qty * tx.price) + comm
       quantity += qty
     } else if (tx.operation === 'VENTA') {
       if (quantity > 0) {
         const avgCost = costBasis / quantity
-        costBasis -= qty * avgCost   // reduce cost basis proportionally
+        // Proportionally reduce cost basis (commissions on sell affect realized PnL, not cost basis)
+        costBasis -= qty * avgCost
         quantity -= qty
-        if (quantity < 0.0001) {    // position fully closed
+        if (quantity < 0.0001) {
           quantity = 0
           costBasis = 0
         }
       }
     }
-    // DIVIDENDO: no effect on cost basis
   }
 
   const avgCost = quantity > 0.0001 ? costBasis / quantity : 0
@@ -64,102 +66,58 @@ export function calculateRunningAvgCost(
  * 4. Update positions table
  * 
  * CONCURRENCY STRATEGY:
- * - Uses OPTIMISTIC LOCKING for position updates (fast path)
- * - Falls back to rebuildPosition on first transaction or lock conflicts
+ * - Uses ATOMIC SQL RPC (fast path & consistency guaranteed)
  */
 export async function processTransaction(
   userId: string,
   input: TransactionInput,
 ): Promise<{ transaction: Transaction; position: Position | null; closedTrade: ClosedTrade | null }> {
-  const supabase = createServiceClient()
+  const supabase = createServerClientInstance()
 
-  // 1. Insert the transaction first
-  const { data: newTx, error: insertErr } = await supabase
-    .from('transactions')
-    .insert({
-      user_id: userId,
-      date: input.date,
-      ticker: input.ticker.toUpperCase().trim(),
-      operation: input.operation,
-      quantity: input.operation === 'VENTA' ? -Math.abs(input.quantity) : Math.abs(input.quantity),
-      price: input.price,
-      commission: input.commission ?? 0,
-      notes: input.notes ?? null,
-      avg_cost_after: 0, // will be recalculated
-      asset_type: (input as any).assetType ?? 'ACCION',
-      moneda: (input as any).moneda ?? 'USD',
-    })
-    .select()
-    .single()
+  // 1. Call the atomic RPC to handle everything in one DB transaction
+  const { data, error: rpcErr } = await supabase.rpc('process_transaction_atomic', {
+    p_date: input.date,
+    p_ticker: input.ticker.toUpperCase().trim(),
+    p_operation: input.operation,
+    p_quantity: Math.abs(input.quantity),
+    p_price: input.price,
+    p_commission: input.commission ?? 0,
+    p_notes: input.notes ?? null,
+    p_asset_type: (input as any).assetType ?? 'ACCION',
+    p_moneda: (input as any).moneda ?? 'USD',
+  })
 
-  if (insertErr) throw insertErr
-
-  // 2. Try optimistic lock update first (fast path for concurrent operations)
-  let updatedPosition: Position | null = null
-  let closedTrade: ClosedTrade | null = null
-
-  try {
-    updatedPosition = await updatePositionIncremental(userId, input.ticker, input)
-  } catch (error) {
-    // FALLBACK: First transaction OR too much contention → rebuild from scratch
-    console.warn('[Portfolio Engine] Incremental update failed, rebuilding position:', error)
-    await rebuildPosition(userId, input.ticker)
-
-    // Fetch the rebuilt position
-    const { data: pos } = await supabase
-      .from('positions')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('ticker', input.ticker.toUpperCase().trim())
-      .single()
-
-    updatedPosition = pos ?? null
+  if (rpcErr) {
+    console.error('[Portfolio Engine] RPC Error:', rpcErr)
+    throw rpcErr
   }
 
-  // 3. Update cash balance (COMPRA/VENTA/DIVIDENDO/CUPON affect cash)
-  if (input.operation === 'COMPRA' || input.operation === 'VENTA' || input.operation === 'DIVIDENDO' || input.operation === 'CUPON') {
-    const transactionCost = Math.abs(input.quantity * input.price) + (input.commission ?? 0)
-    let type: 'DEPOSITO' | 'RETIRO' = 'DEPOSITO'
-    let amount = 0
-    
-    if (input.operation === 'COMPRA') {
-      type = 'RETIRO'
-      amount = transactionCost
-    } else if (input.operation === 'VENTA') {
-      type = 'DEPOSITO'
-      amount = Math.abs(input.quantity * input.price) - (input.commission ?? 0)
-    } else if (input.operation === 'DIVIDENDO' || input.operation === 'CUPON') {
-      type = 'DEPOSITO'
-      amount = Math.abs(input.quantity * input.price) - (input.commission ?? 0)
-    }
-    
-    try {
-      await processCashMovement(userId, {
-        date: input.date,
-        type,
-        amount,
-        description: `${input.operation} ${input.ticker.toUpperCase().trim()} - ${input.quantity} @ ${input.price}`,
-        ticker: input.ticker.toUpperCase().trim(),
-        transaction_id: newTx.id,  // Link cash_movement to transaction for referential integrity
-      })
-    } catch (cashError) {
-      console.error('[Portfolio Engine] Failed to update cash balance:', cashError)
-      // Don't throw — transaction and position already committed
-      // Cash will be inconsistent but can be corrected via rebuildCashBalance
-    }
-  }
+  const { transaction_id } = data
 
-  // 4. Fetch the latest closed trade for this ticker if it was a VENTA
+  // 2. Rebuild position if it was a VENTA to handle closed_trades logic
+  // (The RPC handles quantity and cost but doesn't manage the closed_trades table yet)
   if (input.operation === 'VENTA') {
-    const { data: ct } = await supabase
-      .from('closed_trades')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('ticker', input.ticker.toUpperCase().trim())
-      .order('close_date', { ascending: false })
-      .limit(1)
-      .single()
-    closedTrade = ct ?? null
+    await rebuildPosition(userId, input.ticker)
+  }
+
+  // 3. Fetch results to return to frontend
+  const [txRes, posRes, ctRes] = await Promise.all([
+    supabase.from('transactions').select('*').eq('id', transaction_id).single(),
+    supabase.from('positions').select('*').eq('user_id', userId).eq('ticker', input.ticker.toUpperCase().trim()).single(),
+    input.operation === 'VENTA' 
+      ? supabase.from('closed_trades').select('*').eq('user_id', userId).eq('ticker', input.ticker.toUpperCase().trim()).order('close_date', { ascending: false }).limit(1).single()
+      : Promise.resolve({ data: null })
+  ])
+
+  // 4. Invalidate Redis cache for this user
+  if (isRedisReady()) {
+    try {
+      const redis = getRedis()
+      await redis?.del(`summary:${userId}`)
+      console.log(`[Portfolio Engine] Cache invalidated for user ${userId}`)
+    } catch (cacheErr) {
+      console.warn('[Portfolio Engine] Failed to invalidate cache:', cacheErr)
+    }
   }
 
   // 5. Fetch current price for the ticker (non-critical, background operation)
@@ -168,76 +126,13 @@ export async function processTransaction(
     await fetchQuotesWithFallback([input.ticker.toUpperCase().trim()])
   } catch (priceError) {
     console.warn(`[Portfolio Engine] Failed to fetch price for ${input.ticker}:`, priceError)
-    // Non-critical error — price will be fetched when dashboard loads
   }
 
-  return { transaction: newTx, position: updatedPosition ?? null, closedTrade }
-}
-
-/**
- * Incremental position update with optimistic locking.
- * 
- * FAST PATH for concurrent operations:
- * - Reads current position + version
- * - Calculates new avg_cost, quantity, total_invested
- * - Updates with WHERE version = current_version
- * - Retries on conflict
- * 
- * LIMITATIONS:
- * - Only works for simple COMPRA/VENTA (not partial sells that create closed trades)
- * - Falls back to rebuildPosition for complex scenarios
- * 
- * @throws Error if position doesn't exist (first transaction) or too complex
- */
-async function updatePositionIncremental(
-  userId: string,
-  ticker: string,
-  input: TransactionInput
-): Promise<Position> {
-  const normalizedTicker = ticker.toUpperCase().trim()
-
-  return await updateWithOptimisticLock<Position>(
-    'positions',
-    userId,
-    normalizedTicker,
-    (currentPosition) => {
-      const qty = Math.abs(input.quantity)
-
-      if (input.operation === 'COMPRA') {
-        // Weighted average cost calculation
-        const newCostBasis = currentPosition.total_invested + (qty * input.price)
-        const newQuantity = currentPosition.quantity + qty
-        const newAvgCost = newCostBasis / newQuantity
-
-        return {
-          quantity: newQuantity,
-          avg_cost: newAvgCost,
-          total_invested: newCostBasis,
-          first_bought: currentPosition.first_bought || input.date,
-          last_updated: new Date().toISOString(),
-        }
-      } else if (input.operation === 'VENTA') {
-        // Simple sell: reduce quantity, keep avg_cost
-        const newQuantity = currentPosition.quantity - qty
-        const newCostBasis = currentPosition.total_invested - (qty * currentPosition.avg_cost)
-
-        // If position closes or goes negative, throw to trigger rebuild
-        // (rebuild handles closed trades correctly)
-        if (newQuantity <= 0.0001) {
-          throw new Error('Position closing — needs rebuildPosition for closed_trade logic')
-        }
-
-        return {
-          quantity: newQuantity,
-          total_invested: newCostBasis,
-          last_updated: new Date().toISOString(),
-        }
-      }
-
-      throw new Error(`Unknown operation: ${input.operation}`)
-    },
-    { maxRetries: 3 }
-  )
+  return { 
+    transaction: txRes.data, 
+    position: posRes.data ?? null, 
+    closedTrade: ctRes.data ?? null 
+  }
 }
 
 /**
@@ -479,17 +374,20 @@ export async function rebuildPosition(userId: string, ticker: string) {
 
   for (const tx of allTx) {
     const qty = Math.abs(tx.quantity)
+    const comm = tx.commission || 0
 
     if (tx.operation === 'COMPRA') {
       if (quantity === 0) firstBought = tx.date
-      costBasis += qty * tx.price
+      // Net Cost Basis: Include commission
+      costBasis += (qty * tx.price) + comm
       quantity += qty
       avgCost = costBasis / quantity
 
     } else if (tx.operation === 'VENTA') {
       if (quantity > 0) {
         const sellQty = Math.min(qty, quantity)
-        const proceeds = sellQty * tx.price - (tx.commission || 0)
+        // Proceeds: subtract commission of the sell
+        const proceeds = sellQty * tx.price - comm
 
         // Record a closed_trade for EVERY sell, partial or full
         closedTradeRows.push({
@@ -504,6 +402,7 @@ export async function rebuildPosition(userId: string, ticker: string) {
           proceeds,
         })
 
+        // Reduce cost basis proportionally
         costBasis -= sellQty * avgCost
         quantity -= sellQty
 
@@ -690,21 +589,16 @@ export async function processTransactionBatch(
 
     console.log(`[Batch Import] Import successful! Imported: ${result.imported}, now rebuilding positions...`)
 
-    // Success! Now rebuild positions and cash
+    // Success! Now rebuild positions and cash in parallel for performance
     if (onProgress) await onProgress(60, 'Rebuilding positions...')
 
     const tickers = Array.from(new Set(inputs.map(i => i.ticker.toUpperCase().trim())))
     const tickerErrors: Array<{ line: number; ticker: string; error: string }> = []
 
-    for (let i = 0; i < tickers.length; i++) {
-      const ticker = tickers[i]
-      const percentage = 60 + Math.floor((i / tickers.length) * 20)
-      
-      if (onProgress) await onProgress(percentage, `Rebuilding ${ticker}...`)
-      
-      console.log(`[Batch Import] Rebuilding position for ${ticker}...`)
-      
+    // Rebuild all positions in parallel
+    await Promise.all(tickers.map(async (ticker) => {
       try {
+        console.log(`[Batch Import] Rebuilding position for ${ticker}...`)
         await rebuildPosition(userId, ticker)
         console.log(`[Batch Import] ✓ Successfully rebuilt ${ticker}`)
       } catch (err) {
@@ -715,7 +609,7 @@ export async function processTransactionBatch(
           error: `Position rebuild failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
         })
       }
-    }
+    }))
 
     // Rebuild cash balance
     if (onProgress) await onProgress(85, 'Rebuilding cash balance...')
@@ -753,4 +647,90 @@ export async function processTransactionBatch(
       }],
     }
   }
+}
+
+/**
+ * CALCULATE POSITION LOTS DEFINITION (FIFO)
+ * 
+ * Determines the static structure of open lots (date, quantity, buy_price)
+ * without calculating PnL. This part is cached long-term.
+ */
+export function calculatePositionLotsDefinition(
+  transactions: Transaction[]
+): any[] {
+  // 1. Sort transactions chronologically
+  const sorted = [...transactions].sort((a, b) => 
+    new Date(a.date).getTime() - new Date(b.date).getTime() ||
+    new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  )
+
+  // 2. Separate into Buys and Sells
+  const buys = sorted.filter(t => t.operation === 'COMPRA').map(t => {
+    const qty = Math.abs(t.quantity)
+    const comm = t.commission || 0
+    // Net buy price includes commission per unit
+    const netBuyPrice = ((qty * t.price) + comm) / qty
+
+    return {
+      id: t.id,
+      date: t.date,
+      original_quantity: qty,
+      remaining_quantity: qty,
+      buy_price: netBuyPrice,
+    }
+  })
+
+  const sells = sorted.filter(t => t.operation === 'VENTA')
+
+  // 3. Apply Sells via FIFO
+  for (const sell of sells) {
+    let sellQty = Math.abs(sell.quantity)
+    
+    for (const buy of buys) {
+      if (buy.remaining_quantity <= 0) continue
+      
+      const consume = Math.min(sellQty, buy.remaining_quantity)
+      buy.remaining_quantity -= consume
+      sellQty -= consume
+      
+      if (sellQty <= 0) break
+    }
+  }
+
+  return buys.filter(b => b.remaining_quantity > 0.0001)
+}
+
+/**
+ * ENRICH LOTS WITH PERFORMANCE
+ * 
+ * Takes lot definitions and calculates PnL based on current price.
+ */
+export function enrichLots(lots: any[], currentPrice: number): any[] {
+  return lots.map(lot => {
+    const market_value = lot.remaining_quantity * currentPrice
+    const invested = lot.remaining_quantity * lot.buy_price
+    const pnl = market_value - invested
+    const pnl_pct = invested > 0 ? pnl / invested : 0
+
+    return {
+      ...lot,
+      quantity: lot.remaining_quantity,
+      current_price: currentPrice,
+      market_value,
+      invested,
+      pnl,
+      pnl_pct
+    }
+  })
+}
+
+/**
+ * Legacy wrapper for calculatePositionLots (to maintain compatibility if needed)
+ */
+export function calculatePositionLots(
+  transactions: Transaction[],
+  currentPrice: number
+): any[] {
+  const defs = calculatePositionLotsDefinition(transactions)
+  return enrichLots(defs, currentPrice)
 }

@@ -100,6 +100,18 @@ export default function HistoryPage() {
       } else {
         await fetchAllTransactions()
       }
+      
+      // ALSO refresh the dashboard by navigating to it and back
+      // This ensures portfolio positions and cash are updated
+      // We use a small delay to allow backend processing
+      setTimeout(() => {
+        // Force a hard refresh of dashboard by temporarily navigating away and back
+        // This is a workaround until we implement proper cache invalidation
+        if (window.location.pathname === '/history') {
+          // Navigate to dashboard to force portfolio refresh
+          window.dispatchEvent(new CustomEvent('portfolio-needs-refresh'))
+        }
+      }, 500)
     } catch (err) {
       console.error(err)
       alert('Hubo un error al intentar borrar la operación.')

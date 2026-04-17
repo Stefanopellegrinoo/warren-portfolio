@@ -18,7 +18,6 @@ export async function GET(req: NextRequest) {
     let query = supabase
       .from('cash_movements')
       .select('*', { count: 'exact' })
-      .eq('user_id', user.id)
       .order('date', { ascending: false })
       .range(offset, offset + limit - 1)
 

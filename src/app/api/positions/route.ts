@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClientInstance } from '@/lib/supabase-server'
-import { fetchQuotes } from '@/lib/yahoo-finance'
+import { fetchQuotesWithFallback } from '@/lib/yahoo-finance'
 import { fetchData912Prices } from '@/lib/data912-client'
 import { calculatePortfolioSummary, getFullPortfolio } from '@/lib/portfolio-engine'
 import { getRedis, ensureRedisConnected } from '@/lib/redis'
@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
     const onTickers = portfolio.onPositions.map((p: ONPosition) => p.ticker)
 
     const [stockQuotes, onQuotes] = await Promise.all([
-      stockTickers.length > 0 ? fetchQuotes(stockTickers) : Promise.resolve(new Map()),
+      stockTickers.length > 0 ? fetchQuotesWithFallback(stockTickers) : Promise.resolve(new Map()),
       onTickers.length > 0 ? fetchData912Prices(onTickers) : Promise.resolve(new Map()),
     ])
 

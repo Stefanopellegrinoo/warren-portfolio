@@ -22,7 +22,10 @@ export default function Sidebar() {
 
   async function handleLogout() {
     const sb = createClient()
-    await sb.auth.signOut()
+    await sb.auth.signOut({ scope: 'local' })
+    // Refresh router state to ensure proper authentication state update
+    // This prevents flash of authenticated content before redirect
+    router.refresh()
     router.push('/auth/login')
   }
 
@@ -74,7 +77,7 @@ export default function Sidebar() {
       </aside>
 
       {/* Mobile Bottom Nav */}
-      <nav className="flex md:hidden fixed bottom-0 left-0 w-full z-50 px-6 py-3 justify-between items-center border-t border-white/[0.05]"
+      <nav className="flex md:hidden fixed bottom-0 left-0 w-full z-50 px-4 py-3 justify-between items-center border-t border-white/[0.05]"
            style={{ background: 'linear-gradient(180deg, #060d18 0%, #040810 100%)' }}>
         {NAV.map(({ href, label, icon: Icon }) => {
           const active = pathname.startsWith(href)
@@ -91,6 +94,13 @@ export default function Sidebar() {
             </Link>
           )
         })}
+        
+        {/* Logout button for mobile */}
+        <button onClick={handleLogout}
+          className="flex flex-col items-center gap-1.5 transition-all w-16 text-slate-500 hover:text-rose">
+          <LogOut className="w-5 h-5" strokeWidth={2} />
+          <span className="text-[10px] font-display font-600">Salir</span>
+        </button>
       </nav>
     </>
   )

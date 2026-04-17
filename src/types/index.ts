@@ -1,3 +1,39 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTHENTICATION & USER TYPES
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Authenticated user from Supabase Auth
+ */
+export interface User {
+  id: string
+  email: string
+  email_confirmed_at?: string
+  phone?: string
+  phone_confirmed_at?: string
+  app_metadata?: Record<string, any>
+  user_metadata?: Record<string, any>
+  aud?: string
+  created_at: string
+  updated_at: string
+}
+
+/**
+ * Supabase session with auth tokens
+ */
+export interface AuthSession {
+  access_token: string
+  refresh_token?: string
+  expires_in: number
+  expires_at?: number
+  token_type: string
+  user: User
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// OPERATION & TRANSACTION TYPES
+// ═══════════════════════════════════════════════════════════════════════════
+
 export type Operation = 'COMPRA' | 'VENTA' | 'DIVIDENDO'
 export type CashflowStatus = 'PAGADO' | 'PENDIENTE'
 
@@ -213,6 +249,7 @@ export interface CashMovement {
   amount: number
   description: string | null
   ticker: string | null
+  transaction_id: string | null  // Links to transactions.id
   created_at: string
 }
 
@@ -222,4 +259,112 @@ export interface CashMovementInput {
   amount: number
   description?: string
   ticker?: string
+  transaction_id?: string  // Links to transactions.id (for COMPRA/VENTA), null for manual/CUPON/DIVIDENDO
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// API RESPONSE TYPES
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Standard paginated API response wrapper
+ */
+export interface PaginatedResponse<T> {
+  data: T[]
+  pagination: {
+    page: number
+    limit: number
+    total: number
+    totalPages: number
+  }
+}
+
+/**
+ * Standard error response from API
+ */
+export interface ErrorResponse {
+  error: string
+  details?: string
+  status?: number
+}
+
+/**
+ * Standard success response wrapper
+ */
+export interface SuccessResponse<T> {
+  success: true
+  data: T
+  timestamp?: string
+}
+
+/**
+ * Processing result from transaction operations
+ */
+export interface ProcessTransactionResult {
+  position: Position | null
+  closed_trade: ClosedTrade | null
+  metadata: {
+    operation: Operation
+    quantity: number
+    price: number
+    avg_cost_after: number
+  }
+}
+
+/**
+ * Portfolio calculation result
+ */
+export interface CalculatedPortfolio {
+  summary: PortfolioSummary
+  positions: Position[]
+  closed_trades: ClosedTrade[]
+  transactions: Transaction[]
+  lastUpdated: string
+}
+
+/**
+ * Import operation metadata and progress
+ */
+export interface ImportOperation {
+  id: string
+  user_id: string
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  total_rows: number
+  processed_rows: number
+  successful_rows: number
+  failed_rows: number
+  errors: Array<{ row: number; message: string }>
+  created_at: string
+  completed_at?: string
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VALIDATION & REQUEST TYPES
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Query parameters for list endpoints
+ */
+export interface ListQueryParams {
+  page?: number
+  limit?: number
+  ticker?: string
+  sort_by?: string
+  sort_order?: 'asc' | 'desc'
+}
+
+/**
+ * Date range filter
+ */
+export interface DateRange {
+  start_date: string
+  end_date: string
+}
+
+/**
+ * Filter options for portfolio queries
+ */
+export interface PortfolioFilters extends DateRange {
+  asset_types?: AssetType[]
+  status?: 'open' | 'closed'
 }

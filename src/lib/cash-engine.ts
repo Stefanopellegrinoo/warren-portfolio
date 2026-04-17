@@ -1,6 +1,6 @@
-import { createServiceClient } from './supabase-server'
+import { createServerClientInstance, createServiceClient } from './supabase-server'
 import type { CashBalance, CashMovement, CashMovementInput } from '@/types'
-import { getRedis, isRedisReady } from './redis'
+import { getRedis, isRedisReady, invalidateUserCache } from './redis'
 import { updateWithOptimisticLock } from './concurrency'
 import { cached, CacheTTL, invalidateCacheKey } from './cache'
 
@@ -13,17 +13,14 @@ import { cached, CacheTTL, invalidateCacheKey } from './cache'
  * - CUPON: adds coupon payment (from ONs)
  * - DIVIDENDO: adds dividend payment (from stocks)
  * 
- * Strategy: Rebuild balance from scratch after every change.
- * This ensures consistency and allows auditing the full cash history.
+ * Strategy: ATOMIC SQL RPC (Postgres)
  */
 
 /**
  * Process a new cash movement and update balance.
  * 
  * CONCURRENCY STRATEGY:
- * - Uses OPTIMISTIC LOCKING to prevent race conditions
- * - If balance record doesn't exist yet, falls back to rebuildCashBalance (creates it)
- * - If optimistic lock fails after retries, falls back to rebuildCashBalance (last resort)
+ * - Uses ATOMIC SQL RPC (fast path & consistency guaranteed)
  * 
  * Returns the created movement and updated balance.
  */
@@ -31,68 +28,32 @@ export async function processCashMovement(
   userId: string,
   input: CashMovementInput
 ): Promise<{ movement: CashMovement; balance: CashBalance }> {
-  const supabase = createServiceClient()
+  const supabase = createServerClientInstance()
   
-  // 1. Insert movement
-  const { data: newMovement, error: insertErr } = await supabase
-    .from('cash_movements')
-    .insert({
-      user_id: userId,
-      date: input.date,
-      type: input.type,
-      amount: input.amount,
-      description: input.description ?? null,
-      ticker: input.ticker ?? null,
-    })
-    .select()
-    .single()
-  
-  if (insertErr) throw insertErr
-  
-  // 2. Update balance with optimistic locking
-  try {
-    const balance = await updateWithOptimisticLock<CashBalance>(
-      'cash_balance',
-      userId,
-      null, // no ticker for cash_balance
-      (currentBalance) => {
-        // Calculate the delta from this movement
-        let delta = 0
-        if (input.type === 'DEPOSITO' || input.type === 'CUPON' || input.type === 'DIVIDENDO') {
-          delta = input.amount
-        } else if (input.type === 'RETIRO') {
-          delta = -input.amount
-        }
+  // 1. Call the atomic RPC to handle everything in one DB transaction
+  const { data, error: rpcErr } = await supabase.rpc('process_transaction_atomic', {
+    p_date: input.date,
+    p_operation: input.type,
+    p_price: input.amount, // For DEPOSITO/RETIRO, p_price is used as the amount
+    p_notes: input.description ?? null,
+    p_ticker: input.ticker ?? null,
+  })
 
-        return {
-          balance: currentBalance.balance + delta,
-          updated_at: new Date().toISOString(),
-        }
-      },
-      { maxRetries: 3 }
-    )
-
-    // Invalidate Redis cache
-    if (isRedisReady()) {
-      try {
-        await Promise.all([
-          getRedis()?.del(`summary:${userId}`),
-          invalidateCacheKey(`cash:balance:${userId}`), // Invalidate cached balance
-        ])
-      } catch (err) {
-        console.warn('[Cash Engine] Failed to invalidate Redis cache:', err)
-      }
-    }
-
-    return { movement: newMovement, balance }
-    
-  } catch (error) {
-    // FALLBACK: If optimistic lock fails OR record doesn't exist yet
-    // Fall back to rebuildCashBalance (creates record if needed)
-    console.warn('[Cash Engine] Optimistic lock failed, falling back to rebuildCashBalance:', error)
-    const balance = await rebuildCashBalance(userId)
-    return { movement: newMovement, balance }
+  if (rpcErr) {
+    console.error('[Cash Engine] RPC Error:', rpcErr)
+    throw rpcErr
   }
+
+  // 2. Fetch results
+  const [movementRes, balanceRes] = await Promise.all([
+    supabase.from('cash_movements').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(1).single(),
+    supabase.from('cash_balance').select('*').eq('user_id', userId).single()
+  ])
+
+  // 3. Invalidate Redis cache
+  await invalidateUserCache(userId)
+
+  return { movement: movementRes.data, balance: balanceRes.data }
 }
 
 /**

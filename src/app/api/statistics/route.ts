@@ -24,7 +24,6 @@ export async function GET(req: NextRequest) {
     const { data: snapshots, error: snapErr } = await supabase
       .from('portfolio_snapshots')
       .select('*')
-      .eq('user_id', user.id)
       .order('snapshot_date', { ascending: true })
 
     if (snapErr) throw snapErr
@@ -50,7 +49,6 @@ export async function GET(req: NextRequest) {
     const { data: positions, error: posErr } = await supabase
       .from('positions')
       .select('*')
-      .eq('user_id', user.id)
 
     if (posErr) throw posErr
 
@@ -61,7 +59,6 @@ export async function GET(req: NextRequest) {
     const { data: closed, error: closedErr } = await supabase
       .from('closed_trades')
       .select('*')
-      .eq('user_id', user.id)
       .order('close_date', { ascending: true })
 
     if (closedErr) throw closedErr

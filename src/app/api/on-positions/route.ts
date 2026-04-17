@@ -5,6 +5,7 @@ import { invalidateUserCache } from '@/lib/redis'
 import { validateRequest, validateQueryParams, validationErrorResponse } from '@/lib/api/validation'
 import { ONTransactionSchema } from '@/lib/schemas/on'
 import { PaginationSchema, PaginatedResponse } from '@/lib/schemas/common'
+import type { ONPosition } from '@/types'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,15 +25,18 @@ export async function POST(request: Request) {
     await invalidateUserCache(user.id)
     
     return NextResponse.json(result, { status: 201 })
-  } catch (error: any) {
-    // Handle validation errors
-    if (error.status === 400) {
-      return validationErrorResponse(error)
+  } catch (error) {
+    // Handle validation errors with proper type narrowing
+    const err = error instanceof Error ? error : new Error(String(error))
+    const validationError = error as { status?: number; message?: string }
+    
+    if (validationError.status === 400) {
+      return validationErrorResponse(validationError)
     }
     
     // Handle other errors
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Unknown error' },
+      { error: err.message || 'Unknown error' },
       { status: 500 }
     )
   }
@@ -59,8 +63,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    const response: PaginatedResponse<any> = {
-      data: positions ?? [],
+    const response: PaginatedResponse<ONPosition> = {
+      data: (positions ?? []) as ONPosition[],
       pagination: {
         page,
         limit,
@@ -70,12 +74,16 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json(response)
-  } catch (err: any) {
-    if (err.status === 400) {
-      return validationErrorResponse(err)
+  } catch (err) {
+    // Handle validation errors with proper type narrowing
+    const error = err instanceof Error ? err : new Error(String(err))
+    const validationError = err as { status?: number; message?: string }
+    
+    if (validationError.status === 400) {
+      return validationErrorResponse(validationError)
     }
     
-    console.error(err)
+    console.error('[API] ON Positions error:', error.message)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }
 }

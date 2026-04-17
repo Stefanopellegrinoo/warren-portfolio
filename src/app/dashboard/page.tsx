@@ -39,24 +39,43 @@ function BreakdownBar({
 export default function DashboardPage() {
   const [positions, setPositions] = useState<Position[]>([])
   const [onPositions, setOnPositions] = useState<ONPosition[]>([])
+  const [cedears, setCedears] = useState<any[]>([])
   const [cashBalance, setCashBalance] = useState<number>(0)
   const [summary, setSummary] = useState<PortfolioSummary | null>(null)
   const [positionsLoading, setPositionsLoading] = useState(true)
   const [showAddTx, setShowAddTx] = useState(false)
+  const [quickSellData, setQuickSellData] = useState<{ assetClass: any; ticker: string; quantity: number; price: number } | null>(null)
   const [showImport, setShowImport] = useState(false)
-  const [autoRefresh, setAutoRefresh] = useState(true)
+  const [marketOpen, setMarketOpen] = useState(isMarketOpen())
+  const [autoRefresh, setAutoRefresh] = useState(isMarketOpen())
   const [lastUpdate, setLastUpdate] = useState<string | null>(null)
-  const [marketOpen, setMarketOpen] = useState(true)
 
   const countdownRef = useRef(REFRESH_INTERVAL_SEC)
   const [displayCountdown, setDisplayCountdown] = useState(REFRESH_INTERVAL_SEC)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  const handleQuickSell = (assetClass: any, ticker: string, quantity: number, price: number) => {
+    // If it's potentially a stock/cedear, check against cedears list
+    let finalClass = assetClass
+    if (assetClass === 'ACCION') {
+      const isCedear = cedears.some(c => c.ticker === ticker || ticker.includes(c.ticker))
+      if (isCedear) finalClass = 'CEDEAR'
+    }
+
+    setQuickSellData({ assetClass: finalClass, ticker, quantity, price })
+    setShowAddTx(true)
+  }
+
   const fetchPositionsData = useCallback(async () => {
     setPositionsLoading(true)
     try {
-      const res = await fetch('/api/positions')
-      const posData = await res.json()
+      const [posRes, cedRes] = await Promise.all([
+        fetch('/api/positions'),
+        fetch('/api/cedears')
+      ])
+      
+      const posData = await posRes.json()
+      if (cedRes.ok) setCedears(await cedRes.json())
 
       setPositions(posData.positions ?? [])
       setOnPositions(posData.onPositions ?? [])
@@ -84,10 +103,23 @@ export default function DashboardPage() {
   }, [fetchPositionsData])
 
   useEffect(() => { fetchPositionsData() }, [fetchPositionsData])
-  useEffect(() => { setMarketOpen(isMarketOpen()) }, [])
+
+  // Sync market state and autoRefresh
+  useEffect(() => {
+    const checkMarket = () => {
+      const open = isMarketOpen()
+      setMarketOpen(open)
+      // If market just closed, stop refreshing
+      if (!open && autoRefresh) setAutoRefresh(false)
+    }
+    
+    checkMarket()
+    const timer = setInterval(checkMarket, 60000) // Check every minute
+    return () => clearInterval(timer)
+  }, [autoRefresh])
 
   useEffect(() => {
-    if (!autoRefresh) {
+    if (!autoRefresh || !marketOpen) {
       if (intervalRef.current) clearInterval(intervalRef.current)
       return
     }
@@ -102,7 +134,7 @@ export default function DashboardPage() {
     }, 1000)
     return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoRefresh])
+  }, [autoRefresh, marketOpen])
 
   // ── Derived values ─────────────────────────────────────
   const totalMarketValue = summary?.total_market_value ?? 0
@@ -116,7 +148,7 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen md:pl-56 pb-20 md:pb-0">
-      <div className="max-w-7xl mx-auto px-6 py-8">
+      <div className="max-w-[1550px] mx-auto px-4 md:px-8 py-8">
 
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8 animate-fade-in">
@@ -255,26 +287,40 @@ export default function DashboardPage() {
         {/* ── 3 Sections ── */}
         <div className="space-y-6">
           {/* Section 1: Acciones/CEDEARs */}
-          <PositionsTable positions={positions} loading={positionsLoading} summary={summary?.stocks} />
+          <PositionsTable 
+            positions={positions} 
+            loading={positionsLoading} 
+            summary={summary?.stocks} 
+            onSell={(t, q, p) => handleQuickSell('ACCION', t, q, p)}
+          />
 
           {/* Section 2: ONs */}
           {(onPositions.length > 0) && (
-            <ONsSection positions={onPositions} loading={positionsLoading} summary={summary?.ons} />
+            <ONsSection 
+              positions={onPositions} 
+              loading={positionsLoading} 
+              summary={summary?.ons} 
+              onSell={(t, q, p) => handleQuickSell('ON', t, q, p)}
+            />
           )}
 
           {/* Section 3: Cash */}
-          {(Math.abs(cashValue) > 0) && (
-            <CashSection
-              balance={cashValue}
-              loading={positionsLoading}
-              onMovementDeleted={fetchAllData}
-            />
-          )}
+          <CashSection
+            balance={cashValue}
+            loading={positionsLoading}
+            onMovementDeleted={fetchAllData}
+          />
         </div>
 
       </div>
 
-      {showAddTx && <AddTransactionModal onClose={() => setShowAddTx(false)} onSuccess={fetchAllData} />}
+      {showAddTx && (
+        <AddTransactionModal 
+          onClose={() => { setShowAddTx(false); setQuickSellData(null) }} 
+          onSuccess={fetchAllData} 
+          initialData={quickSellData ?? undefined}
+        />
+      )}
       {showImport && <ImportModal onClose={() => setShowImport(false)} onSuccess={fetchAllData} />}
     </div>
   )

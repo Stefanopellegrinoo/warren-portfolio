@@ -5,24 +5,23 @@ import { X, Plus, Search, AlertCircle, ChevronLeft, TrendingUp, DollarSign, Land
 import { cn } from '@/lib/utils'
 import type { Operation, TransactionInput, Cedear, Activo, ONOperation, CashMovementType } from '@/types'
 
-interface Props {
-  onClose: () => void
-  onSuccess: () => void
-}
-
 // ─────────────────────────────────────────────────────────
 // Step 1: asset type selector
 // ─────────────────────────────────────────────────────────
 type AssetClass = 'ACCION' | 'CEDEAR' | 'ON' | 'CASH'
 
+interface Props {
+  onClose: () => void
+  onSuccess: () => void
+  initialData?: {
+    assetClass: AssetClass
+    ticker: string
+    quantity: number
+    price: number
+  }
+}
+
 const ASSET_CLASSES: { id: AssetClass; label: string; desc: string; icon: React.ReactNode; color: string }[] = [
-  {
-    id: 'ACCION',
-    label: 'Acción',
-    desc: 'Acciones locales (BYMA)',
-    icon: <TrendingUp className="w-5 h-5" />,
-    color: 'bg-blue-500/15 text-blue-400 border-blue-500/40 hover:bg-blue-500/25',
-  },
   {
     id: 'CEDEAR',
     label: 'CEDEAR',
@@ -90,52 +89,61 @@ interface DollarRates {
 // ─────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────
-export default function AddTransactionModal({ onClose, onSuccess }: Props) {
+export default function AddTransactionModal({ onClose, onSuccess, initialData }: Props) {
   // Step 1 / Step 2
-  const [step, setStep] = useState<1 | 2>(1)
-  const [assetClass, setAssetClass] = useState<AssetClass | null>(null)
+  const [step, setStep] = useState<1 | 2>(initialData ? 2 : 1)
+  const [assetClass, setAssetClass] = useState<AssetClass | null>(initialData?.assetClass ?? null)
+
+  // Filter operations based on mode
+  const filteredStockOps = initialData 
+    ? STOCK_OPS.filter(op => op === 'VENTA')
+    : STOCK_OPS.filter(op => op !== 'VENTA')
+
+  const filteredOnOps = initialData
+    ? ON_OPS.filter(op => op === 'VENTA')
+    : ON_OPS.filter(op => op !== 'VENTA')
 
   // ── ACCION state ──
-  const [stockOp, setStockOp] = useState<Operation>('COMPRA')
+  const [stockOp, setStockOp] = useState<Operation>(initialData ? 'VENTA' : 'COMPRA')
   const [form, setForm] = useState<TransactionInput>({
     date: new Date().toISOString().split('T')[0],
-    ticker: '',
-    operation: 'COMPRA',
-    quantity: 0,
-    price: 0,
+    ticker: initialData?.assetClass === 'ACCION' ? initialData.ticker : '',
+    operation: initialData ? 'VENTA' : 'COMPRA',
+    quantity: initialData?.assetClass === 'ACCION' ? initialData.quantity : 0,
+    price: initialData?.assetClass === 'ACCION' ? initialData.price : 0,
     commission: 0,
     notes: '',
   })
   const [activos, setActivos] = useState<Activo[]>([])
-  const [activoSearch, setActivoSearch] = useState('')
+  const [activoSearch, setActivoSearch] = useState(initialData?.assetClass === 'ACCION' ? initialData.ticker : '')
   const [showActivoDropdown, setShowActivoDropdown] = useState(false)
 
   // ── CEDEAR state ──
   const [cedears, setCedears] = useState<Cedear[]>([])
   const [cedearForm, setCedearForm] = useState<CedearFormData>({
     date: new Date().toISOString().split('T')[0],
-    ticker: '',
-    cantidad: 0,
-    precio: 0,
+    ticker: initialData?.assetClass === 'CEDEAR' ? initialData.ticker : '',
+    cantidad: initialData?.assetClass === 'CEDEAR' ? initialData.quantity : 0,
+    precio: initialData?.assetClass === 'CEDEAR' ? initialData.price : 0,
     moneda: 'ARS',
     comision: 0,
     notas: '',
   })
-  const [cedearSearch, setCedearSearch] = useState('')
+  const [cedearSearch, setCedearSearch] = useState(initialData?.assetClass === 'CEDEAR' ? initialData.ticker : '')
   const [showCedearDropdown, setShowCedearDropdown] = useState(false)
   const [dollarRates, setDollarRates] = useState<DollarRates>({ ccl: 0, mep: 0, loaded: false, error: false })
 
   // ── ON state ──
   const [onForm, setOnForm] = useState<ONFormData>({
     date: new Date().toISOString().split('T')[0],
-    ticker: '',
-    operation: 'COMPRA',
-    quantity: 0,
-    price: 0,
+    ticker: initialData?.assetClass === 'ON' ? initialData.ticker : '',
+    operation: initialData ? 'VENTA' : 'COMPRA',
+    quantity: initialData?.assetClass === 'ON' ? initialData.quantity : 0,
+    price: initialData?.assetClass === 'ON' ? initialData.price : 0,
     commission: 0,
     notes: '',
   })
-  const [onSearch, setOnSearch] = useState('')
+  const [onSearch, setOnSearch] = useState(initialData?.assetClass === 'ON' ? initialData.ticker : '')
   const [onResults, setOnResults] = useState<{ ticker: string; name?: string; source: string }[]>([])
   const [showOnDropdown, setShowOnDropdown] = useState(false)
   const [onSearchLoading, setOnSearchLoading] = useState(false)
@@ -161,13 +169,30 @@ export default function AddTransactionModal({ onClose, onSuccess }: Props) {
           fetch('/api/cedears'),
         ])
         if (activosRes.ok) setActivos(await activosRes.json())
-        if (cedearsRes.ok) setCedears(await cedearsRes.json())
+        if (cedearsRes.ok) {
+          const cedearsList = await cedearsRes.json()
+          setCedears(cedearsList)
+
+          // If we have initialData for a CEDEAR, adjust quantity based on ratio
+          if (initialData?.assetClass === 'CEDEAR') {
+            const found = cedearsList.find((c: any) => c.ticker === initialData.ticker)
+            if (found && found.ratio) {
+              setCedearForm(prev => ({
+                ...prev,
+                cantidad: initialData.quantity * found.ratio,
+                // Price is a bit trickier because of currency, but as a baseline 
+                // we show the price per CEDEAR in USD if they switch to USD
+                precio: initialData.price / found.ratio
+              }))
+            }
+          }
+        }
       } catch (err) {
         console.error('Error fetching data:', err)
       }
     }
     fetchData()
-  }, [])
+  }, [initialData])
 
   // ── Fetch dollar rates when CEDEAR is selected ──
   useEffect(() => {
@@ -241,6 +266,15 @@ export default function AddTransactionModal({ onClose, onSuccess }: Props) {
     }
   }
 
+  // ── Derived values for rendering ──
+  const commissionUSD = cedearForm.moneda === 'ARS' && dollarRates.loaded 
+    ? cedearForm.comision / dollarRates.ccl 
+    : cedearForm.comision
+
+  const totalUSD = stockOp === 'VENTA'
+    ? (cantidadAcciones * precioAccionUSD) - (commissionUSD || 0)
+    : (cantidadAcciones * precioAccionUSD) + (commissionUSD || 0)
+
   // ── Submit handlers ──
   async function handleSubmitAccion(e: React.FormEvent) {
     e.preventDefault()
@@ -276,6 +310,10 @@ export default function AddTransactionModal({ onClose, onSuccess }: Props) {
     if (cedearForm.cantidad <= 0) { setError('La cantidad debe ser mayor a 0'); return }
     if (cedearForm.precio <= 0) { setError('El precio debe ser mayor a 0'); return }
 
+    const commissionUSD = cedearForm.moneda === 'ARS' && dollarRates.loaded 
+      ? cedearForm.comision / dollarRates.ccl 
+      : cedearForm.comision
+
     setLoading(true)
     try {
       const res = await fetch('/api/transactions', {
@@ -288,7 +326,7 @@ export default function AddTransactionModal({ onClose, onSuccess }: Props) {
           moneda: cedearForm.moneda,
           operation: stockOp,
           date: cedearForm.date,
-          commission: cedearForm.comision || 0,
+          commission: commissionUSD || 0,
           notes: cedearForm.notas || '',
           assetType: 'CEDEAR',
         }),
@@ -376,10 +414,10 @@ export default function AddTransactionModal({ onClose, onSuccess }: Props) {
             )}
             <div>
               <h2 className="font-display font-700 text-lg text-white">
-                {step === 1 ? 'Nueva Operación' : assetClass === 'CASH' ? 'Movimiento de Cash' : `Operación ${assetClass}`}
+                {step === 1 ? 'Nueva Operación' : initialData ? `Vender ${initialData.ticker}` : assetClass === 'CASH' ? 'Movimiento de Cash' : `Operación ${assetClass}`}
               </h2>
               <p className="text-xs text-slate-500 font-mono mt-0.5">
-                {step === 1 ? 'Elegí el tipo de activo' : 'Completá los datos'}
+                {step === 1 ? 'Elegí el tipo de activo' : initialData ? 'Confirmá los datos de la venta' : 'Completá los datos'}
               </p>
             </div>
           </div>
@@ -416,9 +454,10 @@ export default function AddTransactionModal({ onClose, onSuccess }: Props) {
             {/* Operation tabs */}
             <div>
               <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Operación</label>
-              <div className="grid grid-cols-3 gap-1.5">
-                {STOCK_OPS.map(op => (
-                  <button key={op} type="button" onClick={() => setStockOp(op)}
+              <div className={cn("grid gap-1.5", filteredStockOps.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
+                {filteredStockOps.map(op => (
+                  <button key={op} type="button" 
+                    onClick={() => setStockOp(op)}
                     className={cn('py-2 rounded-lg text-xs font-display font-600 transition-all duration-150 border',
                       stockOp === op
                         ? op === 'COMPRA' ? 'bg-emerald/20 text-emerald border-emerald/40'
@@ -430,6 +469,19 @@ export default function AddTransactionModal({ onClose, onSuccess }: Props) {
                 ))}
               </div>
             </div>
+
+            {initialData && (
+              <div className="bg-bg-700/50 border border-white/5 rounded-xl p-3 flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] font-mono text-slate-500 uppercase tracking-tighter">Posición Actual</p>
+                  <p className="text-sm font-mono font-600 text-white">{initialData.quantity.toLocaleString()} acciones</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] font-mono text-slate-500 uppercase tracking-tighter">Precio Mercado</p>
+                  <p className="text-sm font-mono font-600 text-emerald">${initialData.price.toLocaleString()}</p>
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Fecha</label>
@@ -488,15 +540,23 @@ export default function AddTransactionModal({ onClose, onSuccess }: Props) {
             </div>
             {form.quantity > 0 && form.price > 0 && (
               <div className="bg-bg-700 rounded-lg px-4 py-3 flex justify-between items-center">
-                <span className="text-xs text-slate-500 font-mono">Total estimado</span>
-                <span className="font-mono font-600 text-amber">${((form.quantity * form.price) + (form.commission ?? 0)).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                <span className="text-xs text-slate-500 font-mono">
+                  {stockOp === 'VENTA' ? 'Total a recibir' : 'Total estimado'}
+                </span>
+                <span className={cn("font-mono font-600", stockOp === 'VENTA' ? "text-rose" : "text-amber")}>
+                  ${(stockOp === 'VENTA' 
+                    ? (form.quantity * form.price) - (form.commission ?? 0)
+                    : (form.quantity * form.price) + (form.commission ?? 0)
+                  ).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                </span>
               </div>
             )}
             {error && <p className="text-rose text-xs font-mono bg-rose/10 rounded-lg px-3 py-2 border border-rose/20">{error}</p>}
             <button type="submit" disabled={loading} className="btn-primary w-full flex items-center justify-center gap-2 py-2.5">
               {loading ? <div className="w-4 h-4 border-2 border-bg-900/30 border-t-bg-900 rounded-full animate-spin" /> : <Plus className="w-4 h-4" />}
-              {loading ? 'Guardando...' : 'Guardar Operación'}
+              {loading ? 'Guardando...' : initialData ? 'Confirmar Venta' : 'Guardar Operación'}
             </button>
+
           </form>
         )}
 
@@ -504,9 +564,10 @@ export default function AddTransactionModal({ onClose, onSuccess }: Props) {
           <form onSubmit={handleSubmitCedear} className="space-y-4">
             <div>
               <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Operación</label>
-              <div className="grid grid-cols-3 gap-1.5">
-                {STOCK_OPS.map(op => (
-                  <button key={op} type="button" onClick={() => setStockOp(op)}
+              <div className={cn("grid gap-1.5", filteredStockOps.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
+                {filteredStockOps.map(op => (
+                  <button key={op} type="button" 
+                    onClick={() => setStockOp(op)}
                     className={cn('py-2 rounded-lg text-xs font-display font-600 transition-all duration-150 border',
                       stockOp === op
                         ? op === 'COMPRA' ? 'bg-emerald/20 text-emerald border-emerald/40'
@@ -518,6 +579,19 @@ export default function AddTransactionModal({ onClose, onSuccess }: Props) {
                 ))}
               </div>
             </div>
+
+            {initialData && (
+              <div className="bg-bg-700/50 border border-white/5 rounded-xl p-3 flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] font-mono text-slate-500 uppercase tracking-tighter">Tenencia Actual</p>
+                  <p className="text-sm font-mono font-600 text-white">{initialData.quantity.toLocaleString()} CEDEARs</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] font-mono text-slate-500 uppercase tracking-tighter">Precio Mercado</p>
+                  <p className="text-sm font-mono font-600 text-emerald">${initialData.price.toLocaleString()}</p>
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Fecha</label>
@@ -609,6 +683,16 @@ export default function AddTransactionModal({ onClose, onSuccess }: Props) {
                 </div>
               </div>
             )}
+            {cedearForm.cantidad > 0 && cedearForm.precio > 0 && (
+              <div className="bg-bg-700 rounded-lg px-4 py-3 flex justify-between items-center">
+                <span className="text-xs text-slate-500 font-mono">
+                  {stockOp === 'VENTA' ? 'Recibir en Portfolio (USD)' : 'Inversión en Portfolio (USD)'}
+                </span>
+                <span className={cn("font-mono font-600", stockOp === 'VENTA' ? "text-rose" : "text-amber")}>
+                  ${totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+                </span>
+              </div>
+            )}
             {dollarRates.error && (
               <div className="bg-rose/10 rounded-lg px-4 py-3 flex items-center gap-2 border border-rose/20">
                 <AlertCircle className="w-4 h-4 text-rose" />
@@ -616,10 +700,11 @@ export default function AddTransactionModal({ onClose, onSuccess }: Props) {
               </div>
             )}
             {error && <p className="text-rose text-xs font-mono bg-rose/10 rounded-lg px-3 py-2 border border-rose/20">{error}</p>}
-            <button type="submit" disabled={loading || dollarRates.error} className="btn-primary w-full flex items-center justify-center gap-2 py-2.5">
+            <button type="submit" disabled={loading} className="btn-primary w-full flex items-center justify-center gap-2 py-2.5">
               {loading ? <div className="w-4 h-4 border-2 border-bg-900/30 border-t-bg-900 rounded-full animate-spin" /> : <Plus className="w-4 h-4" />}
-              {loading ? 'Guardando...' : 'Guardar Operación'}
+              {loading ? 'Guardando...' : initialData ? 'Confirmar Venta' : 'Guardar Operación'}
             </button>
+
           </form>
         )}
 
@@ -628,9 +713,10 @@ export default function AddTransactionModal({ onClose, onSuccess }: Props) {
             {/* ON Operation tabs */}
             <div>
               <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Operación</label>
-              <div className="grid grid-cols-3 gap-1.5">
-                {ON_OPS.map(op => (
-                  <button key={op} type="button" onClick={() => setOnForm(f => ({ ...f, operation: op }))}
+              <div className={cn("grid gap-1.5", filteredOnOps.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
+                {filteredOnOps.map(op => (
+                  <button key={op} type="button" 
+                    onClick={() => setOnForm(f => ({ ...f, operation: op }))}
                     className={cn('py-2 rounded-lg text-xs font-display font-600 transition-all duration-150 border',
                       onForm.operation === op
                         ? op === 'COMPRA' ? 'bg-emerald/20 text-emerald border-emerald/40'
@@ -642,6 +728,19 @@ export default function AddTransactionModal({ onClose, onSuccess }: Props) {
                 ))}
               </div>
             </div>
+
+            {initialData && (
+              <div className="bg-bg-700/50 border border-white/5 rounded-xl p-3 flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] font-mono text-slate-500 uppercase tracking-tighter">Nominales Actuales</p>
+                  <p className="text-sm font-mono font-600 text-white">{initialData.quantity.toLocaleString()} nominales</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] font-mono text-slate-500 uppercase tracking-tighter">Precio Mercado</p>
+                  <p className="text-sm font-mono font-600 text-emerald">${initialData.price.toLocaleString()}</p>
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Fecha</label>
@@ -733,18 +832,22 @@ export default function AddTransactionModal({ onClose, onSuccess }: Props) {
             {onForm.quantity > 0 && onForm.price > 0 && (
               <div className="bg-bg-700 rounded-lg px-4 py-3 flex justify-between items-center">
                 <span className="text-xs text-slate-500 font-mono">
-                  {onForm.operation === 'CUPON' ? 'Monto cupón' : 'Total estimado'}
+                  {onForm.operation === 'CUPON' ? 'Monto cupón' : onForm.operation === 'VENTA' ? 'Total a recibir' : 'Total estimado'}
                 </span>
-                <span className="font-mono font-600 text-amber">
-                  ${(onForm.quantity * onForm.price).toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+                <span className={cn("font-mono font-600", onForm.operation === 'VENTA' ? "text-rose" : "text-amber")}>
+                  ${(onForm.operation === 'VENTA' 
+                    ? (onForm.quantity * onForm.price) - (onForm.commission ?? 0)
+                    : (onForm.quantity * onForm.price) + (onForm.commission ?? 0)
+                  ).toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
                 </span>
               </div>
             )}
             {error && <p className="text-rose text-xs font-mono bg-rose/10 rounded-lg px-3 py-2 border border-rose/20">{error}</p>}
             <button type="submit" disabled={loading} className="btn-primary w-full flex items-center justify-center gap-2 py-2.5">
               {loading ? <div className="w-4 h-4 border-2 border-bg-900/30 border-t-bg-900 rounded-full animate-spin" /> : <Plus className="w-4 h-4" />}
-              {loading ? 'Guardando...' : 'Guardar Operación'}
+              {loading ? 'Guardando...' : initialData ? 'Confirmar Venta' : 'Guardar Operación'}
             </button>
+
           </form>
         )}
 
@@ -798,9 +901,10 @@ export default function AddTransactionModal({ onClose, onSuccess }: Props) {
             )}
             {error && <p className="text-rose text-xs font-mono bg-rose/10 rounded-lg px-3 py-2 border border-rose/20">{error}</p>}
             <button type="submit" disabled={loading} className="btn-primary w-full flex items-center justify-center gap-2 py-2.5">
-              {loading ? <div className="w-4 h-4 border-2 border-bg-900/30 border-t-bg-900 rounded-full animate-spin" /> : <DollarSign className="w-4 h-4" />}
-              {loading ? 'Guardando...' : 'Guardar Movimiento'}
+              {loading ? <div className="w-4 h-4 border-2 border-bg-900/30 border-t-bg-900 rounded-full animate-spin" /> : <Plus className="w-4 h-4" />}
+              {loading ? 'Guardando...' : initialData ? 'Confirmar Venta' : 'Guardar Operación'}
             </button>
+
           </form>
         )}
 

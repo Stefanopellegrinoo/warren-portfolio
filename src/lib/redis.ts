@@ -147,6 +147,14 @@ export async function invalidateUserCache(userId: string): Promise<void> {
       keysToDelete.push(...keys)
     } while (cursor !== '0')
 
+    // Find keys matching lots:def:{userId}:*
+    let lotsCursor = '0'
+    do {
+      const [nextCursor, keys] = await redis.scan(lotsCursor, 'MATCH', `lots:def:${userId}:*`, 'COUNT', 100)
+      lotsCursor = nextCursor
+      keysToDelete.push(...keys)
+    } while (lotsCursor !== '0')
+
     // Add exactly matching keys
     keysToDelete.push(`statistics:${userId}`)
     keysToDelete.push(`summary:${userId}`)

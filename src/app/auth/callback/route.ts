@@ -1,61 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClientInstance } from '@/lib/supabase-server'
+import {
+  validateAuthCode,
+  exchangeCodeForSession,
+  createAuthRedirectUrl,
+  parseCallbackParams,
+} from '@/lib/auth-utils'
 
 export async function GET(req: NextRequest) {
-  const { searchParams, origin } = new URL(req.url)
-  const code = searchParams.get('code')
-  const next = searchParams.get('next') || '/dashboard'
+  const { code, next, origin, error: _err } = parseCallbackParams(req.url)
 
-  // Validation: Ensure code is present
-  if (!code) {
-    console.warn('[Auth] OAuth callback missing code parameter')
-    return NextResponse.redirect(
-      new URL('/auth/login?error=invalid_callback', origin)
-    )
-  }
-
-  // Validation: Basic code format check (should be non-empty string)
-  if (code.length < 10 || code.length > 500) {
-    console.warn('[Auth] Invalid OAuth code format:', {
-      length: code.length,
-      preview: code.substring(0, 20),
+  // Step 1: Validate code format
+  const codeValidation = validateAuthCode(code)
+  if (!codeValidation.valid) {
+    const error = codeValidation.error!
+    console.warn('[Auth] Invalid code in callback:', {
+      type: error.type,
+      message: error.message,
+      metadata: error.metadata,
     })
-    return NextResponse.redirect(
-      new URL('/auth/login?error=invalid_code_format', origin)
-    )
+    const redirectUrl = createAuthRedirectUrl(origin, '/auth/login', error.type)
+    return NextResponse.redirect(redirectUrl)
   }
 
-  try {
-    const supabase = createServerClientInstance()
-    const { error } = await supabase.auth.exchangeCodeForSession(code)
+  // Step 2: Exchange code for session (code is now guaranteed to be a string)
+  const supabase = createServerClientInstance()
+  const exchangeResult = await exchangeCodeForSession(supabase, code!)
 
-    if (error) {
-      console.error('[Auth] Session exchange failed:', {
-        message: error.message,
-        status: error.status,
-        code: code.substring(0, 20),
-      })
-      return NextResponse.redirect(
-        new URL(
-          `/auth/login?error=${encodeURIComponent(error.message)}`,
-          origin
-        )
-      )
-    }
-
-    // Success: Redirect to intended destination
-    return NextResponse.redirect(new URL(next, origin))
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : 'Unknown error'
-    console.error('[Auth] Callback error:', {
-      error: errorMsg,
-      code: code.substring(0, 20),
-      stack: err instanceof Error ? err.stack : undefined,
-    })
-
-    return NextResponse.redirect(
-      new URL('/auth/login?error=callback_failed', origin)
-    )
+  if (!exchangeResult.success) {
+    const error = exchangeResult.error!
+    const redirectUrl = createAuthRedirectUrl(origin, '/auth/login', error.type)
+    return NextResponse.redirect(redirectUrl)
   }
+
+  // Step 3: Successful authentication - redirect to intended destination
+  return NextResponse.redirect(new URL(next, origin))
 }
 

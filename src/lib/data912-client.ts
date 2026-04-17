@@ -167,3 +167,8 @@ export async function getAvailableCorporateBonds(): Promise<string[]> {
     return []
   }
 }
+
+/**
+ * Alias for fetchData912Prices - for consistency with ONs terminology
+ */
+export const fetchONQuotes = fetchData912Prices

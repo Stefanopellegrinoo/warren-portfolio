@@ -115,6 +115,7 @@ const worker = new Worker(
   PRICE_QUEUE_NAME,
   async (job) => {
     let tickers: string[] = []
+    let onTickers: string[] = []
 
     if (job.name === 'update-all-prices') {
       if (!isMarketOpen()) {
@@ -122,52 +123,72 @@ const worker = new Worker(
         return
       }
       
-      tickers = await getAllTickers()
-      if (!tickers.length) {
+      const [allTickers, allONTickers] = await Promise.all([getAllTickers(), getAllONTickers()])
+      tickers = allTickers
+      onTickers = allONTickers
+      
+      if (!tickers.length && !onTickers.length) {
         console.log('[Worker] No positions found — skipping')
         return
       }
     } else {
       // On-demand job: specific tickers
       tickers = (job.data as { tickers: string[] }).tickers || []
+      // If tickers are provided, we should also check if any are ONs
+      onTickers = tickers.filter(t => t.toUpperCase().trim().endsWith('D'))
     }
 
-    console.log(`[Worker] Fetching ${tickers.length} tickers: ${tickers.join(', ')}`)
+    console.log(`[Worker] Fetching ${tickers.length} stocks and ${onTickers.length} ONs`)
 
-    // 1. TRY YAHOO FINANCE (fresh data)
-    let yahooPrices = new Map<string, any>()
-    try {
-      yahooPrices = await fetchQuotesFromYahoo(tickers)
-      console.log(`[Worker] Yahoo returned ${yahooPrices.size}/${tickers.length} prices`)
-    } catch (err) {
-      console.error('[Worker] Yahoo fetch failed:', err)
+    // 1. LOAD ALL EXISTING CACHED QUOTES (LKP)
+    // This ensures we have a baseline for both stocks and ONs
+    const allPrices = await fetchQuotes([...tickers, ...onTickers])
+    console.log(`[Worker] Loaded ${allPrices.size} quotes from Redis cache (LKP)`)
+
+    // 2. FETCH FRESH STOCK QUOTES (Yahoo)
+    let freshYahooPrices = new Map<string, any>()
+    if (tickers.length > 0) {
+      try {
+        freshYahooPrices = await fetchQuotesFromYahoo(tickers)
+        console.log(`[Worker] Yahoo returned ${freshYahooPrices.size}/${tickers.length} prices`)
+        
+        // Cache fresh Yahoo prices to Redis
+        freshYahooPrices.forEach((quote, ticker) => {
+          cachePrice(ticker, quote).catch(e => console.error(`[Worker] Cache error for ${ticker}:`, e))
+          allPrices.set(ticker, quote) // Overwrite LKP with fresh data
+        })
+      } catch (err) {
+        console.error('[Worker] Yahoo fetch failed:', err)
+      }
     }
 
-    // 2. CACHE fresh prices to Redis LKP
-    const cacheEntries = Array.from(yahooPrices.entries())
-    for (let i = 0; i < cacheEntries.length; i++) {
-      const [ticker, quote] = cacheEntries[i]
-      await cachePrice(ticker, quote)
-      console.log(`  ✓ ${ticker}: $${quote.price.toFixed(2)}`)
+    // 3. FETCH FRESH ON QUOTES (Data912)
+    let freshONPrices = new Map<string, any>()
+    if (onTickers.length > 0) {
+      try {
+        freshONPrices = await fetchData912Prices(onTickers)
+        console.log(`[Worker] Data912 returned ${freshONPrices.size}/${onTickers.length} prices`)
+        
+        // Cache fresh ON prices to Redis AND Database
+        freshONPrices.forEach((quote, ticker) => {
+          cachePrice(ticker, quote).catch(e => console.error(`[Worker] Cache error for ${ticker}:`, e))
+          allPrices.set(ticker, quote) // Overwrite LKP with fresh data
+        })
+        
+        // Background DB update
+        updateONPricesInDatabase(freshONPrices).catch(e => console.error('[Worker] DB update failed:', e))
+        
+      } catch (err) {
+        console.error('[Worker] Data912 fetch failed:', err)
+      }
     }
 
-    // 3. BUILD COMPLETE PRICE MAP (Yahoo fresh + LKP fallback)
-    // This ensures summaries always have ALL prices, even if Yahoo partially failed
-    const allPrices = new Map<string, any>()
-
-    // First load existing LKP from Redis
-    const lkpPrices = await fetchQuotes(tickers)
-    lkpPrices.forEach((quote, ticker) => allPrices.set(ticker, quote))
-
-    // Then overwrite with fresh Yahoo data
-    yahooPrices.forEach((quote, ticker) => allPrices.set(ticker, quote))
-
-    const missing = tickers.filter(t => !allPrices.has(t))
+    const missing = [...tickers, ...onTickers].filter(t => !allPrices.has(t))
     if (missing.length > 0) {
-      console.warn(`[Worker] No price available for: ${missing.join(', ')}`)
+      console.warn(`[Worker] No price (fresh or LKP) available for: ${missing.join(', ')}`)
     }
 
-    console.log(`[Worker] Done — ${yahooPrices.size} fresh, ${allPrices.size - yahooPrices.size} from LKP, ${missing.length} missing`)
+    console.log(`[Worker] Done — ${freshYahooPrices.size + freshONPrices.size} fresh, ${allPrices.size - (freshYahooPrices.size + freshONPrices.size)} from LKP, ${missing.length} missing`)
 
     // 4. UPDATE GLOBAL TIMESTAMP
     const redis = getRedis()
@@ -175,23 +196,20 @@ const worker = new Worker(
       await redis.set('system:last-refresh', new Date().toISOString())
     }
 
-    // 5. FETCH ON PRICES FROM IOL (if configured)
-    let onPrices = new Map<string, any>()
-    if (job.name === 'update-all-prices') {
-      const onTickers = await getAllONTickers()
-      if (onTickers.length) {
-        try {
-          onPrices = await fetchData912Prices(onTickers)
-          // Update database with latest prices
-          await updateONPricesInDatabase(onPrices)
-        } catch (err) {
-          console.error('[Worker] Data912 fetch failed in job cycle:', err)
-        }
+    // 5. CACHE USER SUMMARIES
+    // Split allPrices back into stock and ON maps for the summary calculator
+    const stockQuotes = new Map<string, any>()
+    const onQuotes = new Map<string, any>()
+    
+    allPrices.forEach((quote, ticker) => {
+      if (ticker.toUpperCase().trim().endsWith('D')) {
+        onQuotes.set(ticker, quote)
+      } else {
+        stockQuotes.set(ticker, quote)
       }
-    }
+    })
 
-    // 6. CACHE USER SUMMARIES
-    await cacheUserSummaries(allPrices, onPrices)
+    await cacheUserSummaries(stockQuotes, onQuotes)
   },
   {
     connection: { url: REDIS_URL },

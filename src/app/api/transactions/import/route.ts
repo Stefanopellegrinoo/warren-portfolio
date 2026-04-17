@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClientInstance } from '@/lib/supabase-server'
 import { addImportJob } from '@/lib/queue'
-import { parseExcelTransactions } from '@/lib/excel-import'
+import { parseExcelTransactions, ExcelParseError } from '@/lib/excel-import'
 import { TransactionImportSchema } from '@/lib/schemas/transaction'
 import { validationErrorResponse } from '@/lib/api/validation'
 import type { TransactionInput } from '@/types'
@@ -47,7 +47,22 @@ export async function POST(req: NextRequest) {
         n.toLowerCase().includes('registro')) ?? workbook.SheetNames[0]
       const sheet = workbook.Sheets[sheetName]
       const data = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null }) as unknown[][]
-      transactions = parseExcelTransactions(data)
+      
+      try {
+        transactions = parseExcelTransactions(data)
+      } catch (error) {
+        if (error instanceof ExcelParseError) {
+          return NextResponse.json({
+            error: 'Error al validar el archivo Excel',
+            details: {
+              line: error.line,
+              field: error.field,
+              message: error.message
+            }
+          }, { status: 400 })
+        }
+        throw error // Re-throw unexpected errors
+      }
     } else {
       return NextResponse.json({ error: 'Content-Type must be application/json or multipart/form-data' }, { status: 400 })
     }
