@@ -9,27 +9,40 @@ import { cn } from "@/lib/utils";
 
 export function BottomPanel() {
   const symbol = useChartStore((s) => s.symbol);
+  const dataSource = useChartStore((s) => s.dataSource);
   const [t, setT] = useState<Ticker24h | null>(null);
 
   useEffect(() => {
+    if (dataSource !== "binance") {
+      setT(null);
+      return;
+    }
     let cancelled = false;
     setT(null);
     const load = () => {
       fetchTicker24h(symbol)
-        .then((x) => {
-          if (!cancelled) setT(x);
-        })
+        .then((x) => { if (!cancelled) setT(x); })
         .catch(console.error);
     };
     load();
     const id = setInterval(load, 5000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [symbol]);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [symbol, dataSource]);
 
   const upClass = (n: number) => (n >= 0 ? "text-tv-green" : "text-tv-red");
+
+  if (dataSource === "yahoo") {
+    return (
+      <div className="flex h-9 items-center gap-0 border-t border-tv-border bg-tv-panel px-3 text-xs">
+        <Stat label="Símbolo" value={symbol} />
+        <Stat label="Fuente" value="Yahoo Finance" />
+        <div className="ml-auto flex items-center gap-2 text-[10px] text-tv-text-dim">
+          <span className="inline-flex h-1.5 w-1.5 rounded-full bg-amber-400" />
+          <span>Yahoo Finance · EOD</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-9 items-center gap-0 border-t border-tv-border bg-tv-panel px-3 text-xs">
@@ -39,24 +52,10 @@ export function BottomPanel() {
         value={t ? formatPct(t.priceChangePercent) : "—"}
         valueClass={t ? upClass(t.priceChangePercent) : ""}
       />
-      <Stat
-        label="24h Alto"
-        value={t ? formatPrice(t.highPrice) : "—"}
-        valueClass="text-tv-green"
-      />
-      <Stat
-        label="24h Bajo"
-        value={t ? formatPrice(t.lowPrice) : "—"}
-        valueClass="text-tv-red"
-      />
-      <Stat
-        label="24h Vol (base)"
-        value={t ? formatVolume(t.volume) : "—"}
-      />
-      <Stat
-        label="24h Vol (USDT)"
-        value={t ? formatVolume(t.quoteVolume) : "—"}
-      />
+      <Stat label="24h Alto" value={t ? formatPrice(t.highPrice) : "—"} valueClass="text-tv-green" />
+      <Stat label="24h Bajo" value={t ? formatPrice(t.lowPrice) : "—"} valueClass="text-tv-red" />
+      <Stat label="24h Vol (base)" value={t ? formatVolume(t.volume) : "—"} />
+      <Stat label="24h Vol (USDT)" value={t ? formatVolume(t.quoteVolume) : "—"} />
       <div className="ml-auto flex items-center gap-2 text-[10px] text-tv-text-dim">
         <span className="inline-flex h-1.5 w-1.5 animate-pulse rounded-full bg-tv-green" />
         <span>Binance · Live</span>
@@ -65,21 +64,11 @@ export function BottomPanel() {
   );
 }
 
-function Stat({
-  label,
-  value,
-  valueClass,
-}: {
-  label: string;
-  value: string;
-  valueClass?: string;
-}) {
+function Stat({ label, value, valueClass }: { label: string; value: string; valueClass?: string }) {
   return (
     <div className="flex items-center gap-1.5 border-r border-tv-border px-3">
       <span className="text-tv-text-dim">{label}</span>
-      <span className={cn("font-medium tabular-nums", valueClass ?? "text-tv-text")}>
-        {value}
-      </span>
+      <span className={cn("font-medium tabular-nums", valueClass ?? "text-tv-text")}>{value}</span>
     </div>
   );
 }

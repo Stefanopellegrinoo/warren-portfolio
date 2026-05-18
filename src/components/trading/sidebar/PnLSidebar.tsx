@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import type { Position, PortfolioSummary } from "@/types";
 import { getPortfolio, getCedearRatios } from "@/lib/warren/positions";
+import { useChartStore } from "@/lib/store/chart-store";
 import { cn } from "@/lib/utils";
 
 interface QuoteResult {
@@ -25,6 +26,9 @@ function formatUSDCompact(value: number): string {
 }
 
 export function PnLSidebar() {
+  const setSymbol = useChartStore((s) => s.setSymbol);
+  const setDataSource = useChartStore((s) => s.setDataSource);
+
   const [positions, setPositions] = useState<Position[]>([]);
   const [cashBalance, setCashBalance] = useState<number | null>(null);
   const [prices, setPrices] = useState<Map<string, number>>(new Map());
@@ -164,10 +168,11 @@ export function PnLSidebar() {
               return (
                 <div
                   key={pos.id}
-                  className="cursor-default px-3 py-2.5 hover:bg-tv-panel-hover"
+                  className="cursor-pointer px-3 py-2.5 hover:bg-tv-panel-hover"
+                  onClick={() => { setDataSource("yahoo"); setSymbol(pos.ticker); }}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-tv-text">
+                    <span className="text-xs font-semibold text-amber-400 underline-offset-2 hover:underline">
                       {pos.ticker}
                     </span>
                     <span className="text-[10px] text-tv-text-muted">

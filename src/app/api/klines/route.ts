@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { fetchKlines } from '@/lib/yahoo-finance'
-import { createServerClientInstance } from '@/lib/supabase-server'
+import { requireUser, isAuthFailure } from '@/lib/api-auth'
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
@@ -12,16 +12,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'ticker required' }, { status: 400 })
   }
 
-  const supabase = createServerClientInstance()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const authResult = await requireUser()
+  if (isAuthFailure(authResult)) return authResult.error
 
   try {
     const period1 = new Date()
     period1.setDate(period1.getDate() - days)
-
     const klines = await fetchKlines(ticker, interval, period1)
     return NextResponse.json(klines)
   } catch (err) {
