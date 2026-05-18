@@ -12,19 +12,16 @@ export const IMPORT_QUEUE_NAME = 'import-transactions'
  * - redis://user:password@localhost:6379
  */
 function parseRedisUrl(url: string) {
+  if (!url) throw new Error('REDIS_URL is not defined')
   const parsed = new URL(url.startsWith('redis://') ? url : `redis://${url}`)
   return {
     host: parsed.hostname || 'localhost',
-    port: parseInt(parsed.port || '6379', 10),
+    port: parseInt(parsed.port || '6380', 10),
     password: parsed.password || undefined,
     username: parsed.username || undefined,
     maxRetriesPerRequest: null,
   }
 }
-
-const redisConnectionOptions = parseRedisUrl(
-  process.env.REDIS_URL || 'redis://localhost:6379'
-)
 
 let priceQueue: Queue | null = null
 let importQueue: Queue | null = null
@@ -32,7 +29,7 @@ let importQueue: Queue | null = null
 export function getPriceQueue(): Queue {
   if (!priceQueue) {
     priceQueue = new Queue(PRICE_QUEUE_NAME, {
-      connection: new Redis(redisConnectionOptions)
+      connection: new Redis(parseRedisUrl(process.env.REDIS_URL || ''))
     })
   }
   return priceQueue
@@ -41,7 +38,7 @@ export function getPriceQueue(): Queue {
 export function getImportQueue(): Queue {
   if (!importQueue) {
     importQueue = new Queue(IMPORT_QUEUE_NAME, {
-     connection: new Redis(redisConnectionOptions)
+      connection: new Redis(parseRedisUrl(process.env.REDIS_URL || ''))
     })
   }
   return importQueue

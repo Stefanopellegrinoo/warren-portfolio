@@ -20,8 +20,10 @@ import { calculatePortfolioSummary } from './portfolio-engine'
 import { getRedis } from './redis'
 import { isMarketOpen } from './utils'
 import { startImportWorker } from './import-worker'
+import { startSignalsWorker } from '@/lib/signals-worker'
+import { scheduleSignalsEvaluationJobs } from '@/lib/signals-queue'
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
+const REDIS_URL = process.env.REDIS_URL
 
 
 let supabaseInstance: any = null
@@ -229,10 +231,12 @@ worker.on('failed', (job, err) => {
 async function main() {
   console.log('[Worker] Price update worker started')
   startImportWorker()
+  startSignalsWorker()
   console.log(`[Worker] Redis: ${REDIS_URL}`)
 
   // Schedule repeating job every 5 minutes
   await scheduleRepeatingPriceJob(5)
+  await scheduleSignalsEvaluationJobs()
 
   // Immediate fetch on startup
   const [tickers, onTickers] = await Promise.all([getAllTickers(), getAllONTickers()])

@@ -5,7 +5,7 @@ export async function middleware(req: NextRequest) {
   const res = NextResponse.next();
   const pathname = req.nextUrl.pathname;
 
-  const protectedPaths = ['/dashboard', '/history', '/cashflow', '/statistics'];
+  const protectedPaths = ['/dashboard', '/history', '/cashflow', '/statistics', '/strategies'];
   const isProtected = protectedPaths.some((p) => pathname.startsWith(p));
   const isAuthPage = pathname === '/auth/login' || pathname === '/';
 
@@ -27,6 +27,13 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/', '/dashboard/:path*', '/history/:path*', '/cashflow/:path*', '/statistics/:path*', '/auth/login', '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|json)$).*)',
-],
+  matcher: [
+    '/',
+    '/auth/login',
+    '/dashboard/:path*',
+    '/history/:path*',
+    '/cashflow/:path*',
+    '/statistics/:path*',
+    '/strategies/:path*',
+  ],
 };

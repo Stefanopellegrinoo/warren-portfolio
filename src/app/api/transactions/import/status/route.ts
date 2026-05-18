@@ -10,8 +10,9 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: NextRequest) {
   try {
     const supabase = createServerClientInstance()
-    const { data: { user }, error: authErr } = await supabase.auth.getUser()
-    if (authErr || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { data: { session } } = await supabase.auth.getSession()
+    const user = session?.user
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     // Validate query params
     const { jobId } = validateQueryParams(ImportStatusQuerySchema, req.url)

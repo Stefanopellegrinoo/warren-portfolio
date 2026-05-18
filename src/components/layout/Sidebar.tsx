@@ -2,18 +2,17 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, History, DollarSign, LogOut, TrendingUp } from 'lucide-react'
+import { LayoutDashboard, History, DollarSign, LogOut, TrendingUp, PieChart, BookOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase-client'
 import { useRouter } from 'next/navigation'
 
-import { PieChart } from 'lucide-react'
-
 const NAV = [
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/history',   label: 'Historial',  icon: History },
-  { href: '/cashflow',  label: 'Cash Flow',  icon: DollarSign },
+  { href: '/dashboard',  label: 'Dashboard',    icon: LayoutDashboard },
+  { href: '/history',    label: 'Historial',    icon: History },
+  { href: '/cashflow',   label: 'Cash Flow',    icon: DollarSign },
   { href: '/statistics', label: 'Estadísticas', icon: PieChart },
+  { href: '/strategies', label: 'Estrategias',  icon: BookOpen },
 ]
 
 export default function Sidebar() {

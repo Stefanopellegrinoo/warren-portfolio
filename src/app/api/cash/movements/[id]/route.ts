@@ -10,7 +10,8 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   const supabase = createServerClientInstance()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { data: { session } } = await supabase.auth.getSession()
+  const user = session?.user
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   // Validate UUID
@@ -34,7 +35,7 @@ export async function DELETE(
   }
 
   // Rebuild balance after deletion
-  await rebuildCashBalance(user.id)
+  await rebuildCashBalance(supabase, user.id)
 
   return NextResponse.json({ success: true })
 }

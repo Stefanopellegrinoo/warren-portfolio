@@ -3,6 +3,18 @@ import { createServerClientInstance, createServiceClient } from './supabase-serv
 import { getRedis, isRedisReady } from './redis'
 import { updateWithOptimisticLock } from './concurrency'
 import { processCashMovement, rebuildCashBalance } from './cash-engine'
+import type { SupabaseClient } from '@supabase/supabase-js'
+
+/**
+ * SECURITY: Explicitly validate userId to prevent data corruption.
+ */
+function assertUserId(userId: unknown): asserts userId is string {
+  if (!userId || typeof userId !== 'string' || userId.trim() === '') {
+    throw new Error(
+      '[Security] userId inválido o ausente. Operación cancelada para prevenir corrupción de datos.'
+    )
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MULTI-ASSET PORTFOLIO TYPES
@@ -23,8 +35,6 @@ export interface FullPortfolio {
  * - COMPRA: new_avg = (old_cost_basis + qty*price) / (old_qty + qty)
  * - VENTA:  avg_cost doesn't change — only qty reduces
  * - When qty → 0: position closes, cost basis resets to 0
- * 
- * This is the ONLY correct way — no spreadsheet formula can do this.
  */
 export function calculateRunningAvgCost(
   transactions: Pick<Transaction, 'operation' | 'quantity' | 'price' | 'commission'>[],
@@ -43,7 +53,6 @@ export function calculateRunningAvgCost(
     } else if (tx.operation === 'VENTA') {
       if (quantity > 0) {
         const avgCost = costBasis / quantity
-        // Proportionally reduce cost basis (commissions on sell affect realized PnL, not cost basis)
         costBasis -= qty * avgCost
         quantity -= qty
         if (quantity < 0.0001) {
@@ -62,45 +71,57 @@ export function calculateRunningAvgCost(
  * Process a new transaction:
  * 1. Insert into transactions table
  * 2. Update position (with optimistic locking for concurrency)
- * 3. If position closes, write to closed_trades
- * 4. Update positions table
- * 
- * CONCURRENCY STRATEGY:
- * - Uses ATOMIC SQL RPC (fast path & consistency guaranteed)
+ * 3. If position closes, write to closed_trades (handled by RPC)
  */
 export async function processTransaction(
+  supabase: SupabaseClient,
   userId: string,
   input: TransactionInput,
 ): Promise<{ transaction: Transaction; position: Position | null; closedTrade: ClosedTrade | null }> {
-  const supabase = createServerClientInstance()
+  assertUserId(userId)
 
-  // 1. Call the atomic RPC to handle everything in one DB transaction
-  const { data, error: rpcErr } = await supabase.rpc('process_transaction_atomic', {
-    p_date: input.date,
-    p_ticker: input.ticker.toUpperCase().trim(),
-    p_operation: input.operation,
-    p_quantity: Math.abs(input.quantity),
-    p_price: input.price,
-    p_commission: input.commission ?? 0,
-    p_notes: input.notes ?? null,
-    p_asset_type: (input as any).assetType ?? 'ACCION',
-    p_moneda: (input as any).moneda ?? 'USD',
-  })
+  // 0. Check for background import lock
+  if (isRedisReady()) {
+    const redis = getRedis()
+    const isImporting = await redis?.get(`importing:${userId}`)
+    if (isImporting) {
+      throw new Error('Hay una importación masiva en curso para este usuario. Por favor, espere a que finalice para realizar cambios manuales.')
+    }
+  }
 
-  if (rpcErr) {
+  // 1. Call the atomic RPC — retry up to 3× on concurrent modification conflicts
+  const RPC_MAX_RETRIES = 3
+  let rpcData: any
+  for (let attempt = 1; attempt <= RPC_MAX_RETRIES; attempt++) {
+    const { data, error: rpcErr } = await supabase.rpc('process_transaction_atomic', {
+      p_date: input.date,
+      p_ticker: input.ticker.toUpperCase().trim(),
+      p_operation: input.operation,
+      p_quantity: Math.abs(input.quantity),
+      p_price: input.price,
+      p_commission: input.commission ?? 0,
+      p_notes: input.notes ?? null,
+      p_asset_type: (input as any).assetType ?? 'ACCION',
+      p_moneda: (input as any).moneda ?? 'USD',
+      p_user_id: userId,
+    })
+
+    if (!rpcErr) { rpcData = data; break }
+
+    const isConcurrentConflict = rpcErr.message?.includes('Concurrent modification')
+    if (isConcurrentConflict && attempt < RPC_MAX_RETRIES) {
+      console.warn(`[Portfolio Engine] Concurrent modification — retrying (${attempt}/${RPC_MAX_RETRIES})`)
+      await new Promise(r => setTimeout(r, 50 * Math.pow(2, attempt - 1)))
+      continue
+    }
+
     console.error('[Portfolio Engine] RPC Error:', rpcErr)
     throw rpcErr
   }
 
-  const { transaction_id } = data
+  const { transaction_id } = rpcData
 
-  // 2. Rebuild position if it was a VENTA to handle closed_trades logic
-  // (The RPC handles quantity and cost but doesn't manage the closed_trades table yet)
-  if (input.operation === 'VENTA') {
-    await rebuildPosition(userId, input.ticker)
-  }
-
-  // 3. Fetch results to return to frontend
+  // 2. Fetch results to return to frontend
   const [txRes, posRes, ctRes] = await Promise.all([
     supabase.from('transactions').select('*').eq('id', transaction_id).single(),
     supabase.from('positions').select('*').eq('user_id', userId).eq('ticker', input.ticker.toUpperCase().trim()).single(),
@@ -114,18 +135,23 @@ export async function processTransaction(
     try {
       const redis = getRedis()
       await redis?.del(`summary:${userId}`)
-      console.log(`[Portfolio Engine] Cache invalidated for user ${userId}`)
-    } catch (cacheErr) {
-      console.warn('[Portfolio Engine] Failed to invalidate cache:', cacheErr)
-    }
+    } catch (cacheErr) {}
   }
 
-  // 5. Fetch current price for the ticker (non-critical, background operation)
+  // 5. ✅ CRITICAL: Warm up price immediately + enqueue reliable worker job (runs outside market hours too)
+  const tickerClean = input.ticker.toUpperCase().trim()
   try {
     const { fetchQuotesWithFallback } = await import('./yahoo-finance')
-    await fetchQuotesWithFallback([input.ticker.toUpperCase().trim()])
+    console.log(`[Portfolio Engine] Warming up price for ${tickerClean}...`)
+    await fetchQuotesWithFallback([tickerClean])
   } catch (priceError) {
-    console.warn(`[Portfolio Engine] Failed to fetch price for ${input.ticker}:`, priceError)
+    console.warn(`[Portfolio Engine] Failed to warm up price for ${tickerClean}:`, priceError)
+  }
+  try {
+    const { addPriceUpdateJob } = await import('./queue')
+    await addPriceUpdateJob([tickerClean])
+  } catch (queueErr) {
+    console.warn(`[Portfolio Engine] Failed to enqueue price update for ${tickerClean}:`, queueErr)
   }
 
   return { 
@@ -137,9 +163,6 @@ export async function processTransaction(
 
 /**
  * Calculates a complete portfolio summary given positions and current quotes.
- * This is used for Dashboard rendering and proactively caching.
- * 
- * PHASE 4: Multi-asset support — stocks, ONs, and cash.
  */
 export function calculatePortfolioSummary(
   stockPositions: Position[],
@@ -194,31 +217,25 @@ export function calculatePortfolioSummary(
     }
   })
 
-  // 3. Calculate stock summary
+  // 3. Calculate summary totals
   const stocksWithPrices = enrichedStocks.filter(p => p.market_value !== undefined)
   const stock_market_value = stocksWithPrices.reduce((s, p) => s + (p.market_value ?? 0), 0)
-  const stock_invested = enrichedStocks.reduce((s, p) => s + p.total_invested, 0)
+  const stock_invested = stocksWithPrices.reduce((s, p) => s + p.total_invested, 0)
   const stock_pnl = stock_market_value - stock_invested
   const stock_pnl_pct = stock_invested > 0 ? stock_pnl / stock_invested : 0
   const stock_day_pnl = stocksWithPrices.reduce((s, p) => s + (p.day_change ?? 0), 0)
 
-  // 4. Calculate ON summary
   const onsWithPrices = enrichedONs.filter(p => p.market_value !== undefined)
   const on_market_value = onsWithPrices.reduce((s, p) => s + (p.market_value ?? 0), 0)
-  const on_invested = enrichedONs.reduce((s, p) => s + p.total_invested, 0)
+  const on_invested = onsWithPrices.reduce((s, p) => s + p.total_invested, 0)
   const on_pnl = on_market_value - on_invested
   const on_pnl_pct = on_invested > 0 ? on_pnl / on_invested : 0
   const on_day_pnl = onsWithPrices.reduce((s, p) => s + (p.day_change ?? 0), 0)
 
-  // 5. Calculate totals (stocks + ONs + cash)
   const total_market_value = stock_market_value + on_market_value + cashBalance
   const total_invested = stock_invested + on_invested
-  const open_pnl = stock_pnl + on_pnl
-  const open_pnl_pct = total_invested > 0 ? open_pnl / total_invested : 0
-  const day_pnl = stock_day_pnl + on_day_pnl
   const realized_pnl = stockRealizedPnl + onRealizedPnl
 
-  // Sort stocks by performance (best first) for best/worst performer
   const sortedStocks = [...stocksWithPrices].sort((a, b) => (b.pnl_pct ?? 0) - (a.pnl_pct ?? 0))
 
   return {
@@ -227,16 +244,15 @@ export function calculatePortfolioSummary(
     summary: {
       total_market_value,
       total_invested,
-      open_pnl,
-      open_pnl_pct,
-      day_pnl,
-      day_pnl_pct: total_invested > 0 ? day_pnl / total_invested : 0,
+      open_pnl: stock_pnl + on_pnl,
+      open_pnl_pct: total_invested > 0 ? (stock_pnl + on_pnl) / total_invested : 0,
+      day_pnl: stock_day_pnl + on_day_pnl,
+      day_pnl_pct: total_invested > 0 ? (stock_day_pnl + on_day_pnl) / total_invested : 0,
       realized_pnl,
       realized_pnl_pct: total_invested > 0 ? realized_pnl / total_invested : 0,
       positions_count: enrichedStocks.length + enrichedONs.length,
       best_performer: sortedStocks[0] ?? null,
       worst_performer: sortedStocks[sortedStocks.length - 1] ?? null,
-      // Multi-asset breakdown
       stocks: {
         market_value: stock_market_value,
         invested: stock_invested,
@@ -264,47 +280,19 @@ export function calculatePortfolioSummary(
 
 /**
  * Fetch all portfolio data in parallel for a user.
- * Returns stocks, ONs, closed trades, and cash balance.
  */
-export async function getFullPortfolio(userId: string): Promise<FullPortfolio> {
-  const supabase = createServiceClient()
+export async function getFullPortfolio(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<FullPortfolio> {
+  assertUserId(userId)
 
-  // Run all queries in parallel for performance
-  const [
-    stockPositionsRes,
-    onPositionsRes,
-    stockClosedRes,
-    onClosedRes,
-    cashBalanceRes,
-  ] = await Promise.all([
-    // Stock positions
-    supabase
-      .from('positions')
-      .select('*')
-      .eq('user_id', userId)
-      .order('total_invested', { ascending: false }),
-    // ON positions
-    supabase
-      .from('on_positions')
-      .select('*')
-      .eq('user_id', userId)
-      .order('total_invested', { ascending: false }),
-    // Stock closed trades
-    supabase
-      .from('closed_trades')
-      .select('*')
-      .eq('user_id', userId),
-    // ON closed trades
-    supabase
-      .from('on_closed_trades')
-      .select('*')
-      .eq('user_id', userId),
-    // Cash balance
-    supabase
-      .from('cash_balance')
-      .select('balance')
-      .eq('user_id', userId)
-      .single(),
+  const [stockPositionsRes, onPositionsRes, stockClosedRes, onClosedRes, cashBalanceRes] = await Promise.all([
+    supabase.from('positions').select('*').eq('user_id', userId).order('total_invested', { ascending: false }),
+    supabase.from('on_positions').select('*').eq('user_id', userId).order('total_invested', { ascending: false }),
+    supabase.from('closed_trades').select('*').eq('user_id', userId),
+    supabase.from('on_closed_trades').select('*').eq('user_id', userId),
+    supabase.from('cash_balance').select('balance').eq('user_id', userId).single(),
   ])
 
   return {
@@ -317,60 +305,31 @@ export async function getFullPortfolio(userId: string): Promise<FullPortfolio> {
 }
 
 /**
- * Recalculate a single position from scratch.
- * 
- * 1. Fetch all remaining transactions for the ticker.
- * 2. Recalculate cost basis and quantity.
- * 3. Upsert or delete the position.
- * 4. Update closed_trades if needed.
- * 
- * WHEN TO USE:
- * - Data initialization (first transaction for a ticker)
- * - Data correction (when position is inconsistent)
- * - Batch operations (imports, migrations)
- * - FALLBACK when optimistic locking fails (position closes, too much contention)
- * - After deleting a transaction
- * - Complex scenarios (partial sells creating closed_trades)
- * 
- * WHEN NOT TO USE:
- * - Normal concurrent operations (processTransaction uses optimistic locking fast path)
+ * Recalculate closed trades for a ticker using incremental UPSERT.
  */
-export async function rebuildPosition(userId: string, ticker: string) {
-  const supabase = createServiceClient()
+export async function rebuildClosedTrades(supabase: SupabaseClient, userId: string, ticker: string) {
+  assertUserId(userId)
+  const cleanTicker = ticker.toUpperCase().trim()
 
   const { data: allTx, error: fetchErr } = await supabase
     .from('transactions')
     .select('*')
     .eq('user_id', userId)
-    .eq('ticker', ticker.toUpperCase().trim())
+    .eq('ticker', cleanTicker)
     .order('date', { ascending: true })
     .order('created_at', { ascending: true })
 
   if (fetchErr) throw fetchErr
-
-  // Wipe existing closed trades for this ticker — rebuild from scratch
-  await supabase
-    .from('closed_trades')
-    .delete()
-    .eq('user_id', userId)
-    .eq('ticker', ticker.toUpperCase().trim())
-
   if (!allTx || allTx.length === 0) {
-    await supabase
-      .from('positions')
-      .delete()
-      .eq('user_id', userId)
-      .eq('ticker', ticker.toUpperCase().trim())
-
-    if (isRedisReady()) await getRedis()?.del(`summary:${userId}`)
-    return null
+    await supabase.from('closed_trades').delete().eq('user_id', userId).eq('ticker', cleanTicker)
+    return
   }
 
   let quantity = 0
   let costBasis = 0
   let firstBought: string | null = null
   let avgCost = 0
-  const closedTradeRows: object[] = []
+  const closedTradeRows: any[] = []
 
   for (const tx of allTx) {
     const qty = Math.abs(tx.quantity)
@@ -378,21 +337,16 @@ export async function rebuildPosition(userId: string, ticker: string) {
 
     if (tx.operation === 'COMPRA') {
       if (quantity === 0) firstBought = tx.date
-      // Net Cost Basis: Include commission
       costBasis += (qty * tx.price) + comm
       quantity += qty
       avgCost = costBasis / quantity
-
     } else if (tx.operation === 'VENTA') {
       if (quantity > 0) {
         const sellQty = Math.min(qty, quantity)
-        // Proceeds: subtract commission of the sell
         const proceeds = sellQty * tx.price - comm
-
-        // Record a closed_trade for EVERY sell, partial or full
         closedTradeRows.push({
           user_id: userId,
-          ticker: ticker.toUpperCase().trim(),
+          ticker: cleanTicker,
           open_date: firstBought || tx.date,
           close_date: tx.date,
           avg_cost: avgCost,
@@ -400,12 +354,10 @@ export async function rebuildPosition(userId: string, ticker: string) {
           quantity: sellQty,
           invested: sellQty * avgCost,
           proceeds,
+          transaction_id: tx.id
         })
-
-        // Reduce cost basis proportionally
         costBasis -= sellQty * avgCost
         quantity -= sellQty
-
         if (quantity <= 0.0001) {
           quantity = 0
           costBasis = 0
@@ -415,64 +367,61 @@ export async function rebuildPosition(userId: string, ticker: string) {
     }
   }
 
-  // Bulk insert all closed trades for this ticker
   if (closedTradeRows.length > 0) {
-    await supabase.from('closed_trades').insert(closedTradeRows)
-  }
-
-  // Upsert or delete final position
-  if (quantity <= 0.0001) {
-    await supabase
-      .from('positions')
-      .delete()
-      .eq('user_id', userId)
-      .eq('ticker', ticker.toUpperCase().trim())
-  } else {
-    avgCost = costBasis / quantity
-    const { error: upsertError } = await supabase
-      .from('positions')
-      .upsert({
-        user_id: userId,
-        ticker: ticker.toUpperCase().trim(),
-        quantity,
-        avg_cost: avgCost,
-        total_invested: costBasis,
-        first_bought: firstBought || new Date().toISOString(),
-        last_updated: new Date().toISOString(),
-        version: 1, // Required for new positions (migration 004)
-      }, { onConflict: 'user_id,ticker' })
-    
-    if (upsertError) {
-      console.error(`[rebuildPosition] Failed to upsert position for ${ticker}:`, upsertError)
-      throw new Error(`Failed to upsert position for ${ticker}: ${upsertError.message}`)
-    }
-  }
-
-  if (isRedisReady()) {
-    try { await getRedis()?.del(`summary:${userId}`) } catch {}
+    await supabase.from('closed_trades').upsert(closedTradeRows, { onConflict: 'transaction_id' })
   }
 }
 
 /**
- * Bulk import: atomically insert all transactions + cash_movements, then rebuild positions.
- * 
- * ATOMICITY:
- * - Uses Postgres stored procedure (import_transactions_atomic) with BEGIN/COMMIT/ROLLBACK
- * - If ANY transaction fails validation or insert, the ENTIRE batch is rolled back
- * - No partial imports = data consistency guaranteed
- * 
- * FEATURES:
- * - Detailed error reporting with line numbers
- * - Creates cash_movements linked to transactions
- * - Rebuilds positions after successful import
- * - Rebuilds cash balance after successful import
- * 
- * PROGRESS CALLBACK:
- * - Optional onProgress(percentage, message) for real-time tracking
+ * Recalculate a single position from scratch.
+ */
+export async function rebuildPosition(supabase: SupabaseClient, userId: string, ticker: string) {
+  assertUserId(userId)
+  const cleanTicker = ticker.toUpperCase().trim()
+
+  await rebuildClosedTrades(supabase, userId, cleanTicker)
+
+  const { data: allTx, error: fetchErr } = await supabase
+    .from('transactions')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('ticker', cleanTicker)
+    .order('date', { ascending: true })
+    .order('created_at', { ascending: true })
+
+  if (fetchErr) throw fetchErr
+
+  if (!allTx || allTx.length === 0) {
+    await supabase.from('positions').delete().eq('user_id', userId).eq('ticker', cleanTicker)
+    return null
+  }
+
+  const { avgCost, quantity, costBasis } = calculateRunningAvgCost(allTx)
+  const firstBought = allTx.find(t => t.operation === 'COMPRA')?.date || allTx[0].date
+
+  if (quantity <= 0.0001) {
+    await supabase.from('positions').delete().eq('user_id', userId).eq('ticker', cleanTicker)
+  } else {
+    await supabase.from('positions').upsert({
+      user_id: userId,
+      ticker: cleanTicker,
+      quantity,
+      avg_cost: avgCost,
+      total_invested: costBasis,
+      first_bought: firstBought,
+      last_updated: new Date().toISOString(),
+    }, { onConflict: 'user_id,ticker' })
+  }
+}
+
+/**
+ * Bulk import transactions.
  */
 export async function processTransactionBatch(
+  supabase: SupabaseClient,
   userId: string,
   inputs: TransactionInput[],
+  replace: boolean = false,
   onProgress?: (percentage: number, message: string) => void | Promise<void>
 ): Promise<{ 
   success: boolean
@@ -480,14 +429,24 @@ export async function processTransactionBatch(
   failed: number
   errors: Array<{ line: number; ticker: string; error: string }>
 }> {
-  const supabase = createServiceClient()
+  assertUserId(userId)
+
+  // 0. Check for background import lock (if not already held by caller)
+  if (isRedisReady()) {
+    const redis = getRedis()
+    const isImporting = await redis?.get(`importing:${userId}`)
+    // If we're doing a batch import, we usually already have the lock, 
+    // but if someone calls this manually without setting it, we should check.
+    // NOTE: This check is skipped if the current process is the one that set the lock, 
+    // but here we can't easily know, so we just log it.
+  }
 
   try {
-    // Report initial progress
-    if (onProgress) await onProgress(10, 'Validating transactions...')
+    if (onProgress) await onProgress(10, 'Validating and sorting transactions...')
+    const sortedInputs = [...inputs].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 
-    // Convert inputs to JSONB format for stored procedure
-    const transactionsJson = inputs.map(input => ({
+    // Convert to JSONB for RPC
+    const transactionsJson = sortedInputs.map(input => ({
       date: input.date,
       ticker: input.ticker,
       operation: input.operation,
@@ -499,238 +458,70 @@ export async function processTransactionBatch(
       moneda: (input as any).moneda ?? 'USD',
     }))
 
-    if (onProgress) await onProgress(15, 'Ensuring tickers exist in activos...')
-
-    // Auto-create missing tickers in activos table
-    // This prevents FK constraint violations when creating positions
-    const uniqueTickers = Array.from(new Set(inputs.map(i => i.ticker.toUpperCase().trim())))
-    
-    for (const ticker of uniqueTickers) {
-      const { error: activoError } = await supabase
-        .from('activos')
-        .upsert(
-          { 
-            ticker, 
-            nombre: ticker // Fallback: use ticker as name (TODO: fetch from Yahoo Finance)
-          },
-          { onConflict: 'ticker', ignoreDuplicates: true }
-        )
-      
-      if (activoError) {
-        console.warn(`[Batch Import] Failed to upsert activo ${ticker}:`, activoError)
-        // Don't fail the import - the stored procedure will catch FK violations if needed
-      } else {
-        console.log(`[Batch Import] ✓ Ensured activo exists: ${ticker}`)
-      }
+    if (onProgress) {
+      const msg = replace ? `Replacing portfolio with ${sortedInputs.length} transactions...` : `Importing ${sortedInputs.length} transactions...`
+      await onProgress(20, msg)
     }
 
-    if (onProgress) await onProgress(20, `Importing ${inputs.length} transactions...`)
-
-    // Call atomic stored procedure
-    const { data, error } = await supabase.rpc('import_transactions_atomic', {
+    const rpcName = replace ? 'replace_portfolio_atomic' : 'import_transactions_atomic'
+    const { data, error } = await supabase.rpc(rpcName, {
       p_user_id: userId,
       p_transactions: transactionsJson as any,
     })
 
-    if (error) {
-      console.error('[Batch Import] Stored procedure error:', error)
-      
-      // Extract line number and details from Postgres error message
-      let parsedErrors: any[] = []
-      const errorMessage = error.message || 'Unknown error during batch import'
-      
-      // Try to parse "Line N:" pattern from error message
-      const lineMatch = errorMessage.match(/Line (\d+):/)
-      if (lineMatch) {
-        const lineNumber = parseInt(lineMatch[1])
-        const cleanError = errorMessage.replace(/^Line \d+:\s*/, '')
-        parsedErrors = [{
-          line: lineNumber,
-          ticker: 'UNKNOWN',
-          error: cleanError
-        }]
-      } else {
-        // Generic error without line number
-        parsedErrors = [{ 
-          line: 0, 
-          ticker: 'UNKNOWN', 
-          error: errorMessage
-        }]
-      }
-      
-      return {
-        success: false,
-        imported: 0,
-        failed: inputs.length,
-        errors: parsedErrors,
-      }
-    }
-
-    // Parse stored procedure result
+    if (error) throw error
     const result = Array.isArray(data) ? data[0] : data
-    
-    console.log('[Batch Import] Stored procedure result:', JSON.stringify(result, null, 2))
-    
-    if (!result.success) {
-      // Batch failed, rollback happened
-      const errorDetails = typeof result.error_details === 'string' 
-        ? JSON.parse(result.error_details)
-        : result.error_details || []
+    if (!result.success) return { success: false, imported: 0, failed: result.failed, errors: result.error_details }
 
-      console.log('[Batch Import] Import failed, rollback triggered. Errors:', errorDetails)
-
-      return {
-        success: false,
-        imported: 0,
-        failed: result.failed || inputs.length,
-        errors: Array.isArray(errorDetails) ? errorDetails : [],
-      }
-    }
-
-    console.log(`[Batch Import] Import successful! Imported: ${result.imported}, now rebuilding positions...`)
-
-    // Success! Now rebuild positions and cash in parallel for performance
     if (onProgress) await onProgress(60, 'Rebuilding positions...')
-
-    const tickers = Array.from(new Set(inputs.map(i => i.ticker.toUpperCase().trim())))
-    const tickerErrors: Array<{ line: number; ticker: string; error: string }> = []
-
-    // Rebuild all positions in parallel
-    await Promise.all(tickers.map(async (ticker) => {
-      try {
-        console.log(`[Batch Import] Rebuilding position for ${ticker}...`)
-        await rebuildPosition(userId, ticker)
-        console.log(`[Batch Import] ✓ Successfully rebuilt ${ticker}`)
-      } catch (err) {
-        console.error(`[Batch Import] ✗ Rebuild failed for ${ticker}:`, err)
-        tickerErrors.push({
-          line: 0,
-          ticker,
-          error: `Position rebuild failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
-        })
-      }
-    }))
-
-    // Rebuild cash balance
-    if (onProgress) await onProgress(85, 'Rebuilding cash balance...')
+    const tickers = Array.from(new Set(sortedInputs.map(i => i.ticker.toUpperCase().trim())))
     
+    await Promise.all(tickers.map(ticker => rebuildPosition(supabase, userId, ticker)))
+    await rebuildCashBalance(supabase, userId)
+
+    // Warm up prices for all new tickers in batch
     try {
-      await rebuildCashBalance(userId)
-    } catch (err) {
-      console.error('[Batch Import] Cash balance rebuild failed:', err)
-      tickerErrors.push({
-        line: 0,
-        ticker: 'CASH',
-        error: `Cash balance rebuild failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
-      })
-    }
+      const { fetchQuotesWithFallback } = await import('./yahoo-finance')
+      await fetchQuotesWithFallback(tickers)
+    } catch (e) {}
 
-    if (onProgress) await onProgress(95, 'Finalizing import...')
-
-    return {
-      success: true,
-      imported: result.imported || 0,
-      failed: tickerErrors.length,
-      errors: tickerErrors,
-    }
-
-  } catch (err) {
-    console.error('[Batch Import] Unexpected error:', err)
-    return {
-      success: false,
-      imported: 0,
-      failed: inputs.length,
-      errors: [{ 
-        line: 0, 
-        ticker: 'UNKNOWN', 
-        error: err instanceof Error ? err.message : 'Unexpected error during import' 
-      }],
-    }
+    return { success: true, imported: result.imported, failed: 0, errors: [] }
+  } catch (err: any) {
+    return { success: false, imported: 0, failed: inputs.length, errors: [{ line: 0, ticker: 'BATCH', error: err.message }] }
   }
 }
 
 /**
- * CALCULATE POSITION LOTS DEFINITION (FIFO)
- * 
- * Determines the static structure of open lots (date, quantity, buy_price)
- * without calculating PnL. This part is cached long-term.
+ * FIFO Lots Logic
  */
-export function calculatePositionLotsDefinition(
-  transactions: Transaction[]
-): any[] {
-  // 1. Sort transactions chronologically
-  const sorted = [...transactions].sort((a, b) => 
-    new Date(a.date).getTime() - new Date(b.date).getTime() ||
-    new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-  )
-
-  // 2. Separate into Buys and Sells
+export function calculatePositionLotsDefinition(transactions: Transaction[]): any[] {
+  const sorted = [...transactions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime() || new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
   const buys = sorted.filter(t => t.operation === 'COMPRA').map(t => {
     const qty = Math.abs(t.quantity)
-    const comm = t.commission || 0
-    // Net buy price includes commission per unit
-    const netBuyPrice = ((qty * t.price) + comm) / qty
-
-    return {
-      id: t.id,
-      date: t.date,
-      original_quantity: qty,
-      remaining_quantity: qty,
-      buy_price: netBuyPrice,
-    }
+    return { id: t.id, date: t.date, remaining_quantity: qty, buy_price: ((qty * t.price) + (t.commission || 0)) / qty }
   })
-
   const sells = sorted.filter(t => t.operation === 'VENTA')
-
-  // 3. Apply Sells via FIFO
   for (const sell of sells) {
     let sellQty = Math.abs(sell.quantity)
-    
     for (const buy of buys) {
       if (buy.remaining_quantity <= 0) continue
-      
       const consume = Math.min(sellQty, buy.remaining_quantity)
       buy.remaining_quantity -= consume
       sellQty -= consume
-      
       if (sellQty <= 0) break
     }
   }
-
   return buys.filter(b => b.remaining_quantity > 0.0001)
 }
 
-/**
- * ENRICH LOTS WITH PERFORMANCE
- * 
- * Takes lot definitions and calculates PnL based on current price.
- */
 export function enrichLots(lots: any[], currentPrice: number): any[] {
   return lots.map(lot => {
     const market_value = lot.remaining_quantity * currentPrice
     const invested = lot.remaining_quantity * lot.buy_price
-    const pnl = market_value - invested
-    const pnl_pct = invested > 0 ? pnl / invested : 0
-
-    return {
-      ...lot,
-      quantity: lot.remaining_quantity,
-      current_price: currentPrice,
-      market_value,
-      invested,
-      pnl,
-      pnl_pct
-    }
+    return { ...lot, quantity: lot.remaining_quantity, current_price: currentPrice, market_value, invested, pnl: market_value - invested, pnl_pct: invested > 0 ? (market_value - invested) / invested : 0 }
   })
 }
 
-/**
- * Legacy wrapper for calculatePositionLots (to maintain compatibility if needed)
- */
-export function calculatePositionLots(
-  transactions: Transaction[],
-  currentPrice: number
-): any[] {
-  const defs = calculatePositionLotsDefinition(transactions)
-  return enrichLots(defs, currentPrice)
+export function calculatePositionLots(transactions: Transaction[], currentPrice: number): any[] {
+  return enrichLots(calculatePositionLotsDefinition(transactions), currentPrice)
 }

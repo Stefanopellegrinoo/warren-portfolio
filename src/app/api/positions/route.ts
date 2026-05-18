@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClientInstance } from '@/lib/supabase-server'
 import { fetchQuotesWithFallback } from '@/lib/yahoo-finance'
-import { fetchData912Prices } from '@/lib/data912-client'
+import { fetchONQuotesWithFallback } from '@/lib/data912-client'
 import { calculatePortfolioSummary, getFullPortfolio } from '@/lib/portfolio-engine'
 import { getRedis, ensureRedisConnected } from '@/lib/redis'
 import type { Position, ONPosition } from '@/types'
@@ -11,8 +11,9 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: NextRequest) {
   try {
     const supabase = createServerClientInstance()
-    const { data: { user }, error: authErr } = await supabase.auth.getUser()
-    if (authErr || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { data: { session } } = await supabase.auth.getSession()
+    const user = session?.user
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     // ENSURE REDIS IS CONNECTED before any reads
     const redisOk = await ensureRedisConnected()
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
     }
 
     // 2. Fetch all portfolio data in parallel
-    const portfolio = await getFullPortfolio(user.id)
+    const portfolio = await getFullPortfolio(supabase, user.id)
 
     // Get last refresh timestamp
     let lastRefresh: string | null = null
@@ -52,7 +53,7 @@ export async function GET(req: NextRequest) {
 
     const [stockQuotes, onQuotes] = await Promise.all([
       stockTickers.length > 0 ? fetchQuotesWithFallback(stockTickers) : Promise.resolve(new Map()),
-      onTickers.length > 0 ? fetchData912Prices(onTickers) : Promise.resolve(new Map()),
+      onTickers.length > 0 ? fetchONQuotesWithFallback(onTickers) : Promise.resolve(new Map()),
     ])
 
     // 4. Calculate realized P&L from closed trades

@@ -11,8 +11,9 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: NextRequest) {
   try {
     const supabase = createServerClientInstance()
-    const { data: { user }, error: authErr } = await supabase.auth.getUser()
-    if (authErr || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { data: { session } } = await supabase.auth.getSession()
+    const user = session?.user
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     // Validate query params
     const { ticker, limit, offset } = validateQueryParams(TransactionQuerySchema, req.url)
@@ -20,6 +21,7 @@ export async function GET(req: NextRequest) {
     let query = supabase
       .from('transactions')
       .select('*', { count: 'exact' })
+      .eq('user_id', user.id)
       .order('date', { ascending: false })
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1)
@@ -55,13 +57,14 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const supabase = createServerClientInstance()
-    const { data: { user }, error: authErr } = await supabase.auth.getUser()
-    if (authErr || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { data: { session } } = await supabase.auth.getSession()
+    const user = session?.user
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     // Validate request body
     const body = await validateRequest(TransactionSchema, req)
 
-    const result = await processTransaction(user.id, body)
+    const result = await processTransaction(supabase, user.id, body)
     // Invalidate Cache since portfolio mutated
     await invalidateUserCache(user.id)
 

@@ -1,81 +1,75 @@
-# Warren Portfolio - Rigorous Codebase Review
+# Warren Portfolio - Rigorous Codebase Review (Updated May 2026)
 
-Below is a comprehensive analysis of the `warren-portfolio` project. This review was conducted with the objective of identifying bugs, architectural flaws, security issues, and performance bottlenecks to ensure the project is robust enough for a high-value acquisition.
+Este documento detalla la arquitectura del sistema y el análisis técnico del proyecto, identificando vulnerabilidades, cuellos de botella y deudas técnicas críticas.
 
-## 1. Architectural Flaws & Atomicity Gaps
+## 0. System Architecture
 
-### 1.1 Incomplete Atomicity in Transaction Processing
-In `src/lib/portfolio-engine.ts` (`processTransaction`) and `src/lib/on-engine.ts` (`processONTransaction`), the code performs multiple database operations sequentially:
-1. Insert the transaction into the `transactions` table.
-2. Update the `positions` or `on_positions` table (using optimistic locking).
-3. Insert a `cash_movement`.
+El proyecto está diseñado como una plataforma de gestión de carteras de inversión de alta performance, utilizando un stack moderno y escalable.
 
-**The Risk:** These operations are not wrapped in a single database transaction. If the Node.js process crashes, times out, or experiences a network error after step 1 but before step 3, the database is left in an inconsistent state. A user will have a transaction recorded, but their cash balance or portfolio position will not reflect it. The `catch` block explicitly logs: `"Cash will be inconsistent but can be corrected via rebuildCashBalance"`. Relying on manual correction for core financial data is unacceptable for a production-grade application.
+### 0.1 Technology Stack
+- **Frontend & API:** Next.js 14+ (App Router) con TypeScript.
+- **Styling:** Tailwind CSS + Radix UI (shadcn/ui).
+- **Database:** Supabase (Postgres) con Row Level Security (RLS) activo para multi-tenancy.
+- **Cache & Queues:** Redis (Upstash/Self-hosted) + BullMQ para procesamiento asincrónico.
+- **Deployment:** Vercel (Frontend/API) + Docker para Workers.
 
-**Recommendation:** Move the entire transaction flow (transaction + position update + cash movement) into a Postgres Stored Procedure (RPC) using `BEGIN; COMMIT; ROLLBACK;`, similar to what is done for batch imports.
+### 0.2 Async Processing & Workers
+El sistema utiliza una arquitectura basada en eventos y colas para tareas pesadas:
+- **Price Updates:** Un worker dedicado (`price-worker.ts`) procesa actualizaciones de precios mediante Yahoo Finance e IOL, gestionadas por BullMQ (`price-updates`).
+- **Batch Imports:** Las importaciones de Excel/CSV se delegan a un worker asincrónico (`import-worker.ts`) para evitar timeouts en el cliente y garantizar la atomicidad via SQL RPC.
 
-### 1.2 Import Batch Rebuild Corruption
-In `src/lib/portfolio-engine.ts` (`processTransactionBatch`), the batch import correctly uses a stored procedure (`import_transactions_atomic`) to insert transactions atomically. However, immediately after, it loops through tickers to rebuild positions:
-```typescript
-try {
-  await rebuildPosition(userId, ticker)
-} catch (err) {
-  tickerErrors.push(...)
-}
-```
-**The Risk:** If `rebuildPosition` fails for any reason (e.g., timeout, connection limit), the system catches the error and continues. The transactions are already permanently committed to the database, but the `positions` aggregate table is now completely out of sync with the underlying transaction history.
-**Recommendation:** Aggregate recalculation should ideally happen via Database Triggers on the `transactions` table, or the rebuild must be part of a guaranteed queue job with robust retry mechanisms, ensuring eventual consistency without manual intervention.
+### 0.3 Logical Domain Layers (Engines)
+La lógica de negocio está encapsulada en "Engines" especializados en `src/lib/`:
+- **Portfolio Engine:** Lógica de activos de renta variable (Acciones/CEDEARs). Gestión de costos promedio ponderados y posiciones.
+- **ON Engine:** Especializado en Obligaciones Negociables (Renta Fija), con soporte para cupones y validaciones de moneda (USD MEP).
+- **Cash Engine:** Motor de movimientos de caja y balance consolidado.
+- **Concurrency Engine:** Implementación propia de **Bloqueo Optimista** (`versioning`) para evitar race conditions en actualizaciones concurrentes.
 
-## 2. Security Vulnerabilities
+---
 
-### 2.1 Extensive Use of Service Role Key (RLS Bypass)
-The application extensively uses `createServiceClient()` in the engine files (`portfolio-engine.ts`, `cash-engine.ts`, `on-engine.ts`, `import-worker.ts`). This client is initialized with the `SUPABASE_SERVICE_ROLE_KEY`.
+## 1. Architectural Integrity & Atomicity
 
-**The Risk:** The service role key bypasses Postgres Row Level Security (RLS). This means the application code bears 100% of the responsibility for multi-tenancy separation. Every single query must manually include `.eq('user_id', userId)`. If a developer misses this in a future feature, it could lead to catastrophic cross-tenant data leaks or mutations.
+### 1.1 Progress: Atomic SQL RPC Implementation ✅
+Se ha implementado satisfactoriamente el RPC `process_transaction_atomic` (Migración 014). Esto garantiza que la inserción de la transacción, el movimiento de caja, el balance y la posición básica ocurran en una única operación de base de datos.
+- **Impacto:** Eliminado el riesgo de inconsistencia entre transacciones y balance de caja.
 
-**Recommendation:** Use the authenticated user's client (`createServerClientInstance`) for all user-initiated API routes. The service role key should strictly be reserved for background workers (`BullMQ`) that do not have an active user session, and even then, queries should be carefully audited.
+### 1.2 The "Post-RPC Rebuild" Fragility (New Critical Issue) ⚠️
+En `portfolio-engine.ts` y `on-engine.ts`, después de ejecutar el RPC atómico, se invoca a `rebuildPosition`. 
+- **The Risk:** Esta llamada ocurre fuera de la transacción de la DB. Si el proceso de Node falla entre el RPC y el rebuild, los `closed_trades` no se actualizan.
+- **Redundancy & Conflict:** El RPC ya actualiza la tabla `positions` con bloqueo optimista/pesimista. `rebuildPosition` vuelve a hacer un `upsert` a la misma tabla pero **resetea el `version` a 1** (línea 467 de `portfolio-engine.ts`), rompiendo cualquier intento de control de concurrencia que el RPC haya intentado proteger.
+- **Recommendation:** Mover la lógica de `closed_trades` adentro de un Trigger de Postgres o incluirla en el RPC. **Eliminar el upsert redundante en `rebuildPosition`** si se llama después de un proceso atómico.
 
-## 3. Inconsistencies and Logic Bugs
+### 1.3 Inefficient Closed Trade Calculation
+`rebuildPosition` borra TODOS los `closed_trades` de un ticker y los vuelve a insertar en cada `VENTA`.
+- **The Risk:** Para usuarios con miles de operaciones, esto es prohibitivamente lento y genera un churn innecesario en la DB.
+- **Recommendation:** Implementar una lógica incremental para `closed_trades`.
 
-### 3.1 Discrepancy in CUPON Handling
-There is a major inconsistency in how "CUPON" operations are handled between general stocks and ONs (Obligaciones Negociables):
-- In `src/lib/portfolio-engine.ts`, submitting a `CUPON` or `DIVIDENDO` creates a record in the `transactions` table and then updates the `cash_movements`.
-- In `src/lib/on-engine.ts`, submitting a `CUPON` **returns early**, creating a `cash_movement` but **failing to insert** a record into the `transactions` table.
+## 2. Security & RLS
 
-**The Risk:** Users holding ONs will not see their coupon payments in their transaction history, leading to confusion and an incomplete audit trail.
+### 2.1 Service Role Key Overuse
+Aunque `processTransaction` ahora usa correctamente `createServerClientInstance()`, funciones core como `rebuildPosition`, `rebuildCashBalance` y los workers de precios siguen casados con `createServiceClient()`.
+- **The Risk:** Al bypassear RLS, cualquier error en el paso del `userId` (como un valor undefined o null que se filtre) podría resultar en operaciones sobre datos de otros usuarios o corrupción global.
+- **Recommendation:** Solo los background jobs (BullMQ) deberían usar el `service_role`. Toda lógica disparada por una API de Next.js debe heredar el contexto del usuario.
 
-### 3.2 Optimistic Locking Retry Implementation Flaw
-In `src/lib/concurrency.ts` (`updateWithOptimisticLock`):
-```typescript
-let query = supabase.from(table).select('*').eq('user_id', userId)
-```
-The base `query` is defined *outside* the `while (attempt < maxRetries)` loop. If an optimistic lock fails, the loop continues and calls `await query.single()` again. While the Supabase JS client evaluates the builder lazily, reusing the same builder reference inside a retry loop can lead to mutated query state or unexpected caching behavior depending on the exact PostgREST client version. It is safer to construct the query completely inside the loop.
+## 3. Logic & Concurrency
 
-### 3.3 Redis Cache Race Conditions
-Across the engine files, cache invalidation is performed manually:
-```typescript
-await Promise.all([
-  getRedis()?.del(`summary:${userId}`),
-  invalidateCacheKey(`cash:balance:${userId}`),
-])
-```
-If a read request hits the API exactly after these keys are deleted, but *before* the database transaction commits (or while the positions are still rebuilding), the cache will be repopulated with stale/inconsistent data. 
+### 3.1 CUPON/DIVIDENDO Consistency ✅
+**Solucionado:** El RPC ahora inserta correctamente registros en la tabla `transactions` para operaciones de `CUPON` y `DIVIDENDO`, asegurando un historial completo y auditable.
 
-## 4. Performance Bottlenecks
+### 3.2 Optimistic Locking Retry ✅
+**Solucionado:** Se corrigió el error en `src/lib/concurrency.ts` donde se reusaba el builder de la query. Ahora la query se construye correctamente dentro del loop de reintento.
 
-### 4.1 Sequential Rebuilding in Batch Imports
-In `src/lib/portfolio-engine.ts` (`processTransactionBatch`), the position rebuild process happens sequentially in a `for` loop:
-```typescript
-for (let i = 0; i < tickers.length; i++) {
-  const ticker = tickers[i]
-  await rebuildPosition(userId, ticker)
-}
-```
-**The Risk:** For a user importing a long history with dozens of unique tickers, this sequential processing will be extremely slow. 
-**Recommendation:** Group these into a `Promise.all()` with a concurrency limiter (e.g., processing chunks of 5-10 tickers in parallel) to drastically speed up the import process.
+## 4. Performance
 
-## Summary of Immediate Actions for 10k Valuation:
-1. **Refactor to pure Database Transactions:** Move `processTransaction` and `processONTransaction` logic into Postgres RPCs to guarantee absolute atomicity between transactions, positions, and cash movements.
-2. **Fix RLS Bypasses:** Remove `createServiceClient()` from any code path executed directly by Next.js API routes.
-3. **Harmonize CUPON/DIVIDENDO:** Ensure ON coupons are recorded in the `transactions` table just like stock dividends.
-4. **Implement Parallel Rebuilds:** Optimize the batch import worker to rebuild independent ticker positions concurrently.
+### 4.1 Parallel Rebuilds in Batch Imports ✅
+**Solucionado:** `processTransactionBatch` ahora utiliza `Promise.all` con los tickers únicos para reconstruir posiciones en paralelo, reduciendo drásticamente el tiempo de importación de archivos Excel grandes.
+
+### 4.2 Missing Asset Support in Atomic Batch
+El RPC `import_transactions_atomic` no soporta `DIVIDENDO` o `CUPON` de forma nativa en el batch, forzando a `portfolio-engine.ts` a procesarlos individualmente en un loop (líneas 505-516), lo cual es lento.
+- **Recommendation:** Extender la migración 010 para soportar tipos de movimientos de solo caja en el importador masivo.
+
+## Summary of Remaining Actions for 10k+ Valuation:
+1. **Mover `closed_trades` al RPC:** Es el último eslabón para una atomicidad del 100%.
+2. **Sanitizar `rebuildPosition`:** Evitar que pise la `version` del bloqueo optimista.
+3. **Auditoría de Clientes Supabase:** Reducir el uso de `service_role` a lo estrictamente necesario (workers).
+4. **Incremental Closed Trades:** Dejar de borrar y reinsertar todo el historial por cada venta.

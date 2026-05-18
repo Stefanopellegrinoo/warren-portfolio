@@ -111,14 +111,14 @@ export async function updateWithOptimisticLock<T extends Record<string, any>>(
       updateQuery = updateQuery.eq('ticker', ticker.toUpperCase().trim())
     }
 
-    const { data: updated, error: updateErr, count } = await updateQuery.select()
+    const { data: updated, error: updateErr } = await updateQuery.select()
 
     if (updateErr) {
       throw updateErr
     }
 
     // STEP 4: Check if update succeeded
-    if (count === 0) {
+    if (!updated || updated.length === 0) {
       // Another writer updated this record between our READ and UPDATE
       // Retry after a short delay
       console.warn(

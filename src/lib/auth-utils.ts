@@ -257,7 +257,9 @@ export function parseCallbackParams(url: string): {
 } {
   const urlObj = new URL(url)
   const code = urlObj.searchParams.get('code')
-  const next = urlObj.searchParams.get('next') || '/dashboard'
+  const rawNext = urlObj.searchParams.get('next') || '/dashboard'
+  // Only allow relative paths — reject anything that could redirect off-site
+  const next = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/dashboard'
   const origin = urlObj.origin
 
   return {

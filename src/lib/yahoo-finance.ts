@@ -228,10 +228,27 @@ export async function fetchQuotesWithFallback(tickers: string[]): Promise<Map<st
       const yahooFinance = await getYahooFinance()
       const normalizedBatch = batch.map(normalizeTickerForYahoo)
       
-      // Quote with proper options object (not array)
-      const yahooResults = await yahooFinance.quote(normalizedBatch, {
-        fields: ['regularMarketPrice', 'regularMarketChange', 'regularMarketChangePercent']
-      })
+      let yahooResults: any[] = []
+      try {
+        // Quote with proper options object (not array)
+        yahooResults = await yahooFinance.quote(normalizedBatch, {
+          fields: ['regularMarketPrice', 'regularMarketChange', 'regularMarketChangePercent']
+        })
+      } catch (batchError) {
+        console.error(`[Quote Fetch] Batch fetch failed for ${batch.join(', ')}. Retrying individually...`)
+        // Fallback: fetch individually to isolate bad tickers
+        for (const ticker of batch) {
+          try {
+            const result = await yahooFinance.quote(normalizeTickerForYahoo(ticker), {
+              fields: ['regularMarketPrice', 'regularMarketChange', 'regularMarketChangePercent']
+            })
+            yahooResults.push(result)
+          } catch (individualError) {
+            console.error(`[Quote Fetch] Individual fetch failed for ${ticker}:`, individualError)
+            yahooResults.push(null)
+          }
+        }
+      }
       
       console.log(`[Quote Fetch] Yahoo results for batch ${i}/${missingTickers.length}:`, yahooResults)
       // Log each result individually for debugging
@@ -245,28 +262,50 @@ export async function fetchQuotesWithFallback(tickers: string[]): Promise<Map<st
         }
       })
       
+      // Convert ARS→USD for any BCBA tickers in this batch
+      const batchHasBCBA = batch.some(t => t.startsWith('BCBA:'))
+      let ccl = 0
+      if (batchHasBCBA) {
+        try { ccl = await getCCLRate() } catch { ccl = 0 }
+      }
+
       // Process batch results
       const now = new Date()
       for (let j = 0; j < batch.length; j++) {
         const ticker = batch[j]
         const result = yahooResults[j]
-        
+
         if (result && result.regularMarketPrice !== undefined) {
+          let price = result.regularMarketPrice
+          let change = result.regularMarketChange || 0
+
+          // BCBA prices from Yahoo are in ARS — convert to USD
+          if (ticker.startsWith('BCBA:') && ccl > 0) {
+            price = price / ccl
+            change = change / ccl
+          }
+
           const quote: Quote = {
             ticker,
-            price: result.regularMarketPrice,
-            change: result.regularMarketChange || 0,
+            price,
+            change,
             changePercent: result.regularMarketChangePercent || 0,
-            previousClose: result.regularMarketPrice - (result.regularMarketChange || 0),
+            previousClose: price - change,
             updatedAt: now.toISOString()
           }
-          
-          // Add to map
+
+          // Add to map (always — even if CCL was unavailable)
           quotesMap.set(ticker, quote)
-          
-          // Cache in Redis (7 days)
-          await cacheQuoteInRedis(ticker, quote)
-          console.log(`[Quote Fetch] Successfully cached ${ticker}: ${quote.price}`)
+
+          // Only cache in Redis if the price is in USD.
+          // BCBA tickers without CCL would store ARS prices as USD, corrupting the LKP.
+          const isBCBAWithoutCCL = ticker.startsWith('BCBA:') && ccl === 0
+          if (!isBCBAWithoutCCL) {
+            await cacheQuoteInRedis(ticker, quote)
+            console.log(`[Quote Fetch] Successfully cached ${ticker}: ${quote.price}`)
+          } else {
+            console.warn(`[Quote Fetch] Skipping Redis cache for ${ticker} — CCL unavailable, price is in ARS`)
+          }
         } else {
           console.warn(`[Quote Fetch] No price data for ${ticker}`, result)
         }
@@ -369,6 +408,91 @@ export async function fetchHistoricalQuotes(
     return parsed
   } catch (err) {
     console.error(`[Yahoo Finance] Error fetching historical data for ${ticker}:`, err)
+    return []
+  }
+}
+
+// ── Klines (OHLCV) Fetching for Charts ───────────────────────────
+export interface Kline {
+  date:   string   // YYYY-MM-DD
+  open:   number
+  high:   number
+  low:    number
+  close:  number
+  volume: number
+}
+
+/**
+ * Fetch full OHLCV data (Klines) from Yahoo Finance.
+ * Used primarily by the TradingView-style charts.
+ * 
+ * - Normalizes ARS prices to USD for BCBA tickers.
+ * - Caches results in Redis for 24 hours.
+ */
+export async function fetchKlines(
+  ticker: string,
+  interval: '1d' | '1w',
+  period1: Date,
+  period2: Date = new Date()
+): Promise<Kline[]> {
+  const cacheKey = `klines:${ticker}:${interval}`
+  
+  // 1. Try Redis cache
+  const cachedData = await getCachedRoute<Kline[]>(cacheKey)
+  if (cachedData) return cachedData
+
+  try {
+    const yahooFinance = await getYahooFinance()
+    const symbol = normalizeTickerForYahoo(ticker)
+    
+    // Map interval to Yahoo Finance format
+    const yfInterval = interval === '1w' ? '1wk' : '1d'
+
+    const result = await yahooFinance.historical(symbol, {
+      period1,
+      period2,
+      interval: yfInterval
+    })
+
+    // 2. Normalize to USD if it's Argentine stock (BCBA)
+    let hCcl: Map<string, number> | null = null
+    if (ticker.startsWith('BCBA:')) {
+      hCcl = await getHistoricalCCL(period1, period2)
+    }
+
+    const parsed: Kline[] = result.map((row: any) => {
+      const dateStr = row.date.toISOString().split('T')[0]
+      let open = row.open
+      let high = row.high
+      let low = row.low
+      let close = row.close
+      
+      if (hCcl) {
+        const rate = hCcl.get(dateStr)
+        if (rate) {
+          open = open / rate
+          high = high / rate
+          low = low / rate
+          close = close / rate
+        }
+      }
+
+      return {
+        date: dateStr,
+        open,
+        high,
+        low,
+        close,
+        volume: row.volume ?? 0
+      }
+    })
+    
+    // 3. Cache results (1 day TTL)
+    await cacheRoute(cacheKey, parsed, 86400)
+    
+    return parsed
+  } catch (err) {
+    console.error(`[Yahoo Finance] Error fetching klines for ${ticker}:`, err)
     return []
   }
 }

@@ -9,8 +9,9 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: NextRequest) {
   try {
     const supabase = createServerClientInstance()
-    const { data: { user }, error: authErr } = await supabase.auth.getUser()
-    if (authErr || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { data: { session } } = await supabase.auth.getSession()
+    const user = session?.user
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     // Check Cache First
     const cacheKey = `statistics:${user.id}`
@@ -24,6 +25,7 @@ export async function GET(req: NextRequest) {
     const { data: snapshots, error: snapErr } = await supabase
       .from('portfolio_snapshots')
       .select('*')
+      .eq('user_id', user.id)
       .order('snapshot_date', { ascending: true })
 
     if (snapErr) throw snapErr
@@ -49,6 +51,7 @@ export async function GET(req: NextRequest) {
     const { data: positions, error: posErr } = await supabase
       .from('positions')
       .select('*')
+      .eq('user_id', user.id)
 
     if (posErr) throw posErr
 
@@ -59,6 +62,7 @@ export async function GET(req: NextRequest) {
     const { data: closed, error: closedErr } = await supabase
       .from('closed_trades')
       .select('*')
+      .eq('user_id', user.id)
       .order('close_date', { ascending: true })
 
     if (closedErr) throw closedErr

@@ -2,15 +2,16 @@ import { fetchRawQuotes } from './yahoo-finance'
 import { getRedis, isRedisReady } from './redis'
 
 const REDIS_KEY_CCL = 'currency:ccl'
+const REDIS_KEY_CCL_LKP = 'currency:ccl:lkp'  // persists indefinitely, updated on each fresh fetch
 const CACHE_TTL = 3600 // 1 hour
 
 /**
- * Fetches the implicit Dolar CCL (Contado con Liquidacion) rate 
+ * Fetches the implicit Dolar CCL (Contado con Liquidacion) rate
  * by comparing GGAL (NASDAQ) vs GGAL.BA (Buenos Aires).
  * GGAL 1 ADR = 10 local shares.
  */
 export async function getCCLRate(): Promise<number> {
-  // 1. Try Cache
+  // 1. Try short-lived cache (1h TTL)
   if (isRedisReady()) {
     const cached = await getRedis()?.get(REDIS_KEY_CCL)
     if (cached) return parseFloat(cached)
@@ -27,9 +28,13 @@ export async function getCCLRate(): Promise<number> {
       // CCL = (Local Price * Ratio) / ADR Price
       // Example: GGAL.BA = 5000, GGAL = 50, Ratio = 10 -> (5000*10)/50 = 1000
       const ccl = (local.price * 10) / adr.price
-      
+
       if (isRedisReady()) {
-        await getRedis()?.setex(REDIS_KEY_CCL, CACHE_TTL, ccl.toString())
+        const redis = getRedis()
+        // Short-lived cache (refreshed hourly)
+        await redis?.setex(REDIS_KEY_CCL, CACHE_TTL, ccl.toString())
+        // LKP — no expiry, always reflects the last successfully fetched rate
+        await redis?.set(REDIS_KEY_CCL_LKP, ccl.toString())
       }
       return ccl
     }
@@ -37,8 +42,18 @@ export async function getCCLRate(): Promise<number> {
     console.error('[Currency] Error calculating CCL rate:', err)
   }
 
-  // Fallback (approximate or last known)
-  return 1100 
+  // 3. Fallback to last known price (LKP) rather than a stale hardcoded constant
+  if (isRedisReady()) {
+    const lkp = await getRedis()?.get(REDIS_KEY_CCL_LKP)
+    if (lkp) {
+      console.warn('[Currency] Using LKP CCL rate — live fetch failed')
+      return parseFloat(lkp)
+    }
+  }
+
+  // Absolute last resort — log loudly so it's visible in production
+  console.error('[Currency] No CCL rate available (live fetch failed, no LKP in Redis). Using emergency fallback.')
+  return 1100
 }
 
 /**

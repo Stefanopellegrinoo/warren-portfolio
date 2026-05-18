@@ -11,7 +11,8 @@ export const dynamic = 'force-dynamic'
 
 export async function POST(request: Request) {
   const supabase = createServerClientInstance()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { data: { session } } = await supabase.auth.getSession()
+  const user = session?.user
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   try {
@@ -19,7 +20,7 @@ export async function POST(request: Request) {
     const body = await validateRequest(ONTransactionSchema, request)
     
     // Process the transaction
-    const result = await processONTransaction(user.id, body)
+    const result = await processONTransaction(supabase, user.id, body)
     
     // Invalidate Cache since portfolio mutated
     await invalidateUserCache(user.id)
@@ -45,7 +46,8 @@ export async function POST(request: Request) {
 export async function GET(req: NextRequest) {
   try {
     const supabase = createServerClientInstance()
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { session } } = await supabase.auth.getSession()
+    const user = session?.user
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     // Validate pagination params

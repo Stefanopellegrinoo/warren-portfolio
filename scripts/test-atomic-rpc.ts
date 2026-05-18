@@ -96,6 +96,24 @@ async function runTests() {
     console.log(`   Cash Balance: $${cash2.balance}`)
     if (Number(cash2.balance) !== 9293) throw new Error(`Wrong cash balance: ${cash2.balance}`)
 
+    // ✅ NUEVA VALIDACIÓN: Verificar closed_trades
+    console.log('   Verifying closed_trades entry...')
+    const { data: ct2 } = await supabase
+      .from('closed_trades')
+      .select('*')
+      .eq('user_id', TEST_USER_ID)
+      .eq('ticker', TICKER)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single()
+    
+    if (!ct2) throw new Error('Closed trade record NOT FOUND')
+    console.log(`   Closed Trade: Qty=${ct2.quantity}, PnL=$${ct2.pnl}, PnL%=${(ct2.pnl_pct * 100).toFixed(2)}%`)
+    
+    if (Number(ct2.quantity) !== 4) throw new Error(`Wrong closed quantity: ${ct2.quantity}`)
+    // PnL expected: (200 - 150.5) * 4 - 2 (commission) = 196
+    if (Math.abs(Number(ct2.pnl) - 196) > 0.1) throw new Error(`Wrong PnL: ${ct2.pnl} (expected ~196)`)
+
 
     // 🧪 TEST 3: Insufficient Position
     console.log('\n🧪 TEST 3: Insufficient Position Error...')

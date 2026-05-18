@@ -1,8 +1,18 @@
-import { createServerClientInstance, createServiceClient } from './supabase-server'
 import type { CashBalance, CashMovement, CashMovementInput } from '@/types'
 import { getRedis, isRedisReady, invalidateUserCache } from './redis'
-import { updateWithOptimisticLock } from './concurrency'
-import { cached, CacheTTL, invalidateCacheKey } from './cache'
+import { invalidateCacheKey } from './cache'
+import type { SupabaseClient } from '@supabase/supabase-js'
+
+/**
+ * SECURITY: Explicitly validate userId to prevent data corruption.
+ */
+function assertUserId(userId: unknown): asserts userId is string {
+  if (!userId || typeof userId !== 'string' || userId.trim() === '') {
+    throw new Error(
+      '[Security] userId inválido o ausente. Operación cancelada para prevenir corrupción de datos.'
+    )
+  }
+}
 
 /**
  * CASH ENGINE
@@ -25,10 +35,11 @@ import { cached, CacheTTL, invalidateCacheKey } from './cache'
  * Returns the created movement and updated balance.
  */
 export async function processCashMovement(
+  supabase: SupabaseClient,
   userId: string,
   input: CashMovementInput
 ): Promise<{ movement: CashMovement; balance: CashBalance }> {
-  const supabase = createServerClientInstance()
+  assertUserId(userId)
   
   // 1. Call the atomic RPC to handle everything in one DB transaction
   const { data, error: rpcErr } = await supabase.rpc('process_transaction_atomic', {
@@ -37,6 +48,7 @@ export async function processCashMovement(
     p_price: input.amount, // For DEPOSITO/RETIRO, p_price is used as the amount
     p_notes: input.description ?? null,
     p_ticker: input.ticker ?? null,
+    p_user_id: userId
   })
 
   if (rpcErr) {
@@ -60,18 +72,12 @@ export async function processCashMovement(
  * Rebuild cash balance from all movements.
  * 
  * This is the source of truth — balance is always derived from movements.
- * 
- * WHEN TO USE:
- * - Data initialization (first cash movement for a user)
- * - Data correction (when balance is inconsistent)
- * - Batch operations (imports, migrations)
- * - FALLBACK when optimistic locking fails (too much contention)
- * 
- * WHEN NOT TO USE:
- * - Normal concurrent operations (use processCashMovement with optimistic locking instead)
  */
-export async function rebuildCashBalance(userId: string): Promise<CashBalance> {
-  const supabase = createServiceClient()
+export async function rebuildCashBalance(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<CashBalance> {
+  assertUserId(userId)
   
   // Fetch all movements in chronological order
   const { data: movements, error: fetchErr } = await supabase
@@ -84,12 +90,19 @@ export async function rebuildCashBalance(userId: string): Promise<CashBalance> {
   if (fetchErr) throw fetchErr
   
   let balance = 0
-  
+
   for (const m of movements ?? []) {
-    if (m.type === 'DEPOSITO' || m.type === 'CUPON' || m.type === 'DIVIDENDO') {
-      balance += m.amount
-    } else if (m.type === 'RETIRO') {
-      balance -= m.amount
+    switch (m.type) {
+      case 'DEPOSITO':
+      case 'CUPON':
+      case 'DIVIDENDO':
+      case 'VENTA':
+        balance += m.amount
+        break
+      case 'RETIRO':
+      case 'COMPRA':
+        balance -= m.amount
+        break
     }
   }
   
@@ -123,52 +136,45 @@ export async function rebuildCashBalance(userId: string): Promise<CashBalance> {
 
 /**
  * Get current cash balance for a user.
- * Returns null if no balance exists (user hasn't made any cash movements yet).
- * 
- * PERFORMANCE: Cached for 30 seconds to reduce DB load on dashboard.
  */
-export async function getCashBalance(userId: string): Promise<CashBalance | null> {
-  return cached(
-    `cash:balance:${userId}`,
-    CacheTTL.CASH_BALANCE,
-    async () => {
-      const supabase = createServiceClient()
-      
-      const { data, error } = await supabase
-        .from('cash_balance')
-        .select('*')
-        .eq('user_id', userId)
-        .single()
-      
-      if (error) {
-        // No balance found — return null (user starts with $0)
-        return null
-      }
-      
-      return data
-    }
-  )
+export async function getCashBalance(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<CashBalance | null> {
+  assertUserId(userId)
+
+  const { data, error } = await supabase
+    .from('cash_balance')
+    .select('*')
+    .eq('user_id', userId)
+    .single()
+  
+  if (error) {
+    return null
+  }
+  
+  return data
 }
 
 /**
  * Delete a cash movement and recalculate balance.
- * Used when correcting data entry mistakes.
  */
 export async function deleteCashMovement(
+  supabase: SupabaseClient,
   userId: string,
   movementId: string
 ): Promise<CashBalance> {
-  const supabase = createServiceClient()
+  assertUserId(userId)
 
   // 1. Delete the movement
   const { error: deleteErr } = await supabase
     .from('cash_movements')
     .delete()
     .eq('id', movementId)
-    .eq('user_id', userId) // Security: ensure user owns the movement
+    .eq('user_id', userId) 
 
   if (deleteErr) throw deleteErr
 
   // 2. Rebuild balance from remaining movements
-  return await rebuildCashBalance(userId)
+  return await rebuildCashBalance(supabase, userId)
 }

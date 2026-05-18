@@ -5,7 +5,11 @@ let redisReady = false
 let connectPromise: Promise<void> | null = null
 
 function getRedisUrl(): string {
-  return process.env.REDIS_URL || 'redis://localhost:6379'
+  const redis_url = process.env.REDIS_URL || ''
+  if (!redis_url) {
+    console.error('[Redis] REDIS_URL is not defined')
+  }
+  return redis_url
 }
 
 /**
@@ -14,7 +18,7 @@ function getRedisUrl(): string {
  */
 export function getRedis(): Redis | null {
   if (redisClient) return redisClient
-
+  
   try {
     redisClient = new Redis(getRedisUrl(), {
       maxRetriesPerRequest: null, // Required for BullMQ
@@ -127,6 +131,15 @@ export async function getCachedRoute<T>(key: string): Promise<T | null> {
   return null
 }
 
+// ioredis prepends keyPrefix to GET/SET/DEL but SCAN returns full Redis keys (with prefix).
+// Passing those keys back to DEL would double-prefix them: warren:warren:key.
+// Strip the prefix before using SCAN results in other commands.
+const KEY_PREFIX = 'warren:'
+
+function stripKeyPrefix(key: string): string {
+  return key.startsWith(KEY_PREFIX) ? key.slice(KEY_PREFIX.length) : key
+}
+
 /**
  * Invalidates all user-specific route caches when data mutates.
  * Clears pattern: history:{userId}:* and statistics:{userId}
@@ -140,11 +153,12 @@ export async function invalidateUserCache(userId: string): Promise<void> {
     // Find keys matching history:{userId}:*
     let cursor = '0'
     const keysToDelete: string[] = []
-    
+
     do {
       const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', `history:${userId}:*`, 'COUNT', 100)
       cursor = nextCursor
-      keysToDelete.push(...keys)
+      // Strip the prefix — ioredis will re-add it when calling DEL
+      keysToDelete.push(...keys.map(stripKeyPrefix))
     } while (cursor !== '0')
 
     // Find keys matching lots:def:{userId}:*
@@ -152,10 +166,10 @@ export async function invalidateUserCache(userId: string): Promise<void> {
     do {
       const [nextCursor, keys] = await redis.scan(lotsCursor, 'MATCH', `lots:def:${userId}:*`, 'COUNT', 100)
       lotsCursor = nextCursor
-      keysToDelete.push(...keys)
+      keysToDelete.push(...keys.map(stripKeyPrefix))
     } while (lotsCursor !== '0')
 
-    // Add exactly matching keys
+    // Add exactly matching keys (no prefix stripping needed — DEL adds it)
     keysToDelete.push(`statistics:${userId}`)
     keysToDelete.push(`summary:${userId}`)
 

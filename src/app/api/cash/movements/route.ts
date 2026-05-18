@@ -9,7 +9,8 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: NextRequest) {
   try {
     const supabase = createServerClientInstance()
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { session } } = await supabase.auth.getSession()
+    const user = session?.user
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     // Validate query params
@@ -18,6 +19,7 @@ export async function GET(req: NextRequest) {
     let query = supabase
       .from('cash_movements')
       .select('*', { count: 'exact' })
+      .eq('user_id', user.id)
       .order('date', { ascending: false })
       .range(offset, offset + limit - 1)
 

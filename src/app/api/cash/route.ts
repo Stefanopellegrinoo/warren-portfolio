@@ -8,7 +8,8 @@ export const dynamic = 'force-dynamic'
 
 export async function POST(request: Request) {
   const supabase = createServerClientInstance()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { data: { session } } = await supabase.auth.getSession()
+  const user = session?.user
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   try {
@@ -16,7 +17,7 @@ export async function POST(request: Request) {
     const body = await validateRequest(CashMovementSchema, request)
     
     // Process the movement
-    const result = await processCashMovement(user.id, body)
+    const result = await processCashMovement(supabase, user.id, body)
     return NextResponse.json(result)
   } catch (error: any) {
     // Handle validation errors
@@ -34,7 +35,8 @@ export async function POST(request: Request) {
 
 export async function GET() {
   const supabase = createServerClientInstance()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { data: { session } } = await supabase.auth.getSession()
+  const user = session?.user
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { data: balance } = await supabase

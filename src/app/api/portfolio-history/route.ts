@@ -10,11 +10,15 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: NextRequest) {
   try {
   const supabase = createServerClientInstance()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { data: { session } } = await supabase.auth.getSession()
+  const user = session?.user
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
-  const daysParam = searchParams.get('days') ?? '90'
+  const rawDays = searchParams.get('days') ?? '90'
+  // Cap to max 730 days (2 years) to prevent resource exhaustion
+  const MAX_DAYS = 730
+  const daysParam = rawDays === 'all' ? 'all' : String(Math.min(parseInt(rawDays) || 90, MAX_DAYS))
 
   // Check Cache First
   const cacheKey = `history:${user.id}:${daysParam}`
@@ -221,7 +225,8 @@ export async function GET(req: NextRequest) {
 // POST: take a snapshot of current portfolio value (call daily via cron or manually)
 export async function POST(req: NextRequest) {
   const supabase = createServerClientInstance()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { data: { session } } = await supabase.auth.getSession()
+  const user = session?.user
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { data: positions } = await supabase

@@ -8,6 +8,7 @@
  */
 
 import type { Quote } from '@/types'
+import { fetchQuotes, cachePrice } from './yahoo-finance'
 
 interface Data912RawQuote {
   symbol: string
@@ -172,3 +173,32 @@ export async function getAvailableCorporateBonds(): Promise<string[]> {
  * Alias for fetchData912Prices - for consistency with ONs terminology
  */
 export const fetchONQuotes = fetchData912Prices
+
+/**
+ * Fetch ON quotes with Redis LKP (Last Known Price) fallback.
+ * - Tries Redis/memory cache first (no network if cached)
+ * - For cache misses, calls Data912
+ * - If Data912 fails, returns whatever LKP exists (stale prices > no prices)
+ */
+export async function fetchONQuotesWithFallback(tickers: string[]): Promise<Map<string, Quote>> {
+  if (!tickers.length) return new Map()
+
+  // 1. Try Redis LKP first — no network call when worker has cached prices
+  const quotesMap = await fetchQuotes(tickers)
+
+  const missingTickers = tickers.filter(t => !quotesMap.has(t))
+  if (missingTickers.length === 0) return quotesMap
+
+  // 2. Fetch missing from Data912
+  try {
+    const freshQuotes = await fetchData912Prices(missingTickers)
+    freshQuotes.forEach((quote, ticker) => {
+      quotesMap.set(ticker, quote)
+      cachePrice(ticker, quote).catch(e => console.error(`[Data912] Cache error for ${ticker}:`, e))
+    })
+  } catch (err) {
+    console.warn('[Data912] External fetch failed — returning LKP for missing tickers:', missingTickers.join(', '))
+  }
+
+  return quotesMap
+}

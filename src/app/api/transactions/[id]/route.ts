@@ -10,8 +10,9 @@ export const dynamic = 'force-dynamic'
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const supabase = createServerClientInstance()
-    const { data: { user }, error: authErr } = await supabase.auth.getUser()
-    if (authErr || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { data: { session } } = await supabase.auth.getSession()
+    const user = session?.user
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     // Validate UUID
     try {
@@ -28,6 +29,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       .from('transactions')
       .select('ticker, asset_type')
       .eq('id', params.id)
+      .eq('user_id', user.id)
       .single()
 
     if (getErr || !tx) {
@@ -40,20 +42,21 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       .from('transactions')
       .delete()
       .eq('id', params.id)
+      .eq('user_id', user.id)
 
     if (delErr) throw delErr
 
     // 3. Rebuild position using correct function based on asset type
     if (tx.asset_type === 'ON') {
       const { rebuildONPosition } = await import('@/lib/on-engine')
-      await rebuildONPosition(user.id, tx.ticker)
+      await rebuildONPosition(supabase, user.id, tx.ticker)
     } else {
-      await rebuildPosition(user.id, tx.ticker)
+      await rebuildPosition(supabase, user.id, tx.ticker)
     }
 
     // 4. Rebuild cash balance to ensure consistency after deletion
     const { rebuildCashBalance } = await import('@/lib/cash-engine')
-    await rebuildCashBalance(user.id)
+    await rebuildCashBalance(supabase, user.id)
 
     // 5. Invalidate User Cache
     await invalidateUserCache(user.id)
@@ -81,8 +84,9 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const supabase = createServerClientInstance()
-    const { data: { user }, error: authErr } = await supabase.auth.getUser()
-    if (authErr || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { data: { session } } = await supabase.auth.getSession()
+    const user = session?.user
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     // Validate UUID
     try {
@@ -99,6 +103,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       .from('transactions')
       .select('ticker, asset_type')
       .eq('id', params.id)
+      .eq('user_id', user.id)
       .single()
 
     if (getErr || !originalTx) {
@@ -145,7 +150,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       const transactionCost = (Math.abs(updated.quantity) * updated.price) + (updated.commission || 0)
       
       try {
-        await processCashMovement(user.id, {
+        await processCashMovement(supabase, user.id, {
           date: updated.date,
           type: updated.operation === 'COMPRA' ? 'RETIRO' : 'DEPOSITO',
           amount: updated.operation === 'COMPRA' ? transactionCost : (Math.abs(updated.quantity) * updated.price) - (updated.commission || 0),
@@ -161,12 +166,18 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     // 6. Rebuild position using correct function
     if (originalTx.asset_type === 'ON') {
       const { rebuildONPosition } = await import('@/lib/on-engine')
-      await rebuildONPosition(user.id, originalTx.ticker)
+      await rebuildONPosition(supabase, user.id, originalTx.ticker)
     } else {
-      await rebuildPosition(user.id, originalTx.ticker)
+      await rebuildPosition(supabase, user.id, originalTx.ticker)
     }
 
-    // 7. Invalidate User Cache
+    // 7. Rebuild cash balance from the ledger — step 4 only removes the cash_movement row,
+    //    it does NOT reverse the cash_balance delta that was already applied by the original RPC.
+    //    Without this rebuild, the balance accumulates both the old and new deltas.
+    const { rebuildCashBalance } = await import('@/lib/cash-engine')
+    await rebuildCashBalance(supabase, user.id)
+
+    // 8. Invalidate User Cache
     await invalidateUserCache(user.id)
 
     return NextResponse.json({ success: true, data: updated }, { status: 200 })

@@ -1,12 +1,10 @@
 import { Worker, Job } from 'bullmq'
 import { IMPORT_QUEUE_NAME } from './queue'
-import { getRedis } from './redis'
+import { getRedis, getRedisConnectionOpts } from './redis'
 import { createServiceClient } from './supabase-server'
 import { processTransactionBatch } from './portfolio-engine'
 import { invalidateUserCache } from './redis'
 import { fetchQuotesWithFallback } from './yahoo-finance'
-
-const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
 
 export const importWorker = new Worker(
   IMPORT_QUEUE_NAME,
@@ -22,30 +20,17 @@ export const importWorker = new Worker(
     const supabase = createServiceClient()
 
     try {
-      // 1. Set lock to block price-worker
-      if (redis) await redis.setex(`importing:${userId}`, 300, '1')
+      // 1. Set lock to block price-worker and manual transactions
+      if (redis) await redis.setex(`importing:${userId}`, 3600, '1')
       await job.updateProgress({ percentage: 5, message: 'Initializing import...' })
 
-      // 2. Handle replacement if requested
-      if (replace) {
-        console.log(`[ImportWorker] Replacing all data for user ${userId}`)
-        await job.updateProgress({ percentage: 10, message: 'Deleting existing data...' })
-        
-        await supabase.from('transactions').delete().eq('user_id', userId)
-        await supabase.from('positions').delete().eq('user_id', userId)
-        await supabase.from('closed_trades').delete().eq('user_id', userId)
-        await supabase.from('on_positions').delete().eq('user_id', userId)
-        await supabase.from('on_closed_trades').delete().eq('user_id', userId)
-        // Cash movements will be deleted via CASCADE (transaction_id foreign key)
-        // Then rebuild cash balance will happen after import
-      }
-      await job.updateProgress({ percentage: 15, message: 'Starting batch import...' })
-
-      // 3. Process the batch with progress tracking
+      // 2. Process the batch with progress tracking (replace handled inside)
       const results = await processTransactionBatch(
+        supabase,
         userId, 
         transactions,
-        async (percentage, message) => {
+        replace, // Pass replace flag here
+        async (percentage: number, message: string) => {
           // Map processTransactionBatch progress (10-95) to job progress (15-90)
           const jobPercentage = 15 + Math.floor((percentage / 100) * 75)
           await job.updateProgress({ percentage: jobPercentage, message })
@@ -117,7 +102,7 @@ export const importWorker = new Worker(
     }
   },
   {
-    connection: { url: REDIS_URL },
+    ...getRedisConnectionOpts(),
     concurrency: 1, // One import at a time globally to avoid DB/Redis thrashing, or we could increase it
   }
 )

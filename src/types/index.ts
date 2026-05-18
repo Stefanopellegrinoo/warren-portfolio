@@ -368,3 +368,138 @@ export interface PortfolioFilters extends DateRange {
   asset_types?: AssetType[]
   status?: 'open' | 'closed'
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STRATEGY & INDICATOR TYPES (Sprint 3)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type IndicatorType = 'EMA' | 'RSI' | 'MACD' | 'Bollinger' | 'Volume'
+
+export type IndicatorOperator =
+  | 'crosses_above'
+  | 'crosses_below'
+  | 'gt'
+  | 'lt'
+  | 'gte'
+  | 'lte'
+
+export interface IndicatorParam {
+  type: IndicatorType
+  period?: number
+  source?: string
+  fast?: number
+  slow?: number
+  signal?: number
+  stdDev?: number
+}
+
+export interface ConditionRule {
+  indicator: IndicatorType
+  period?: number
+  operator: IndicatorOperator
+  target?: IndicatorType
+  targetPeriod?: number
+  value?: number
+}
+
+export interface SetupConfig {
+  indicators: IndicatorParam[]
+  conditions: {
+    buy: ConditionRule[]
+    sell: ConditionRule[]
+  }
+  stopLoss?: number
+  takeProfit?: number
+}
+
+export interface Strategy {
+  id: string
+  user_id: string
+  name: string
+  philosophy: string
+  tickers: string[]
+  timeframes: string[]
+  active: boolean
+  created_at: string
+}
+
+export interface IndicatorSetup {
+  id: string
+  strategy_id: string
+  user_id: string
+  name: string
+  config: SetupConfig
+  active: boolean
+  created_at: string
+}
+
+export interface Signal {
+  id: string
+  setup_id: string
+  strategy_id: string
+  user_id: string
+  ticker: string
+  type: 'BUY' | 'SELL'
+  price: number
+  timeframe: string
+  fired_at: string
+  metadata?: Record<string, unknown>
+}
+
+export interface PaperTrade {
+  id: string
+  setup_id: string
+  strategy_id: string
+  user_id: string
+  ticker: string
+  open_signal_id?: string
+  close_signal_id?: string
+  open_price: number
+  close_price?: number
+  open_at: string
+  close_at?: string
+  close_reason?: 'SIGNAL' | 'STOP_LOSS' | 'TAKE_PROFIT'
+  pnl_pct?: number
+  status: 'OPEN' | 'CLOSED'
+}
+
+export interface SetupPerformance {
+  id: string
+  setup_id: string
+  strategy_id: string
+  user_id: string
+  ticker: string
+  total_trades: number
+  profitable_trades: number
+  hit_rate?: number
+  avg_return_pct?: number
+  avg_duration_days?: number
+  updated_at: string
+}
+
+export interface Alert {
+  id: string
+  user_id: string
+  ticker: string
+  setup_id?: string
+  channels: string[]
+  active: boolean
+  last_fired_at?: string
+  created_at: string
+}
+
+export interface WatchlistItem {
+  id: string
+  user_id: string
+  ticker: string
+  notes?: string
+  added_at: string
+}
+
+export interface StrategyWithSetups extends Strategy {
+  indicator_setups: IndicatorSetup[]
+}
+
+export interface StrategiesListResponse {
+  strategies: StrategyWithSetups[]
+}
