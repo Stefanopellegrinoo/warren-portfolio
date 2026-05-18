@@ -20,8 +20,8 @@ import { calculatePortfolioSummary } from './portfolio-engine'
 import { getRedis } from './redis'
 import { isMarketOpen } from './utils'
 import { startImportWorker } from './import-worker'
-import { startSignalsWorker } from '@/lib/signals-worker'
-import { scheduleSignalsEvaluationJobs } from '@/lib/signals-queue'
+import { startSignalsWorker } from './signals-worker'
+import { scheduleSignalsEvaluationJobs } from './signals-queue'
 
 const REDIS_URL = process.env.REDIS_URL
 

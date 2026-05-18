@@ -1,11 +1,11 @@
 import { Worker, type Job } from 'bullmq'
-import type { Candle } from '@/lib/binance/types'
+import type { Candle } from './binance/types'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { createServiceClient } from '@/lib/supabase-server'
-import { getRedis, getRedisConnectionOpts } from '@/lib/redis'
-import { fetchKlines } from '@/lib/yahoo-finance'
-import { isMarketOpen } from '@/lib/utils'
-import { SIGNALS_QUEUE_NAME } from '@/lib/signals-queue'
+import { createServiceClient } from './supabase-server'
+import { getRedis, getRedisConnectionOpts } from './redis'
+import { fetchKlines } from './yahoo-finance'
+import { isMarketOpen } from './utils'
+import { SIGNALS_QUEUE_NAME } from './signals-queue'
 import {
   ema,
   rsi,
@@ -14,8 +14,8 @@ import {
   volumeAvg,
   evaluateConditions,
   type ComputedState,
-} from '@/lib/indicators'
-import type { IndicatorSetup } from '@/types'
+} from './indicators'
+import type { IndicatorSetup } from '../types'
 
 type CloseReason = 'SIGNAL' | 'STOP_LOSS' | 'TAKE_PROFIT'
 

@@ -244,16 +244,16 @@ export default function StrategyDetailPage() {
               </pre>
             </section>
 
-            {/* Performance placeholder */}
-            <section className="glass rounded-2xl p-5 border border-white/[0.08]">
-              <h2 className="font-display font-700 text-white text-sm mb-3">Performance</h2>
-              <div className="flex flex-col items-center justify-center py-8 gap-2">
-                <p className="text-slate-500 font-mono text-xs text-center">
-                  Disponible en Sprint 5
-                </p>
-                <ChevronRight className="w-4 h-4 text-slate-600" />
-              </div>
-            </section>
+            {/* Performance link */}
+            <Link href={`/strategies/${strategy.id}/performance`}>
+              <section className="glass rounded-2xl p-5 border border-white/[0.08] hover:border-amber/30 transition-colors cursor-pointer group">
+                <div className="flex items-center justify-between mb-1">
+                  <h2 className="font-display font-700 text-white text-sm">Performance</h2>
+                  <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-amber transition-colors" />
+                </div>
+                <p className="text-slate-500 text-[11px]">Ver comparación de setups →</p>
+              </section>
+            </Link>
 
           </div>
 

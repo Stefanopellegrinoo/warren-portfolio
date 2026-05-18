@@ -27,6 +27,7 @@ import {
   type DataSource,
 } from "@/lib/store/chart-store";
 import { formatPrice, formatVolume } from "@/lib/format";
+import { SIGNAL_COLORS, getSetupColor } from "@/lib/setup-color";
 import { IndicatorPill } from "./IndicatorPill";
 import { MeasureOverlay } from "./MeasureOverlay";
 
@@ -97,15 +98,6 @@ const OPERATION_MARKER_STYLE = {
   DIVIDENDO: { position: "belowBar" as const, color: "#2196f3", shape: "circle" as const,    text: "D" },
 } as const;
 
-const SIGNAL_COLORS = ['#FFCC00', '#FF8C00', '#9B59B6', '#00BFFF', '#00FF7F'];
-
-function getSetupColor(setupId: string): string {
-  let hash = 0;
-  for (let i = 0; i < setupId.length; i++) {
-    hash = (hash * 31 + setupId.charCodeAt(i)) | 0;
-  }
-  return SIGNAL_COLORS[Math.abs(hash) % SIGNAL_COLORS.length];
-}
 
 interface PaneOffset {
   top: number;
@@ -162,6 +154,35 @@ export function PriceChart({ symbol, timeframe }: Props) {
   const [renderTick, setRenderTick] = useState(0);
   const measureRef = useRef(measure);
   measureRef.current = measure;
+
+  const [setupLegend, setSetupLegend] = useState<Array<{ id: string; name: string }>>([]);
+  const [hiddenSetups, setHiddenSetups] = useState<Set<string>>(new Set());
+  const allSignalsRef = useRef<Array<{
+    time: UTCTimestamp;
+    setup_id: string;
+    position: 'belowBar' | 'aboveBar';
+    color: string;
+    shape: 'arrowUp' | 'arrowDown';
+    size: number;
+    text: string;
+  }>>([]);
+  const flushMarkersRef = useRef<(() => void) | null>(null);
+  const hiddenSetupsRef = useRef(hiddenSetups);
+  hiddenSetupsRef.current = hiddenSetups;
+
+  function applySetupFilters() {
+    const hidden = hiddenSetupsRef.current;
+    signalMarkersRef.current = allSignalsRef.current
+      .filter((m) => !hidden.has(m.setup_id))
+      .map(({ setup_id: _sid, ...rest }) => rest);
+    flushMarkersRef.current?.();
+  }
+
+  // Sync hiddenSetups changes to chart markers without refetch
+  useEffect(() => {
+    applySetupFilters();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hiddenSetups]);
 
   // Helper — compute pane top offsets from chart layout
   function recomputePaneOffsets() {
@@ -572,6 +593,7 @@ export function PriceChart({ symbol, timeframe }: Props) {
         markersPluginRef.current.detach();
         markersPluginRef.current = null;
       }
+      flushMarkersRef.current = null;
       return;
     }
 
@@ -582,6 +604,7 @@ export function PriceChart({ symbol, timeframe }: Props) {
       combined.sort((a, b) => (a.time as number) - (b.time as number));
       getOrCreatePlugin().setMarkers(combined);
     }
+    flushMarkersRef.current = flushMarkers;
 
     async function loadMarkers() {
       try {
@@ -611,12 +634,13 @@ export function PriceChart({ symbol, timeframe }: Props) {
           setup_id: string;
           type: 'BUY' | 'SELL';
           fired_at: string;
-          indicator_setups?: { name: string };
+          indicator_setups?: { name: string } | null;
         }> = await res.json();
         if (cancelled || !signals.length) return;
 
-        signalMarkersRef.current = signals.map((signal) => ({
+        allSignalsRef.current = signals.map((signal) => ({
           time: Math.floor(new Date(signal.fired_at).getTime() / 1000) as UTCTimestamp,
+          setup_id: signal.setup_id,
           position: signal.type === 'BUY' ? 'belowBar' as const : 'aboveBar' as const,
           color: getSetupColor(signal.setup_id),
           shape: signal.type === 'BUY' ? 'arrowUp' as const : 'arrowDown' as const,
@@ -624,6 +648,20 @@ export function PriceChart({ symbol, timeframe }: Props) {
           text: signal.indicator_setups?.name ?? '',
         }));
 
+        const seenIds = new Set<string>();
+        const uniqueSetups: Array<{ id: string; name: string }> = [];
+        for (const signal of signals) {
+          if (!seenIds.has(signal.setup_id)) {
+            seenIds.add(signal.setup_id);
+            uniqueSetups.push({
+              id: signal.setup_id,
+              name: signal.indicator_setups?.name ?? signal.setup_id,
+            });
+          }
+        }
+        setSetupLegend(uniqueSetups);
+
+        signalMarkersRef.current = allSignalsRef.current.map(({ setup_id: _sid, ...rest }) => rest);
         flushMarkers();
       } catch {
         // silent — signals are non-critical
@@ -939,6 +977,41 @@ export function PriceChart({ symbol, timeframe }: Props) {
     <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
       {measureRender}
+
+      {/* Setup legend — visible only for Yahoo Finance source when signals are loaded */}
+      {setupLegend.length > 0 && dataSource === 'yahoo' && (
+        <div className="absolute bottom-0 left-0 right-0 flex flex-wrap gap-2 px-3 py-2 border-t border-white/[0.06] z-10">
+          {setupLegend.map((setup) => {
+            const isHidden = hiddenSetups.has(setup.id);
+            const color = getSetupColor(setup.id);
+            return (
+              <button
+                key={setup.id}
+                onClick={() => {
+                  setHiddenSetups((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(setup.id)) next.delete(setup.id);
+                    else next.add(setup.id);
+                    return next;
+                  });
+                }}
+                className={`flex items-center gap-1.5 text-[11px] font-mono px-2 py-1 rounded-full border transition-opacity ${
+                  isHidden
+                    ? 'opacity-40 border-white/10 text-slate-500'
+                    : 'border-white/20 text-white'
+                }`}
+                style={{ borderColor: isHidden ? undefined : color + '40' }}
+              >
+                <span
+                  className="w-2 h-2 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: isHidden ? '#4B5563' : color }}
+                />
+                {setup.name}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Top-left of main pane: symbol info + OHLC + Volume pill + EMA pills */}
       <div
