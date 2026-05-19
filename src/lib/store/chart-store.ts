@@ -62,12 +62,9 @@ export const DEFAULT_WATCHLIST = [
   "MATICUSDT",
 ];
 
-export type DataSource = "binance" | "yahoo";
-
 interface ChartState {
   symbol: string;
   timeframe: Timeframe;
-  dataSource: DataSource;
   /** Indicator is added to the chart (appears in pill + renders unless hidden) */
   indicators: Record<IndicatorKey, boolean>;
   /** Indicator is hidden (eye icon off) — kept in pill list, just not rendered */
@@ -75,6 +72,7 @@ interface ChartState {
   /** Periods and parameters for each indicator */
   config: IndicatorConfig;
   watchlist: string[];
+  activeWatchlistId: string | null;
 
   showPortfolioOverlay: boolean;
 
@@ -88,7 +86,6 @@ interface ChartState {
   // Actions
   setSymbol: (s: string) => void;
   setTimeframe: (t: Timeframe) => void;
-  setDataSource: (d: DataSource) => void;
   toggleIndicator: (key: IndicatorKey) => void;
   removeIndicator: (key: IndicatorKey) => void;
   toggleHidden: (key: IndicatorKey) => void;
@@ -101,6 +98,7 @@ interface ChartState {
   setSymbolDialogOpen: (v: boolean) => void;
   setSettingsTarget: (k: IndicatorKey | null) => void;
   togglePortfolioOverlay: () => void;
+  setActiveWatchlistId: (id: string | null) => void;
 }
 
 export const useChartStore = create<ChartState>()(
@@ -108,7 +106,6 @@ export const useChartStore = create<ChartState>()(
     (set) => ({
       symbol: "BTCUSDT",
       timeframe: "15m" as Timeframe,
-      dataSource: "binance" as DataSource,
       indicators: {
         ema20: true,
         ema50: true,
@@ -127,6 +124,7 @@ export const useChartStore = create<ChartState>()(
       },
       config: { ...DEFAULT_CONFIG },
       watchlist: DEFAULT_WATCHLIST,
+      activeWatchlistId: null,
       showPortfolioOverlay: true,
       tool: "cursor",
       priceLines: [],
@@ -135,7 +133,6 @@ export const useChartStore = create<ChartState>()(
 
       setSymbol: (symbol) => set({ symbol }),
       setTimeframe: (timeframe) => set({ timeframe }),
-      setDataSource: (dataSource) => set({ dataSource }),
       toggleIndicator: (key) =>
         set((s) => ({
           indicators: { ...s.indicators, [key]: !s.indicators[key] },
@@ -188,17 +185,18 @@ export const useChartStore = create<ChartState>()(
       setSettingsTarget: (settingsTarget) => set({ settingsTarget }),
       togglePortfolioOverlay: () =>
         set((s) => ({ showPortfolioOverlay: !s.showPortfolioOverlay })),
+      setActiveWatchlistId: (activeWatchlistId) => set({ activeWatchlistId }),
     }),
     {
       name: "tv-gratis-chart-state",
       partialize: (s) => ({
         symbol: s.symbol,
         timeframe: s.timeframe,
-        dataSource: s.dataSource,
         indicators: s.indicators,
         hidden: s.hidden,
         config: s.config,
         watchlist: s.watchlist,
+        activeWatchlistId: s.activeWatchlistId,
         showPortfolioOverlay: s.showPortfolioOverlay,
       }),
     },

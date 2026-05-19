@@ -18,13 +18,13 @@ import {
 import { fetchKlines } from "@/lib/binance/rest";
 import { getBinanceWS } from "@/lib/binance/ws";
 import { ema, rsi, macd } from "@/lib/indicators";
+import { getProviderForSymbol } from "@/lib/market-data/resolver";
 import type { Candle, Timeframe } from "@/lib/binance/types";
 import { getTransactions } from "@/lib/warren/positions";
 import {
   INDICATOR_COLORS,
   useChartStore,
   type IndicatorKey,
-  type DataSource,
 } from "@/lib/store/chart-store";
 import { formatPrice, formatVolume } from "@/lib/format";
 import { SIGNAL_COLORS, getSetupColor } from "@/lib/setup-color";
@@ -129,12 +129,14 @@ export function PriceChart({ symbol, timeframe }: Props) {
   const config = useChartStore((s) => s.config);
   const tool = useChartStore((s) => s.tool);
   const priceLines = useChartStore((s) => s.priceLines);
-  const dataSource = useChartStore((s) => s.dataSource);
   const showPortfolioOverlay = useChartStore((s) => s.showPortfolioOverlay);
   const addPriceLine = useChartStore((s) => s.addPriceLine);
   const removeIndicator = useChartStore((s) => s.removeIndicator);
   const toggleHidden = useChartStore((s) => s.toggleHidden);
   const setSettingsTarget = useChartStore((s) => s.setSettingsTarget);
+
+  // Dynamic provider resolution
+  const provider = getProviderForSymbol(symbol);
 
   // Refs to avoid recreating subscribeClick on every tool change
   const toolRef = useRef(tool);
@@ -353,8 +355,16 @@ export function PriceChart({ symbol, timeframe }: Props) {
     chart.timeScale().subscribeVisibleLogicalRangeChange(logicalRangeHandler);
 
     // ResizeObserver — recompute pane offsets when chart container resizes
-    const ro = new ResizeObserver(() => {
-      requestAnimationFrame(() => recomputePaneOffsets());
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry && chartRef.current) {
+        const { width, height } = entry.contentRect;
+        // Optimization: use requestAnimationFrame to throttle resize calls
+        requestAnimationFrame(() => {
+          chartRef.current?.resize(Math.floor(width), Math.floor(height));
+          recomputePaneOffsets();
+        });
+      }
     });
     ro.observe(containerRef.current);
     recomputePaneOffsets();
@@ -590,7 +600,7 @@ export function PriceChart({ symbol, timeframe }: Props) {
       return markersPluginRef.current;
     }
 
-    if (dataSource !== "yahoo" || !showPortfolioOverlay) {
+    if (!showPortfolioOverlay) {
       if (markersPluginRef.current) {
         markersPluginRef.current.detach();
         markersPluginRef.current = null;
@@ -676,7 +686,7 @@ export function PriceChart({ symbol, timeframe }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [symbol, showPortfolioOverlay, dataSource]);
+  }, [symbol, showPortfolioOverlay]);
 
   // Cursor style when drawing tools are active + reset measure on tool change
   useEffect(() => {
@@ -819,7 +829,7 @@ export function PriceChart({ symbol, timeframe }: Props) {
 
     async function load() {
       try {
-        if (dataSource === "binance") {
+        if (provider === "binance") {
           const klines = await fetchKlines(symbol, timeframe, 1000);
           if (cancelled) return;
           applyCandles(klines);
@@ -865,7 +875,7 @@ export function PriceChart({ symbol, timeframe }: Props) {
             },
           });
         } else {
-          // Yahoo Finance — fetch historical klines server-side (no days= → full history)
+          // Yahoo Finance — fetch historical klines server-side
           const yahooInterval: "1d" | "1w" = timeframe === "1w" ? "1w" : "1d";
           const res = await fetch(
             `/api/klines?ticker=${encodeURIComponent(symbol)}&interval=${yahooInterval}`,
@@ -884,8 +894,6 @@ export function PriceChart({ symbol, timeframe }: Props) {
           }));
           applyCandles(klines);
 
-          // On initial load (per symbol), constrain visible range to the last 2 years.
-          // The user can pan/zoom left to explore the full historical data without a refetch.
           if (yahooFirstLoadRef.current && chartRef.current) {
             yahooFirstLoadRef.current = false;
             const now = Math.floor(Date.now() / 1000);
@@ -895,12 +903,10 @@ export function PriceChart({ symbol, timeframe }: Props) {
             try {
               chartRef.current.timeScale().setVisibleRange({ from: fromDateStr as any, to: toDateStr as any });
             } catch {
-              // setVisibleRange can fail if there is not enough data; fall back gracefully
               chartRef.current.timeScale().fitContent();
             }
           }
 
-          // Poll for live price every 60s
           const poll = async () => {
             if (cancelled) return;
             try {
@@ -930,10 +936,9 @@ export function PriceChart({ symbol, timeframe }: Props) {
     return () => {
       cancelled = true;
       if (unsub) unsub();
-      // Reset first-load flag so the next symbol load applies the visible range again
       yahooFirstLoadRef.current = true;
     };
-  }, [symbol, timeframe, dataSource]);
+  }, [symbol, timeframe, provider]);
 
   const greenOrRed = (n: number) =>
     n >= 0 ? "text-tv-green" : "text-tv-red";
@@ -999,7 +1004,7 @@ export function PriceChart({ symbol, timeframe }: Props) {
       {measureRender}
 
       {/* Setup legend — visible only for Yahoo Finance source when signals are loaded */}
-      {setupLegend.length > 0 && dataSource === 'yahoo' && (
+      {setupLegend.length > 0 && provider === 'yahoo' && (
         <div className="absolute bottom-0 left-0 right-0 flex flex-wrap gap-2 px-3 py-2 border-t border-white/[0.06] z-10">
           {setupLegend.map((setup) => {
             const isHidden = hiddenSetups.has(setup.id);
@@ -1046,7 +1051,7 @@ export function PriceChart({ symbol, timeframe }: Props) {
             <span className="uppercase text-tv-text-muted">{timeframe}</span>
             <span className="text-tv-text-muted">·</span>
             <span className="text-tv-text-muted">
-              {dataSource === "yahoo" ? "Yahoo Finance" : "Binance"}
+              {provider === "yahoo" ? "Yahoo Finance" : "Binance"}
             </span>
           </div>
           {hover && (

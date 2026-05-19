@@ -84,21 +84,16 @@ describe('fetchTickerSearch', () => {
 })
 
 describe('shouldFetchSearch', () => {
-  it('returns true when query length >= 2 and dataSource is yahoo', async () => {
+  it('returns true when query length >= 2', async () => {
     const { shouldFetchSearch } = await import('./SymbolSelector')
-    expect(shouldFetchSearch('ap', 'yahoo')).toBe(true)
-    expect(shouldFetchSearch('app', 'yahoo')).toBe(true)
+    expect(shouldFetchSearch('ap')).toBe(true)
+    expect(shouldFetchSearch('app')).toBe(true)
   })
 
   it('returns false when query is shorter than 2 chars', async () => {
     const { shouldFetchSearch } = await import('./SymbolSelector')
-    expect(shouldFetchSearch('a', 'yahoo')).toBe(false)
-    expect(shouldFetchSearch('', 'yahoo')).toBe(false)
-  })
-
-  it('returns false when dataSource is binance', async () => {
-    const { shouldFetchSearch } = await import('./SymbolSelector')
-    expect(shouldFetchSearch('app', 'binance')).toBe(false)
+    expect(shouldFetchSearch('a')).toBe(false)
+    expect(shouldFetchSearch('')).toBe(false)
   })
 })
 
