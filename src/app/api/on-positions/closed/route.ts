@@ -1,13 +1,12 @@
 import { NextResponse } from 'next/server'
-import { createServerClientInstance } from '@/lib/supabase-server'
+import { requireUser, isAuthFailure } from '@/lib/api-auth'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
-  const supabase = createServerClientInstance()
-  const { data: { session } } = await supabase.auth.getSession()
-  const user = session?.user
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const authResult = await requireUser()
+  if (isAuthFailure(authResult)) return authResult.error
+  const { supabase, user } = authResult
 
   const { data: closedTrades, error } = await supabase
     .from('on_closed_trades')

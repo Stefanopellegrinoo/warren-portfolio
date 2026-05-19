@@ -1,18 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClientInstance } from '@/lib/supabase-server'
 import { fetchQuotes } from '@/lib/yahoo-finance'
 import { fetchONQuotes } from '@/lib/data912-client'
 import { getCachedRoute, cacheRoute } from '@/lib/redis'
 import type { Position, ONPosition } from '@/types'
+import { requireUser, isAuthFailure } from '@/lib/api-auth'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   try {
-    const supabase = createServerClientInstance()
-    const { data: { session } } = await supabase.auth.getSession()
-    const user = session?.user
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const authResult = await requireUser()
+    if (isAuthFailure(authResult)) return authResult.error
+    const { supabase, user } = authResult
 
     const cacheKey = `statistics:combined:${user.id}`
     const cachedStats = await getCachedRoute(cacheKey)

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClientInstance } from '@/lib/supabase-server'
 import type { Cashflow } from '@/types'
+import { requireUser, isAuthFailure } from '@/lib/api-auth'
 
 const ALLOWED_CATEGORIES = [
   'Alquiler', 'Servicios', 'Supermercado', 'Transporte', 'Salud',
@@ -12,10 +12,9 @@ const ALLOWED_CATEGORIES = [
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
-  const supabase = createServerClientInstance()
-  const { data: { session } } = await supabase.auth.getSession()
-  const user = session?.user
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const authResult = await requireUser()
+  if (isAuthFailure(authResult)) return authResult.error
+  const { supabase, user } = authResult
 
   const { data, error, count } = await supabase
     .from('cashflow')
@@ -34,10 +33,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const supabase = createServerClientInstance()
-  const { data: { session } } = await supabase.auth.getSession()
-  const user = session?.user
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const authResult = await requireUser()
+  if (isAuthFailure(authResult)) return authResult.error
+  const { supabase, user } = authResult
 
   const body = await req.json()
 
@@ -76,10 +74,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const supabase = createServerClientInstance()
-  const { data: { session } } = await supabase.auth.getSession()
-  const user = session?.user
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const authResult = await requireUser()
+  if (isAuthFailure(authResult)) return authResult.error
+  const { supabase, user } = authResult
 
   const body = await req.json()
   const { id, status } = body
@@ -105,15 +102,14 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const supabase = createServerClientInstance()
-  const { data: { session } } = await supabase.auth.getSession()
-  const user = session?.user
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const authResult = await requireUser()
+  if (isAuthFailure(authResult)) return authResult.error
+  const { supabase, user } = authResult
 
   const { id } = await req.json()
   if (!id) return NextResponse.json({ error: 'ID requerido' }, { status: 400 })
 
-  const { error, count } = await supabase
+  const { error } = await supabase
     .from('cashflow')
     .delete()
     .eq('id', id)

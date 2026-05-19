@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { fetchQuotes, fetchQuotesWithFallback } from '@/lib/yahoo-finance'
-import { createServerClientInstance } from '@/lib/supabase-server'
+import { requireUser, isAuthFailure } from '@/lib/api-auth'
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
@@ -11,11 +11,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'tickers required' }, { status: 400 })
   }
 
-  const supabase = createServerClientInstance()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const authResult = await requireUser()
+  if (isAuthFailure(authResult)) return authResult.error
 
   try {
     let quotes = await fetchQuotes(tickers)

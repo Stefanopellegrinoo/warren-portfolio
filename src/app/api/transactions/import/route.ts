@@ -1,19 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClientInstance } from '@/lib/supabase-server'
 import { addImportJob } from '@/lib/queue'
 import { parseExcelTransactions, ExcelParseError } from '@/lib/excel-import'
 import { TransactionImportSchema } from '@/lib/schemas/transaction'
 import { validationErrorResponse } from '@/lib/api/validation'
 import type { TransactionInput } from '@/types'
+import { requireUser, isAuthFailure } from '@/lib/api-auth'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = createServerClientInstance()
-    const { data: { session } } = await supabase.auth.getSession()
-    const user = session?.user
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const authResult = await requireUser()
+    if (isAuthFailure(authResult)) return authResult.error
+    const { user } = authResult
 
     const contentType = req.headers.get('content-type') ?? ''
     let transactions: TransactionInput[] = []
@@ -29,7 +28,7 @@ export async function POST(req: NextRequest) {
           path: err.path.join('.'),
           message: err.message,
         })) || [{ message: 'Invalid request body' }]
-        
+
         return validationErrorResponse({
           status: 400,
           message: 'Validation failed',
@@ -48,7 +47,7 @@ export async function POST(req: NextRequest) {
         n.toLowerCase().includes('registro')) ?? workbook.SheetNames[0]
       const sheet = workbook.Sheets[sheetName]
       const data = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null }) as unknown[][]
-      
+
       try {
         transactions = parseExcelTransactions(data)
       } catch (error) {
@@ -77,9 +76,9 @@ export async function POST(req: NextRequest) {
     const replace = searchParams.get('replace') === 'true'
     const job = await addImportJob(user.id, transactions, replace)
 
-    return NextResponse.json({ 
+    return NextResponse.json({
       message: 'Importación iniciada en segundo plano',
-      jobId: job.id 
+      jobId: job.id
     }, { status: 202 })
 
   } catch (err: any) {
@@ -87,7 +86,7 @@ export async function POST(req: NextRequest) {
     if (err.status === 400) {
       return validationErrorResponse(err)
     }
-    
+
     console.error(err)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }

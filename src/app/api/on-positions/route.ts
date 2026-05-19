@@ -1,40 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClientInstance } from '@/lib/supabase-server'
 import { processONTransaction } from '@/lib/on-engine'
 import { invalidateUserCache } from '@/lib/redis'
 import { validateRequest, validateQueryParams, validationErrorResponse } from '@/lib/api/validation'
 import { ONTransactionSchema } from '@/lib/schemas/on'
 import { PaginationSchema, PaginatedResponse } from '@/lib/schemas/common'
 import type { ONPosition } from '@/types'
+import { requireUser, isAuthFailure } from '@/lib/api-auth'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(request: Request) {
-  const supabase = createServerClientInstance()
-  const { data: { session } } = await supabase.auth.getSession()
-  const user = session?.user
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const authResult = await requireUser()
+  if (isAuthFailure(authResult)) return authResult.error
+  const { supabase, user } = authResult
 
   try {
     // Validate request body
     const body = await validateRequest(ONTransactionSchema, request)
-    
+
     // Process the transaction
     const result = await processONTransaction(supabase, user.id, body)
-    
+
     // Invalidate Cache since portfolio mutated
     await invalidateUserCache(user.id)
-    
+
     return NextResponse.json(result, { status: 201 })
   } catch (error) {
     // Handle validation errors with proper type narrowing
     const err = error instanceof Error ? error : new Error(String(error))
     const validationError = error as { status?: number; message?: string }
-    
+
     if (validationError.status === 400) {
       return validationErrorResponse(validationError)
     }
-    
+
     // Handle other errors
     return NextResponse.json(
       { error: err.message || 'Unknown error' },
@@ -45,10 +44,9 @@ export async function POST(request: Request) {
 
 export async function GET(req: NextRequest) {
   try {
-    const supabase = createServerClientInstance()
-    const { data: { session } } = await supabase.auth.getSession()
-    const user = session?.user
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const authResult = await requireUser()
+    if (isAuthFailure(authResult)) return authResult.error
+    const { supabase, user } = authResult
 
     // Validate pagination params
     const { page, limit } = validateQueryParams(PaginationSchema, req.url)
@@ -80,11 +78,11 @@ export async function GET(req: NextRequest) {
     // Handle validation errors with proper type narrowing
     const error = err instanceof Error ? err : new Error(String(err))
     const validationError = err as { status?: number; message?: string }
-    
+
     if (validationError.status === 400) {
       return validationErrorResponse(validationError)
     }
-    
+
     console.error('[API] ON Positions error:', error.message)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }

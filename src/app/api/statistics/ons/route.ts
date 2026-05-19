@@ -1,17 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClientInstance } from '@/lib/supabase-server'
 import { fetchONQuotes } from '@/lib/data912-client'
 import { getCachedRoute, cacheRoute } from '@/lib/redis'
 import type { ONPosition, ONClosedTrade } from '@/types'
+import { requireUser, isAuthFailure } from '@/lib/api-auth'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   try {
-    const supabase = createServerClientInstance()
-    const { data: { session } } = await supabase.auth.getSession()
-    const user = session?.user
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const authResult = await requireUser()
+    if (isAuthFailure(authResult)) return authResult.error
+    const { supabase, user } = authResult
 
     // Check Cache First
     const cacheKey = `statistics:ons:${user.id}`
@@ -51,7 +50,7 @@ export async function GET(req: NextRequest) {
       const quote = quotes.get(pos.ticker)
       const market_value = quote ? quote.price * pos.quantity : 0
       const pnl = market_value - pos.total_invested
-      
+
       totalPortfolioValue += market_value
       openPnl += pnl
       if (pnl > 0) winningPositions++
@@ -79,11 +78,11 @@ export async function GET(req: NextRequest) {
     // All PnLs (for bar chart)
     const allPnLs = [
       ...enrichedPositions.map((p: any) => ({ ticker: p.ticker, pnl: p.pnl, pnl_pct: p.pnl_pct, status: 'OPEN' })),
-      ...(closed || []).map((t: ONClosedTrade) => ({ 
-        ticker: t.ticker, 
-        pnl: t.pnl, 
-        pnl_pct: t.pnl_pct, 
-        status: 'CLOSED' 
+      ...(closed || []).map((t: ONClosedTrade) => ({
+        ticker: t.ticker,
+        pnl: t.pnl,
+        pnl_pct: t.pnl_pct,
+        status: 'CLOSED'
       }))
     ].sort((a: any, b: any) => b.pnl - a.pnl)
 
@@ -93,7 +92,7 @@ export async function GET(req: NextRequest) {
     // Monthly Realized Returns
     const monthlyReturns: { month: string; pnl: number; trades: number }[] = []
     const monthMap = new Map<string, { pnl: number; trades: number }>()
-    
+
     for (const trade of (closed || [])) {
       const d = new Date(trade.close_date)
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -102,7 +101,7 @@ export async function GET(req: NextRequest) {
       existing.trades += 1
       monthMap.set(key, existing)
     }
-    
+
     const sortedMonths = Array.from(monthMap.entries()).sort((a, b) => a[0].localeCompare(b[0]))
     for (const [month, data] of sortedMonths) {
       monthlyReturns.push({ month, ...data })

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClientInstance } from '@/lib/supabase-server'
 import { calculatePositionLotsDefinition, enrichLots } from '@/lib/portfolio-engine'
 import { fetchQuotes } from '@/lib/yahoo-finance'
 import { cached } from '@/lib/cache'
+import { requireUser, isAuthFailure } from '@/lib/api-auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,10 +11,9 @@ export async function GET(
   { params }: { params: { ticker: string } }
 ) {
   try {
-    const supabase = createServerClientInstance()
-    const { data: { session } } = await supabase.auth.getSession()
-    const user = session?.user
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const authResult = await requireUser()
+    if (isAuthFailure(authResult)) return authResult.error
+    const { supabase, user } = authResult
 
     const ticker = params.ticker.toUpperCase().trim()
 
