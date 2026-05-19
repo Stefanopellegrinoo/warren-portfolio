@@ -61,7 +61,7 @@ export function useResizable(opts: UseResizableOptions): UseResizableReturn {
   function handlePointerMove(e: React.PointerEvent<HTMLDivElement>) {
     if (!isDragging.current) return;
     const delta = e.clientX - startX.current;
-    const newWidth = clampWidth(startWidth.current - delta, opts.min, opts.max);
+    const newWidth = clampWidth(startWidth.current + delta, opts.min, opts.max);
     setWidth(newWidth);
   }
 
