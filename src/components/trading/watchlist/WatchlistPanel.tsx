@@ -115,7 +115,11 @@ export function buildAddFromSearchPayload(
 const REFRESH_INTERVAL_MS = 60_000;
 const MAX_LISTS = 10;
 
-export function WatchlistPanel() {
+interface WatchlistPanelProps {
+  onSelectSymbol?: (ticker: string) => void;
+}
+
+export function WatchlistPanel({ onSelectSymbol }: WatchlistPanelProps = {}) {
   const [lists, setLists] = useState<Watchlist[]>([]);
   const [activeListId, setActiveListId] = useState<string | null>(null);
   const [items, setItems] = useState<WatchlistItem[]>([]);
@@ -614,7 +618,8 @@ export function WatchlistPanel() {
             {items.map((item) => (
               <div
                 key={item.id}
-                className="group grid grid-cols-[1fr_auto_auto] items-center gap-2 border-b border-tv-border px-3 py-1.5 text-xs"
+                onClick={() => onSelectSymbol?.(item.symbol)}
+                className="group grid grid-cols-[1fr_auto_auto] items-center gap-2 border-b border-tv-border px-3 py-1.5 text-xs cursor-pointer hover:bg-tv-panel-hover"
               >
                 <div className="flex flex-col gap-0.5">
                   <span className="font-semibold text-tv-text">{item.symbol}</span>

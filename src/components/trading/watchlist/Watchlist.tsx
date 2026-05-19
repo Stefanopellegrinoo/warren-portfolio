@@ -15,7 +15,11 @@ interface Row {
   pct: number;
 }
 
-export function Watchlist() {
+interface WatchlistProps {
+  onSelectSymbol?: (ticker: string) => void;
+}
+
+export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
   const watchlist = useChartStore((s) => s.watchlist);
   const symbol = useChartStore((s) => s.symbol);
   const setSymbol = useChartStore((s) => s.setSymbol);
@@ -110,7 +114,7 @@ export function Watchlist() {
             return (
               <div
                 key={s}
-                onClick={() => setSymbol(s)}
+                onClick={() => { setSymbol(s); onSelectSymbol?.(s); }}
                 className={cn(
                   "group grid cursor-pointer grid-cols-[1fr_auto_auto] items-center gap-2 px-3 py-1.5 text-xs transition-colors",
                   "hover:bg-tv-panel-hover",
