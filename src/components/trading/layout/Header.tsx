@@ -17,7 +17,11 @@ const NAV = [
   { href: "/strategies", icon: BookOpen,          label: "Estrategias" },
 ];
 
-export function Header() {
+interface HeaderProps {
+  onSymbolSelect?: () => void;
+}
+
+export function Header({ onSymbolSelect }: HeaderProps = {}) {
   const dataSource = useChartStore((s) => s.dataSource);
   const setDataSource = useChartStore((s) => s.setDataSource);
   const showPortfolioOverlay = useChartStore((s) => s.showPortfolioOverlay);
@@ -35,10 +39,10 @@ export function Header() {
           <span className="text-sm font-bold tracking-tight text-white">WARREN</span>
         </div>
 
-        <Separator orientation="vertical" className="h-6 bg-tv-border" />
+        <Separator orientation="vertical" className="hidden md:block h-6 bg-tv-border" />
 
         {/* DataSource toggle */}
-        <div className="flex items-center rounded bg-tv-bg p-0.5 text-[11px] font-semibold">
+        <div className="hidden md:flex items-center rounded bg-tv-bg p-0.5 text-[11px] font-semibold">
           <button
             type="button"
             onClick={() => setDataSource("binance")}
@@ -65,8 +69,8 @@ export function Header() {
           </button>
         </div>
 
-        <Separator orientation="vertical" className="h-6 bg-tv-border" />
-        <SymbolSelector />
+        <Separator orientation="vertical" className="hidden md:block h-6 bg-tv-border" />
+        <SymbolSelector onSymbolSelect={onSymbolSelect} />
         <Separator orientation="vertical" className="h-6 bg-tv-border" />
         <TimeframeSelector />
         <Separator orientation="vertical" className="mx-1 h-6 bg-tv-border" />
