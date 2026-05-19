@@ -42,6 +42,24 @@ interface SignalsResponse {
   signals: Signal[]
 }
 
+interface PaperTrade {
+  id: string
+  setup_id: string
+  setup_name: string
+  ticker: string
+  status: 'OPEN' | 'CLOSED'
+  open_price: number
+  close_price: number | null
+  open_at: string
+  close_at: string | null
+  close_reason: 'SIGNAL' | 'STOP_LOSS' | 'TAKE_PROFIT' | null
+  pnl_pct: number | null
+}
+
+interface PaperTradesResponse {
+  trades: PaperTrade[]
+}
+
 interface Strategy {
   id: string
   name: string
@@ -304,11 +322,169 @@ function SignalCard({ signal }: { signal: Signal }) {
   )
 }
 
+// ─── Tab: Paper Trades ───────────────────────────────────────────────────────
+
+function PnlPctCell({ value }: { value: number | null }) {
+  if (value === null) return <span className="text-slate-500">—</span>
+  const color = value >= 0 ? 'text-tv-green' : 'text-tv-red'
+  const prefix = value >= 0 ? '+' : ''
+  return <span className={color}>{prefix}{value.toFixed(2)}%</span>
+}
+
+function CloseReasonBadge({ value }: { value: 'SIGNAL' | 'STOP_LOSS' | 'TAKE_PROFIT' | null }) {
+  if (!value) return <span className="text-slate-500">—</span>
+  const map: Record<string, { label: string; className: string }> = {
+    SIGNAL: { label: 'Signal', className: 'tag-neutral' },
+    STOP_LOSS: { label: 'Stop Loss', className: 'bg-tv-red/10 text-tv-red border border-tv-red/30 px-2 py-0.5 rounded-full text-[10px] font-mono' },
+    TAKE_PROFIT: { label: 'Take Profit', className: 'tag-positive' },
+  }
+  const { label, className } = map[value] ?? { label: value, className: 'tag-neutral' }
+  return <span className={`${className} text-[10px]`}>{label}</span>
+}
+
+function PaperTradesTab({
+  trades,
+  loading,
+  error,
+  setups,
+}: {
+  trades: PaperTrade[]
+  loading: boolean
+  error: boolean
+  setups: Array<{ id: string; name: string; active: boolean }>
+}) {
+  const [setupFilter, setSetupFilter] = useState<string>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'OPEN' | 'CLOSED'>('all')
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <div className="w-8 h-8 rounded-full border-2 border-amber border-t-transparent animate-spin" />
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="glass rounded-2xl p-8 border border-white/[0.08] flex items-center justify-center">
+        <p className="text-tv-red font-mono text-sm">Error al cargar paper trades.</p>
+      </div>
+    )
+  }
+
+  const filtered = trades.filter((t) => {
+    if (setupFilter !== 'all' && t.setup_id !== setupFilter) return false
+    if (statusFilter !== 'all' && t.status !== statusFilter) return false
+    return true
+  })
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-4">
+        {setups.length > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-slate-500 text-[11px] font-mono uppercase tracking-wider">Setup</span>
+            <select
+              value={setupFilter}
+              onChange={(e) => setSetupFilter(e.target.value)}
+              className="bg-white/[0.04] border border-white/[0.08] rounded-lg text-slate-300 text-[11px] font-mono px-2.5 py-1 focus:outline-none focus:border-amber/40"
+            >
+              <option value="all">Todos</option>
+              {setups.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div className="flex items-center gap-2">
+          <span className="text-slate-500 text-[11px] font-mono uppercase tracking-wider">Estado</span>
+          <PillSelector
+            options={[
+              { label: 'Todos', value: 'all' as const },
+              { label: 'Abierto', value: 'OPEN' as const },
+              { label: 'Cerrado', value: 'CLOSED' as const },
+            ]}
+            value={statusFilter}
+            onChange={setStatusFilter}
+          />
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="glass rounded-2xl p-8 border border-white/[0.08] flex flex-col items-center gap-2 text-center">
+          <p className="text-slate-300 font-display font-600 text-sm">Sin paper trades para los filtros seleccionados.</p>
+          <p className="text-slate-500 font-mono text-xs">Los paper trades se generan automáticamente cuando las señales se abren y cierran.</p>
+        </div>
+      ) : (
+        <div className="glass rounded-2xl border border-white/[0.08] overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr>
+                <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-left px-5 pt-4">Setup</th>
+                <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-left px-3 pt-4">Ticker</th>
+                <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-left px-3 pt-4">Estado</th>
+                <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-right px-3 pt-4">Apertura</th>
+                <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-right px-3 pt-4">Cierre</th>
+                <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-right px-3 pt-4">Precio entrada</th>
+                <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-right px-3 pt-4">Precio salida</th>
+                <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-right px-3 pt-4">P&amp;L %</th>
+                <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-right px-5 pt-4">Razón cierre</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((trade) => (
+                <tr key={trade.id}>
+                  <td className="py-3 border-t border-white/[0.06] px-5">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: getSetupColor(trade.setup_id) }}
+                      />
+                      <span className="text-white text-sm">{trade.setup_name}</span>
+                    </div>
+                  </td>
+                  <td className="py-3 border-t border-white/[0.06] px-3 font-mono text-slate-300">
+                    {trade.ticker}
+                  </td>
+                  <td className="py-3 border-t border-white/[0.06] px-3">
+                    <span className={trade.status === 'OPEN' ? 'tag-positive text-[10px]' : 'tag-neutral text-[10px]'}>
+                      {trade.status === 'OPEN' ? 'Abierto' : 'Cerrado'}
+                    </span>
+                  </td>
+                  <td className="py-3 border-t border-white/[0.06] px-3 text-right font-mono text-slate-300 text-[11px]">
+                    {new Date(trade.open_at).toLocaleDateString('es-AR')}
+                  </td>
+                  <td className="py-3 border-t border-white/[0.06] px-3 text-right font-mono text-slate-300 text-[11px]">
+                    {trade.close_at ? new Date(trade.close_at).toLocaleDateString('es-AR') : <span className="text-slate-500">—</span>}
+                  </td>
+                  <td className="py-3 border-t border-white/[0.06] px-3 text-right font-mono text-white">
+                    ${trade.open_price.toFixed(2)}
+                  </td>
+                  <td className="py-3 border-t border-white/[0.06] px-3 text-right font-mono text-white">
+                    {trade.close_price !== null ? `$${trade.close_price.toFixed(2)}` : <span className="text-slate-500">—</span>}
+                  </td>
+                  <td className="py-3 border-t border-white/[0.06] px-3 text-right font-mono">
+                    <PnlPctCell value={trade.pnl_pct} />
+                  </td>
+                  <td className="py-3 border-t border-white/[0.06] px-5 text-right">
+                    <CloseReasonBadge value={trade.close_reason} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 type Period = '7d' | '30d' | '90d' | '1y'
 type SignalType = 'all' | 'BUY' | 'SELL'
-type Tab = 'comparison' | 'signals'
+type Tab = 'comparison' | 'signals' | 'paper-trades'
 
 const PERIOD_OPTIONS: { label: string; value: Period }[] = [
   { label: '7d', value: '7d' },
@@ -330,10 +506,13 @@ export default function PerformancePage() {
   const [strategy, setStrategy] = useState<Strategy | null>(null)
   const [performance, setPerformance] = useState<PerformanceResponse | null>(null)
   const [signals, setSignals] = useState<Signal[]>([])
+  const [paperTrades, setPaperTrades] = useState<PaperTrade[]>([])
 
   const [loadingStrategy, setLoadingStrategy] = useState(true)
   const [loadingPerformance, setLoadingPerformance] = useState(true)
   const [loadingSignals, setLoadingSignals] = useState(true)
+  const [loadingPaperTrades, setLoadingPaperTrades] = useState(false)
+  const [errorPaperTrades, setErrorPaperTrades] = useState(false)
 
   const [activeTab, setActiveTab] = useState<Tab>('comparison')
   const [period, setPeriod] = useState<Period>('30d')
@@ -378,9 +557,32 @@ export default function PerformancePage() {
     }
   }, [strategyId, period, ticker, signalType])
 
+  const loadPaperTrades = useCallback(async () => {
+    try {
+      setLoadingPaperTrades(true)
+      setErrorPaperTrades(false)
+      const res = await fetch(`/api/strategies/${strategyId}/paper-trades?status=OPEN`)
+      if (!res.ok) { setErrorPaperTrades(true); return }
+      const openData = await res.json() as PaperTradesResponse
+
+      const res2 = await fetch(`/api/strategies/${strategyId}/paper-trades?status=CLOSED`)
+      if (!res2.ok) { setErrorPaperTrades(true); return }
+      const closedData = await res2.json() as PaperTradesResponse
+
+      setPaperTrades([...openData.trades, ...closedData.trades])
+    } catch {
+      setErrorPaperTrades(true)
+    } finally {
+      setLoadingPaperTrades(false)
+    }
+  }, [strategyId])
+
   useEffect(() => { loadStrategy() }, [loadStrategy])
   useEffect(() => { loadPerformance() }, [loadPerformance])
   useEffect(() => { loadSignals() }, [loadSignals])
+  useEffect(() => {
+    if (activeTab === 'paper-trades') { loadPaperTrades() }
+  }, [activeTab, loadPaperTrades])
 
   const isLoading = loadingStrategy || loadingPerformance
 
@@ -461,6 +663,16 @@ export default function PerformancePage() {
           >
             Señales
           </button>
+          <button
+            onClick={() => setActiveTab('paper-trades')}
+            className={`pb-3 text-sm font-display font-600 transition-colors ${
+              activeTab === 'paper-trades'
+                ? 'text-white border-b-2 border-tv-green -mb-px'
+                : 'text-slate-400 hover:text-slate-300'
+            }`}
+          >
+            Paper Trades
+          </button>
         </div>
 
         {/* Tab Content */}
@@ -476,6 +688,15 @@ export default function PerformancePage() {
             </div>
             <SignalsTab signals={signals} loading={loadingSignals} />
           </div>
+        )}
+
+        {activeTab === 'paper-trades' && (
+          <PaperTradesTab
+            trades={paperTrades}
+            loading={loadingPaperTrades}
+            error={errorPaperTrades}
+            setups={strategy?.indicator_setups ?? []}
+          />
         )}
 
       </div>

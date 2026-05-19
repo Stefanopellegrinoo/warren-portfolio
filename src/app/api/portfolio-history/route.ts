@@ -23,7 +23,6 @@ export async function GET(req: NextRequest) {
     const cacheKey = `history:${user.id}:${daysParam}`
     const cachedHistory = await getCachedRoute(cacheKey)
     if (cachedHistory) {
-      console.log(`[Cache Hit] Portfolio History for ${user.id} (${daysParam} days)`)
       return NextResponse.json(cachedHistory)
     }
 

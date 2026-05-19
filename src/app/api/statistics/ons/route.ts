@@ -16,7 +16,6 @@ export async function GET(req: NextRequest) {
     const cacheKey = `statistics:ons:${user.id}`
     const cachedStats = await getCachedRoute(cacheKey)
     if (cachedStats) {
-      console.log(`[Cache Hit] ON Statistics for ${user.id}`)
       return NextResponse.json(cachedStats)
     }
 
