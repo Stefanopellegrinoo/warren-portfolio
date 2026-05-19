@@ -517,7 +517,7 @@ export function WatchlistPanel() {
         </div>
       ) : items.length === 0 ? (
         <div className="flex flex-1 items-center justify-center p-4 text-center text-xs text-tv-text-muted">
-          No symbols yet.
+          No symbols yet. Search and add tickers above.
         </div>
       ) : (
         <ScrollArea className="flex-1">

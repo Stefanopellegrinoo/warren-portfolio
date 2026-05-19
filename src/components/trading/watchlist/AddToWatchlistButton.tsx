@@ -137,6 +137,7 @@ export function AddToWatchlistButton({
       });
       if (res.ok || res.status === 409) {
         setAddedListIds((prev) => new Set(prev).add(listId));
+        setPopoverOpen(false);
         onAdded?.(listId);
       }
     } catch {
