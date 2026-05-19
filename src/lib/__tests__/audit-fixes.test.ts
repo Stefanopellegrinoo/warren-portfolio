@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { calculatePortfolioSummary } from '../portfolio-engine'
+import { calculatePortfolioSummary, splitTickersByAssetType } from '../portfolio-engine'
 import type { Position, ONPosition, Quote } from '@/types'
 
 describe('Audit Fixes Verification', () => {
@@ -50,19 +50,70 @@ describe('Audit Fixes Verification', () => {
 
   describe('Portfolio Engine - processTransactionBatch sorting', () => {
     it('sorts transactions chronologically before processing', async () => {
-      // This is a partial test since we can't easily run the full RPC without Supabase
-      // but we can check the sorting logic if we were to expose it or just trust the array sort
       const inputs = [
         { date: '2024-01-05', ticker: 'AAPL', operation: 'VENTA', quantity: 5, price: 160 },
         { date: '2024-01-01', ticker: 'AAPL', operation: 'COMPRA', quantity: 10, price: 150 }
       ]
-      
-      const sorted = [...inputs].sort((a, b) => 
+      const sorted = [...inputs].sort((a, b) =>
         new Date(a.date).getTime() - new Date(b.date).getTime()
       )
-      
       expect(sorted[0].date).toBe('2024-01-01')
       expect(sorted[1].date).toBe('2024-01-05')
+    })
+  })
+
+  describe('splitTickersByAssetType — C1 fix', () => {
+    it('routes ON tickers separately from stock tickers', () => {
+      const inputs = [
+        { ticker: 'AMZN', assetType: 'ACCION' },
+        { ticker: 'YMCAD', assetType: 'ON' },
+        { ticker: 'MELI', assetType: 'CEDEAR' },
+        { ticker: 'PBRD', assetType: 'ON' },
+      ]
+      const { stockTickers, onTickers } = splitTickersByAssetType(inputs)
+      expect(stockTickers).toEqual(['AMZN', 'MELI'])
+      expect(onTickers).toEqual(['YMCAD', 'PBRD'])
+    })
+
+    it('defaults to ACCION when assetType is absent', () => {
+      const inputs = [
+        { ticker: 'AMZN' },
+        { ticker: 'PBRD', assetType: 'ON' },
+      ]
+      const { stockTickers, onTickers } = splitTickersByAssetType(inputs)
+      expect(stockTickers).toEqual(['AMZN'])
+      expect(onTickers).toEqual(['PBRD'])
+    })
+
+    it('normalizes ticker casing and deduplicates', () => {
+      const inputs = [
+        { ticker: 'amzn', assetType: 'ACCION' },
+        { ticker: 'AMZN', assetType: 'ACCION' },
+        { ticker: 'YMCAD', assetType: 'ON' },
+      ]
+      const { stockTickers, onTickers } = splitTickersByAssetType(inputs)
+      expect(stockTickers).toEqual(['AMZN'])
+      expect(onTickers).toEqual(['YMCAD'])
+    })
+
+    it('returns all stock tickers when no ONs present', () => {
+      const inputs = [
+        { ticker: 'AMZN', assetType: 'ACCION' },
+        { ticker: 'MELI', assetType: 'CEDEAR' },
+      ]
+      const { stockTickers, onTickers } = splitTickersByAssetType(inputs)
+      expect(stockTickers).toEqual(['AMZN', 'MELI'])
+      expect(onTickers).toEqual([])
+    })
+
+    it('returns all ON tickers when no stocks present', () => {
+      const inputs = [
+        { ticker: 'YMCAD', assetType: 'ON' },
+        { ticker: 'PBRD', assetType: 'ON' },
+      ]
+      const { stockTickers, onTickers } = splitTickersByAssetType(inputs)
+      expect(stockTickers).toEqual([])
+      expect(onTickers).toEqual(['YMCAD', 'PBRD'])
     })
   })
 })
