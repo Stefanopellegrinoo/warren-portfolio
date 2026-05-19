@@ -446,6 +446,19 @@ export async function processTransactionBatch(
 }> {
   assertUserId(userId)
 
+  if (isRedisReady()) {
+    const redis = getRedis()
+    const existingLock = await redis?.get(`import-lock:${userId}`)
+    if (existingLock) {
+      return {
+        success: false,
+        imported: 0,
+        failed: inputs.length,
+        errors: [{ line: 0, ticker: 'BATCH', error: 'Import already in progress. Please wait.' }],
+      }
+    }
+  }
+
   try {
     if (onProgress) await onProgress(10, 'Validating and sorting transactions...')
     const sortedInputs = [...inputs].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())

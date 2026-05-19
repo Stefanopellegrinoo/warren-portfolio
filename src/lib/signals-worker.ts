@@ -39,15 +39,6 @@ interface PaperTradeRow {
   status: 'OPEN' | 'CLOSED'
 }
 
-interface SetupPerformanceRow {
-  setup_id: string
-  ticker: string
-  total_trades: number
-  profitable_trades: number
-  hit_rate: number
-  avg_return_pct: number | null
-  avg_duration_days: number | null
-}
 
 const KLINES_LOOKBACK_DAYS = 365
 const MIN_KLINES = 30
@@ -393,54 +384,22 @@ async function updateSetupPerformance(
   open_at: string,
   close_at: string
 ): Promise<void> {
-  const { data: current } = await supabase
-    .from('setup_performance')
-    .select('*')
-    .eq('setup_id', setup.id)
-    .eq('ticker', ticker)
-    .maybeSingle()
-
   const durationDays =
     (new Date(close_at).getTime() - new Date(open_at).getTime()) /
     (1000 * 60 * 60 * 24)
-  const isProfitable = pnl_pct > 0
 
-  if (!current) {
-    await supabase.from('setup_performance').insert({
-      setup_id: setup.id,
-      strategy_id: setup.strategy_id,
-      user_id: setup.user_id,
-      ticker,
-      total_trades: 1,
-      profitable_trades: isProfitable ? 1 : 0,
-      hit_rate: isProfitable ? 1 : 0,
-      avg_return_pct: pnl_pct,
-      avg_duration_days: durationDays,
-      updated_at: new Date().toISOString(),
-    })
-    return
+  const { error } = await supabase.rpc('update_setup_performance_atomic', {
+    p_setup_id: setup.id,
+    p_strategy_id: setup.strategy_id,
+    p_user_id: setup.user_id,
+    p_ticker: ticker,
+    p_pnl_pct: pnl_pct,
+    p_duration_days: durationDays,
+  })
+
+  if (error) {
+    throw new Error(`update_setup_performance_atomic failed: ${error.message}`)
   }
-
-  const previous = current as SetupPerformanceRow
-  const n = previous.total_trades + 1
-  const profitable = previous.profitable_trades + (isProfitable ? 1 : 0)
-  const avgReturn =
-    ((previous.avg_return_pct ?? 0) * previous.total_trades + pnl_pct) / n
-  const avgDuration =
-    ((previous.avg_duration_days ?? 0) * previous.total_trades + durationDays) / n
-
-  await supabase
-    .from('setup_performance')
-    .update({
-      total_trades: n,
-      profitable_trades: profitable,
-      hit_rate: profitable / n,
-      avg_return_pct: avgReturn,
-      avg_duration_days: avgDuration,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('setup_id', setup.id)
-    .eq('ticker', ticker)
 }
 
 function buildMetadata(state: ComputedState | null): Record<string, unknown> {
