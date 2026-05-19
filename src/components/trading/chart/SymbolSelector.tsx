@@ -69,7 +69,11 @@ export function debounce<T extends (...args: any[]) => void>(
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function SymbolSelector() {
+interface SymbolSelectorProps {
+  onSymbolSelect?: () => void;
+}
+
+export function SymbolSelector({ onSymbolSelect }: SymbolSelectorProps = {}) {
   const symbol = useChartStore((s) => s.symbol);
   const setSymbol = useChartStore((s) => s.setSymbol);
   const addToWatchlist = useChartStore((s) => s.addToWatchlist);
@@ -146,6 +150,7 @@ export function SymbolSelector() {
     if (dataSource === "binance") addToWatchlist(ticker);
     setOpen(false);
     setQuery("");
+    onSymbolSelect?.();
   }
 
   function handleYahooKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {

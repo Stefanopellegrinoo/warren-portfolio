@@ -28,7 +28,7 @@ export default function TradingPage() {
     <>
       {/* Mobile layout */}
       <div className="flex h-[100dvh] flex-col md:hidden">
-        <Header />
+        <Header onSymbolSelect={() => setMobileView('chart')} />
         <main className="min-h-0 flex-1 overflow-hidden">
           {mobileView === 'chart' ? (
             <PriceChart symbol={symbol} timeframe={timeframe} />
