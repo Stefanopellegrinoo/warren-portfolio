@@ -33,6 +33,7 @@ export async function GET(req: NextRequest) {
         return {
           ticker: q.ticker,
           price: q.price,
+          change: q.change ?? 0,
           change_pct: q.changePercent,
           last_updated: q.updatedAt,
         }

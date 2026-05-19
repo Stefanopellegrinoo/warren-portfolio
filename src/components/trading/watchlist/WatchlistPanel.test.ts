@@ -11,6 +11,9 @@ import {
   buildRenamePayload,
   isLastList,
   buildDeleteItemUrl,
+  // New search utility exports
+  shouldSearch,
+  buildAddFromSearchPayload,
 } from './WatchlistPanel'
 import type { Watchlist } from '@/app/api/watchlist/lists/route'
 
@@ -165,6 +168,39 @@ describe('buildDeleteItemUrl', () => {
 
   it('URL-encodes special characters', () => {
     expect(buildDeleteItemUrl('GGAL.BA', 'list-1')).toBe('/api/watchlist?symbol=GGAL.BA&watchlistId=list-1')
+  })
+})
+
+// ── New search utility tests ───────────────────────────────────────────────
+
+describe('shouldSearch', () => {
+  it('returns false for empty string', () => {
+    expect(shouldSearch('')).toBe(false)
+  })
+
+  it('returns false for single character', () => {
+    expect(shouldSearch('a')).toBe(false)
+  })
+
+  it('returns true for two characters', () => {
+    expect(shouldSearch('ab')).toBe(true)
+  })
+
+  it('returns true for longer query like "AAPL"', () => {
+    expect(shouldSearch('AAPL')).toBe(true)
+  })
+})
+
+describe('buildAddFromSearchPayload', () => {
+  it('returns object with symbol and watchlistId', () => {
+    const result = buildAddFromSearchPayload('AAPL', 'list-1')
+    expect(result).toEqual({ symbol: 'AAPL', watchlistId: 'list-1' })
+  })
+
+  it('passes through exact values without modification', () => {
+    const result = buildAddFromSearchPayload('GGAL.BA', 'list-abc-123')
+    expect(result.symbol).toBe('GGAL.BA')
+    expect(result.watchlistId).toBe('list-abc-123')
   })
 })
 

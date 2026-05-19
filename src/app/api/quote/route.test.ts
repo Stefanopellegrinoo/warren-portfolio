@@ -64,6 +64,27 @@ describe('GET /api/quote', () => {
     expect(data[0].price).toBe(150.5)
   })
 
+  it('includes the change field in the response', async () => {
+    const { GET } = await import('./route')
+    mockGetQuote.mockResolvedValue(fakeQuote)
+
+    const res = await GET(makeRequest({ ticker: 'AAPL' }))
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(typeof data[0].change).toBe('number')
+    expect(data[0].change).toBe(1.2)
+  })
+
+  it('returns change: 0 when provider returns undefined change', async () => {
+    const { GET } = await import('./route')
+    const quoteWithoutChange = { ...fakeQuote, change: undefined }
+    mockGetQuote.mockResolvedValue(quoteWithoutChange)
+
+    const res = await GET(makeRequest({ ticker: 'AAPL' }))
+    const data = await res.json()
+    expect(data[0].change).toBe(0)
+  })
+
   it('returns 400 when no ticker provided', async () => {
     const { GET } = await import('./route')
     const res = await GET(makeRequest({}))

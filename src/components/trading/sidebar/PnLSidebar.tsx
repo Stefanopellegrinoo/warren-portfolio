@@ -10,6 +10,43 @@ interface QuoteResult {
   ticker: string;
   price: number | null;
   change_pct: number | null;
+  change: number;
+}
+
+// ── Pure utility exports (exported for unit testing) ──────────────────────────
+
+/**
+ * Computes daily P&L as sum of (change * quantity) across all positions.
+ */
+export function calcDayPnL(
+  positions: Position[],
+  changes: Map<string, number>
+): number {
+  return positions.reduce(
+    (acc, p) => acc + (changes.get(p.ticker) ?? 0) * p.quantity,
+    0
+  );
+}
+
+/**
+ * Returns true when at least one ticker in the changes map has a non-zero value.
+ */
+export function hasDayData(changes: Map<string, number>): boolean {
+  if (changes.size === 0) return false;
+  return [...changes.values()].some((v) => v !== 0);
+}
+
+/**
+ * Computes daily P&L percentage.
+ * Returns null when totalPortfolio - dayPnL === 0 to avoid division by zero.
+ */
+export function calcDayPnLPct(
+  dayPnL: number,
+  totalPortfolio: number
+): number | null {
+  const base = totalPortfolio - dayPnL;
+  if (base === 0) return null;
+  return (dayPnL / base) * 100;
 }
 
 type LoadState = "idle" | "loading" | "error";
@@ -32,6 +69,7 @@ export function PnLSidebar() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [cashBalance, setCashBalance] = useState<number | null>(null);
   const [prices, setPrices] = useState<Map<string, number>>(new Map());
+  const [changes, setChanges] = useState<Map<string, number>>(new Map());
   const [ratios, setRatios] = useState<Map<string, number>>(new Map());
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [reloadKey, setReloadKey] = useState(0);
@@ -65,6 +103,13 @@ export function PnLSidebar() {
         const next = new Map(prev);
         data.forEach((q) => {
           if (q.price !== null) next.set(q.ticker, q.price);
+        });
+        return next;
+      });
+      setChanges((prev) => {
+        const next = new Map(prev);
+        data.forEach((q) => {
+          next.set(q.ticker, q.change ?? 0);
         });
         return next;
       });
@@ -131,6 +176,10 @@ export function PnLSidebar() {
     const price = livePrice ?? pos.current_price ?? 0;
     return acc + price * pos.quantity;
   }, 0);
+
+  const dayPnL = calcDayPnL(positions, changes);
+  const hasDayPnL = hasDayData(changes);
+  const dayPnLPct = calcDayPnLPct(dayPnL, totalPortfolio);
 
   return (
     <div className="flex h-full flex-col">
@@ -230,6 +279,22 @@ export function PnLSidebar() {
             {formatUSDCompact(totalPortfolio)}
           </span>
         </div>
+        {hasDayPnL && (
+          <div className="mt-1 flex items-center justify-between text-xs">
+            <span className="text-tv-text-muted">Day</span>
+            <span
+              className={cn(
+                "tabular-nums font-semibold",
+                dayPnL > 0 ? "text-tv-green" : dayPnL < 0 ? "text-tv-red" : "text-tv-text-muted"
+              )}
+            >
+              {dayPnL >= 0 ? "+" : ""}
+              {formatUSDCompact(dayPnL)}
+              {dayPnLPct !== null &&
+                ` (${dayPnLPct >= 0 ? "+" : ""}${dayPnLPct.toFixed(2)}%)`}
+            </span>
+          </div>
+        )}
         {cashBalance !== null && (
           <div className="mt-1 flex items-center justify-between text-xs">
             <span className="text-tv-text-muted">Cash</span>

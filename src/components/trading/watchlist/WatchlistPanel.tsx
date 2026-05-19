@@ -4,8 +4,11 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { X, Plus, Pencil, Trash2, Check, XCircle } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { debounce, fetchTickerSearch } from "@/components/trading/chart/SymbolSelector";
+import { AddToWatchlistButton } from "@/components/trading/watchlist/AddToWatchlistButton";
 import type { WatchlistItem } from "@/app/api/watchlist/route";
 import type { Watchlist } from "@/app/api/watchlist/lists/route";
+import type { SearchResult } from "@/lib/market-data/types";
 
 // ── Pure utility exports (exported for unit testing) ──────────────────────────
 
@@ -89,6 +92,24 @@ export function buildDeleteItemUrl(symbol: string, watchlistId: string): string 
   return `/api/watchlist?symbol=${encodeURIComponent(symbol)}&watchlistId=${encodeURIComponent(watchlistId)}`;
 }
 
+/**
+ * Returns true when the search query is long enough to trigger a fetch.
+ * Minimum 2 characters required.
+ */
+export function shouldSearch(q: string): boolean {
+  return q.length >= 2;
+}
+
+/**
+ * Build the POST body payload for adding a symbol found via search.
+ */
+export function buildAddFromSearchPayload(
+  symbol: string,
+  watchlistId: string
+): { symbol: string; watchlistId: string } {
+  return { symbol, watchlistId };
+}
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
 const REFRESH_INTERVAL_MS = 60_000;
@@ -115,6 +136,12 @@ export function WatchlistPanel() {
   // Delete confirmation
   const [deletingListId, setDeletingListId] = useState<string | null>(null);
   const [isDeletingRequest, setIsDeletingRequest] = useState(false);
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   // Race-guard counter: incremented on each fetchItems call; response is discarded if stale
   const reqId = useRef(0);
@@ -184,6 +211,28 @@ export function WatchlistPanel() {
     }, REFRESH_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [activeListId, fetchItems]);
+
+  // ── Debounced ticker search ────────────────────────────────────────────────────
+
+  const debouncedSearch = useRef(
+    debounce(async (q: string) => {
+      setIsSearching(true);
+      const results = await fetchTickerSearch(q);
+      setSearchResults(results);
+      setIsSearching(false);
+      setSearchOpen(results.length > 0);
+    }, 300)
+  ).current;
+
+  useEffect(() => {
+    if (!shouldSearch(searchQuery)) {
+      setSearchResults([]);
+      setSearchOpen(false);
+      setIsSearching(false);
+      return;
+    }
+    debouncedSearch(searchQuery);
+  }, [searchQuery, debouncedSearch]);
 
   // ── Delete item ───────────────────────────────────────────────────────────────
 
@@ -503,6 +552,46 @@ export function WatchlistPanel() {
             </div>
           </div>
         )}
+        {/* Search row */}
+        <div className="px-2 pb-2 pt-1">
+          <div className="relative">
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={activeListId ? "Search tickers..." : "Create a list first"}
+              disabled={!activeListId}
+              aria-label="Search tickers to add to watchlist"
+              className="w-full rounded bg-tv-bg-secondary px-2 py-1 text-xs text-tv-text placeholder-tv-text-muted outline-none border border-tv-border focus:border-tv-green disabled:opacity-50"
+            />
+            {searchOpen && searchResults.length > 0 && (
+              <div className="absolute left-0 right-0 top-full z-50 mt-1 rounded border border-tv-border bg-tv-bg-secondary shadow-lg max-h-48 overflow-y-auto">
+                {isSearching && (
+                  <div className="px-2 py-1 text-xs text-tv-text-muted">Searching...</div>
+                )}
+                {searchResults.map((r) => (
+                  <div
+                    key={r.symbol}
+                    className="flex items-center justify-between px-2 py-1 hover:bg-tv-panel-hover"
+                  >
+                    <div>
+                      <span className="text-xs font-bold text-tv-text">{r.symbol}</span>
+                      <span className="ml-1 text-xs text-tv-text-muted">{r.shortname}</span>
+                    </div>
+                    <AddToWatchlistButton
+                      symbol={r.symbol}
+                      watchlistId={activeListId!}
+                      onAdded={() => {
+                        fetchItems(activeListId!);
+                        setSearchQuery("");
+                        setSearchOpen(false);
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* ── Symbol list ────────────────────────────────────────────────────── */}
