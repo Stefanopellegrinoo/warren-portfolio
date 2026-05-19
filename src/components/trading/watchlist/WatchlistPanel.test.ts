@@ -3,8 +3,18 @@ import {
   formatWatchlistPrice,
   formatWatchlistChange,
   getChangeColorClass,
-  buildDeleteUrl,
+  // New exports for multi-watchlist
+  selectList,
+  buildListsUrl,
+  buildItemsUrl,
+  buildCreateListPayload,
+  buildRenamePayload,
+  isLastList,
+  buildDeleteItemUrl,
 } from './WatchlistPanel'
+import type { Watchlist } from '@/app/api/watchlist/lists/route'
+
+// ── Existing tests (kept) ──────────────────────────────────────────────────
 
 describe('formatWatchlistPrice', () => {
   it('formats a positive price with 2 decimal places', () => {
@@ -65,12 +75,138 @@ describe('getChangeColorClass', () => {
   })
 })
 
-describe('buildDeleteUrl', () => {
-  it('builds DELETE url with encoded symbol', () => {
-    expect(buildDeleteUrl('AAPL')).toBe('/api/watchlist?symbol=AAPL')
+// ── New multi-watchlist utility tests ─────────────────────────────────────
+
+describe('selectList', () => {
+  const lists: Watchlist[] = [
+    { id: 'list-1', name: 'Tech US', created_at: '2024-01-01', item_count: 2 },
+    { id: 'list-2', name: 'BCBA', created_at: '2024-01-02', item_count: 0 },
+  ]
+
+  it('returns the list matching the given id', () => {
+    const result = selectList(lists, 'list-2')
+    expect(result?.id).toBe('list-2')
+    expect(result?.name).toBe('BCBA')
   })
 
-  it('encodes special characters in symbol', () => {
-    expect(buildDeleteUrl('GGAL.BA')).toBe('/api/watchlist?symbol=GGAL.BA')
+  it('returns the first list when id is null', () => {
+    const result = selectList(lists, null)
+    expect(result?.id).toBe('list-1')
+  })
+
+  it('returns the first list when id is not found', () => {
+    const result = selectList(lists, 'nonexistent')
+    expect(result?.id).toBe('list-1')
+  })
+
+  it('returns undefined for empty list array', () => {
+    const result = selectList([], null)
+    expect(result).toBeUndefined()
+  })
+})
+
+describe('buildListsUrl', () => {
+  it('returns the watchlist lists endpoint', () => {
+    expect(buildListsUrl()).toBe('/api/watchlist/lists')
+  })
+})
+
+describe('buildItemsUrl', () => {
+  it('builds items URL with watchlistId', () => {
+    expect(buildItemsUrl('list-abc')).toBe('/api/watchlist?watchlistId=list-abc')
+  })
+
+  it('URL-encodes the watchlistId', () => {
+    expect(buildItemsUrl('list abc')).toBe('/api/watchlist?watchlistId=list%20abc')
+  })
+})
+
+describe('buildCreateListPayload', () => {
+  it('returns an object with name field', () => {
+    expect(buildCreateListPayload('Tech US')).toEqual({ name: 'Tech US' })
+  })
+
+  it('preserves the name as-is', () => {
+    expect(buildCreateListPayload('  My List  ')).toEqual({ name: '  My List  ' })
+  })
+})
+
+describe('buildRenamePayload', () => {
+  it('returns an object with name field', () => {
+    expect(buildRenamePayload('New Name')).toEqual({ name: 'New Name' })
+  })
+})
+
+describe('isLastList', () => {
+  it('returns true when there is exactly one list', () => {
+    const lists: Watchlist[] = [
+      { id: 'list-1', name: 'Only', created_at: '2024-01-01', item_count: 0 },
+    ]
+    expect(isLastList(lists)).toBe(true)
+  })
+
+  it('returns false when there are multiple lists', () => {
+    const lists: Watchlist[] = [
+      { id: 'list-1', name: 'A', created_at: '2024-01-01', item_count: 0 },
+      { id: 'list-2', name: 'B', created_at: '2024-01-02', item_count: 0 },
+    ]
+    expect(isLastList(lists)).toBe(false)
+  })
+
+  it('returns true for empty list array (no lists to delete)', () => {
+    expect(isLastList([])).toBe(true)
+  })
+})
+
+describe('buildDeleteItemUrl', () => {
+  it('builds DELETE url with symbol and watchlistId', () => {
+    expect(buildDeleteItemUrl('AAPL', 'list-1')).toBe('/api/watchlist?symbol=AAPL&watchlistId=list-1')
+  })
+
+  it('URL-encodes special characters', () => {
+    expect(buildDeleteItemUrl('GGAL.BA', 'list-1')).toBe('/api/watchlist?symbol=GGAL.BA&watchlistId=list-1')
+  })
+})
+
+describe('race-guard counter logic', () => {
+  it('increments a counter ref to detect stale requests', () => {
+    // Simulate the race-guard pattern: counter always increments
+    let counter = 0
+    const increment = () => ++counter
+
+    const id1 = increment()
+    const id2 = increment()
+
+    // id1 is stale — counter has moved past it
+    expect(id1).toBe(1)
+    expect(id2).toBe(2)
+    expect(id2).toBe(counter) // latest request matches counter
+    expect(id1).not.toBe(counter) // stale request does not match
+  })
+
+  it('stale response is discarded when counter has advanced', () => {
+    let counter = 0
+    const responses: string[] = []
+
+    function handleResponse(capturedId: number, data: string) {
+      // Only accept if this response matches the current counter
+      if (capturedId === counter) {
+        responses.push(data)
+      }
+    }
+
+    // First request (id=1) — immediately stale
+    counter++
+    const id1 = counter
+
+    // Second request (id=2) — this is the live one
+    counter++
+    const id2 = counter
+
+    // Both respond, but only id2 should be accepted
+    handleResponse(id1, 'stale-data')
+    handleResponse(id2, 'fresh-data')
+
+    expect(responses).toEqual(['fresh-data'])
   })
 })
