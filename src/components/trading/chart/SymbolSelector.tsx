@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { Search, ChevronDown, Loader2 } from "lucide-react";
 import {
   Dialog,
@@ -15,6 +15,7 @@ import { fetchExchangeSymbols } from "@/lib/binance/rest";
 import { getPortfolio } from "@/lib/warren/positions";
 import { useChartStore } from "@/lib/store/chart-store";
 import { cn } from "@/lib/utils";
+import { AddToWatchlistButton } from "@/components/trading/watchlist/AddToWatchlistButton";
 import type { SymbolInfo } from "@/lib/binance/types";
 import type { SearchResult } from "@/lib/market-data/types";
 
@@ -84,6 +85,9 @@ export function SymbolSelector() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
+  // ── Watchlist state (for Add button "already in watchlist" check) ───────────
+  const [watchlistSymbols, setWatchlistSymbols] = useState<string[]>([]);
+
   // Stable debounced fetch reference
   const debouncedFetch = useRef(
     debounce(async (q: string) => {
@@ -103,6 +107,11 @@ export function SymbolSelector() {
       getPortfolio()
         .then((data) => setPortfolioTickers((data.positions ?? []).map((p) => p.ticker)))
         .catch(console.error);
+      // Fetch current watchlist symbols so AddToWatchlistButton knows which are already added
+      fetch("/api/watchlist")
+        .then((res) => (res.ok ? res.json() : { watchlist: [] }))
+        .then((data) => setWatchlistSymbols((data.watchlist ?? []).map((w: { symbol: string }) => w.symbol)))
+        .catch(() => setWatchlistSymbols([]));
     }
   }, [open, dataSource, allSymbols.length]);
 
@@ -202,21 +211,30 @@ export function SymbolSelector() {
                 {/* Search results (query >= 2) */}
                 {showSearchResults && !isSearching && searchResults.length > 0 && (
                   searchResults.map((result) => (
-                    <button
+                    <div
                       key={result.symbol}
-                      type="button"
-                      onClick={() => selectTicker(result.symbol)}
                       className={cn(
-                        "flex items-center justify-between border-b border-tv-border px-4 py-2.5 text-left text-xs hover:bg-tv-panel-hover",
+                        "flex items-center justify-between border-b border-tv-border px-4 py-2.5 text-xs hover:bg-tv-panel-hover",
                         result.symbol === symbol && "bg-tv-panel-hover",
                       )}
                     >
-                      <div className="flex flex-col gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => selectTicker(result.symbol)}
+                        className="flex flex-1 flex-col gap-0.5 text-left"
+                      >
                         <span className="font-semibold text-tv-text">{result.symbol}</span>
                         <span className="text-[10px] text-tv-text-muted">{result.shortname}</span>
+                      </button>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-tv-text-muted">{result.exchange}</span>
+                        <AddToWatchlistButton
+                          symbol={result.symbol}
+                          isInWatchlist={watchlistSymbols.includes(result.symbol)}
+                          onAdded={() => setWatchlistSymbols((prev) => [...prev, result.symbol])}
+                        />
                       </div>
-                      <span className="text-[10px] text-tv-text-muted">{result.exchange}</span>
-                    </button>
+                    </div>
                   ))
                 )}
 
