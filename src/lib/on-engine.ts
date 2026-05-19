@@ -1,5 +1,5 @@
 import type { ONPosition, ONClosedTrade, ONOperation } from '@/types'
-import { getRedis, isRedisReady } from './redis'
+import { getRedis, isRedisReady, invalidateUserCache } from './redis'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 export interface ONTransactionInput {
@@ -107,9 +107,7 @@ export async function processONTransaction(
 
 
   // 4. Invalidate Redis cache
-  if (isRedisReady()) {
-    try { await getRedis()?.del(`summary:${userId}`) } catch {}
-  }
+  await invalidateUserCache(userId)
 
   return { position: posRes.data ?? null, closedTrade: ctRes.data ?? null }
 }
@@ -220,7 +218,7 @@ export async function rebuildONPosition(
       .delete()
       .eq('user_id', userId)
       .eq('ticker', normalizedTicker)
-    if (isRedisReady()) await getRedis()?.del(`summary:${userId}`)
+    await invalidateUserCache(userId)
     return
   }
 
@@ -272,7 +270,5 @@ export async function rebuildONPosition(
       }, { onConflict: 'user_id,ticker' })
   }
 
-  if (isRedisReady()) {
-    try { await getRedis()?.del(`summary:${userId}`) } catch {}
-  }
+  await invalidateUserCache(userId)
 }
