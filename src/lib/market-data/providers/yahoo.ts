@@ -130,8 +130,28 @@ export class YahooProvider implements MarketDataProvider {
   }
 
   // ── searchTickers ──────────────────────────────────────────────────────────
-  // Stub for PR 1 — implemented fully in PR 2
-  async searchTickers(_q: string): Promise<SearchResult[]> {
-    return []
+  async searchTickers(q: string): Promise<SearchResult[]> {
+    const ALLOWED_QUOTE_TYPES = new Set(['EQUITY', 'ETF', 'CRYPTOCURRENCY'])
+
+    try {
+      const yahooFinance = await getYahooFinanceInstance()
+
+      const response = await withRetry(() =>
+        (yahooFinance as any).search(q, { quotesCount: 10, newsCount: 0 })
+      ) as { quotes: any[] }
+
+      const quotes: any[] = response?.quotes ?? []
+
+      return quotes
+        .filter((item: any) => item.isYahooFinance === true && ALLOWED_QUOTE_TYPES.has(item.quoteType))
+        .map((item: any): SearchResult => ({
+          symbol: item.symbol,
+          shortname: item.shortname ?? item.longname ?? '',
+          quoteType: item.quoteType,
+          exchange: item.exchange ?? '',
+        }))
+    } catch (err) {
+      throw classifyError(err)
+    }
   }
 }

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
-import { Search, ChevronDown } from "lucide-react";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import { Search, ChevronDown, Loader2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -16,6 +16,57 @@ import { getPortfolio } from "@/lib/warren/positions";
 import { useChartStore } from "@/lib/store/chart-store";
 import { cn } from "@/lib/utils";
 import type { SymbolInfo } from "@/lib/binance/types";
+import type { SearchResult } from "@/lib/market-data/types";
+
+// ── Pure utility exports (exported for unit testing) ─────────────────────────
+
+/**
+ * Build the search URL for the ticker search API.
+ */
+export function buildSearchUrl(q: string): string {
+  return `/api/ticker/search?q=${encodeURIComponent(q)}`
+}
+
+/**
+ * Fetch ticker search results from the API.
+ * Returns empty array on any error.
+ */
+export async function fetchTickerSearch(q: string): Promise<SearchResult[]> {
+  try {
+    const res = await fetch(buildSearchUrl(q))
+    if (!res.ok) return []
+    const data = await res.json()
+    return data.results ?? []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Determines whether a search fetch should be issued.
+ */
+export function shouldFetchSearch(query: string, dataSource: string): boolean {
+  return dataSource === "yahoo" && query.length >= 2
+}
+
+/**
+ * Creates a debounced version of the given function.
+ * Only the last call within the delay window is executed.
+ */
+export function debounce<T extends (...args: any[]) => void>(
+  fn: T,
+  delayMs: number
+): (...args: Parameters<T>) => void {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  return (...args: Parameters<T>) => {
+    if (timer !== null) clearTimeout(timer)
+    timer = setTimeout(() => {
+      fn(...args)
+    }, delayMs)
+  }
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 export function SymbolSelector() {
   const symbol = useChartStore((s) => s.symbol);
@@ -29,6 +80,20 @@ export function SymbolSelector() {
   const [allSymbols, setAllSymbols] = useState<SymbolInfo[]>([]);
   const [portfolioTickers, setPortfolioTickers] = useState<string[]>([]);
 
+  // ── Yahoo search state ──────────────────────────────────────────────────────
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+
+  // Stable debounced fetch reference
+  const debouncedFetch = useRef(
+    debounce(async (q: string) => {
+      setIsSearching(true)
+      const results = await fetchTickerSearch(q)
+      setSearchResults(results)
+      setIsSearching(false)
+    }, 300)
+  ).current
+
   useEffect(() => {
     if (!open) return;
     if (dataSource === "binance" && allSymbols.length === 0) {
@@ -40,6 +105,21 @@ export function SymbolSelector() {
         .catch(console.error);
     }
   }, [open, dataSource, allSymbols.length]);
+
+  // Clear search results when query is cleared
+  useEffect(() => {
+    if (query.length < 2) {
+      setSearchResults([])
+      setIsSearching(false)
+    }
+  }, [query])
+
+  // Trigger debounced search when query changes (yahoo only)
+  useEffect(() => {
+    if (shouldFetchSearch(query, dataSource)) {
+      debouncedFetch(query)
+    }
+  }, [query, dataSource, debouncedFetch])
 
   const filteredBinance = useMemo(() => {
     const q = query.trim().toUpperCase();
@@ -74,6 +154,11 @@ export function SymbolSelector() {
     }
   }
 
+  // ── Yahoo display logic ─────────────────────────────────────────────────────
+  // When query >= 2: show search results (or loading state)
+  // When query < 2: show portfolio tickers (existing behavior)
+  const showSearchResults = dataSource === "yahoo" && query.length >= 2;
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger className="group flex items-center gap-2 rounded px-3 py-1.5 text-sm font-semibold hover:bg-tv-panel-hover">
@@ -106,30 +191,66 @@ export function SymbolSelector() {
           <div className="flex flex-col">
             {dataSource === "yahoo" ? (
               <>
-                {filteredYahoo.length === 0 && !query && (
-                  <div className="p-4 text-center text-xs text-tv-text-muted">
-                    No hay posiciones abiertas
+                {/* Loading state */}
+                {isSearching && (
+                  <div className="flex items-center justify-center gap-2 p-4 text-xs text-tv-text-muted">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <span>Searching...</span>
                   </div>
                 )}
-                {filteredYahoo.length === 0 && query && (
+
+                {/* Search results (query >= 2) */}
+                {showSearchResults && !isSearching && searchResults.length > 0 && (
+                  searchResults.map((result) => (
+                    <button
+                      key={result.symbol}
+                      type="button"
+                      onClick={() => selectTicker(result.symbol)}
+                      className={cn(
+                        "flex items-center justify-between border-b border-tv-border px-4 py-2.5 text-left text-xs hover:bg-tv-panel-hover",
+                        result.symbol === symbol && "bg-tv-panel-hover",
+                      )}
+                    >
+                      <div className="flex flex-col gap-0.5">
+                        <span className="font-semibold text-tv-text">{result.symbol}</span>
+                        <span className="text-[10px] text-tv-text-muted">{result.shortname}</span>
+                      </div>
+                      <span className="text-[10px] text-tv-text-muted">{result.exchange}</span>
+                    </button>
+                  ))
+                )}
+
+                {/* No search results found */}
+                {showSearchResults && !isSearching && searchResults.length === 0 && (
                   <div className="p-4 text-center text-xs text-tv-text-muted">
-                    Presioná Enter para buscar &ldquo;{query.toUpperCase()}&rdquo;
+                    No results found. Press Enter to load &ldquo;{query.toUpperCase()}&rdquo; directly.
                   </div>
                 )}
-                {filteredYahoo.map((ticker) => (
-                  <button
-                    key={ticker}
-                    type="button"
-                    onClick={() => selectTicker(ticker)}
-                    className={cn(
-                      "flex items-center justify-between border-b border-tv-border px-4 py-2.5 text-left text-xs hover:bg-tv-panel-hover",
-                      ticker === symbol && "bg-tv-panel-hover",
+
+                {/* Portfolio tickers (query < 2) */}
+                {!showSearchResults && !isSearching && (
+                  <>
+                    {filteredYahoo.length === 0 && !query && (
+                      <div className="p-4 text-center text-xs text-tv-text-muted">
+                        No hay posiciones abiertas
+                      </div>
                     )}
-                  >
-                    <span className="font-semibold text-tv-text">{ticker}</span>
-                    <span className="text-[10px] text-tv-text-muted">Portfolio</span>
-                  </button>
-                ))}
+                    {filteredYahoo.map((ticker) => (
+                      <button
+                        key={ticker}
+                        type="button"
+                        onClick={() => selectTicker(ticker)}
+                        className={cn(
+                          "flex items-center justify-between border-b border-tv-border px-4 py-2.5 text-left text-xs hover:bg-tv-panel-hover",
+                          ticker === symbol && "bg-tv-panel-hover",
+                        )}
+                      >
+                        <span className="font-semibold text-tv-text">{ticker}</span>
+                        <span className="text-[10px] text-tv-text-muted">Portfolio</span>
+                      </button>
+                    ))}
+                  </>
+                )}
               </>
             ) : (
               <>
