@@ -85,9 +85,6 @@ export function SymbolSelector() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
-  // ── Watchlist state (for Add button "already in watchlist" check) ───────────
-  const [watchlistSymbols, setWatchlistSymbols] = useState<string[]>([]);
-
   // Stable debounced fetch reference
   const debouncedFetch = useRef(
     debounce(async (q: string) => {
@@ -107,11 +104,6 @@ export function SymbolSelector() {
       getPortfolio()
         .then((data) => setPortfolioTickers((data.positions ?? []).map((p) => p.ticker)))
         .catch(console.error);
-      // Fetch current watchlist symbols so AddToWatchlistButton knows which are already added
-      fetch("/api/watchlist")
-        .then((res) => (res.ok ? res.json() : { watchlist: [] }))
-        .then((data) => setWatchlistSymbols((data.watchlist ?? []).map((w: { symbol: string }) => w.symbol)))
-        .catch(() => setWatchlistSymbols([]));
     }
   }, [open, dataSource, allSymbols.length]);
 
@@ -230,8 +222,6 @@ export function SymbolSelector() {
                         <span className="text-[10px] text-tv-text-muted">{result.exchange}</span>
                         <AddToWatchlistButton
                           symbol={result.symbol}
-                          isInWatchlist={watchlistSymbols.includes(result.symbol)}
-                          onAdded={() => setWatchlistSymbols((prev) => [...prev, result.symbol])}
                         />
                       </div>
                     </div>
