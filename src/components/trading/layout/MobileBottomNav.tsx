@@ -34,7 +34,7 @@ const TABS: { view: MobileView; Icon: typeof TrendingUp }[] = [
 
 export default function MobileBottomNav({ activeView, onViewChange }: MobileBottomNavProps) {
   return (
-    <nav className="fixed bottom-0 left-0 right-0 h-14 md:hidden border-t border-tv-border bg-tv-panel flex">
+    <nav className="flex-shrink-0 h-14 md:hidden border-t border-tv-border bg-tv-panel flex">
       {TABS.map(({ view, Icon }) => {
         const active = isActiveView(view, activeView)
         const config = getTabConfig(view)
