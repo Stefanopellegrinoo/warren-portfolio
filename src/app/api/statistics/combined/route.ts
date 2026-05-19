@@ -16,7 +16,6 @@ export async function GET(req: NextRequest) {
     const cacheKey = `statistics:combined:${user.id}`
     const cachedStats = await getCachedRoute(cacheKey)
     if (cachedStats) {
-      console.log(`[Cache Hit] Combined Statistics for ${user.id}`)
       return NextResponse.json(cachedStats)
     }
 
@@ -74,8 +73,13 @@ export async function GET(req: NextRequest) {
       .eq('user_id', user.id)
     const onsRealizedPnl = (onClosedTrades || []).reduce((s: number, t: any) => s + (t.pnl || 0), 0)
 
-    // TODO: Fetch cash balance (if implemented)
-    const cashBalance = 0
+    // Fetch real cash balance
+    const { data: cashData } = await supabase
+      .from('cash_balance')
+      .select('balance')
+      .eq('user_id', user.id)
+      .maybeSingle()
+    const cashBalance = cashData?.balance ?? 0
 
     const totalValue = stocksValue + onsValue + cashBalance
 
