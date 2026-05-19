@@ -1,19 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClientInstance } from '@/lib/supabase-server'
 import { fetchQuotesWithFallback } from '@/lib/yahoo-finance'
 import { fetchONQuotesWithFallback } from '@/lib/data912-client'
 import { calculatePortfolioSummary, getFullPortfolio } from '@/lib/portfolio-engine'
 import { getRedis, ensureRedisConnected } from '@/lib/redis'
 import type { Position, ONPosition } from '@/types'
+import { requireUser, isAuthFailure } from '@/lib/api-auth'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   try {
-    const supabase = createServerClientInstance()
-    const { data: { session } } = await supabase.auth.getSession()
-    const user = session?.user
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const authResult = await requireUser()
+    if (isAuthFailure(authResult)) return authResult.error
+    const { supabase, user } = authResult
 
     // ENSURE REDIS IS CONNECTED before any reads
     const redisOk = await ensureRedisConnected()

@@ -1,18 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Job } from 'bullmq'
 import { getImportQueue } from '@/lib/queue'
-import { createServerClientInstance } from '@/lib/supabase-server'
 import { validateQueryParams, validationErrorResponse } from '@/lib/api/validation'
 import { ImportStatusQuerySchema } from '@/lib/schemas/transaction'
+import { requireUser, isAuthFailure } from '@/lib/api-auth'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   try {
-    const supabase = createServerClientInstance()
-    const { data: { session } } = await supabase.auth.getSession()
-    const user = session?.user
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const authResult = await requireUser()
+    if (isAuthFailure(authResult)) return authResult.error
 
     // Validate query params
     const { jobId } = validateQueryParams(ImportStatusQuerySchema, req.url)
@@ -47,7 +45,7 @@ export async function GET(req: NextRequest) {
     if (err.status === 400) {
       return validationErrorResponse(err)
     }
-    
+
     console.error('[ImportStatus] Error:', err)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }

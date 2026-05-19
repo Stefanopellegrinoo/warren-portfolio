@@ -1,18 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClientInstance } from '@/lib/supabase-server'
 import { rebuildPosition } from '@/lib/portfolio-engine'
 import { invalidateUserCache } from '@/lib/redis'
 import { UUIDSchema } from '@/lib/schemas/common'
 import { validateRequest, validationErrorResponse } from '@/lib/api/validation'
+import { requireUser, isAuthFailure } from '@/lib/api-auth'
 
 export const dynamic = 'force-dynamic'
 
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const supabase = createServerClientInstance()
-    const { data: { session } } = await supabase.auth.getSession()
-    const user = session?.user
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const authResult = await requireUser()
+    if (isAuthFailure(authResult)) return authResult.error
+    const { supabase, user } = authResult
 
     // Validate UUID
     try {
@@ -64,9 +63,9 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     // 6. Force frontend to refresh portfolio data
     // Add a timestamp to ensure cache invalidation in the browser
     const timestamp = Date.now()
-    
-    return NextResponse.json({ 
-      success: true, 
+
+    return NextResponse.json({
+      success: true,
       invalidated: timestamp,
       message: 'Transaction deleted. Portfolio and cash balance recalculated.'
     }, { status: 200 })
@@ -75,7 +74,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     if (err.status === 400) {
       return validationErrorResponse(err)
     }
-    
+
     console.error(err)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }
@@ -83,10 +82,9 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const supabase = createServerClientInstance()
-    const { data: { session } } = await supabase.auth.getSession()
-    const user = session?.user
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const authResult = await requireUser()
+    if (isAuthFailure(authResult)) return authResult.error
+    const { supabase, user } = authResult
 
     // Validate UUID
     try {
@@ -148,7 +146,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (updated.operation === 'COMPRA' || updated.operation === 'VENTA') {
       const { processCashMovement } = await import('@/lib/cash-engine')
       const transactionCost = (Math.abs(updated.quantity) * updated.price) + (updated.commission || 0)
-      
+
       try {
         await processCashMovement(supabase, user.id, {
           date: updated.date,
@@ -186,7 +184,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (err.status === 400) {
       return validationErrorResponse(err)
     }
-    
+
     console.error(err)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }

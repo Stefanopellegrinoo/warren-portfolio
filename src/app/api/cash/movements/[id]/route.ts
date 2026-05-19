@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
-import { createServerClientInstance } from '@/lib/supabase-server'
 import { rebuildCashBalance } from '@/lib/cash-engine'
 import { UUIDSchema } from '@/lib/schemas/common'
+import { requireUser, isAuthFailure } from '@/lib/api-auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,10 +9,9 @@ export async function DELETE(
   request: Request,
   { params }: { params: { id: string } }
 ) {
-  const supabase = createServerClientInstance()
-  const { data: { session } } = await supabase.auth.getSession()
-  const user = session?.user
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const authResult = await requireUser()
+  if (isAuthFailure(authResult)) return authResult.error
+  const { supabase, user } = authResult
 
   // Validate UUID
   try {

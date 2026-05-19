@@ -1,17 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClientInstance } from '@/lib/supabase-server'
 import { validateQueryParams, validationErrorResponse } from '@/lib/api/validation'
 import { CashMovementQuerySchema } from '@/lib/schemas/cash'
 import { PaginatedResponse } from '@/lib/schemas/common'
+import { requireUser, isAuthFailure } from '@/lib/api-auth'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   try {
-    const supabase = createServerClientInstance()
-    const { data: { session } } = await supabase.auth.getSession()
-    const user = session?.user
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const authResult = await requireUser()
+    if (isAuthFailure(authResult)) return authResult.error
+    const { supabase, user } = authResult
 
     // Validate query params
     const { limit, offset, type } = validateQueryParams(CashMovementQuerySchema, req.url)
@@ -51,7 +50,7 @@ export async function GET(req: NextRequest) {
     if (err.status === 400) {
       return validationErrorResponse(err)
     }
-    
+
     console.error(err)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }
