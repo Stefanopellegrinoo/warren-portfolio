@@ -157,6 +157,8 @@ export function PriceChart({ symbol, timeframe }: Props) {
 
   const [setupLegend, setSetupLegend] = useState<Array<{ id: string; name: string }>>([]);
   const [hiddenSetups, setHiddenSetups] = useState<Set<string>>(new Set());
+  // Track whether the Yahoo chart has been loaded at least once (for setVisibleRange logic)
+  const yahooFirstLoadRef = useRef(true);
   const allSignalsRef = useRef<Array<{
     time: UTCTimestamp;
     setup_id: string;
@@ -863,17 +865,17 @@ export function PriceChart({ symbol, timeframe }: Props) {
             },
           });
         } else {
-          // Yahoo Finance — fetch historical klines server-side
+          // Yahoo Finance — fetch historical klines server-side (no days= → full history)
           const yahooInterval: "1d" | "1w" = timeframe === "1w" ? "1w" : "1d";
           const res = await fetch(
-            `/api/klines?ticker=${encodeURIComponent(symbol)}&interval=${yahooInterval}&days=365`,
+            `/api/klines?ticker=${encodeURIComponent(symbol)}&interval=${yahooInterval}`,
           );
           if (!res.ok) throw new Error(`klines API ${res.status}`);
-          const raw: Array<{ date: string; open: number; high: number; low: number; close: number; volume: number }> =
+          const raw: Array<{ time: string; open: number; high: number; low: number; close: number; volume: number }> =
             await res.json();
           if (cancelled) return;
           const klines: Candle[] = raw.map((k) => ({
-            time: Math.floor(new Date(k.date + "T00:00:00Z").getTime() / 1000),
+            time: Math.floor(new Date(k.time + "T00:00:00Z").getTime() / 1000),
             open: k.open,
             high: k.high,
             low: k.low,
@@ -881,6 +883,22 @@ export function PriceChart({ symbol, timeframe }: Props) {
             volume: k.volume,
           }));
           applyCandles(klines);
+
+          // On initial load (per symbol), constrain visible range to the last 2 years.
+          // The user can pan/zoom left to explore the full historical data without a refetch.
+          if (yahooFirstLoadRef.current && chartRef.current) {
+            yahooFirstLoadRef.current = false;
+            const now = Math.floor(Date.now() / 1000);
+            const twoYearsAgo = now - 2 * 365 * 24 * 60 * 60;
+            const toDateStr = new Date(now * 1000).toISOString().split("T")[0];
+            const fromDateStr = new Date(twoYearsAgo * 1000).toISOString().split("T")[0];
+            try {
+              chartRef.current.timeScale().setVisibleRange({ from: fromDateStr as any, to: toDateStr as any });
+            } catch {
+              // setVisibleRange can fail if there is not enough data; fall back gracefully
+              chartRef.current.timeScale().fitContent();
+            }
+          }
 
           // Poll for live price every 60s
           const poll = async () => {
@@ -912,6 +930,8 @@ export function PriceChart({ symbol, timeframe }: Props) {
     return () => {
       cancelled = true;
       if (unsub) unsub();
+      // Reset first-load flag so the next symbol load applies the visible range again
+      yahooFirstLoadRef.current = true;
     };
   }, [symbol, timeframe, dataSource]);
 
