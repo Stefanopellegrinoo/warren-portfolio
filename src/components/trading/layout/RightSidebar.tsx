@@ -40,10 +40,13 @@ export function RightSidebar() {
 
   return (
     <div className="relative flex flex-row h-full">
+      {/* drag handle — 12px hit area, 1px visual */}
       <div
-        className="w-1 cursor-col-resize self-stretch bg-transparent hover:bg-tv-border transition-colors select-none flex-shrink-0"
+        className="relative w-3 cursor-col-resize self-stretch flex-shrink-0 group"
         {...handleProps}
-      />
+      >
+        <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent group-hover:bg-tv-border transition-colors" />
+      </div>
       <aside
         className="flex flex-col border-l border-tv-border bg-tv-panel flex-shrink-0"
         style={{ width }}
