@@ -22,8 +22,6 @@ interface HeaderProps {
 }
 
 export function Header({ onSymbolSelect }: HeaderProps = {}) {
-  const dataSource = useChartStore((s) => s.dataSource);
-  const setDataSource = useChartStore((s) => s.setDataSource);
   const showPortfolioOverlay = useChartStore((s) => s.showPortfolioOverlay);
   const togglePortfolioOverlay = useChartStore((s) => s.togglePortfolioOverlay);
 
@@ -36,64 +34,30 @@ export function Header({ onSymbolSelect }: HeaderProps = {}) {
           <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/20">
             <TrendingUp className="h-4 w-4 text-amber-400" strokeWidth={2.5} />
           </div>
-          <span className="text-sm font-bold tracking-tight text-white">WARREN</span>
+          <span className="hidden sm:inline text-sm font-bold tracking-tight text-white">WARREN</span>
         </div>
 
-        <Separator orientation="vertical" className="hidden md:block h-6 bg-tv-border" />
-
-        {/* DataSource toggle */}
-        <div className="hidden md:flex items-center rounded bg-tv-bg p-0.5 text-[11px] font-semibold">
-          <button
-            type="button"
-            onClick={() => setDataSource("binance")}
-            className={cn(
-              "rounded px-2.5 py-1 transition-colors",
-              dataSource === "binance"
-                ? "bg-amber-500/20 text-amber-400"
-                : "text-tv-text-muted hover:text-tv-text",
-            )}
-          >
-            CRYPTO
-          </button>
-          <button
-            type="button"
-            onClick={() => setDataSource("yahoo")}
-            className={cn(
-              "rounded px-2.5 py-1 transition-colors",
-              dataSource === "yahoo"
-                ? "bg-amber-500/20 text-amber-400"
-                : "text-tv-text-muted hover:text-tv-text",
-            )}
-          >
-            STOCKS
-          </button>
-        </div>
-
-        <Separator orientation="vertical" className="hidden md:block h-6 bg-tv-border" />
+        <Separator orientation="vertical" className="h-6 bg-tv-border" />
         <SymbolSelector onSymbolSelect={onSymbolSelect} />
         <Separator orientation="vertical" className="h-6 bg-tv-border" />
         <TimeframeSelector />
         <Separator orientation="vertical" className="mx-1 h-6 bg-tv-border" />
         <IndicatorMenu />
 
-        {dataSource === "yahoo" && (
-          <>
-            <Separator orientation="vertical" className="mx-1 h-6 bg-tv-border" />
-            <button
-              type="button"
-              onClick={togglePortfolioOverlay}
-              title={showPortfolioOverlay ? "Ocultar overlay portfolio" : "Mostrar overlay portfolio"}
-              className={cn(
-                "flex items-center rounded px-2.5 py-1.5 text-xs font-medium transition-colors",
-                showPortfolioOverlay
-                  ? "bg-amber-500/20 text-amber-400"
-                  : "text-tv-text-muted hover:bg-tv-panel-hover hover:text-tv-text",
-              )}
-            >
-              OVL
-            </button>
-          </>
-        )}
+        <Separator orientation="vertical" className="mx-1 h-6 bg-tv-border" />
+        <button
+          type="button"
+          onClick={togglePortfolioOverlay}
+          title={showPortfolioOverlay ? "Ocultar overlay portfolio" : "Mostrar overlay portfolio"}
+          className={cn(
+            "flex items-center rounded px-2.5 py-1.5 text-xs font-medium transition-colors",
+            showPortfolioOverlay
+              ? "bg-amber-500/20 text-amber-400"
+              : "text-tv-text-muted hover:bg-tv-panel-hover hover:text-tv-text",
+          )}
+        >
+          OVL
+        </button>
       </div>
 
       {/* Right: compact app navigation */}

@@ -61,7 +61,7 @@ export class BinanceWS {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private nextId = 1;
   private klineSubs = new Map<string, KlineSubscription>();
-  private tickerSubs = new Map<string, (m: MiniTickerMsg["data"]) => void>();
+  private tickerSubs = new Map<string, Set<(d: MiniTickerMsg["data"]) => void>>();
   private connected = false;
   private closing = false;
 
@@ -130,8 +130,10 @@ export class BinanceWS {
         isFinal: k.x,
       });
     } else if (msg.stream.includes("@miniTicker")) {
-      const handler = this.tickerSubs.get(msg.stream);
-      if (handler) handler((msg as MiniTickerMsg).data);
+      const handlers = this.tickerSubs.get(msg.stream);
+      if (handlers) {
+        handlers.forEach(handler => handler((msg as MiniTickerMsg).data));
+      }
     }
   }
 
@@ -150,22 +152,37 @@ export class BinanceWS {
     onTick: (s: { symbol: string; close: number; open: number; pct: number }) => void,
   ): () => void {
     const streams = symbols.map((s) => `${s.toLowerCase()}@miniTicker`);
-    streams.forEach((stream) => {
-      this.tickerSubs.set(stream, (d) => {
-        const close = parseFloat(d.c);
-        const open = parseFloat(d.o);
-        onTick({
-          symbol: d.s,
-          close,
-          open,
-          pct: open === 0 ? 0 : ((close - open) / open) * 100,
-        });
+    
+    const handler = (d: MiniTickerMsg["data"]) => {
+      const close = parseFloat(d.c);
+      const open = parseFloat(d.o);
+      onTick({
+        symbol: d.s,
+        close,
+        open,
+        pct: open === 0 ? 0 : ((close - open) / open) * 100,
       });
+    };
+
+    streams.forEach((stream) => {
+      if (!this.tickerSubs.has(stream)) {
+        this.tickerSubs.set(stream, new Set());
+        if (this.connected) this.send({ method: "SUBSCRIBE", params: [stream], id: this.nextId++ });
+      }
+      this.tickerSubs.get(stream)!.add(handler);
     });
-    if (this.connected) this.send({ method: "SUBSCRIBE", params: streams, id: this.nextId++ });
+
     return () => {
-      streams.forEach((s) => this.tickerSubs.delete(s));
-      if (this.connected) this.send({ method: "UNSUBSCRIBE", params: streams, id: this.nextId++ });
+      streams.forEach((stream) => {
+        const handlers = this.tickerSubs.get(stream);
+        if (handlers) {
+          handlers.delete(handler);
+          if (handlers.size === 0) {
+            this.tickerSubs.delete(stream);
+            if (this.connected) this.send({ method: "UNSUBSCRIBE", params: [stream], id: this.nextId++ });
+          }
+        }
+      });
     };
   }
 

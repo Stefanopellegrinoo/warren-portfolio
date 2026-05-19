@@ -8,6 +8,9 @@ dist/
 *.tsbuildinfo
 .DS_Store
 
+# Code graph index
+.codegraph/
+
 # PWA generated files
 public/sw.js
 public/sw.js.map

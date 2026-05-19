@@ -64,7 +64,6 @@ function formatUSDCompact(value: number): string {
 
 export function PnLSidebar() {
   const setSymbol = useChartStore((s) => s.setSymbol);
-  const setDataSource = useChartStore((s) => s.setDataSource);
 
   const [positions, setPositions] = useState<Position[]>([]);
   const [cashBalance, setCashBalance] = useState<number | null>(null);
@@ -146,7 +145,6 @@ export function PnLSidebar() {
       cancelled = true;
       if (intervalRef.current !== undefined) clearInterval(intervalRef.current);
     };
-    // reloadKey is a trigger-only dep — not read inside, incremented by retry button
   }, [loadPositions, fetchPrices, reloadKey]);
 
   if (loadState === "loading") {
@@ -218,7 +216,7 @@ export function PnLSidebar() {
                 <div
                   key={pos.id}
                   className="cursor-pointer px-3 py-2.5 hover:bg-tv-panel-hover"
-                  onClick={() => { setDataSource("yahoo"); setSymbol(pos.ticker); }}
+                  onClick={() => { setSymbol(pos.ticker); }}
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-amber-400 underline-offset-2 hover:underline">

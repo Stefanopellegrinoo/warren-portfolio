@@ -3,17 +3,18 @@
 import { useEffect, useState } from "react";
 import { useChartStore } from "@/lib/store/chart-store";
 import { fetchTicker24h } from "@/lib/binance/rest";
+import { getProviderForSymbol } from "@/lib/market-data/resolver";
 import type { Ticker24h } from "@/lib/binance/types";
 import { formatPrice, formatPct, formatVolume } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export function BottomPanel() {
   const symbol = useChartStore((s) => s.symbol);
-  const dataSource = useChartStore((s) => s.dataSource);
+  const provider = getProviderForSymbol(symbol);
   const [t, setT] = useState<Ticker24h | null>(null);
 
   useEffect(() => {
-    if (dataSource !== "binance") {
+    if (provider !== "binance") {
       setT(null);
       return;
     }
@@ -27,11 +28,11 @@ export function BottomPanel() {
     load();
     const id = setInterval(load, 5000);
     return () => { cancelled = true; clearInterval(id); };
-  }, [symbol, dataSource]);
+  }, [symbol, provider]);
 
   const upClass = (n: number) => (n >= 0 ? "text-tv-green" : "text-tv-red");
 
-  if (dataSource === "yahoo") {
+  if (provider === "yahoo") {
     return (
       <div className="flex h-9 items-center gap-0 border-t border-tv-border bg-tv-panel px-3 text-xs">
         <Stat label="Símbolo" value={symbol} />
