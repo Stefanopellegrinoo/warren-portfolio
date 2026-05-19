@@ -3,6 +3,7 @@ import { createServerClientInstance, createServiceClient } from './supabase-serv
 import { getRedis, isRedisReady } from './redis'
 import { updateWithOptimisticLock } from './concurrency'
 import { processCashMovement, rebuildCashBalance } from './cash-engine'
+import { rebuildONPosition } from './on-engine'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 /**
@@ -414,6 +415,20 @@ export async function rebuildPosition(supabase: SupabaseClient, userId: string, 
   }
 }
 
+export function splitTickersByAssetType(
+  inputs: Array<{ ticker: string; assetType?: string }>
+): { stockTickers: string[]; onTickers: string[] } {
+  const tickerAssetType = new Map<string, string>()
+  for (const input of inputs) {
+    tickerAssetType.set(input.ticker.toUpperCase().trim(), input.assetType ?? 'ACCION')
+  }
+  const tickers = Array.from(new Set(inputs.map(i => i.ticker.toUpperCase().trim())))
+  return {
+    stockTickers: tickers.filter(t => tickerAssetType.get(t) !== 'ON'),
+    onTickers: tickers.filter(t => tickerAssetType.get(t) === 'ON'),
+  }
+}
+
 /**
  * Bulk import transactions.
  */
@@ -430,16 +445,6 @@ export async function processTransactionBatch(
   errors: Array<{ line: number; ticker: string; error: string }>
 }> {
   assertUserId(userId)
-
-  // 0. Check for background import lock (if not already held by caller)
-  if (isRedisReady()) {
-    const redis = getRedis()
-    const isImporting = await redis?.get(`importing:${userId}`)
-    // If we're doing a batch import, we usually already have the lock, 
-    // but if someone calls this manually without setting it, we should check.
-    // NOTE: This check is skipped if the current process is the one that set the lock, 
-    // but here we can't easily know, so we just log it.
-  }
 
   try {
     if (onProgress) await onProgress(10, 'Validating and sorting transactions...')
@@ -475,8 +480,12 @@ export async function processTransactionBatch(
 
     if (onProgress) await onProgress(60, 'Rebuilding positions...')
     const tickers = Array.from(new Set(sortedInputs.map(i => i.ticker.toUpperCase().trim())))
-    
-    await Promise.all(tickers.map(ticker => rebuildPosition(supabase, userId, ticker)))
+    const { stockTickers, onTickers } = splitTickersByAssetType(sortedInputs as any[])
+
+    await Promise.all([
+      ...stockTickers.map((ticker: string) => rebuildPosition(supabase, userId, ticker)),
+      ...onTickers.map((ticker: string) => rebuildONPosition(supabase, userId, ticker)),
+    ])
     await rebuildCashBalance(supabase, userId)
 
     // Warm up prices for all new tickers in batch
