@@ -51,6 +51,11 @@ export function normalizeTickerForYahoo(ticker: string): string {
 // ── Yahoo Finance singleton ─────────────────────────────
 let yahooInstance: any = null
 
+/** @internal — exported for use by market-data providers only */
+export async function getYahooFinanceInstance(): Promise<any> {
+  return getYahooFinance()
+}
+
 async function getYahooFinance(): Promise<any> {
   if (yahooInstance) return yahooInstance
 

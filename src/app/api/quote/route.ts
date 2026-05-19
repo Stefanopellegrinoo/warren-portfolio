@@ -1,6 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { fetchQuotes, fetchQuotesWithFallback } from '@/lib/yahoo-finance'
+import { getMarketDataProvider, MarketDataError } from '@/lib/market-data'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
+
+// Map MarketDataError codes to HTTP status codes
+function errorToStatus(err: MarketDataError): number {
+  switch (err.code) {
+    case 'NOT_FOUND':           return 404
+    case 'RATE_LIMITED':        return 429
+    case 'PROVIDER_UNAVAILABLE':
+    case 'UNKNOWN':
+    default:                    return 500
+  }
+}
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
@@ -15,25 +26,25 @@ export async function GET(req: NextRequest) {
   if (isAuthFailure(authResult)) return authResult.error
 
   try {
-    let quotes = await fetchQuotes(tickers)
-    const missing = tickers.filter(t => !quotes.get(t))
-    if (missing.length > 0) {
-      const fresh = await fetchQuotesWithFallback(missing)
-      fresh.forEach((v, k) => quotes.set(k, v))
-    }
+    const provider = getMarketDataProvider()
+    const results = await Promise.all(
+      tickers.map(async (ticker) => {
+        const q = await provider.getQuote(ticker)
+        return {
+          ticker: q.ticker,
+          price: q.price,
+          change_pct: q.changePercent,
+          last_updated: q.updatedAt,
+        }
+      })
+    )
 
-    const result = tickers.map(t => {
-      const q = quotes.get(t)
-      return {
-        ticker: t,
-        price: q?.price ?? null,
-        change_pct: q?.changePercent ?? null,
-        last_updated: q?.updatedAt ?? null,
-      }
-    })
-
-    return NextResponse.json(result)
+    return NextResponse.json(results)
   } catch (err) {
+    if (err instanceof MarketDataError) {
+      console.error(`[/api/quote] ${err.code}: ${err.message}`)
+      return NextResponse.json({ error: err.message }, { status: errorToStatus(err) })
+    }
     console.error('[/api/quote]', err)
     return NextResponse.json({ error: 'Failed to fetch quotes' }, { status: 500 })
   }
