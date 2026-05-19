@@ -41,7 +41,7 @@ export function LeftSidebar() {
   const symbol = useChartStore((s) => s.symbol);
 
   return (
-    <aside className="flex w-11 flex-col items-center gap-0.5 border-r border-tv-border bg-tv-panel py-1.5">
+    <aside className="hidden md:flex w-11 flex-col items-center gap-0.5 border-r border-tv-border bg-tv-panel py-1.5">
       {TOOLS.map((t) => {
         const Icon = t.icon;
         const active = tool === t.key;
