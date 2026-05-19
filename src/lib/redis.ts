@@ -171,6 +171,8 @@ export async function invalidateUserCache(userId: string): Promise<void> {
 
     // Add exactly matching keys (no prefix stripping needed — DEL adds it)
     keysToDelete.push(`statistics:${userId}`)
+    keysToDelete.push(`statistics:combined:${userId}`)
+    keysToDelete.push(`statistics:ons:${userId}`)
     keysToDelete.push(`summary:${userId}`)
 
     if (keysToDelete.length > 0) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { Cashflow } from '@/types'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
+import { invalidateUserCache } from '@/lib/redis'
 
 const ALLOWED_CATEGORIES = [
   'Alquiler', 'Servicios', 'Supermercado', 'Transporte', 'Salud',
@@ -70,6 +71,7 @@ export async function POST(req: NextRequest) {
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  await invalidateUserCache(user.id)
   return NextResponse.json(data, { status: 201 })
 }
 
@@ -98,6 +100,7 @@ export async function PATCH(req: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   if (!data) return NextResponse.json({ error: 'No encontrado' }, { status: 404 })
+  await invalidateUserCache(user.id)
   return NextResponse.json(data)
 }
 
@@ -116,5 +119,6 @@ export async function DELETE(req: NextRequest) {
     .eq('user_id', user.id)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  await invalidateUserCache(user.id)
   return NextResponse.json({ ok: true })
 }

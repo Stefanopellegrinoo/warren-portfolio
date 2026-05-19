@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { rebuildCashBalance } from '@/lib/cash-engine'
 import { UUIDSchema } from '@/lib/schemas/common'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
+import { invalidateUserCache } from '@/lib/redis'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,6 +36,7 @@ export async function DELETE(
 
   // Rebuild balance after deletion
   await rebuildCashBalance(supabase, user.id)
+  await invalidateUserCache(user.id)
 
   return NextResponse.json({ success: true })
 }
