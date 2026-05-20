@@ -22,7 +22,7 @@ import { isMarketOpen } from './utils'
 import { startImportWorker } from './import-worker'
 import { startSignalsWorker } from './signals-worker'
 import { scheduleSignalsEvaluationJobs } from './signals-queue'
-import { checkNotificationConfig } from './notifications'
+import { checkNotificationConfig, sendTelegram } from './notifications'
 
 const REDIS_URL = process.env.REDIS_URL
 
@@ -113,6 +113,56 @@ async function updateONPricesInDatabase(prices: Map<string, any>): Promise<void>
 }
 
 
+/**
+ * Evaluate all active price alerts against the latest fetched prices.
+ * Uses createServiceClient (RLS bypass) since this runs in the worker.
+ * On trigger: marks the alert as 'triggered' and sends a Telegram message.
+ */
+export async function evaluatePriceAlerts(prices: Record<string, number>): Promise<void> {
+  const supabase = getSupabase()
+  if (!supabase) return
+
+  const tickers = Object.keys(prices)
+  if (tickers.length === 0) return
+
+  const { data: alerts, error } = await supabase
+    .from('price_alerts')
+    .select('*')
+    .eq('status', 'active')
+    .eq('type', 'price')
+    .in('ticker', tickers)
+
+  if (error) {
+    console.error('[Worker] evaluatePriceAlerts: fetch failed', error)
+    return
+  }
+
+  for (const alert of alerts ?? []) {
+    const currentPrice = prices[alert.ticker]
+    if (currentPrice === undefined) continue
+
+    const fired =
+      (alert.operator === 'crosses_above' && currentPrice >= alert.value) ||
+      (alert.operator === 'crosses_below' && currentPrice <= alert.value)
+
+    if (!fired) continue
+
+    const { error: updateError } = await supabase
+      .from('price_alerts')
+      .update({ status: 'triggered', triggered_at: new Date().toISOString() })
+      .eq('id', alert.id)
+
+    if (updateError) {
+      console.error(`[Worker] evaluatePriceAlerts: update failed for ${alert.id}`, updateError)
+      continue
+    }
+
+    const direction = alert.operator === 'crosses_above' ? '↑' : '↓'
+    const msg = `🔔 Alerta disparada: ${alert.ticker} ${direction} ${alert.value}\nPrecio actual: ${currentPrice}`
+    await sendTelegram(msg)
+  }
+}
+
 // ── Worker ──────────────────────────────────────────────
 const worker = new Worker(
   PRICE_QUEUE_NAME,
@@ -193,13 +243,24 @@ const worker = new Worker(
 
     console.log(`[Worker] Done — ${freshYahooPrices.size + freshONPrices.size} fresh, ${allPrices.size - (freshYahooPrices.size + freshONPrices.size)} from LKP, ${missing.length} missing`)
 
-    // 4. UPDATE GLOBAL TIMESTAMP
+    // 4. EVALUATE PRICE ALERTS
+    const pricesRecord: Record<string, number> = {}
+    allPrices.forEach((quote, ticker) => {
+      if (quote?.price !== undefined) {
+        pricesRecord[ticker] = quote.price
+      }
+    })
+    await evaluatePriceAlerts(pricesRecord).catch(e =>
+      console.error('[Worker] evaluatePriceAlerts failed:', e)
+    )
+
+    // 6. UPDATE GLOBAL TIMESTAMP
     const redis = getRedis()
     if (redis) {
       await redis.set('system:last-refresh', new Date().toISOString())
     }
 
-    // 5. CACHE USER SUMMARIES
+    // 7. CACHE USER SUMMARIES
     // Split allPrices back into stock and ON maps for the summary calculator
     const stockQuotes = new Map<string, any>()
     const onQuotes = new Map<string, any>()
