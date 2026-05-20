@@ -1,0 +1,300 @@
+<h2>Tab Alertas — estilo real de la app</h2>
+<p class="subtitle">Exactamente el mismo design system que ya tiene la página de estrategias</p>
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+* { box-sizing: border-box; }
+
+.app-preview {
+  background: #0d1117;
+  border-radius: 16px;
+  overflow: hidden;
+  font-family: 'Inter', -apple-system, sans-serif;
+  border: 1px solid rgba(255,255,255,0.06);
+  max-width: 680px;
+  margin: 0 auto;
+}
+
+/* Page header (breadcrumb) */
+.page-header {
+  padding: 16px 24px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: rgba(148,163,184,0.6);
+  font-weight: 500;
+}
+.page-title {
+  font-size: 22px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.02em;
+  padding: 6px 24px 0;
+}
+
+/* Tab strip — exact copy of strategies page */
+.tab-strip {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  padding: 0 24px;
+  margin-top: 16px;
+}
+.tab-btn {
+  padding: 10px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  color: rgba(100,116,139,1);
+  letter-spacing: 0.02em;
+  transition: color 0.15s;
+}
+.tab-btn.active {
+  color: #f59e0b;
+  border-bottom-color: #f59e0b;
+}
+.tab-count {
+  display: inline-block;
+  font-family: monospace;
+  font-size: 10px;
+  color: rgba(100,116,139,0.7);
+  margin-left: 4px;
+}
+
+/* Content area */
+.tab-body { padding: 20px 24px 24px; }
+
+/* Glass card — matches `glass rounded-2xl border border-white/[0.08]` */
+.glass-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px;
+  backdrop-filter: blur(8px);
+  overflow: hidden;
+}
+
+/* Table */
+.alerts-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.alerts-table thead th {
+  text-align: left;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: rgba(100,116,139,0.5);
+  padding: 12px 12px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.alerts-table tbody tr {
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.alerts-table tbody tr:last-child {
+  border-bottom: none;
+}
+.alerts-table tbody tr.triggered {
+  opacity: 0.45;
+}
+.alerts-table tbody td {
+  padding: 10px 12px;
+  vertical-align: middle;
+}
+
+/* Ticker badge — matches app `px-2 py-0.5 rounded-full bg-white/[0.06] border border-white/[0.08]` */
+.ticker-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(245,158,11,0.08);
+  color: #f59e0b;
+  font-family: monospace;
+  font-size: 10px;
+  font-weight: 700;
+  border: 1px solid rgba(245,158,11,0.2);
+  letter-spacing: 0.05em;
+}
+
+/* Type badges */
+.type-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  font-family: monospace;
+  font-size: 9px;
+  font-weight: 600;
+  border: 1px solid;
+}
+.type-price { color: #60a5fa; border-color: rgba(96,165,250,0.25); background: rgba(96,165,250,0.07); }
+.type-rsi   { color: #c4b5fd; border-color: rgba(196,181,253,0.2); background: rgba(196,181,253,0.06); }
+.type-ema   { color: #5eead4; border-color: rgba(94,234,212,0.2);  background: rgba(94,234,212,0.06); }
+.type-macd  { color: #fbbf24; border-color: rgba(251,191,36,0.2);  background: rgba(251,191,36,0.06); }
+
+/* Condition text */
+.cond-text {
+  font-family: monospace;
+  font-size: 10px;
+  color: rgba(203,213,225,0.7);
+}
+
+/* Status badges — exact tag-positive / tag-neutral style */
+.tag-positive {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  background: rgba(16,185,129,0.1);
+  color: #34d399;
+  border: 1px solid rgba(16,185,129,0.25);
+}
+.tag-neutral {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  background: rgba(100,116,139,0.12);
+  color: rgba(148,163,184,0.7);
+  border: 1px solid rgba(100,116,139,0.2);
+}
+
+/* Channel chips */
+.channels-cell {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.ch-chip {
+  font-size: 9px;
+  color: rgba(100,116,139,0.6);
+  font-family: monospace;
+}
+
+/* Delete button */
+.del-btn {
+  background: transparent;
+  border: none;
+  color: rgba(100,116,139,0.3);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: color 0.1s;
+}
+.del-btn:hover { color: #ef5350; }
+
+/* Empty state */
+.empty-state {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px;
+  padding: 40px 24px;
+  text-align: center;
+  color: rgba(100,116,139,0.7);
+  font-size: 13px;
+  font-family: monospace;
+}
+
+/* Setups tab placeholder */
+.setups-placeholder {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px;
+  padding: 20px;
+  color: rgba(100,116,139,0.4);
+  font-size: 11px;
+  font-family: monospace;
+  text-align: center;
+}
+</style>
+
+<!-- MOCKUP: showing the Alertas tab active -->
+<div style="margin: 0 auto; max-width: 700px;">
+  <div class="app-preview">
+    <div class="page-header">
+      <span class="back-btn">← Estrategias</span>
+    </div>
+    <div class="page-title">Mi Estrategia</div>
+
+    <div class="tab-strip">
+      <button class="tab-btn">Setups <span class="tab-count">3</span></button>
+      <button class="tab-btn active">Alertas <span class="tab-count">5</span></button>
+    </div>
+
+    <div class="tab-body">
+      <div class="glass-card">
+        <table class="alerts-table">
+          <thead>
+            <tr>
+              <th>Ticker</th>
+              <th>Tipo</th>
+              <th>Condición</th>
+              <th>Canales</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="ticker-badge">AAPL</span></td>
+              <td><span class="type-badge type-price">price</span></td>
+              <td><span class="cond-text">cruza 195.40 ↑</span></td>
+              <td><div class="channels-cell"><span class="ch-chip">📱</span><span class="ch-chip">📧</span></div></td>
+              <td><span class="tag-positive">activa</span></td>
+              <td><button class="del-btn">×</button></td>
+            </tr>
+            <tr>
+              <td><span class="ticker-badge">GGAL</span></td>
+              <td><span class="type-badge type-rsi">rsi</span></td>
+              <td><span class="cond-text">cruza 70 ↑</span></td>
+              <td><div class="channels-cell"><span class="ch-chip">📱</span></div></td>
+              <td><span class="tag-positive">activa</span></td>
+              <td><button class="del-btn">×</button></td>
+            </tr>
+            <tr>
+              <td><span class="ticker-badge">BMA</span></td>
+              <td><span class="type-badge type-ema">ema20</span></td>
+              <td><span class="cond-text">precio cruza ↑</span></td>
+              <td><div class="channels-cell"><span class="ch-chip">📱</span><span class="ch-chip">📧</span></div></td>
+              <td><span class="tag-positive">activa</span></td>
+              <td><button class="del-btn">×</button></td>
+            </tr>
+            <tr>
+              <td><span class="ticker-badge">MELI</span></td>
+              <td><span class="type-badge type-macd">macd</span></td>
+              <td><span class="cond-text">cruza señal ↑</span></td>
+              <td><div class="channels-cell"><span class="ch-chip">📧</span></div></td>
+              <td><span class="tag-positive">activa</span></td>
+              <td><button class="del-btn">×</button></td>
+            </tr>
+            <tr class="triggered">
+              <td><span class="ticker-badge">MELI</span></td>
+              <td><span class="type-badge type-price">price</span></td>
+              <td><span class="cond-text">baja 2100 ↓</span></td>
+              <td><div class="channels-cell"><span class="ch-chip">📱</span><span class="ch-chip">📧</span></div></td>
+              <td><span class="tag-neutral">disparada</span></td>
+              <td><button class="del-btn">×</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p style="margin-top: 10px; font-size: 10px; color: rgba(100,116,139,0.4); font-family: monospace; text-align: right;">
+        Las alertas disparadas se auto-desactivan · Se crean desde el gráfico
+      </p>
+    </div>
+  </div>
+</div>

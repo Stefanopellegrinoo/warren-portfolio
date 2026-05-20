@@ -8,6 +8,7 @@ import {
   LineSeries,
   HistogramSeries,
   CrosshairMode,
+  LineStyle,
   type IChartApi,
   type ISeriesApi,
   type IPriceLine,
@@ -30,6 +31,8 @@ import { formatPrice, formatVolume } from "@/lib/format";
 import { SIGNAL_COLORS, getSetupColor } from "@/lib/setup-color";
 import { IndicatorPill } from "./IndicatorPill";
 import { MeasureOverlay } from "./MeasureOverlay";
+import { ChartContextMenu } from "./ChartContextMenu";
+import { AlertCreationWidget } from "./AlertCreationWidget";
 
 interface MeasurePoint {
   time: number;
@@ -50,6 +53,26 @@ function durationLabel(aTime: number, bTime: number): string {
   if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
   if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
   return `${minutes}m`;
+}
+
+interface PriceAlert {
+  id: string;
+  user_id: string;
+  ticker: string;
+  type: string;
+  operator: string;
+  value: number;
+  name: string;
+  channel: string;
+  status: string;
+  created_at: string;
+  triggered_at: string | null;
+}
+
+interface ContextMenuState {
+  x: number;
+  y: number;
+  price: number;
 }
 
 interface Props {
@@ -180,6 +203,11 @@ export function PriceChart({ symbol, timeframe }: Props) {
 
   const [setupLegend, setSetupLegend] = useState<Array<{ id: string; name: string }>>([]);
   const [hiddenSetups, setHiddenSetups] = useState<Set<string>>(new Set());
+
+  // Price alerts state
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [alertWidget, setAlertWidget] = useState<{ price: number } | null>(null);
+  const alertPriceLinesRef = useRef<Map<string, IPriceLine>>(new Map());
   // Track whether the Yahoo chart has been loaded at least once (for setVisibleRange logic)
   const yahooFirstLoadRef = useRef(true);
   const allSignalsRef = useRef<Array<{
@@ -422,6 +450,7 @@ export function PriceChart({ symbol, timeframe }: Props) {
       adxPlusDIRef.current = null;
       adxMinusDIRef.current = null;
       adx25Ref.current = null;
+      alertPriceLinesRef.current.clear();
     };
   }, []);
 
@@ -952,6 +981,50 @@ export function PriceChart({ symbol, timeframe }: Props) {
     };
   }, [symbol, showPortfolioOverlay]);
 
+  // Load alert price lines when symbol changes
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+
+    // Clear previous alert lines
+    for (const line of Array.from(alertPriceLinesRef.current.values())) {
+      try { series.removePriceLine(line); } catch {}
+    }
+    alertPriceLinesRef.current.clear();
+
+    let cancelled = false;
+
+    async function loadAlertLines() {
+      try {
+        const res = await fetch(`/api/price-alerts?ticker=${encodeURIComponent(symbol)}`);
+        if (!res.ok || cancelled) return;
+        const body = await res.json();
+        const alerts: PriceAlert[] = body.alerts ?? [];
+        if (cancelled || !candleSeriesRef.current) return;
+        for (const alert of alerts) {
+          if (alert.status !== "active") continue;
+          const line = candleSeriesRef.current.createPriceLine({
+            price: alert.value,
+            color: "#f59e0b",
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: alert.name,
+          });
+          alertPriceLinesRef.current.set(alert.id, line);
+        }
+      } catch {
+        // Non-critical — skip silently
+      }
+    }
+
+    loadAlertLines();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol]);
+
   // Cursor style when drawing tools are active + reset measure on tool change
   useEffect(() => {
     if (containerRef.current) {
@@ -1118,6 +1191,21 @@ export function PriceChart({ symbol, timeframe }: Props) {
       plusDI: last?.plusDI,
       minusDI: last?.minusDI,
     }));
+  }
+
+  function addAlertPriceLine(alert: PriceAlert) {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+    if (alertPriceLinesRef.current.has(alert.id)) return;
+    const line = series.createPriceLine({
+      price: alert.value,
+      color: "#f59e0b",
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+      axisLabelVisible: true,
+      title: alert.name,
+    });
+    alertPriceLinesRef.current.set(alert.id, line);
   }
 
   function applyCandles(klines: Candle[]) {
@@ -1340,9 +1428,47 @@ export function PriceChart({ symbol, timeframe }: Props) {
   void renderTick;
 
   return (
-    <div className="relative h-full w-full">
+    <div
+      className="relative h-full w-full"
+      onContextMenu={(e) => {
+        e.preventDefault();
+        const series = candleSeriesRef.current;
+        if (!series) return;
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const offsetY = e.clientY - rect.top;
+        const price = series.coordinateToPrice(offsetY);
+        if (price === null || !isFinite(price)) return;
+        setContextMenu({ x: e.clientX, y: e.clientY, price });
+      }}
+    >
       <div ref={containerRef} className="h-full w-full" />
       {measureRender}
+
+      {contextMenu && (
+        <ChartContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          price={contextMenu.price}
+          onNewAlert={(price) => {
+            setContextMenu(null);
+            setAlertWidget({ price });
+          }}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {alertWidget && (
+        <AlertCreationWidget
+          price={alertWidget.price}
+          symbol={symbol}
+          onClose={() => setAlertWidget(null)}
+          onCreated={(alert) => {
+            addAlertPriceLine(alert);
+            setAlertWidget(null);
+          }}
+        />
+      )}
 
       {/* Setup legend — visible only for Yahoo Finance source when signals are loaded */}
       {setupLegend.length > 0 && provider === 'yahoo' && (

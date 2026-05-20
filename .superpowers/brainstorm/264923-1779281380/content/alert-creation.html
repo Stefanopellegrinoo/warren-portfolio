@@ -1,0 +1,327 @@
+<h2>¿Cómo se crea la alerta?</h2>
+<p class="subtitle">Después de click derecho → "Nueva alerta aquí" en el gráfico</p>
+
+<style>
+.chart-mock {
+  background: #131722;
+  border: 1px solid #2a2e39;
+  border-radius: 6px;
+  overflow: hidden;
+  font-family: -apple-system, monospace;
+  font-size: 11px;
+  position: relative;
+}
+.chart-topbar {
+  background: #1e222d;
+  padding: 5px 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid #2a2e39;
+  color: #787b86;
+  font-size: 10px;
+}
+.symbol { color: #d1d4dc; font-weight: bold; font-size: 12px; }
+.chart-body {
+  position: relative;
+  height: 180px;
+  background: #131722;
+}
+.candles {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  padding: 10px 10px 10px;
+  height: 100%;
+  box-sizing: border-box;
+}
+.candle { width: 7px; background: #26a69a; border-radius: 1px; }
+.candle.red { background: #ef5350; }
+.alert-line {
+  position: absolute;
+  left: 0; right: 0;
+  border-top: 1.5px dashed #f7931a;
+  top: 45%;
+  pointer-events: none;
+}
+.alert-line-label {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  background: #f7931a;
+  color: #000;
+  font-size: 9px;
+  padding: 1px 5px;
+  font-weight: bold;
+  font-family: monospace;
+}
+
+/* Widget A - floating minimal */
+.widget-a {
+  position: absolute;
+  top: 30%;
+  left: 45%;
+  background: #1e222d;
+  border: 1px solid #f7931a;
+  border-radius: 6px;
+  padding: 10px 12px;
+  min-width: 160px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  z-index: 10;
+}
+.widget-title {
+  color: #787b86;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 8px;
+}
+.widget-price-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.price-badge {
+  background: #f7931a22;
+  border: 1px solid #f7931a;
+  color: #f7931a;
+  border-radius: 3px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: bold;
+  font-family: monospace;
+}
+.cond-select {
+  background: #2a2e39;
+  border: 1px solid #363a45;
+  border-radius: 3px;
+  padding: 3px 6px;
+  color: #d1d4dc;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.channel-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.ch-pill {
+  background: #2a2e39;
+  border: 1px solid #363a45;
+  border-radius: 10px;
+  padding: 2px 7px;
+  color: #d1d4dc;
+  font-size: 9px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.ch-pill.active { border-color: #2962ff; color: #2962ff; background: #2962ff15; }
+.btn-row { display: flex; gap: 6px; }
+.btn-create {
+  background: #2962ff;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  padding: 4px 12px;
+  font-size: 10px;
+  cursor: pointer;
+  flex: 1;
+}
+.btn-cancel {
+  background: transparent;
+  color: #787b86;
+  border: 1px solid #363a45;
+  border-radius: 3px;
+  padding: 4px 8px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+/* Modal B - full dialog */
+.modal-b {
+  position: absolute;
+  top: 10%;
+  left: 15%;
+  right: 15%;
+  background: #1e222d;
+  border: 1px solid #363a45;
+  border-radius: 8px;
+  padding: 14px 16px;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.7);
+  z-index: 10;
+}
+.modal-title {
+  color: #d1d4dc;
+  font-size: 12px;
+  font-weight: bold;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.field-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+  align-items: center;
+}
+.field-label {
+  color: #787b86;
+  font-size: 9px;
+  text-transform: uppercase;
+  width: 48px;
+  flex-shrink: 0;
+}
+.field-val {
+  background: #131722;
+  border: 1px solid #363a45;
+  border-radius: 3px;
+  padding: 3px 7px;
+  color: #d1d4dc;
+  font-size: 10px;
+  font-family: monospace;
+}
+.field-val.amber { color: #f7931a; border-color: #f7931a44; }
+.seg-control {
+  display: flex;
+  gap: 2px;
+  background: #131722;
+  border: 1px solid #363a45;
+  border-radius: 3px;
+  padding: 2px;
+}
+.seg-btn {
+  padding: 2px 8px;
+  border-radius: 2px;
+  font-size: 9px;
+  color: #787b86;
+  cursor: pointer;
+}
+.seg-btn.active { background: #2962ff; color: white; }
+.modal-channels { display: flex; gap: 5px; margin-bottom: 10px; }
+.modal-ch {
+  background: #131722;
+  border: 1px solid #363a45;
+  border-radius: 3px;
+  padding: 3px 8px;
+  color: #787b86;
+  font-size: 9px;
+  cursor: pointer;
+}
+.modal-ch.on { border-color: #2962ff; color: #2962ff; }
+</style>
+
+<div class="split" style="gap: 16px;">
+
+  <!-- Opción A: Widget flotante mínimo (TradingView style) -->
+  <div class="mockup" style="flex:1">
+    <div class="mockup-header">A — Widget flotante (estilo TradingView)</div>
+    <div class="mockup-body" style="padding:0">
+      <div class="chart-mock">
+        <div class="chart-topbar">
+          <span class="symbol">AAPL</span>
+          <span style="margin-left:auto;color:#26a69a">195.80 +1.2%</span>
+        </div>
+        <div class="chart-body">
+          <div class="candles">
+            <div class="candle" style="height:45px"></div>
+            <div class="candle red" style="height:38px"></div>
+            <div class="candle" style="height:58px"></div>
+            <div class="candle" style="height:65px"></div>
+            <div class="candle red" style="height:42px"></div>
+            <div class="candle" style="height:72px"></div>
+            <div class="candle" style="height:60px"></div>
+          </div>
+          <div class="alert-line">
+            <span class="alert-line-label">195.40</span>
+          </div>
+          <div class="widget-a">
+            <div class="widget-title">🔔 Nueva alerta</div>
+            <div class="widget-price-row">
+              <div class="cond-select">Cruz ▾</div>
+              <div class="price-badge">195.40</div>
+            </div>
+            <div class="channel-row">
+              <div class="ch-pill active">📱 Telegram</div>
+              <div class="ch-pill active">📧 Email</div>
+              <div class="ch-pill">🔔 App</div>
+            </div>
+            <div class="btn-row">
+              <button class="btn-create">Crear alerta</button>
+              <button class="btn-cancel">✕</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p style="font-size:11px;color:#787b86;padding:8px">
+      Mínimo: precio pre-llenado, condición (cruza/sube/baja), canales. Un click → creada. Igual a TradingView. Rápido pero sin nombre ni más opciones.
+    </p>
+  </div>
+
+  <!-- Opción B: Modal con más opciones -->
+  <div class="mockup" style="flex:1">
+    <div class="mockup-header">B — Modal con opciones completas</div>
+    <div class="mockup-body" style="padding:0">
+      <div class="chart-mock">
+        <div class="chart-topbar">
+          <span class="symbol">AAPL</span>
+          <span style="margin-left:auto;color:#26a69a">195.80 +1.2%</span>
+        </div>
+        <div class="chart-body">
+          <div class="candles" style="opacity:0.3">
+            <div class="candle" style="height:45px"></div>
+            <div class="candle red" style="height:38px"></div>
+            <div class="candle" style="height:58px"></div>
+            <div class="candle" style="height:65px"></div>
+          </div>
+          <div class="modal-b">
+            <div class="modal-title">🔔 Nueva alerta — AAPL</div>
+            <div class="field-row">
+              <span class="field-label">Tipo</span>
+              <div class="seg-control">
+                <div class="seg-btn active">Precio</div>
+                <div class="seg-btn">Indicador</div>
+              </div>
+            </div>
+            <div class="field-row">
+              <span class="field-label">Cuando</span>
+              <div class="field-val">Cruza ▾</div>
+              <div class="field-val amber">195.40</div>
+            </div>
+            <div class="field-row">
+              <span class="field-label">Nombre</span>
+              <div class="field-val" style="flex:1;color:#363a45">AAPL nivel 195...</div>
+            </div>
+            <div class="field-row" style="margin-bottom:4px">
+              <span class="field-label">Canales</span>
+              <div class="modal-channels">
+                <div class="modal-ch on">Telegram</div>
+                <div class="modal-ch on">Email</div>
+                <div class="modal-ch">Solo app</div>
+              </div>
+            </div>
+            <div class="btn-row">
+              <button class="btn-create">Crear alerta</button>
+              <button class="btn-cancel">Cancelar</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p style="font-size:11px;color:#787b86;padding:8px">
+      Más completo: tipo (precio/indicador), condición, nombre personalizable, canales. Un poco más lento pero más potente — permite crear alertas de indicadores también.
+    </p>
+  </div>
+
+</div>
+
+<div style="margin-top:16px;padding:12px;background:#1e222d22;border-radius:6px;border:1px solid #2a2e39">
+  <p style="font-size:11px;color:#787b86;margin:0">
+    💡 <strong style="color:#d1d4dc">Nota:</strong> En ambas opciones la línea aparece en el gráfico al crear. La diferencia es cuántas opciones mostramos en el widget de creación.
+  </p>
+</div>

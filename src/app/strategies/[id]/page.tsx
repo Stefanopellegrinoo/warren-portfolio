@@ -8,7 +8,7 @@ import { toast } from 'sonner'
 import type { StrategyWithSetups, IndicatorSetup, IndicatorParam } from '@/types'
 import { StrategyFormModal } from '@/components/strategies/StrategyFormModal'
 import { SetupFormModal } from '@/components/strategies/SetupFormModal'
-import { AlertsTab } from '@/components/strategies/AlertsTab'
+import { PriceAlertsTab } from '@/components/strategies/PriceAlertsTab'
 
 function indicatorLabel(ind: IndicatorParam): string {
   switch (ind.type) {
@@ -329,10 +329,7 @@ export default function StrategyDetailPage() {
 
             {/* Alerts tab */}
             {activeTab === 'alerts' && (
-              <AlertsTab
-                strategyId={strategyId}
-                setups={strategy.indicator_setups}
-              />
+              <PriceAlertsTab />
             )}
 
           </div>
