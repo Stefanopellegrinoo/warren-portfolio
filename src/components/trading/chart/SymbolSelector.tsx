@@ -128,7 +128,6 @@ export function SymbolSelector({ onSymbolSelect }: SymbolSelectorProps = {}) {
 
   function selectTicker(ticker: string) {
     setSymbol(ticker);
-    addSymbolToCurrentWatchlist(ticker);
     setOpen(false);
     setQuery("");
     onSymbolSelect?.();
