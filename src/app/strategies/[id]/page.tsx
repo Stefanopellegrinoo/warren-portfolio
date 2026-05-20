@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 import type { StrategyWithSetups, IndicatorSetup, IndicatorParam } from '@/types'
 import { StrategyFormModal } from '@/components/strategies/StrategyFormModal'
 import { SetupFormModal } from '@/components/strategies/SetupFormModal'
+import { AlertsTab } from '@/components/strategies/AlertsTab'
 
 function indicatorLabel(ind: IndicatorParam): string {
   switch (ind.type) {
@@ -41,6 +42,7 @@ export default function StrategyDetailPage() {
   const [editingSetup, setEditingSetup] = useState<IndicatorSetup | undefined>(undefined)
   const [deletingSetupId, setDeletingSetupId] = useState<string | null>(null)
   const [togglingSetupId, setTogglingSetupId] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<'setups' | 'alerts'>('setups')
 
   const loadStrategy = useCallback(async () => {
     try {
@@ -257,52 +259,82 @@ export default function StrategyDetailPage() {
 
           </div>
 
-          {/* Right column: Setups */}
+          {/* Right column: Setups / Alertas tabs */}
           <div className="lg:col-span-2">
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="font-display font-700 text-white text-sm">
-                  Setups
-                  <span className="ml-2 text-slate-500 font-mono text-xs">
-                    ({strategy.indicator_setups.length})
-                  </span>
-                </h2>
-                <button
-                  className="btn-primary inline-flex items-center gap-1.5 text-xs"
-                  onClick={openNewSetup}
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Nuevo setup
-                </button>
-              </div>
 
-              {strategy.indicator_setups.length === 0 ? (
-                <div className="glass rounded-2xl p-8 border border-white/[0.08] flex flex-col items-center gap-3">
-                  <p className="text-slate-400 font-mono text-sm">Sin setups todavía</p>
+            {/* Tab strip */}
+            <div className="flex gap-0 mb-4 border-b border-white/[0.08]">
+              {(['setups', 'alerts'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`px-4 py-2 text-xs font-mono border-b-2 transition-colors ${
+                    activeTab === tab
+                      ? 'border-amber text-amber'
+                      : 'border-transparent text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  {tab === 'setups' ? 'Setups' : 'Alertas'}
+                </button>
+              ))}
+            </div>
+
+            {/* Setups tab */}
+            {activeTab === 'setups' && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="font-display font-700 text-white text-sm">
+                    Setups
+                    <span className="ml-2 text-slate-500 font-mono text-xs">
+                      ({strategy.indicator_setups.length})
+                    </span>
+                  </h2>
                   <button
                     className="btn-primary inline-flex items-center gap-1.5 text-xs"
                     onClick={openNewSetup}
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    Crear primer setup
+                    Nuevo setup
                   </button>
                 </div>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  {strategy.indicator_setups.map((setup) => (
-                    <SetupRow
-                      key={setup.id}
-                      setup={setup}
-                      togglingId={togglingSetupId}
-                      deletingId={deletingSetupId}
-                      onToggle={toggleSetupActive}
-                      onEdit={openEditSetup}
-                      onDelete={deleteSetup}
-                    />
-                  ))}
-                </div>
-              )}
-            </section>
+
+                {strategy.indicator_setups.length === 0 ? (
+                  <div className="glass rounded-2xl p-8 border border-white/[0.08] flex flex-col items-center gap-3">
+                    <p className="text-slate-400 font-mono text-sm">Sin setups todavía</p>
+                    <button
+                      className="btn-primary inline-flex items-center gap-1.5 text-xs"
+                      onClick={openNewSetup}
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Crear primer setup
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-3">
+                    {strategy.indicator_setups.map((setup) => (
+                      <SetupRow
+                        key={setup.id}
+                        setup={setup}
+                        togglingId={togglingSetupId}
+                        deletingId={deletingSetupId}
+                        onToggle={toggleSetupActive}
+                        onEdit={openEditSetup}
+                        onDelete={deleteSetup}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* Alerts tab */}
+            {activeTab === 'alerts' && (
+              <AlertsTab
+                strategyId={strategyId}
+                setups={strategy.indicator_setups}
+              />
+            )}
+
           </div>
 
         </div>
