@@ -10,33 +10,25 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useChartStore, type IndicatorKey } from "@/lib/store/chart-store";
+import { useChartStore, type IndicatorKey, type IndicatorConfig } from "@/lib/store/chart-store";
 
 interface Entry {
   key: IndicatorKey;
-  label: (cfg: {
-    ema20: number;
-    ema50: number;
-    ema200: number;
-    rsi: number;
-    macdFast: number;
-    macdSlow: number;
-    macdSignal: number;
-  }) => string;
+  label: (cfg: IndicatorConfig) => string;
   group: string;
 }
 
 const ENTRIES: Entry[] = [
-  { key: "ema20", group: "Medias móviles", label: (c) => `EMA ${c.ema20}` },
-  { key: "ema50", group: "Medias móviles", label: (c) => `EMA ${c.ema50}` },
-  { key: "ema200", group: "Medias móviles", label: (c) => `EMA ${c.ema200}` },
-  { key: "volume", group: "Volumen", label: () => "Volumen" },
-  { key: "rsi", group: "Osciladores", label: (c) => `RSI (${c.rsi})` },
-  {
-    key: "macd",
-    group: "Osciladores",
-    label: (c) => `MACD (${c.macdFast}, ${c.macdSlow}, ${c.macdSignal})`,
-  },
+  { key: "ema20",      group: "Medias móviles", label: (c) => `EMA ${c.ema20}` },
+  { key: "ema50",      group: "Medias móviles", label: (c) => `EMA ${c.ema50}` },
+  { key: "ema200",     group: "Medias móviles", label: (c) => `EMA ${c.ema200}` },
+  { key: "bollinger",  group: "Medias móviles", label: (c) => `Bollinger Bands (${c.bbPeriod}, ${c.bbStdDev})` },
+  { key: "volume",     group: "Volumen",         label: () => "Volumen" },
+  { key: "obv",        group: "Volumen",         label: () => "OBV" },
+  { key: "rsi",        group: "Osciladores",     label: (c) => `RSI (${c.rsi})` },
+  { key: "stochastic", group: "Osciladores",     label: (c) => `Stochastic (${c.stochK}, ${c.stochSmooth}, ${c.stochD})` },
+  { key: "macd",       group: "Osciladores",     label: (c) => `MACD (${c.macdFast}, ${c.macdSlow}, ${c.macdSignal})` },
+  { key: "adx",        group: "Tendencia",        label: (c) => `ADX (${c.adxPeriod})` },
 ];
 
 export function IndicatorMenu() {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { Plus, X, Loader2 } from "lucide-react";
 import { fetchTickers24h } from "@/lib/binance/rest";
 import { getBinanceWS } from "@/lib/binance/ws";
@@ -24,55 +24,53 @@ interface WatchlistProps {
 export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
   const activeId = useChartStore((s) => s.activeWatchlistId);
   const localWatchlist = useChartStore((s) => s.watchlist);
+  const watchlistRefreshTick = useChartStore((s) => s.watchlistRefreshTick);
   const symbol = useChartStore((s) => s.symbol);
   const setSymbol = useChartStore((s) => s.setSymbol);
   const removeFromLocal = useChartStore((s) => s.removeFromWatchlist);
   const openSymbolDialog = useChartStore((s) => s.setSymbolDialogOpen);
-  
+
   const [currentList, setCurrentList] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<Record<string, Row>>({});
   const [flash, setFlash] = useState<Record<string, "up" | "down" | null>>({});
 
-  // 1. Sync symbols when activeId or localWatchlist changes
+  // Effect A — local watchlist mirror (only when no activeId)
   useEffect(() => {
-    if (!activeId) {
-      setCurrentList(localWatchlist);
-      return;
-    }
-
-    let cancelled = false;
-    async function fetchRemote() {
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/watchlist?watchlistId=${activeId}`);
-        if (res.ok && !cancelled) {
-          const data = await res.json();
-          setCurrentList(data.items.map((i: any) => i.symbol));
-        }
-      } catch (e) {
-        console.error("Failed to fetch remote watchlist", e);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    fetchRemote();
-    return () => { cancelled = true; };
+    if (activeId) return;
+    setCurrentList(localWatchlist);
   }, [activeId, localWatchlist]);
 
-  // 2. Data fetching & WS logic for currentList
+  // Effect B — remote watchlist fetch (only when activeId is set)
+  useEffect(() => {
+    if (!activeId) return;
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/watchlist?watchlistId=${activeId}`)
+      .then((res) => res.ok ? res.json() : Promise.reject(res.statusText))
+      .then((data) => {
+        if (cancelled) return;
+        setCurrentList(data.items.map((i: { symbol: string }) => i.symbol));
+      })
+      .catch((e) => console.error("Failed to fetch remote watchlist", e))
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [activeId, watchlistRefreshTick]);
+
+  // Effect: data fetching — Binance WS + Yahoo polling, both run in parallel
   useEffect(() => {
     if (currentList.length === 0) {
       setRows({});
       return;
     }
+
     let cancelled = false;
+    const teardowns: Array<() => void> = [];
 
     const binanceTickers = currentList.filter(s => getProviderForSymbol(s) === 'binance');
     const yahooTickers = currentList.filter(s => getProviderForSymbol(s) === 'yahoo');
 
-    // BINANCE
+    // --- Binance branch (REST seed + WS live) ---
     if (binanceTickers.length > 0) {
       fetchTickers24h(binanceTickers)
         .then((tickers) => {
@@ -84,7 +82,8 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
             });
             return next;
           });
-        });
+        })
+        .catch((e) => console.error('Watchlist binance seed failed', e));
 
       const ws = getBinanceWS();
       const unsub = ws.subscribeMiniTickers(binanceTickers, (tick) => {
@@ -102,31 +101,36 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
           return { ...prev, [tick.symbol]: { symbol: tick.symbol, price: tick.close, pct: tick.pct } };
         });
       });
-      
-      return () => { cancelled = true; unsub(); };
+      teardowns.push(unsub);
     }
 
-    // YAHOO
+    // --- Yahoo branch (poll /api/quote every 30s) ---
     if (yahooTickers.length > 0) {
       const fetchYahoo = async () => {
         try {
           const res = await fetch(`/api/quote?tickers=${encodeURIComponent(yahooTickers.join(","))}`);
-          if (res.ok && !cancelled) {
-            const data = await res.json();
-            setRows((prev) => {
-              const next = { ...prev };
-              data.forEach((q: any) => {
-                next[q.ticker] = { symbol: q.ticker, price: q.price, pct: q.change_pct ?? 0 };
-              });
-              return next;
+          if (!res.ok || cancelled) return;
+          const data = await res.json();
+          setRows((prev) => {
+            const next = { ...prev };
+            data.forEach((q: { ticker: string; price: number; change_pct: number }) => {
+              next[q.ticker] = { symbol: q.ticker, price: q.price, pct: q.change_pct ?? 0 };
             });
-          }
-        } catch {}
+            return next;
+          });
+        } catch (e) {
+          console.error('Watchlist yahoo poll failed', e);
+        }
       };
       fetchYahoo();
-      const id = setInterval(fetchYahoo, 30000);
-      return () => { cancelled = true; clearInterval(id); };
+      const id = setInterval(fetchYahoo, 30_000);
+      teardowns.push(() => clearInterval(id));
     }
+
+    return () => {
+      cancelled = true;
+      teardowns.forEach((fn) => fn());
+    };
   }, [currentList]);
 
   const handleRemove = async (s: string) => {
@@ -150,7 +154,7 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
   return (
     <div className="flex h-full flex-col bg-tv-bg">
       <WatchlistSelector />
-      
+
       <div className="flex items-center justify-between px-3 py-2">
         <h2 className="text-[10px] font-bold uppercase tracking-widest text-tv-text-dim">
           {loading ? "Sincronizando..." : "Símbolos"}
@@ -182,7 +186,7 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
               const isActive = s === symbol;
               const f = flash[s];
               const provider = getProviderForSymbol(s);
-              
+
               return (
                 <div
                   key={s}
@@ -207,7 +211,7 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
                       <span className="text-[8px] text-amber-500 font-bold px-1 rounded border border-amber-500/20 bg-amber-500/5">STK</span>
                     )}
                   </div>
-                  
+
                   <span className={cn(
                     "text-right tabular-nums font-medium transition-colors duration-300",
                     f === "up" && "text-tv-green",
@@ -241,7 +245,7 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
                 </div>
               );
             })}
-            
+
             {currentList.length === 0 && !loading && (
               <div className="flex flex-col items-center justify-center py-20 px-6 text-center">
                 <div className="w-12 h-12 rounded-full bg-tv-panel flex items-center justify-center mb-4">

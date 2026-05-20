@@ -1,4 +1,5 @@
 import { useChartStore } from "@/lib/store/chart-store";
+import { toast } from "sonner";
 
 /**
  * Universal helper to add a symbol to the current active watchlist.
@@ -11,28 +12,28 @@ export async function addSymbolToCurrentWatchlist(symbol: string) {
   if (!activeId) {
     // Local watchlist
     store.addToWatchlist(symbol);
-    return { success: true, mode: 'local' };
+    return { success: true, mode: 'local' as const };
   }
 
   // Remote watchlist
   try {
     const res = await fetch("/api/watchlist", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ symbol, watchlistId: activeId }),
     });
 
     if (res.ok) {
-      // We don't necessarily need to update the store here because 
-      // the Watchlist component is listening to activeId changes 
-      // and re-fetching, BUT adding to local state would make it feel faster.
-      // However, for simplicity and to avoid duplicated sources of truth, 
-      // we just return success.
-      return { success: true, mode: 'remote' };
+      store.bumpWatchlistRefresh();
+      toast.success(`${symbol} agregado a la lista`);
+      return { success: true, mode: 'remote' as const };
     } else {
-      const data = await res.json();
-      return { success: false, error: data.error };
+      const data = await res.json().catch(() => ({}));
+      toast.error(data?.error || "No se pudo agregar el símbolo");
+      return { success: false, mode: 'remote' as const, error: data?.error };
     }
-  } catch (e) {
-    return { success: false, error: "Network error" };
+  } catch {
+    toast.error("Error de red al agregar el símbolo");
+    return { success: false, mode: 'remote' as const, error: "Network error" };
   }
 }

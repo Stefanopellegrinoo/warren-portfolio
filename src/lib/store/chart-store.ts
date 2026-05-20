@@ -10,7 +10,11 @@ export type IndicatorKey =
   | "ema200"
   | "rsi"
   | "macd"
-  | "volume";
+  | "volume"
+  | "bollinger"
+  | "obv"
+  | "stochastic"
+  | "adx";
 
 export type DrawingTool = "cursor" | "hline" | "measure" | "eraser";
 
@@ -28,6 +32,12 @@ export interface IndicatorConfig {
   macdFast: number;
   macdSlow: number;
   macdSignal: number;
+  bbPeriod: number;
+  bbStdDev: number;
+  stochK: number;
+  stochSmooth: number;
+  stochD: number;
+  adxPeriod: number;
 }
 
 export const DEFAULT_CONFIG: IndicatorConfig = {
@@ -38,6 +48,12 @@ export const DEFAULT_CONFIG: IndicatorConfig = {
   macdFast: 12,
   macdSlow: 26,
   macdSignal: 9,
+  bbPeriod: 20,
+  bbStdDev: 2,
+  stochK: 14,
+  stochSmooth: 3,
+  stochD: 3,
+  adxPeriod: 14,
 };
 
 export const INDICATOR_COLORS: Record<IndicatorKey, string> = {
@@ -47,6 +63,10 @@ export const INDICATOR_COLORS: Record<IndicatorKey, string> = {
   rsi: "#ab47bc",
   macd: "#2962ff",
   volume: "#787b86",
+  bollinger: "#2962FF",
+  obv: "#FF6D00",
+  stochastic: "#2962FF",
+  adx: "#B0BEC5",
 };
 
 export const DEFAULT_WATCHLIST = [
@@ -99,6 +119,9 @@ interface ChartState {
   setSettingsTarget: (k: IndicatorKey | null) => void;
   togglePortfolioOverlay: () => void;
   setActiveWatchlistId: (id: string | null) => void;
+  /** Incremented each time a symbol is successfully added to a remote watchlist */
+  watchlistRefreshTick: number;
+  bumpWatchlistRefresh: () => void;
 }
 
 export const useChartStore = create<ChartState>()(
@@ -113,6 +136,10 @@ export const useChartStore = create<ChartState>()(
         rsi: true,
         macd: false,
         volume: true,
+        bollinger: false,
+        obv: false,
+        stochastic: false,
+        adx: false,
       },
       hidden: {
         ema20: false,
@@ -121,6 +148,10 @@ export const useChartStore = create<ChartState>()(
         rsi: false,
         macd: false,
         volume: false,
+        bollinger: false,
+        obv: false,
+        stochastic: false,
+        adx: false,
       },
       config: { ...DEFAULT_CONFIG },
       watchlist: DEFAULT_WATCHLIST,
@@ -130,6 +161,7 @@ export const useChartStore = create<ChartState>()(
       priceLines: [],
       symbolDialogOpen: false,
       settingsTarget: null,
+      watchlistRefreshTick: 0,
 
       setSymbol: (symbol) => set({ symbol }),
       setTimeframe: (timeframe) => set({ timeframe }),
@@ -186,6 +218,8 @@ export const useChartStore = create<ChartState>()(
       togglePortfolioOverlay: () =>
         set((s) => ({ showPortfolioOverlay: !s.showPortfolioOverlay })),
       setActiveWatchlistId: (activeWatchlistId) => set({ activeWatchlistId }),
+      bumpWatchlistRefresh: () =>
+        set((s) => ({ watchlistRefreshTick: s.watchlistRefreshTick + 1 })),
     }),
     {
       name: "tv-gratis-chart-state",

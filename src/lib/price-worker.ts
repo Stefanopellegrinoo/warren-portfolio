@@ -22,6 +22,7 @@ import { isMarketOpen } from './utils'
 import { startImportWorker } from './import-worker'
 import { startSignalsWorker } from './signals-worker'
 import { scheduleSignalsEvaluationJobs } from './signals-queue'
+import { checkNotificationConfig } from './notifications'
 
 const REDIS_URL = process.env.REDIS_URL
 
@@ -232,6 +233,7 @@ async function main() {
   console.log('[Worker] Price update worker started')
   startImportWorker()
   startSignalsWorker()
+  checkNotificationConfig()
   console.log(`[Worker] Redis: ${REDIS_URL}`)
 
   // Schedule repeating job every 5 minutes

@@ -61,7 +61,7 @@ export function Header({ onSymbolSelect }: HeaderProps = {}) {
       </div>
 
       {/* Right: compact app navigation */}
-      <nav className="flex items-center gap-0.5">
+      <nav className="hidden lg:flex items-center gap-0.5">
         {NAV.map(({ href, icon: Icon, label }) => (
           <Link
             key={href}

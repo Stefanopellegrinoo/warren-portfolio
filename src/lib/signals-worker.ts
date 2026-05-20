@@ -16,6 +16,7 @@ import {
   type ComputedState,
 } from './indicators'
 import type { IndicatorSetup } from '../types'
+import { sendTelegram, sendEmail, type SendResult } from './notifications'
 
 type CloseReason = 'SIGNAL' | 'STOP_LOSS' | 'TAKE_PROFIT'
 
@@ -252,6 +253,20 @@ async function handleBuySignal(
   console.log(
     `[signals-worker] BUY signal fired: ${ticker} @ ${price} (setup: ${setup.name})`
   )
+
+  const buyStrategyName = await getStrategyName(supabase, setup.strategy_id)
+  dispatchAlerts(supabase, {
+    id: signal.id,
+    user_id: setup.user_id,
+    setup_id: setup.id,
+    strategy_id: setup.strategy_id,
+    ticker,
+    type: 'BUY',
+    price,
+    metadata: buildMetadata(state),
+  }, buyStrategyName, setup.name).catch((err: Error) =>
+    console.error('[signals-worker] dispatchAlerts BUY error', err.message)
+  )
 }
 
 async function handleSellSignal(
@@ -374,6 +389,22 @@ async function closeTrade(
   ).catch((err: Error) =>
     console.error('[signals-worker] error updating setup_performance', err.message)
   )
+
+  if (closeSignalId && reason === 'SIGNAL' && state) {
+    const sellStrategyName = await getStrategyName(supabase, setup.strategy_id)
+    dispatchAlerts(supabase, {
+      id: closeSignalId,
+      user_id: setup.user_id,
+      setup_id: setup.id,
+      strategy_id: setup.strategy_id,
+      ticker,
+      type: 'SELL',
+      price,
+      metadata: buildMetadata(state),
+    }, sellStrategyName, setup.name).catch((err: Error) =>
+      console.error('[signals-worker] dispatchAlerts SELL error', err.message)
+    )
+  }
 }
 
 async function updateSetupPerformance(
@@ -399,6 +430,164 @@ async function updateSetupPerformance(
 
   if (error) {
     throw new Error(`update_setup_performance_atomic failed: ${error.message}`)
+  }
+}
+
+// ── Alert Dispatch ───────────────────────────────────────
+
+interface DispatchSignal {
+  id: string
+  user_id: string
+  setup_id: string
+  strategy_id: string
+  ticker: string
+  type: 'BUY' | 'SELL'
+  price: number
+  metadata: Record<string, unknown> | null
+}
+
+const strategyNameCache = new Map<string, string>()
+
+async function getStrategyName(
+  supabase: SupabaseClient,
+  strategyId: string
+): Promise<string> {
+  const cached = strategyNameCache.get(strategyId)
+  if (cached) return cached
+  const { data } = await supabase
+    .from('strategies')
+    .select('name')
+    .eq('id', strategyId)
+    .single()
+  const name = data?.name ?? 'Unknown'
+  strategyNameCache.set(strategyId, name)
+  return name
+}
+
+export function formatIndicatorLines(
+  metadata: Record<string, unknown> | null
+): string {
+  if (!metadata) return ''
+  const lines: string[] = []
+  for (const [key, val] of Object.entries(metadata)) {
+    if (typeof val !== 'number' || key === 'close') continue
+    const label = key.toUpperCase().replace(/(\d+)/, ' $1')
+    lines.push(`${label}: ${val.toFixed(2)}`)
+  }
+  return lines.join(' | ')
+}
+
+export function formatTelegramMessage(
+  signal: DispatchSignal,
+  setupName: string,
+  strategyName: string
+): string {
+  const emoji = signal.type === 'BUY' ? '🟢' : '🔴'
+  const indicators = formatIndicatorLines(signal.metadata)
+  const lines = [
+    `${emoji} [${setupName} — ${signal.type}] ${signal.ticker}`,
+    `Precio: $${signal.price.toFixed(2)}`,
+  ]
+  if (indicators) lines.push(indicators)
+  lines.push(`Estrategia: ${strategyName}`)
+  return lines.join('\n')
+}
+
+function formatEmailHtml(
+  signal: DispatchSignal,
+  setupName: string,
+  strategyName: string
+): string {
+  const indicators = formatIndicatorLines(signal.metadata)
+  return [
+    `<p><strong>${signal.type} ${signal.ticker}</strong> @ ${signal.price.toFixed(2)}</p>`,
+    `<p>Estrategia: ${strategyName}<br/>Setup: ${setupName}</p>`,
+    indicators ? `<pre>${indicators}</pre>` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+async function getUserEmail(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<string> {
+  try {
+    const { data } = await supabase.auth.admin.getUserById(userId)
+    return data?.user?.email ?? ''
+  } catch {
+    return ''
+  }
+}
+
+async function dispatchAlerts(
+  supabase: SupabaseClient,
+  signal: DispatchSignal,
+  strategyName: string,
+  setupName: string
+): Promise<void> {
+  try {
+    const { data: alerts, error } = await supabase
+      .from('alerts')
+      .select('id, channels, last_fired_at, user_id')
+      .eq('user_id', signal.user_id)
+      .eq('ticker', signal.ticker)
+      .eq('setup_id', signal.setup_id)
+      .eq('active', true)
+
+    if (error) {
+      console.error('[signals-worker] dispatchAlerts SELECT error', error.message)
+      return
+    }
+    if (!alerts?.length) return
+
+    const now = Date.now()
+    const THROTTLE_MS = 24 * 60 * 60 * 1000
+
+    for (const alert of alerts) {
+      if (
+        alert.last_fired_at &&
+        now - new Date(alert.last_fired_at).getTime() < THROTTLE_MS
+      ) {
+        console.log(
+          `[signals-worker] alert ${alert.id} throttled (last_fired_at=${alert.last_fired_at})`
+        )
+        continue
+      }
+
+      const tgText = formatTelegramMessage(signal, setupName, strategyName)
+      const emailHtml = formatEmailHtml(signal, setupName, strategyName)
+      const emailSubject = `Warren · ${signal.type} ${signal.ticker} @ ${signal.price.toFixed(2)}`
+
+      let anySuccess = false
+      for (const channel of alert.channels as Array<'telegram' | 'email'>) {
+        let result: SendResult
+        if (channel === 'telegram') {
+          result = await sendTelegram(tgText)
+        } else {
+          const emailTo = await getUserEmail(supabase, alert.user_id)
+          result = await sendEmail(emailTo, emailSubject, emailHtml)
+        }
+
+        anySuccess = anySuccess || result.ok
+        await supabase.from('alert_history').insert({
+          alert_id: alert.id,
+          signal_id: signal.id,
+          channel,
+          status: result.ok ? 'sent' : 'failed',
+          error: result.ok ? null : (result as { ok: false; error: string }).error,
+        })
+      }
+
+      if (anySuccess) {
+        await supabase
+          .from('alerts')
+          .update({ last_fired_at: new Date().toISOString() })
+          .eq('id', alert.id)
+      }
+    }
+  } catch (err) {
+    console.error('[signals-worker] dispatchAlerts unexpected error', (err as Error).message)
   }
 }
 

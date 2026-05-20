@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronDown, Plus, List, Trash2, Edit2, MoreVertical } from "lucide-react";
+import { ChevronDown, Plus, List, Trash2, Edit2 } from "lucide-react";
 import { useChartStore } from "@/lib/store/chart-store";
 import {
   DropdownMenu,
@@ -29,16 +29,43 @@ interface WatchlistInfo {
   item_count: number;
 }
 
+async function extractError(res: Response, fallback: string): Promise<string> {
+  try {
+    const data = await res.json();
+    return data?.error ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export function WatchlistSelector() {
   const activeId = useChartStore((s) => s.activeWatchlistId);
   const setActiveId = useChartStore((s) => s.setActiveWatchlistId);
-  
+
   const [lists, setLists] = useState<WatchlistInfo[]>([]);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [newListName, setNewListName] = useState("");
   const [editingList, setEditingList] = useState<WatchlistInfo | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Open edit dialog only after the dropdown has fully closed to avoid
+  // @base-ui/react identity/focus conflict (error #31).
+  useEffect(() => {
+    if (editingList && !dropdownOpen) {
+      setShowEditDialog(true);
+    }
+  }, [editingList, dropdownOpen]);
+
+  // Open delete confirm dialog only after dropdown has fully closed (same Base UI pattern).
+  useEffect(() => {
+    if (pendingDeleteId && !dropdownOpen) {
+      setShowDeleteDialog(true);
+    }
+  }, [pendingDeleteId, dropdownOpen]);
 
   async function fetchLists() {
     try {
@@ -62,6 +89,7 @@ export function WatchlistSelector() {
     try {
       const res = await fetch("/api/watchlist/lists", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: newListName }),
       });
       if (res.ok) {
@@ -70,8 +98,16 @@ export function WatchlistSelector() {
         setActiveId(data.id);
         setShowCreateDialog(false);
         setNewListName("");
+        toast.success("Lista creada");
+      } else {
+        const msg = await extractError(res, "No se pudo crear la lista");
+        toast.error(msg);
       }
-    } catch {} finally { setLoading(false); }
+    } catch {
+      toast.error("Error de red al crear la lista");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleRenameList() {
@@ -80,6 +116,7 @@ export function WatchlistSelector() {
     try {
       const res = await fetch(`/api/watchlist/lists/${editingList.id}`, {
         method: "PATCH",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: newListName }),
       });
       if (res.ok) {
@@ -87,32 +124,52 @@ export function WatchlistSelector() {
         setShowEditDialog(false);
         setNewListName("");
         setEditingList(null);
+        toast.success("Lista renombrada");
+      } else {
+        const msg = await extractError(res, "No se pudo renombrar la lista");
+        toast.error(msg);
       }
-    } catch {} finally { setLoading(false); }
+    } catch {
+      toast.error("Error de red al renombrar la lista");
+    } finally {
+      setLoading(false);
+    }
   }
 
-  async function handleDeleteList(id: string, e: React.MouseEvent) {
+  function requestDeleteList(id: string, e: React.MouseEvent) {
     e.stopPropagation();
-    if (!confirm("¿Estás seguro de que querés eliminar esta lista?")) return;
+    setPendingDeleteId(id);
+    setDropdownOpen(false);
+  }
+
+  async function confirmDeleteList() {
+    if (!pendingDeleteId) return;
+    const id = pendingDeleteId;
     try {
       const res = await fetch(`/api/watchlist/lists/${id}`, { method: "DELETE" });
       if (res.ok) {
         if (activeId === id) setActiveId(null);
         await fetchLists();
+        toast.success("Lista eliminada");
       } else {
-        const data = await res.json();
-        toast.error(data.error || "No se pudo eliminar la lista");
+        const data = await res.json().catch(() => ({}));
+        toast.error(data?.error || "No se pudo eliminar la lista");
       }
-    } catch {}
+    } catch {
+      toast.error("Error de red al eliminar la lista");
+    } finally {
+      setPendingDeleteId(null);
+      setShowDeleteDialog(false);
+    }
   }
 
-  const activeListName = activeId 
-    ? lists.find(l => l.id === activeId)?.name || "Cargando..." 
+  const activeListName = activeId
+    ? lists.find((l) => l.id === activeId)?.name || "Cargando..."
     : "Watchlist Local";
 
   return (
     <div className="flex items-center justify-between px-3 py-1.5 border-b border-tv-border bg-tv-panel/40">
-      <DropdownMenu>
+      <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
         <DropdownMenuTrigger className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest text-tv-text hover:text-tv-blue transition-colors group outline-none">
           <List className="h-3 w-3 text-tv-text-dim group-hover:text-tv-blue" />
           {activeListName}
@@ -123,9 +180,9 @@ export function WatchlistSelector() {
             Tus Listas
           </DropdownMenuLabel>
           <DropdownMenuSeparator className="bg-tv-border/50 mx-1" />
-          
+
           <div className="max-h-[300px] overflow-y-auto py-1">
-            <DropdownMenuItem 
+            <DropdownMenuItem
               onClick={() => setActiveId(null)}
               className={cn(
                 "flex items-center justify-between text-xs py-2 px-3 cursor-pointer rounded-sm outline-none transition-colors",
@@ -140,9 +197,9 @@ export function WatchlistSelector() {
                 {!activeId && <div className="w-1.5 h-1.5 rounded-full bg-tv-blue shadow-[0_0_8px_rgba(41,98,255,0.6)]" />}
               </div>
             </DropdownMenuItem>
-            
+
             {lists.map((l) => (
-              <DropdownMenuItem 
+              <DropdownMenuItem
                 key={l.id}
                 onClick={() => setActiveId(l.id)}
                 className={cn(
@@ -159,53 +216,54 @@ export function WatchlistSelector() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        setEditingList(l);
                         setNewListName(l.name);
-                        setTimeout(() => setShowEditDialog(true), 0);
+                        setEditingList(l);
+                        setDropdownOpen(false);
                       }}
                       className="p-1 rounded hover:bg-tv-bg text-tv-text-dim hover:text-tv-text opacity-0 group-hover:opacity-100 transition-opacity"
                     >
                       <Edit2 className="h-3 w-3" />
                     </button>
                     <button
-                      onClick={(e) => handleDeleteList(l.id, e)}
+                      onClick={(e) => requestDeleteList(l.id, e)}
                       className="p-1 rounded hover:bg-tv-red/20 text-tv-text-dim hover:text-tv-red opacity-0 group-hover:opacity-100 transition-opacity"
                     >
                       <Trash2 className="h-3 w-3" />
                     </button>
-                    {activeId === l.id && <div className="w-1.5 h-1.5 rounded-full bg-tv-blue shadow-[0_0_8px_rgba(41,98,255,0.6)]" />}
+                    {activeId === l.id && (
+                      <div className="w-1.5 h-1.5 rounded-full bg-tv-blue shadow-[0_0_8px_rgba(41,98,255,0.6)]" />
+                    )}
                   </div>
                 </div>
               </DropdownMenuItem>
             ))}
           </div>
-          
-          <DropdownMenuSeparator className="bg-tv-border/50 mx-1" />
-          
-          <DropdownMenuItem 
-            onClick={() => {
-              setNewListName("");
-              setTimeout(() => setShowCreateDialog(true), 0);
-            }}
-            className="flex items-center gap-2.5 text-xs py-2 px-3 cursor-pointer rounded-sm outline-none text-tv-blue hover:bg-tv-blue/5 font-semibold mt-1"
-          >
-            <Plus className="h-4 w-4" />
-            Crear nueva lista...
-          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <div className="flex items-center gap-1">
+      {/* Right side: item count + create button (outside dropdown to avoid Base UI focus conflict) */}
+      <div className="flex items-center gap-1.5">
         <span className="text-[10px] text-tv-text-dim/40 font-mono">
-          {activeId ? lists.find(l => l.id === activeId)?.item_count || 0 : "∞"}
+          {activeId ? lists.find((l) => l.id === activeId)?.item_count || 0 : "∞"}
         </span>
+        <button
+          onClick={() => {
+            setNewListName("");
+            setShowCreateDialog(true);
+          }}
+          className="p-0.5 rounded hover:bg-tv-panel-hover text-tv-text-dim hover:text-tv-blue transition-colors"
+          title="Crear nueva lista"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
       </div>
 
-      {/* Dialogs */}
-      <Dialog key="dialog-create" open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
         <DialogContent className="bg-tv-panel border-tv-border text-tv-text sm:max-w-[320px] shadow-2xl">
           <DialogHeader>
-            <DialogTitle className="text-xs font-bold uppercase tracking-[0.2em] text-tv-text-dim">Nueva Watchlist</DialogTitle>
+            <DialogTitle className="text-xs font-bold uppercase tracking-[0.2em] text-tv-text-dim">
+              Nueva Watchlist
+            </DialogTitle>
           </DialogHeader>
           <div className="py-6">
             <Input
@@ -218,14 +276,14 @@ export function WatchlistSelector() {
             />
           </div>
           <DialogFooter className="gap-2">
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => setShowCreateDialog(false)}
               className="border-tv-border text-[11px] h-8 font-bold uppercase tracking-wider hover:bg-tv-panel-hover"
             >
               Cancelar
             </Button>
-            <Button 
+            <Button
               onClick={handleCreateList}
               disabled={loading || !newListName.trim()}
               className="bg-tv-blue hover:bg-tv-blue/90 text-white text-[11px] h-8 font-bold uppercase tracking-wider px-6"
@@ -236,10 +294,18 @@ export function WatchlistSelector() {
         </DialogContent>
       </Dialog>
 
-      <Dialog key="dialog-edit" open={showEditDialog} onOpenChange={setShowEditDialog}>
+      <Dialog
+        open={showEditDialog}
+        onOpenChange={(open) => {
+          setShowEditDialog(open);
+          if (!open) setEditingList(null);
+        }}
+      >
         <DialogContent className="bg-tv-panel border-tv-border text-tv-text sm:max-w-[320px] shadow-2xl">
           <DialogHeader>
-            <DialogTitle className="text-xs font-bold uppercase tracking-[0.2em] text-tv-text-dim">Renombrar Lista</DialogTitle>
+            <DialogTitle className="text-xs font-bold uppercase tracking-[0.2em] text-tv-text-dim">
+              Renombrar Lista
+            </DialogTitle>
           </DialogHeader>
           <div className="py-6">
             <Input
@@ -252,8 +318,8 @@ export function WatchlistSelector() {
             />
           </div>
           <DialogFooter className="gap-2">
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => {
                 setShowEditDialog(false);
                 setEditingList(null);
@@ -262,12 +328,51 @@ export function WatchlistSelector() {
             >
               Cancelar
             </Button>
-            <Button 
+            <Button
               onClick={handleRenameList}
               disabled={loading || !newListName.trim()}
               className="bg-tv-blue hover:bg-tv-blue/90 text-white text-[11px] h-8 font-bold uppercase tracking-wider px-6"
             >
               {loading ? "..." : "Guardar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={showDeleteDialog}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingDeleteId(null);
+            setShowDeleteDialog(false);
+          }
+        }}
+      >
+        <DialogContent className="bg-tv-panel border-tv-border text-tv-text sm:max-w-[360px] shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-xs font-bold uppercase tracking-[0.2em] text-tv-text-dim">
+              Eliminar Lista
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-6 text-xs text-tv-text">
+            ¿Estás seguro de que querés eliminar esta lista? Esta acción no se puede deshacer.
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setPendingDeleteId(null);
+                setShowDeleteDialog(false);
+              }}
+              className="border-tv-border text-[11px] h-8 font-bold uppercase tracking-wider hover:bg-tv-panel-hover"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={confirmDeleteList}
+              className="bg-tv-red hover:bg-tv-red/90 text-white text-[11px] h-8 font-bold uppercase tracking-wider px-6"
+            >
+              Eliminar
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -160,6 +160,144 @@ export function bollinger(
   return out;
 }
 
+export interface OBVPoint {
+  time: number;
+  value: number;
+}
+
+export function obv(candles: Candle[]): IndicatorPoint[] {
+  const out: IndicatorPoint[] = [];
+  if (candles.length === 0) return out;
+  let cumulative = 0;
+  out.push({ time: candles[0].time, value: 0 });
+  for (let i = 1; i < candles.length; i++) {
+    if (candles[i].close > candles[i - 1].close) cumulative += candles[i].volume;
+    else if (candles[i].close < candles[i - 1].close) cumulative -= candles[i].volume;
+    out.push({ time: candles[i].time, value: cumulative });
+  }
+  return out;
+}
+
+export interface StochasticPoint {
+  time: number;
+  k: number;
+  d: number;
+}
+
+export function stochastic(
+  candles: Candle[],
+  kPeriod = 14,
+  kSmooth = 3,
+  dPeriod = 3,
+): StochasticPoint[] {
+  // 1. Raw %K
+  const rawK: IndicatorPoint[] = [];
+  for (let i = kPeriod - 1; i < candles.length; i++) {
+    let lowest = candles[i].low;
+    let highest = candles[i].high;
+    for (let j = i - kPeriod + 1; j <= i; j++) {
+      if (candles[j].low < lowest) lowest = candles[j].low;
+      if (candles[j].high > highest) highest = candles[j].high;
+    }
+    const range = highest - lowest;
+    const kVal = range === 0 ? 50 : (100 * (candles[i].close - lowest)) / range;
+    rawK.push({ time: candles[i].time, value: kVal });
+  }
+  // 2. Smoothed %K = SMA(rawK, kSmooth)
+  if (rawK.length < kSmooth) return [];
+  const kSmoothed: IndicatorPoint[] = [];
+  for (let i = kSmooth - 1; i < rawK.length; i++) {
+    let sum = 0;
+    for (let j = i - kSmooth + 1; j <= i; j++) sum += rawK[j].value;
+    kSmoothed.push({ time: rawK[i].time, value: sum / kSmooth });
+  }
+  // 3. %D = SMA(kSmoothed, dPeriod)
+  if (kSmoothed.length < dPeriod) return [];
+  const out: StochasticPoint[] = [];
+  for (let i = dPeriod - 1; i < kSmoothed.length; i++) {
+    let sum = 0;
+    for (let j = i - dPeriod + 1; j <= i; j++) sum += kSmoothed[j].value;
+    out.push({ time: kSmoothed[i].time, k: kSmoothed[i].value, d: sum / dPeriod });
+  }
+  return out;
+}
+
+export interface ADXPoint {
+  time: number;
+  adx: number;
+  plusDI: number;
+  minusDI: number;
+}
+
+export function adx(candles: Candle[], period = 14): ADXPoint[] {
+  if (candles.length < period * 2) return [];
+
+  // Step 1: TR, +DM, -DM for each bar (starting from index 1)
+  const tr: number[] = [];
+  const plusDM: number[] = [];
+  const minusDM: number[] = [];
+
+  for (let i = 1; i < candles.length; i++) {
+    const high = candles[i].high;
+    const low = candles[i].low;
+    const prevHigh = candles[i - 1].high;
+    const prevLow = candles[i - 1].low;
+    const prevClose = candles[i - 1].close;
+
+    tr.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
+
+    const upMove = high - prevHigh;
+    const downMove = prevLow - low;
+    plusDM.push(upMove > downMove && upMove > 0 ? upMove : 0);
+    minusDM.push(downMove > upMove && downMove > 0 ? downMove : 0);
+  }
+
+  // Step 2: Wilder smoothing — seed with sum of first `period` values
+  let smoothTR = tr.slice(0, period).reduce((a, b) => a + b, 0);
+  let smoothPlus = plusDM.slice(0, period).reduce((a, b) => a + b, 0);
+  let smoothMinus = minusDM.slice(0, period).reduce((a, b) => a + b, 0);
+
+  const dxValues: number[] = [];
+  const diPlus: number[] = [];
+  const diMinus: number[] = [];
+  const times: number[] = [];
+
+  function pushDI(idx: number) {
+    const p = smoothTR === 0 ? 0 : (100 * smoothPlus) / smoothTR;
+    const m = smoothTR === 0 ? 0 : (100 * smoothMinus) / smoothTR;
+    const dx = p + m === 0 ? 0 : (100 * Math.abs(p - m)) / (p + m);
+    diPlus.push(p);
+    diMinus.push(m);
+    dxValues.push(dx);
+    times.push(candles[idx].time);
+  }
+
+  pushDI(period); // first point using sum of first `period` bars
+
+  for (let i = period; i < tr.length; i++) {
+    smoothTR = smoothTR - smoothTR / period + tr[i];
+    smoothPlus = smoothPlus - smoothPlus / period + plusDM[i];
+    smoothMinus = smoothMinus - smoothMinus / period + minusDM[i];
+    pushDI(i + 1); // candles index is i+1 (since tr starts at candle index 1)
+  }
+
+  // Step 3: Wilder smoothing of DX to get ADX
+  if (dxValues.length < period) return [];
+
+  let adxVal = dxValues.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  const out: ADXPoint[] = [];
+
+  // First ADX point at dxValues[period-1]
+  out.push({ time: times[period - 1], adx: adxVal, plusDI: diPlus[period - 1], minusDI: diMinus[period - 1] });
+
+  for (let i = period; i < dxValues.length; i++) {
+    adxVal = (adxVal * (period - 1) + dxValues[i]) / period;
+    out.push({ time: times[i], adx: adxVal, plusDI: diPlus[i], minusDI: diMinus[i] });
+  }
+
+  return out;
+}
+
 export function volumeAvg(candles: Candle[], period = 20): IndicatorPoint[] {
   const out: IndicatorPoint[] = [];
   if (candles.length < period) return out;

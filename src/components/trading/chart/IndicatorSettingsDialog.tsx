@@ -22,6 +22,10 @@ const TITLES: Record<IndicatorKey, string> = {
   rsi: "RSI",
   macd: "MACD",
   volume: "Volumen",
+  bollinger: "Bollinger Bands",
+  obv: "OBV",
+  stochastic: "Stochastic",
+  adx: "ADX",
 };
 
 export function IndicatorSettingsDialog() {
@@ -81,6 +85,12 @@ function SettingsForm({ target, config, onSave, onReset }: FormProps) {
     macdFast: config.macdFast,
     macdSlow: config.macdSlow,
     macdSignal: config.macdSignal,
+    bbPeriod: config.bbPeriod,
+    bbStdDev: config.bbStdDev,
+    stochK: config.stochK,
+    stochSmooth: config.stochSmooth,
+    stochD: config.stochD,
+    adxPeriod: config.adxPeriod,
   });
 
   useEffect(() => {
@@ -92,6 +102,12 @@ function SettingsForm({ target, config, onSave, onReset }: FormProps) {
       macdFast: config.macdFast,
       macdSlow: config.macdSlow,
       macdSignal: config.macdSignal,
+      bbPeriod: config.bbPeriod,
+      bbStdDev: config.bbStdDev,
+      stochK: config.stochK,
+      stochSmooth: config.stochSmooth,
+      stochD: config.stochD,
+      adxPeriod: config.adxPeriod,
     });
   }, [config, target]);
 
@@ -107,6 +123,16 @@ function SettingsForm({ target, config, onSave, onReset }: FormProps) {
         macdSignal: clamp(draft.macdSignal, 2, 100),
       });
     else if (target === "volume") onSave({});
+    else if (target === "bollinger")
+      onSave({ bbPeriod: clamp(draft.bbPeriod, 2, 500), bbStdDev: clamp(draft.bbStdDev, 1, 5) });
+    else if (target === "obv") onSave({});
+    else if (target === "stochastic")
+      onSave({
+        stochK: clamp(draft.stochK, 1, 100),
+        stochSmooth: clamp(draft.stochSmooth, 1, 20),
+        stochD: clamp(draft.stochD, 1, 20),
+      });
+    else if (target === "adx") onSave({ adxPeriod: clamp(draft.adxPeriod, 2, 100) });
   }
 
   return (
@@ -149,6 +175,61 @@ function SettingsForm({ target, config, onSave, onReset }: FormProps) {
           El indicador de volumen no tiene parámetros configurables en esta
           versión.
         </p>
+      )}
+      {target === "bollinger" && (
+        <div className="grid grid-cols-2 gap-2">
+          <Field
+            label="Período"
+            value={draft.bbPeriod}
+            onChange={(n) => setDraft((d) => ({ ...d, bbPeriod: n }))}
+          />
+          <Field
+            label="Desv. estándar"
+            value={draft.bbStdDev}
+            onChange={(n) => setDraft((d) => ({ ...d, bbStdDev: n }))}
+          />
+        </div>
+      )}
+      {target === "obv" && (
+        <p className="text-xs text-tv-text-muted">
+          OBV no tiene parámetros configurables.
+        </p>
+      )}
+      {target === "stochastic" && (
+        <div className="flex flex-col gap-2">
+          <div className="grid grid-cols-3 gap-2">
+            <Field
+              label="K"
+              value={draft.stochK}
+              onChange={(n) => setDraft((d) => ({ ...d, stochK: n }))}
+            />
+            <Field
+              label="Smooth"
+              value={draft.stochSmooth}
+              onChange={(n) => setDraft((d) => ({ ...d, stochSmooth: n }))}
+            />
+            <Field
+              label="D"
+              value={draft.stochD}
+              onChange={(n) => setDraft((d) => ({ ...d, stochD: n }))}
+            />
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setDraft((d) => ({ ...d, stochK: 21, stochSmooth: 5, stochD: 5 }))}
+            className="text-tv-text-muted hover:text-tv-text text-xs"
+          >
+            Largo plazo (21, 5, 5)
+          </Button>
+        </div>
+      )}
+      {target === "adx" && (
+        <Field
+          label="Período"
+          value={draft.adxPeriod}
+          onChange={(n) => setDraft((d) => ({ ...d, adxPeriod: n }))}
+        />
       )}
 
       <div className="mt-2 flex items-center justify-between">

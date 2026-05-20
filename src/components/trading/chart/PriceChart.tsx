@@ -17,7 +17,7 @@ import {
 } from "lightweight-charts";
 import { fetchKlines } from "@/lib/binance/rest";
 import { getBinanceWS } from "@/lib/binance/ws";
-import { ema, rsi, macd } from "@/lib/indicators";
+import { ema, rsi, macd, bollinger, obv, stochastic, adx } from "@/lib/indicators";
 import { getProviderForSymbol } from "@/lib/market-data/resolver";
 import type { Candle, Timeframe } from "@/lib/binance/types";
 import { getTransactions } from "@/lib/warren/positions";
@@ -90,6 +90,15 @@ interface LastValues {
   macdSignal?: number;
   macdHist?: number;
   volume?: number;
+  bbUpper?: number;
+  bbMiddle?: number;
+  bbLower?: number;
+  obv?: number;
+  stochK?: number;
+  stochD?: number;
+  adx?: number;
+  plusDI?: number;
+  minusDI?: number;
 }
 
 const OPERATION_MARKER_STYLE = {
@@ -118,6 +127,18 @@ export function PriceChart({ symbol, timeframe }: Props) {
   const macdRef = useRef<ISeriesApi<"Line"> | null>(null);
   const macdSignalRef = useRef<ISeriesApi<"Line"> | null>(null);
   const macdHistRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const bbUpperRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const bbMiddleRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const bbLowerRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const obvRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const stochKRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const stochDRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const stoch20Ref = useRef<ISeriesApi<"Line"> | null>(null);
+  const stoch80Ref = useRef<ISeriesApi<"Line"> | null>(null);
+  const adxRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const adxPlusDIRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const adxMinusDIRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const adx25Ref = useRef<ISeriesApi<"Line"> | null>(null);
   const candlesRef = useRef<Candle[]>([]);
   const priceLinesMapRef = useRef<Map<string, IPriceLine>>(new Map());
   const markersPluginRef = useRef<ISeriesMarkersPluginApi<UTCTimestamp> | null>(null);
@@ -389,6 +410,18 @@ export function PriceChart({ symbol, timeframe }: Props) {
       macdRef.current = null;
       macdSignalRef.current = null;
       macdHistRef.current = null;
+      bbUpperRef.current = null;
+      bbMiddleRef.current = null;
+      bbLowerRef.current = null;
+      obvRef.current = null;
+      stochKRef.current = null;
+      stochDRef.current = null;
+      stoch20Ref.current = null;
+      stoch80Ref.current = null;
+      adxRef.current = null;
+      adxPlusDIRef.current = null;
+      adxMinusDIRef.current = null;
+      adx25Ref.current = null;
     };
   }, []);
 
@@ -529,6 +562,207 @@ export function PriceChart({ symbol, timeframe }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [indicators.macd, indicators.rsi]);
 
+  // Bollinger Bands — overlay on pane 0
+  useEffect(() => {
+    if (!chartRef.current) return;
+    if (indicators.bollinger && !bbUpperRef.current) {
+      bbUpperRef.current = chartRef.current.addSeries(LineSeries, {
+        color: "#2962FF66",
+        lineWidth: 1,
+        lineStyle: 2,
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      bbMiddleRef.current = chartRef.current.addSeries(LineSeries, {
+        color: "#2962FF",
+        lineWidth: 1,
+        lineStyle: 2,
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      bbLowerRef.current = chartRef.current.addSeries(LineSeries, {
+        color: "#2962FF66",
+        lineWidth: 1,
+        lineStyle: 2,
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      updateBollinger();
+    } else if (!indicators.bollinger && bbUpperRef.current) {
+      chartRef.current.removeSeries(bbUpperRef.current);
+      chartRef.current.removeSeries(bbMiddleRef.current!);
+      chartRef.current.removeSeries(bbLowerRef.current!);
+      bbUpperRef.current = bbMiddleRef.current = bbLowerRef.current = null;
+    }
+    requestAnimationFrame(() => recomputePaneOffsets());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [indicators.bollinger]);
+
+  // OBV — separate pane
+  useEffect(() => {
+    if (!chartRef.current) return;
+    if (indicators.obv && !obvRef.current) {
+      const paneIndex = 1 + (indicators.rsi ? 1 : 0) + (indicators.macd ? 1 : 0);
+      obvRef.current = chartRef.current.addSeries(
+        LineSeries,
+        {
+          color: INDICATOR_COLORS.obv,
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        },
+        paneIndex,
+      );
+      try {
+        chartRef.current.panes()[paneIndex]?.setStretchFactor(1);
+        chartRef.current.panes()[0]?.setStretchFactor(3);
+      } catch {}
+      updateOBV();
+    } else if (!indicators.obv && obvRef.current && chartRef.current) {
+      chartRef.current.removeSeries(obvRef.current);
+      obvRef.current = null;
+    }
+    requestAnimationFrame(() => recomputePaneOffsets());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [indicators.obv, indicators.rsi, indicators.macd]);
+
+  // Stochastic — separate pane
+  useEffect(() => {
+    if (!chartRef.current) return;
+    if (indicators.stochastic && !stochKRef.current) {
+      const paneIndex =
+        1 + (indicators.rsi ? 1 : 0) + (indicators.macd ? 1 : 0) + (indicators.obv ? 1 : 0);
+      stochKRef.current = chartRef.current.addSeries(
+        LineSeries,
+        {
+          color: INDICATOR_COLORS.stochastic,
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        },
+        paneIndex,
+      );
+      stochDRef.current = chartRef.current.addSeries(
+        LineSeries,
+        {
+          color: TV_COLORS.yellow,
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        },
+        paneIndex,
+      );
+      stoch20Ref.current = chartRef.current.addSeries(
+        LineSeries,
+        {
+          color: TV_COLORS.textMuted,
+          lineWidth: 1,
+          lineStyle: 2,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        },
+        paneIndex,
+      );
+      stoch80Ref.current = chartRef.current.addSeries(
+        LineSeries,
+        {
+          color: TV_COLORS.textMuted,
+          lineWidth: 1,
+          lineStyle: 2,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        },
+        paneIndex,
+      );
+      try {
+        chartRef.current.panes()[paneIndex]?.setStretchFactor(1);
+        chartRef.current.panes()[0]?.setStretchFactor(3);
+      } catch {}
+      updateStochastic();
+    } else if (!indicators.stochastic && stochKRef.current && chartRef.current) {
+      chartRef.current.removeSeries(stochKRef.current);
+      if (stochDRef.current) chartRef.current.removeSeries(stochDRef.current);
+      if (stoch20Ref.current) chartRef.current.removeSeries(stoch20Ref.current);
+      if (stoch80Ref.current) chartRef.current.removeSeries(stoch80Ref.current);
+      stochKRef.current = null;
+      stochDRef.current = null;
+      stoch20Ref.current = null;
+      stoch80Ref.current = null;
+    }
+    requestAnimationFrame(() => recomputePaneOffsets());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [indicators.stochastic, indicators.rsi, indicators.macd, indicators.obv]);
+
+  // ADX — separate pane
+  useEffect(() => {
+    if (!chartRef.current) return;
+    if (indicators.adx && !adxRef.current) {
+      const paneIndex =
+        1 +
+        (indicators.rsi ? 1 : 0) +
+        (indicators.macd ? 1 : 0) +
+        (indicators.obv ? 1 : 0) +
+        (indicators.stochastic ? 1 : 0);
+      adxRef.current = chartRef.current.addSeries(
+        LineSeries,
+        {
+          color: INDICATOR_COLORS.adx,
+          lineWidth: 2,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        },
+        paneIndex,
+      );
+      adxPlusDIRef.current = chartRef.current.addSeries(
+        LineSeries,
+        {
+          color: TV_COLORS.green,
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        },
+        paneIndex,
+      );
+      adxMinusDIRef.current = chartRef.current.addSeries(
+        LineSeries,
+        {
+          color: TV_COLORS.red,
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        },
+        paneIndex,
+      );
+      adx25Ref.current = chartRef.current.addSeries(
+        LineSeries,
+        {
+          color: TV_COLORS.textMuted,
+          lineWidth: 1,
+          lineStyle: 2,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        },
+        paneIndex,
+      );
+      try {
+        chartRef.current.panes()[paneIndex]?.setStretchFactor(1);
+        chartRef.current.panes()[0]?.setStretchFactor(3);
+      } catch {}
+      updateADX();
+    } else if (!indicators.adx && adxRef.current && chartRef.current) {
+      chartRef.current.removeSeries(adxRef.current);
+      if (adxPlusDIRef.current) chartRef.current.removeSeries(adxPlusDIRef.current);
+      if (adxMinusDIRef.current) chartRef.current.removeSeries(adxMinusDIRef.current);
+      if (adx25Ref.current) chartRef.current.removeSeries(adx25Ref.current);
+      adxRef.current = null;
+      adxPlusDIRef.current = null;
+      adxMinusDIRef.current = null;
+      adx25Ref.current = null;
+    }
+    requestAnimationFrame(() => recomputePaneOffsets());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [indicators.adx, indicators.rsi, indicators.macd, indicators.obv, indicators.stochastic]);
+
   // Visibility — eye toggle (hidden state) + enabled state combined
   useEffect(() => {
     const v = (key: IndicatorKey) => indicators[key] && !hidden[key];
@@ -542,6 +776,18 @@ export function PriceChart({ symbol, timeframe }: Props) {
     if (macdSignalRef.current) macdSignalRef.current.applyOptions({ visible: v("macd") });
     if (macdHistRef.current) macdHistRef.current.applyOptions({ visible: v("macd") });
     if (volumeSeriesRef.current) volumeSeriesRef.current.applyOptions({ visible: v("volume") });
+    if (bbUpperRef.current) bbUpperRef.current.applyOptions({ visible: v("bollinger") });
+    if (bbMiddleRef.current) bbMiddleRef.current.applyOptions({ visible: v("bollinger") });
+    if (bbLowerRef.current) bbLowerRef.current.applyOptions({ visible: v("bollinger") });
+    if (obvRef.current) obvRef.current.applyOptions({ visible: v("obv") });
+    if (stochKRef.current) stochKRef.current.applyOptions({ visible: v("stochastic") });
+    if (stochDRef.current) stochDRef.current.applyOptions({ visible: v("stochastic") });
+    if (stoch20Ref.current) stoch20Ref.current.applyOptions({ visible: v("stochastic") });
+    if (stoch80Ref.current) stoch80Ref.current.applyOptions({ visible: v("stochastic") });
+    if (adxRef.current) adxRef.current.applyOptions({ visible: v("adx") });
+    if (adxPlusDIRef.current) adxPlusDIRef.current.applyOptions({ visible: v("adx") });
+    if (adxMinusDIRef.current) adxMinusDIRef.current.applyOptions({ visible: v("adx") });
+    if (adx25Ref.current) adx25Ref.current.applyOptions({ visible: v("adx") });
   }, [indicators, hidden]);
 
   // Recompute indicators when config changes (periods)
@@ -556,6 +802,18 @@ export function PriceChart({ symbol, timeframe }: Props) {
   useEffect(() => {
     updateMACD();
   }, [config.macdFast, config.macdSlow, config.macdSignal]);
+
+  useEffect(() => {
+    updateBollinger();
+  }, [config.bbPeriod, config.bbStdDev]);
+
+  useEffect(() => {
+    updateStochastic();
+  }, [config.stochK, config.stochSmooth, config.stochD]);
+
+  useEffect(() => {
+    updateADX();
+  }, [config.adxPeriod]);
 
   // Sync price lines from store to the candle series
   useEffect(() => {
@@ -592,6 +850,12 @@ export function PriceChart({ symbol, timeframe }: Props) {
   useEffect(() => {
     const series = candleSeriesRef.current;
     if (!series) return;
+
+    // Reset per-symbol UI state BEFORE any async work
+    setSetupLegend([]);
+    setHiddenSetups(new Set());
+    allSignalsRef.current = [];
+    signalMarkersRef.current = [];
 
     function getOrCreatePlugin() {
       if (!markersPluginRef.current) {
@@ -785,6 +1049,77 @@ export function PriceChart({ symbol, timeframe }: Props) {
     }));
   }
 
+  function updateBollinger() {
+    const c = candlesRef.current;
+    if (c.length === 0 || !bbUpperRef.current || !bbMiddleRef.current || !bbLowerRef.current) return;
+    const cfg = configRef.current;
+    const data = bollinger(c, cfg.bbPeriod, cfg.bbStdDev);
+    bbUpperRef.current.setData(data.map((p) => ({ time: p.time as UTCTimestamp, value: p.upper })));
+    bbMiddleRef.current.setData(data.map((p) => ({ time: p.time as UTCTimestamp, value: p.middle })));
+    bbLowerRef.current.setData(data.map((p) => ({ time: p.time as UTCTimestamp, value: p.lower })));
+    const last = data.at(-1);
+    setLastValues((prev) => ({
+      ...prev,
+      bbUpper: last?.upper,
+      bbMiddle: last?.middle,
+      bbLower: last?.lower,
+    }));
+  }
+
+  function updateOBV() {
+    const c = candlesRef.current;
+    if (c.length === 0 || !obvRef.current) return;
+    const data = obv(c).map((p) => ({ time: p.time as UTCTimestamp, value: p.value }));
+    obvRef.current.setData(data);
+    setLastValues((prev) => ({ ...prev, obv: data.at(-1)?.value }));
+  }
+
+  function updateStochastic() {
+    const c = candlesRef.current;
+    if (c.length === 0 || !stochKRef.current || !stochDRef.current) return;
+    const cfg = configRef.current;
+    const data = stochastic(c, cfg.stochK, cfg.stochSmooth, cfg.stochD);
+    stochKRef.current.setData(data.map((p) => ({ time: p.time as UTCTimestamp, value: p.k })));
+    stochDRef.current.setData(data.map((p) => ({ time: p.time as UTCTimestamp, value: p.d })));
+    if (stoch20Ref.current && data.length > 0) {
+      stoch20Ref.current.setData([
+        { time: data[0].time as UTCTimestamp, value: 20 },
+        { time: data[data.length - 1].time as UTCTimestamp, value: 20 },
+      ]);
+    }
+    if (stoch80Ref.current && data.length > 0) {
+      stoch80Ref.current.setData([
+        { time: data[0].time as UTCTimestamp, value: 80 },
+        { time: data[data.length - 1].time as UTCTimestamp, value: 80 },
+      ]);
+    }
+    const last = data.at(-1);
+    setLastValues((prev) => ({ ...prev, stochK: last?.k, stochD: last?.d }));
+  }
+
+  function updateADX() {
+    const c = candlesRef.current;
+    if (c.length === 0 || !adxRef.current || !adxPlusDIRef.current || !adxMinusDIRef.current) return;
+    const cfg = configRef.current;
+    const data = adx(c, cfg.adxPeriod);
+    adxRef.current.setData(data.map((p) => ({ time: p.time as UTCTimestamp, value: p.adx })));
+    adxPlusDIRef.current.setData(data.map((p) => ({ time: p.time as UTCTimestamp, value: p.plusDI })));
+    adxMinusDIRef.current.setData(data.map((p) => ({ time: p.time as UTCTimestamp, value: p.minusDI })));
+    if (adx25Ref.current && data.length > 0) {
+      adx25Ref.current.setData([
+        { time: data[0].time as UTCTimestamp, value: 25 },
+        { time: data[data.length - 1].time as UTCTimestamp, value: 25 },
+      ]);
+    }
+    const last = data.at(-1);
+    setLastValues((prev) => ({
+      ...prev,
+      adx: last?.adx,
+      plusDI: last?.plusDI,
+      minusDI: last?.minusDI,
+    }));
+  }
+
   function applyCandles(klines: Candle[]) {
     candlesRef.current = klines;
     if (candleSeriesRef.current) {
@@ -810,6 +1145,10 @@ export function PriceChart({ symbol, timeframe }: Props) {
     updateEMAs();
     updateRSI();
     updateMACD();
+    updateBollinger();
+    updateOBV();
+    updateStochastic();
+    updateADX();
     chartRef.current?.timeScale().fitContent();
     requestAnimationFrame(() => recomputePaneOffsets());
     if (klines.length > 0) {
@@ -867,6 +1206,10 @@ export function PriceChart({ symbol, timeframe }: Props) {
               updateEMAs();
               updateRSI();
               updateMACD();
+              updateBollinger();
+              updateOBV();
+              updateStochastic();
+              updateADX();
               const prev = arr[arr.length - 2] ?? lastCandle;
               setLastPrice({
                 value: k.close,
@@ -943,14 +1286,12 @@ export function PriceChart({ symbol, timeframe }: Props) {
   const greenOrRed = (n: number) =>
     n >= 0 ? "text-tv-green" : "text-tv-red";
 
-  // Helpers for pill rendering
-  const isShown = (key: IndicatorKey) =>
-    indicators[key] && (key === "volume" || true); // always renderable if enabled
-  void isShown;
-
   // Determine which pane each indicator lives in (based on current layout)
   const rsiPaneIdx = 1;
   const macdPaneIdx = indicators.rsi ? 2 : 1;
+  const obvPaneIdx = 1 + (indicators.rsi ? 1 : 0) + (indicators.macd ? 1 : 0);
+  const stochPaneIdx = obvPaneIdx + (indicators.obv ? 1 : 0);
+  const adxPaneIdx = stochPaneIdx + (indicators.stochastic ? 1 : 0);
 
   let measureRender: React.ReactNode = null;
   if (
@@ -1142,6 +1483,21 @@ export function PriceChart({ symbol, timeframe }: Props) {
               onRemove={() => removeIndicator("volume")}
             />
           )}
+          {indicators.bollinger && (
+            <IndicatorPill
+              name={`BB(${config.bbPeriod},${config.bbStdDev})`}
+              value={
+                lastValues.bbMiddle !== undefined
+                  ? formatPrice(lastValues.bbMiddle)
+                  : undefined
+              }
+              color={INDICATOR_COLORS.bollinger}
+              hidden={hidden.bollinger}
+              onToggleHide={() => toggleHidden("bollinger")}
+              onSettings={() => setSettingsTarget("bollinger")}
+              onRemove={() => removeIndicator("bollinger")}
+            />
+          )}
         </div>
       </div>
 
@@ -1181,6 +1537,64 @@ export function PriceChart({ symbol, timeframe }: Props) {
             onToggleHide={() => toggleHidden("macd")}
             onSettings={() => setSettingsTarget("macd")}
             onRemove={() => removeIndicator("macd")}
+          />
+        </div>
+      )}
+
+      {/* OBV pane label */}
+      {indicators.obv && paneOffsets[obvPaneIdx] && (
+        <div
+          style={{ top: paneOffsets[obvPaneIdx].top + 6, left: 12 }}
+          className="pointer-events-none absolute z-10"
+        >
+          <IndicatorPill
+            name="OBV"
+            value={lastValues.obv !== undefined ? formatVolume(lastValues.obv) : undefined}
+            color={INDICATOR_COLORS.obv}
+            hidden={hidden.obv}
+            onToggleHide={() => toggleHidden("obv")}
+            onSettings={() => setSettingsTarget("obv")}
+            onRemove={() => removeIndicator("obv")}
+          />
+        </div>
+      )}
+
+      {/* Stochastic pane label */}
+      {indicators.stochastic && paneOffsets[stochPaneIdx] && (
+        <div
+          style={{ top: paneOffsets[stochPaneIdx].top + 6, left: 12 }}
+          className="pointer-events-none absolute z-10"
+        >
+          <IndicatorPill
+            name={`Stoch(${config.stochK},${config.stochSmooth},${config.stochD})`}
+            value={
+              lastValues.stochK !== undefined
+                ? `${lastValues.stochK.toFixed(2)} / ${(lastValues.stochD ?? 0).toFixed(2)}`
+                : undefined
+            }
+            color={INDICATOR_COLORS.stochastic}
+            hidden={hidden.stochastic}
+            onToggleHide={() => toggleHidden("stochastic")}
+            onSettings={() => setSettingsTarget("stochastic")}
+            onRemove={() => removeIndicator("stochastic")}
+          />
+        </div>
+      )}
+
+      {/* ADX pane label */}
+      {indicators.adx && paneOffsets[adxPaneIdx] && (
+        <div
+          style={{ top: paneOffsets[adxPaneIdx].top + 6, left: 12 }}
+          className="pointer-events-none absolute z-10"
+        >
+          <IndicatorPill
+            name={`ADX(${config.adxPeriod})`}
+            value={lastValues.adx !== undefined ? lastValues.adx.toFixed(2) : undefined}
+            color={INDICATOR_COLORS.adx}
+            hidden={hidden.adx}
+            onToggleHide={() => toggleHidden("adx")}
+            onSettings={() => setSettingsTarget("adx")}
+            onRemove={() => removeIndicator("adx")}
           />
         </div>
       )}
