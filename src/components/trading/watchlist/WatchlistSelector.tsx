@@ -6,6 +6,7 @@ import { useChartStore } from "@/lib/store/chart-store";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -73,9 +74,12 @@ export function WatchlistSelector() {
       if (res.ok) {
         const data = await res.json();
         setLists(data.lists);
+      } else {
+        const msg = await extractError(res, "No se pudieron cargar las listas");
+        toast.error(msg);
       }
-    } catch (e) {
-      console.error("Failed to fetch lists", e);
+    } catch {
+      toast.error("Error de red al cargar las listas");
     }
   }
 
@@ -176,9 +180,11 @@ export function WatchlistSelector() {
           <ChevronDown className="h-3 w-3 text-tv-text-dim group-hover:text-tv-blue" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-64 bg-tv-panel border-tv-border text-tv-text p-1 shadow-2xl">
-          <DropdownMenuLabel className="px-2 py-1.5 text-[9px] font-bold uppercase tracking-[0.2em] text-tv-text-dim/60">
-            Tus Listas
-          </DropdownMenuLabel>
+          <DropdownMenuGroup>
+            <DropdownMenuLabel className="px-2 py-1.5 text-[9px] font-bold uppercase tracking-[0.2em] text-tv-text-dim/60">
+              Tus Listas
+            </DropdownMenuLabel>
+          </DropdownMenuGroup>
           <DropdownMenuSeparator className="bg-tv-border/50 mx-1" />
 
           <div className="max-h-[300px] overflow-y-auto py-1">
