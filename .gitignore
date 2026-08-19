@@ -1,0 +1,35 @@
+.env.local
+.env
+.env*.local
+*.local
+node_modules/
+.next/
+out/
+dist/
+*.log
+*.tsbuildinfo
+.DS_Store
+
+# Code graph index
+.codegraph/
+
+# Claude Code tooling artifacts
+.atl/
+.superpowers/
+.claude/
+.pi/
+.temp/
+supabase/.temp/
+
+# Data-repair backups — full transaction/trade rows dumped before a mutating
+# script writes. Real financial history; never commit these.
+*-backup-*.json
+
+# PWA generated files
+public/sw.js
+public/sw.js.map
+public/workbox-*.js
+public/workbox-*.js.map
+public/worker-*.js
+public/worker-*.js.map
+

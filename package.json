@@ -1,0 +1,57 @@
+{
+  "name": "warren-portfolio",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "worker": "tsx src/lib/price-worker.ts",
+    "backfill": "tsx --env-file=.env scripts/backfill-snapshots.ts"
+  },
+  "dependencies": {
+    "@base-ui/react": "^1.4.1",
+    "@supabase/ssr": "^0.1.0",
+    "@supabase/supabase-js": "^2.39.0",
+    "bullmq": "^5.71.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.0",
+    "date-fns": "^3.2.0",
+    "ioredis": "^5.10.0",
+    "lightweight-charts": "^5.2.0",
+    "lucide-react": "^0.309.0",
+    "next": "14.1.0",
+    "next-pwa": "^5.6.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "recharts": "^2.10.3",
+    "resend": "^6.12.3",
+    "sonner": "^2.0.7",
+    "tailwind-merge": "^2.2.0",
+    "tsx": "^4.21.0",
+    "xlsx": "^0.18.5",
+    "yahoo-finance2": "^3.13.2",
+    "zod": "^4.3.6",
+    "zustand": "^5.0.13"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "@vitejs/plugin-react": "^6.0.1",
+    "autoprefixer": "^10.0.1",
+    "eslint": "10.4.0",
+    "eslint-config-next": "16.2.6",
+    "jsdom": "^29.0.2",
+    "postcss": "^8",
+    "tailwindcss": "^3.3.0",
+    "typescript": "^5",
+    "vitest": "^4.1.4"
+  },
+  "overrides": {
+    "ioredis": "^5.10.0"
+  }
+}

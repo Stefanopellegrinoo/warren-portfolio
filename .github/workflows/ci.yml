@@ -1,0 +1,77 @@
+name: CI
+
+# Only `push`: this is a single-author repo, so same-repo PRs already show the
+# push check. Adding `pull_request` would just double every run.
+on: push
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # matches node:22-alpine in the Dockerfile
+          cache: npm
+      - run: npm ci
+      - run: npm run type-check
+      - run: npm run test
+      # NO `npm run lint` here: the script is `next lint` and the repo has no
+      # ESLint config, so it drops into the interactive setup prompt and hangs
+      # the runner until the job timeout. type-check + build are the real gates.
+
+  image:
+    needs: test
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      # Sin esto el runner usa el driver `docker`, que no soporta exportar cache:
+      # `cache-to: type=gha` falla con "Cache export is not supported for the docker driver".
+      # setup-buildx crea un builder con driver `docker-container`, que sí.
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          # Lowercase literal, NOT ${{ github.repository }}: the owner is
+          # `Stefanopellegrinoo` and GHCR rejects uppercase in a repository name.
+          tags: |
+            ghcr.io/stefanopellegrinoo/warren-portfolio:latest
+            ghcr.io/stefanopellegrinoo/warren-portfolio:${{ github.sha }}
+          build-args: |
+            NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+            NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: image
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    steps:
+      # ssh directo en vez de una action de terceros: el secret es una clave que entra a prod,
+      # y una action de terceros la ve entera. Son cinco lineas, no vale la pena delegarlas.
+      - name: Deploy
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          # sin comando: la clave esta restringida con command=... en authorized_keys del box,
+          # asi que ejecuta el script de deploy y nada mas, aunque se filtre.
+          # -n cierra stdin: sin eso el comando remoto puede quedarse esperando entrada
+          # y la sesion no cierra nunca (probado, colgo 180s). Esta invocacion exacta
+          # se verifico end-to-end contra el VPS antes de commitear.
+          ssh -n -i ~/.ssh/deploy_key -o BatchMode=yes "$USER@$HOST"
