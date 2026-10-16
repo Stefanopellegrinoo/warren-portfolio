@@ -15,6 +15,8 @@ import { fetchDailyChart, type DailyBar, type DailyChart, type SplitEvent } from
 import { argentinaDate } from './utils'
 
 export const BARS_TTL = 7 * 86400
+/** Negative cache: a symbol that failed with nothing stored is not retried for an hour. */
+export const MISSING_TTL = 3600
 const CONCURRENCY = 5
 
 interface Entry {
@@ -24,6 +26,8 @@ interface Entry {
   bars: [string, number][]
   splits: [string, number, number][]
   splitsKnown: boolean
+  /** Negative marker: epoch ms until which the symbol is known-failing. */
+  missingUntil?: number
 }
 
 export interface BarsResult {
@@ -41,6 +45,8 @@ export interface BarsDeps {
   today?: string
 }
 
+// ponytail: never evicted (one entry per distinct symbol, ~1500 bars each) and no singleflight, so
+// concurrent requests for the same symbol both fetch. Add an LRU / in-flight map if either hurts.
 const memory = new Map<string, Entry>()
 export const _resetBarsMemory = () => memory.clear()
 
@@ -62,7 +68,7 @@ async function readEntry(symbol: string): Promise<Entry | null> {
 async function writeEntry(symbol: string, entry: Entry): Promise<void> {
   try {
     if (await ensureRedisConnected()) {
-      await getRedis()?.setex(keyOf(symbol), BARS_TTL, JSON.stringify(entry))
+      await getRedis()?.setex(keyOf(symbol), entry.missingUntil ? MISSING_TTL : BARS_TTL, JSON.stringify(entry))
       return
     }
   } catch {
@@ -82,8 +88,13 @@ const toResult = (e: Entry, degraded: boolean): BarsResult => ({
 async function getOne(symbol: string, from: Date, deps: BarsDeps): Promise<BarsResult> {
   const today = deps.today ?? argentinaDate()
   const fromDay = from.toISOString().slice(0, 10)
-  const stored = await readEntry(symbol)
-  if (stored && stored.fetchedOn === today && stored.from <= fromDay) return toResult(stored, false)
+  let stored = await readEntry(symbol)
+  if (stored?.missingUntil) {
+    if (stored.missingUntil > Date.now()) return { bars: [], splits: [], splitsKnown: false, degraded: true, missing: true }
+    stored = null
+  }
+  // splitsKnown=false (historical() fallback) is never fresh: chart() gets another try next request.
+  if (stored && stored.splitsKnown && stored.fetchedOn === today && stored.from <= fromDay) return toResult(stored, false)
 
   try {
     const chart = await (deps.fetchChart ?? fetchDailyChart)(symbol, from, new Date(`${today}T23:59:59Z`))
@@ -99,6 +110,7 @@ async function getOne(symbol: string, from: Date, deps: BarsDeps): Promise<BarsR
   } catch (err) {
     console.warn(`[Bars] Yahoo failed for ${symbol}:`, err instanceof Error ? err.message : err)
     if (stored) return toResult(stored, true)
+    await writeEntry(symbol, { fetchedOn: today, from: fromDay, bars: [], splits: [], splitsKnown: false, missingUntil: Date.now() + MISSING_TTL * 1000 })
     return { bars: [], splits: [], splitsKnown: false, degraded: true, missing: true }
   }
 }

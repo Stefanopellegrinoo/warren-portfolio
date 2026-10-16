@@ -149,7 +149,7 @@ export async function getDerivedSeries(
   const barsByTicker = new Map<string, DailyBar[]>()
   for (const [ticker, symbol] of symbolOf) {
     const chart = charts.get(symbol)
-    if (!chart || chart.degraded || (chart.bars.length > 0 && !chart.splitsKnown)) degraded = true
+    if (!chart || chart.degraded || !chart.splitsKnown) degraded = true
     let bars = unadjustSplits(chart?.bars ?? [], chart?.splits ?? [])
     if (symbol.endsWith('.BA')) {
       const usd = toUsd(bars, ccl)

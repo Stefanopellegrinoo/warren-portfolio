@@ -35,14 +35,17 @@ const ok = (bars = AAA_BARS, over: Partial<BarsResult> = {}): BarsResult =>
 const quote = (ticker: string, price: number) => ({ ticker, price, change: 0, changePercent: 0, previousClose: price })
 
 type Tables = Record<string, { data?: any[]; error?: { message: string } }>
-function fakeSupabase(tables: Tables, log: string[] = []) {
+function fakeSupabase(tables: Tables, log: string[] = [], filters: string[] = []) {
   return {
     from(name: string) {
       log.push(name)
       const cfg = tables[name] ?? { data: [] }
       let offset = 0
       const b: any = {
-        select: () => b, eq: () => b, gte: () => b, lte: () => b, in: () => b, order: () => b,
+        select: () => b, lte: () => b, order: () => b,
+        eq: (c: string, v: unknown) => { filters.push(`${name}.eq(${c},${v})`); return b },
+        gte: (c: string, v: unknown) => { filters.push(`${name}.gte(${c},${v})`); return b },
+        in: (c: string, v: unknown[]) => { filters.push(`${name}.in(${c},${v.join('|')})`); return b },
         range: (o: number) => { offset = o; return b },
         then: (res: any, rej: any) =>
           Promise.resolve(cfg.error ? { data: null, error: cfg.error } : { data: (cfg.data ?? []).slice(offset, offset + 1000), error: null })
@@ -161,11 +164,11 @@ describe('getDerivedSeries', () => {
     expect(redisMock.eval).not.toHaveBeenCalled()
   })
 
-  it('a bars source with unknown splits, or no bars at all, is degraded; Yahoo answering [] is not', async () => {
+  it('a bars source with unknown splits is degraded; a clean chart() answering [] is not', async () => {
     const unknownSplits = deps({ getBars: vi.fn(async (s: string[]) => new Map(s.map(x => [x, ok(AAA_BARS, { splitsKnown: false })]))) })
     expect((await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, unknownSplits)).degraded).toBe(true)
 
-    const empty = deps({ getBars: vi.fn(async (s: string[]) => new Map(s.map(x => [x, ok([], { splitsKnown: false })]))) })
+    const empty = deps({ getBars: vi.fn(async (s: string[]) => new Map(s.map(x => [x, ok([], { splitsKnown: true })]))) })
     const res = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, empty)
     expect(res.degraded).toBe(false)
   })
@@ -239,6 +242,7 @@ describe('getDerivedSeries', () => {
     let seen!: DeriveInput
     const derive = vi.fn((i: DeriveInput) => { seen = i; return { rows: [], flags: FLAGS } })
     const d = deps()
+    const filters: string[] = []
     await getDerivedSeries(
       fakeSupabase(tables({
         transactions: { data: [tx(), tx({ ticker: 'AERBD', asset_type: 'ON', quantity: 100, price: 100 })] },
@@ -250,8 +254,12 @@ describe('getDerivedSeries', () => {
           { snapshot_date: '2026-03-03', ons_value: '10150', ons_invested: '10000' },
           { snapshot_date: '2026-03-04', ons_value: null, ons_invested: '10000' },
         ] },
-      })), 'u1', {}, { ...d, derive }
+      }), [], filters), 'u1', {}, { ...d, derive }
     )
+    expect(filters).toEqual(expect.arrayContaining([
+      'portfolio_snapshots.eq(user_id,u1)', 'portfolio_snapshots.eq(source,live)',
+      'on_price_history.in(ticker,AERBD)', 'on_price_history.gte(price_date,2026-03-02)',
+    ]))
     expect(seen.onPricesByTicker.get('AERBD')).toEqual([bar('2026-03-03', 101.5), bar('2026-03-04', 102)])
     expect([...seen.onPricesByTicker.keys()]).toEqual(['AERBD'])
     expect(seen.onMarks.get('2026-03-03')).toEqual({ ons_value: 10150, ons_invested: 10000 })
@@ -259,5 +267,13 @@ describe('getDerivedSeries', () => {
     expect(d.getBars.mock.calls[0][0]).toEqual(['AAA'])
     expect(d.fetchQuotes.mock.calls[0][0].sort()).toEqual(['AAA', 'AERBD'])
     expect(seen.today).toBe(TODAY)
+  })
+
+  it('W2b: a symbol with no bars and unknown splits (fallback path) is degraded and not cached', async () => {
+    store.set('summary:version:u1', '7')
+    const d = deps({ getBars: vi.fn(async (symbols: string[]) => new Map(symbols.map(s => [s, ok([], { splitsKnown: false })]))) })
+    const res = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, d)
+    expect(res.degraded).toBe(true)
+    expect(redisMock.eval).not.toHaveBeenCalled()
   })
 })

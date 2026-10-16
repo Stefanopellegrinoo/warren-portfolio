@@ -57,6 +57,13 @@ describe('fetchDailyBars', () => {
     await expect(fetchDailyBars('NOSUCH', from, to, { getYahoo })).resolves.toEqual([])
   })
 
+  it('W2b: [] after a chart() failure keeps splitsKnown=false; [] after a clean chart() is a fact', async () => {
+    const failed = fakeYahoo({ chart: () => { throw new Error('429') }, historical: () => [] })
+    await expect(fetchDailyChart('AAA', from, to, { getYahoo: failed })).resolves.toMatchObject({ bars: [], splitsKnown: false })
+    const clean = fakeYahoo({ chart: () => ({ quotes: [] }), historical: () => [] })
+    await expect(fetchDailyChart('AAA', from, to, { getYahoo: clean })).resolves.toMatchObject({ bars: [], splitsKnown: true })
+  })
+
   it('THROWS when both endpoints fail — a fetch failure is not "no price"', async () => {
     // This is the whole point of the module. fetchHistoricalQuotes returns []
     // here, which the backfill would read as "unpriced" and mark at avg_cost,

@@ -68,7 +68,6 @@ describe('getBars', () => {
   it('S8.2: Yahoo fails and nothing is stored -> missing + degraded, nothing invented', async () => {
     const res = await getBars(['AAA'], FROM, { fetchChart: async () => { throw new Error('boom') }, today: TODAY })
     expect(res.get('AAA')).toMatchObject({ bars: [], degraded: true, missing: true })
-    expect(store.size).toBe(0)
   })
 
   it('Yahoo answering with no bars is a fact, not a failure', async () => {
@@ -76,6 +75,24 @@ describe('getBars', () => {
       fetchChart: async () => ({ bars: [], splits: [], splitsKnown: true }), today: TODAY,
     })
     expect(res.get('AAA')).toMatchObject({ bars: [], degraded: false, missing: false })
+  })
+
+  it('W2a: an entry with unknown splits is not fresh, chart() is retried on the next request', async () => {
+    const fetchChart = vi.fn(async () => ({ ...chart(), splitsKnown: false }))
+    await getBars(['AAA'], FROM, { fetchChart, today: TODAY })
+    fetchChart.mockResolvedValueOnce(chart())
+    const again = await getBars(['AAA'], FROM, { fetchChart, today: TODAY })
+    expect(fetchChart).toHaveBeenCalledTimes(2)
+    expect(again.get('AAA')).toMatchObject({ splitsKnown: true, degraded: false })
+  })
+
+  it('W1: a symbol that fails with nothing stored gets a 1h negative marker, still degraded, no refetch', async () => {
+    const fetchChart = vi.fn(async () => { throw new Error('delisted') })
+    await getBars(['AAA'], FROM, { fetchChart, today: TODAY })
+    const again = await getBars(['AAA'], FROM, { fetchChart, today: TODAY })
+    expect(fetchChart).toHaveBeenCalledTimes(1)
+    expect(redisMock.setex).toHaveBeenCalledWith('bars:v1:AAA', 3600, expect.any(String))
+    expect(again.get('AAA')).toMatchObject({ bars: [], degraded: true, missing: true })
   })
 
   it('S11.2: Redis down -> in-memory fallback, still cached for the day', async () => {

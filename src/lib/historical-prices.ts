@@ -114,7 +114,9 @@ export async function fetchDailyChart(
   // The legacy endpoint settles which — it is the same one the app already uses.
   try {
     const rows = await yf.historical(symbol, { period1: from, period2: to, interval: '1d' })
-    return { bars: normalizeBars(rows ?? []), splits: [], splitsKnown: false }
+    const bars = normalizeBars(rows ?? [])
+    // [] is a fact only when chart() itself answered cleanly; after a chart() failure it is just "unknown".
+    return { bars, splits: [], splitsKnown: bars.length === 0 && chartFailure === null }
   } catch (err) {
     throw new HistoricalFetchError(symbol, chartFailure ?? err)
   }
