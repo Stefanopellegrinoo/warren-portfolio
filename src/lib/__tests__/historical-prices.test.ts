@@ -5,6 +5,9 @@ import {
   closeOnOrBefore,
   buildQuoteMap,
   HistoricalFetchError,
+  fetchDailyChart,
+  unadjustSplits,
+  toUsd,
 } from '../historical-prices'
 
 const from = new Date('2022-02-09')
@@ -159,5 +162,83 @@ describe('buildQuoteMap', () => {
     const quotes = buildQuoteMap(new Map([['AAPL', 0], ['MELI', -1]]))
 
     expect(quotes.size).toBe(0)
+  })
+})
+
+describe('unadjustSplits', () => {
+  const split = { date: '2024-06-10', numerator: 2, denominator: 1 }
+
+  it('multiplies bars dated before the split by the ratio and leaves later bars untouched', () => {
+    const out = unadjustSplits(
+      [{ date: '2024-06-07', close: 50 }, { date: '2024-06-10', close: 60 }, { date: '2024-06-11', close: 61 }],
+      [split]
+    )
+    expect(out).toEqual([
+      { date: '2024-06-07', close: 100 },
+      { date: '2024-06-10', close: 60 },
+      { date: '2024-06-11', close: 61 },
+    ])
+  })
+
+  it('compounds several splits that happened after the bar', () => {
+    const out = unadjustSplits([{ date: '2020-01-02', close: 10 }], [split, { date: '2022-01-03', numerator: 3, denominator: 1 }])
+    expect(out[0].close).toBeCloseTo(60, 10)
+  })
+
+  it('returns the bars untouched when there are no splits', () => {
+    const bars = [{ date: '2024-06-07', close: 50 }]
+    expect(unadjustSplits(bars, [])).toEqual(bars)
+  })
+})
+
+describe('toUsd', () => {
+  const bar = (date: string, close: number) => ({ date, close })
+
+  it('divides an ARS close by the CCL of that day', () => {
+    const out = toUsd([bar('2024-03-04', 12000)], new Map([['2024-03-04', 1200]]))
+    expect(out).toEqual({ bars: [bar('2024-03-04', 10)], degraded: false })
+  })
+
+  it('carries the last CCL forward over a day without a rate', () => {
+    const out = toUsd([bar('2024-03-05', 12000)], new Map([['2024-03-04', 1200]]))
+    expect(out).toEqual({ bars: [bar('2024-03-05', 10)], degraded: false })
+  })
+
+  it('drops the bar and flags degraded when no CCL exists on or before the day', () => {
+    const out = toUsd([bar('2024-03-01', 12000), bar('2024-03-05', 12000)], new Map([['2024-03-04', 1200]]))
+    expect(out).toEqual({ bars: [bar('2024-03-05', 10)], degraded: true })
+  })
+})
+
+describe('fetchDailyChart', () => {
+  it('returns bars plus the split events from chart()', async () => {
+    const getYahoo = fakeYahoo({
+      chart: () => ({
+        quotes: [{ date: new Date('2024-06-07T00:00:00Z'), close: 120 }],
+        events: { splits: [{ date: new Date('2024-06-10T13:30:00Z'), numerator: 10, denominator: 1 }] },
+      }),
+    })
+    const res = await fetchDailyChart('NVDA', from, to, { getYahoo })
+    expect(res).toEqual({
+      bars: [{ date: '2024-06-07', close: 120 }],
+      splits: [{ date: '2024-06-10', numerator: 10, denominator: 1 }],
+      splitsKnown: true,
+    })
+  })
+
+  it('reports splitsKnown=false when only the legacy endpoint answered', async () => {
+    const getYahoo = fakeYahoo({
+      chart: () => ({ quotes: [] }),
+      historical: () => [{ date: new Date('2024-06-07T00:00:00Z'), close: 120 }],
+    })
+    const res = await fetchDailyChart('NVDA', from, to, { getYahoo })
+    expect(res.splitsKnown).toBe(false)
+    expect(res.splits).toEqual([])
+    expect(res.bars).toHaveLength(1)
+  })
+
+  it('fetchDailyBars still returns just the bars', async () => {
+    const getYahoo = fakeYahoo({ chart: () => ({ quotes: [{ date: new Date('2024-06-07T00:00:00Z'), close: 120 }] }) })
+    expect(await fetchDailyBars('NVDA', from, to, { getYahoo })).toEqual([{ date: '2024-06-07', close: 120 }])
   })
 })

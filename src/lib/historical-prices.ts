@@ -57,19 +57,44 @@ function normalizeBars(rows: any[]): DailyBar[] {
   return (rows ?? []).map(toBar).filter((b: DailyBar | null): b is DailyBar => b !== null)
 }
 
+/** A split event: `numerator` new shares per `denominator` old ones, on `date`. */
+export interface SplitEvent {
+  /** YYYY-MM-DD */
+  date: string
+  numerator: number
+  denominator: number
+}
+
+export interface DailyChart {
+  bars: DailyBar[]
+  splits: SplitEvent[]
+  /** false when the answer came from historical(), which carries no split events. */
+  splitsKnown: boolean
+}
+
+function normalizeSplits(rows: any[]): SplitEvent[] {
+  return (rows ?? [])
+    .filter(r => r?.date && Number(r.numerator) > 0 && Number(r.denominator) > 0)
+    .map(r => ({
+      date: new Date(r.date).toISOString().slice(0, 10),
+      numerator: Number(r.numerator),
+      denominator: Number(r.denominator),
+    }))
+}
+
 /**
- * Daily bars for `symbol` over [from, to].
+ * Daily bars for `symbol` over [from, to], plus the split events of the window.
  *
- * Throws HistoricalFetchError when BOTH endpoints fail. Returns [] only when
- * they both succeed and Yahoo has nothing — the distinction the caller needs
+ * Throws HistoricalFetchError when BOTH endpoints fail. Returns empty bars only
+ * when they both succeed and Yahoo has nothing — the distinction the caller needs
  * to tell "no such data" from "the network is angry".
  */
-export async function fetchDailyBars(
+export async function fetchDailyChart(
   symbol: string,
   from: Date,
   to: Date,
   deps: { getYahoo?: () => Promise<any> } = {}
-): Promise<DailyBar[]> {
+): Promise<DailyChart> {
   const getYahoo = deps.getYahoo ?? defaultGetYahoo
   const yf = await getYahoo()
 
@@ -80,7 +105,7 @@ export async function fetchDailyBars(
     // Decide on USABLE bars, not on the raw array: a non-empty response whose
     // closes are all null must still fall through to the legacy endpoint, or
     // [] would stop meaning "Yahoo genuinely has no bars".
-    if (bars.length > 0) return bars
+    if (bars.length > 0) return { bars, splits: normalizeSplits(res?.events?.splits), splitsKnown: true }
   } catch (err) {
     chartFailure = err
   }
@@ -89,10 +114,56 @@ export async function fetchDailyBars(
   // The legacy endpoint settles which — it is the same one the app already uses.
   try {
     const rows = await yf.historical(symbol, { period1: from, period2: to, interval: '1d' })
-    return normalizeBars(rows ?? [])
+    return { bars: normalizeBars(rows ?? []), splits: [], splitsKnown: false }
   } catch (err) {
     throw new HistoricalFetchError(symbol, chartFailure ?? err)
   }
+}
+
+/** Bars only — see fetchDailyChart for the failure contract. */
+export async function fetchDailyBars(
+  symbol: string,
+  from: Date,
+  to: Date,
+  deps: { getYahoo?: () => Promise<any> } = {}
+): Promise<DailyBar[]> {
+  return (await fetchDailyChart(symbol, from, to, deps)).bars
+}
+
+/**
+ * Undoes Yahoo's split adjustment: chart() closes are retroactively divided by
+ * every later split, but quantities in the ledger are as-traded. A bar dated
+ * before a split is multiplied back by numerator/denominator of each later split.
+ */
+export function unadjustSplits(bars: DailyBar[], splits: SplitEvent[]): DailyBar[] {
+  if (splits.length === 0) return bars
+  return bars.map(bar => {
+    const factor = splits
+      .filter(s => s.date > bar.date)
+      .reduce((acc, s) => acc * (s.numerator / s.denominator), 1)
+    return factor === 1 ? bar : { date: bar.date, close: bar.close * factor }
+  })
+}
+
+/**
+ * ARS closes (.BA symbols) to USD at the CCL of the day, carrying the last
+ * known rate forward. A bar with no CCL on or before it is DROPPED (the previous
+ * price then carries forward in closeOnOrBefore) and the result is flagged
+ * degraded — never converted at an invented rate.
+ */
+export function toUsd(bars: DailyBar[], ccl: Map<string, number>): { bars: DailyBar[]; degraded: boolean } {
+  const rates: DailyBar[] = Array.from(ccl, ([date, close]) => ({ date, close }))
+  let degraded = false
+  const out: DailyBar[] = []
+  for (const bar of bars) {
+    const rate = closeOnOrBefore(rates, bar.date)
+    if (rate === null || !(rate > 0)) {
+      degraded = true
+      continue
+    }
+    out.push({ date: bar.date, close: bar.close / rate })
+  }
+  return { bars: out, degraded }
 }
 
 /**
