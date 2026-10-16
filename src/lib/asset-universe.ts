@@ -41,6 +41,8 @@ export interface ProjectableSnapshot {
   snapshot_date: string
   total_value: number
   total_invested: number
+  /** Open P&L of positions (excludes cash) — value − pnl = cost + cash. */
+  pnl?: number | null
   source?: 'live' | 'estimated'
   stocks_value?: number | null
   stocks_invested?: number | null
@@ -64,15 +66,23 @@ function projectRow(s: ProjectableSnapshot, universe: Universe): ProjectedPoint 
   let value: number | null
   let invested: number | null
   switch (universe) {
-    case 'total':
+    // Universes whose value includes cash must count that cash as invested too,
+    // or the chart's P&L (value − invested) reads idle cash as profit.
+    case 'total': {
       value = finiteOrNull(s.total_value)
-      invested = finiteOrNull(s.total_invested)
+      // total_invested excludes cash; value − open pnl is cost + cash, and pnl
+      // survives rows whose cash_value is null. A row without pnl keeps the old
+      // cost-only invested rather than being dropped: the metrics need its value.
+      const pnl = finiteOrNull(s.pnl)
+      invested = value !== null && pnl !== null ? value - pnl : finiteOrNull(s.total_invested)
       break
+    }
     case 'measurable': {
       const stocks = finiteOrNull(s.stocks_value)
       const cash = finiteOrNull(s.cash_value)
+      const stocksInvested = finiteOrNull(s.stocks_invested)
       value = stocks !== null && cash !== null ? stocks + cash : null
-      invested = finiteOrNull(s.stocks_invested)
+      invested = stocksInvested !== null && cash !== null ? stocksInvested + cash : null
       break
     }
     case 'stocks':

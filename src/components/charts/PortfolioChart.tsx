@@ -82,8 +82,10 @@ export default function PortfolioChart({ data, period, onPeriodChange }: Props) 
     to: formatDate(r.to),
   }))
 
+  // P&L change, not value change: a withdrawal lowers value without losing money.
+  const pnl = (p: PortfolioChartPoint) => p.value - p.invested
   const isPositive = data.length >= 2
-    ? data[data.length - 1].value >= data[0].value
+    ? pnl(data[data.length - 1]) >= pnl(data[0])
     : true
 
   return (
@@ -144,9 +146,9 @@ export default function PortfolioChart({ data, period, onPeriodChange }: Props) 
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#132035" vertical={false} />
             <XAxis dataKey="date" tick={{ fill: '#475569', fontSize: 10, fontFamily: 'var(--font-mono)' }}
-              axisLine={false} tickLine={false} interval="preserveStartEnd" />
+              axisLine={false} tickLine={false} interval="preserveStartEnd" minTickGap={24} />
             <YAxis tick={{ fill: '#475569', fontSize: 10, fontFamily: 'var(--font-mono)' }}
-              axisLine={false} tickLine={false}
+              axisLine={false} tickLine={false} domain={['auto', 'auto']}
               tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
             <Tooltip content={<CustomTooltip />} />
             <Area type="monotone" dataKey="invested" stroke="#475569" strokeWidth={1}

@@ -23,6 +23,7 @@ const snap = (
   snapshot_date,
   total_value: 1000,
   total_invested: 800,
+  pnl: 100, // 1000 − (800 cost + 100 cash)
   stocks_value: 600,
   stocks_invested: 500,
   ons_value: 300,
@@ -46,15 +47,21 @@ describe('isUniverse', () => {
 })
 
 describe('projectHistory', () => {
-  it('total projects total_value / total_invested', () => {
+  it('total invested is cost + cash, so value − invested is the open pnl, not idle cash', () => {
     const [p] = projectHistory([snap('2026-07-01')], 'total')
-    expect(p).toEqual({ snapshot_date: '2026-07-01', value: 1000, invested: 800 })
+    expect(p).toEqual({ snapshot_date: '2026-07-01', value: 1000, invested: 900 })
+    expect(p.value - p.invested).toBe(100) // the stored pnl
   })
 
-  it('measurable is stocks_value + cash_value and EXCLUDES ONs; invested excludes cash by design', () => {
+  it('total uses pnl even when cash_value is null', () => {
+    const [p] = projectHistory([snap('2026-07-01', { cash_value: null })], 'total')
+    expect(p.invested).toBe(900)
+  })
+
+  it('measurable is stocks_value + cash_value and EXCLUDES ONs; invested includes the cash', () => {
     const [p] = projectHistory([snap('2026-07-01')], 'measurable')
     expect(p.value).toBe(700) // 600 + 100, not 1000
-    expect(p.invested).toBe(500) // stocks_invested only
+    expect(p.invested).toBe(600) // 500 stocks cost + 100 cash → P&L 100 = stocks gain only
   })
 
   it('stocks and ons project their own pair', () => {
