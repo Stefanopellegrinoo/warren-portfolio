@@ -11,7 +11,7 @@ import type { Quote } from '@/types'
 import { fetchQuotes, cachePrice } from './yahoo-finance'
 import { createServiceClient } from './supabase-server'
 
-interface Data912RawQuote {
+export interface Data912RawQuote {
   symbol: string
   c: number           // last price (inconsistent format — see normalizePriceToUSD)
   pct_change: number  // percentage change (0.53 = 0.53%, not 53%)
@@ -41,7 +41,7 @@ function normalizePriceToUSD(rawPrice: number): number {
 /**
  * Fetch ALL corporate bond quotes from data912.com
  */
-async function fetchAllData912Quotes(): Promise<Data912RawQuote[]> {
+export async function fetchAllData912Quotes(): Promise<Data912RawQuote[]> {
   try {
     const response = await fetch('https://data912.com/live/arg_corp', {
       headers: {

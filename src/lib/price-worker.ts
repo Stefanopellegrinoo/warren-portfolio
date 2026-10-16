@@ -18,6 +18,7 @@ import { fetchData912Prices } from './data912-client'
 import { createServiceClient } from './supabase-server'
 import { getRedis } from './redis'
 import { cacheUserSummaries } from './summary-cache'
+import { captureOnPriceHistory } from './on-price-history'
 import { snapshotAllUsers, splitQuotesByAssetClass } from './portfolio-snapshots'
 import { isMarketOpen, argentinaDate } from './utils'
 import { startImportWorker } from './import-worker'
@@ -179,6 +180,44 @@ async function getUserTickers(userId: string): Promise<{ stock: string[]; on: st
   return { stock, on }
 }
 
+/**
+ * Nightly job: capture the ON feed, then snapshot every user.
+ *
+ * Capture runs FIRST and is isolated: its failure is reported but must never
+ * stop the snapshots. Both use the Argentine calendar day, not UTC: the job
+ * runs at 02:00 UTC precisely so it closes the local day, and by then the UTC
+ * date is already tomorrow.
+ */
+export async function runSnapshotJob(): Promise<void> {
+  const date = argentinaDate()
+
+  try {
+    const supabase = getSupabase()
+    if (!supabase) throw new Error('Supabase not configured')
+    const written = await captureOnPriceHistory(supabase, date)
+    console.log(`[Worker] on_price_history: ${written} rows for ${date}`)
+  } catch (err) {
+    console.error('[Worker] on_price_history capture failed:', err)
+    // sendTelegram uses parse_mode HTML: an unescaped '<' (e.g. an HTML error page
+    // in a JSON parse error) makes Telegram reject the alert. It reports that as
+    // {ok:false}, not a throw, so check the result too.
+    const reason = (err instanceof Error ? err.message : String(err))
+      .slice(0, 500)
+      .replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]!)
+    await sendTelegram(`on_price_history capture failed for ${date}: ${reason}`)
+      .then(r => { if (!r?.ok) console.error('[Worker] Telegram alert not delivered:', r?.error) })
+      .catch(e => console.error('[Worker] Telegram alert failed:', e))
+  }
+
+  // Value the day on whatever prices we have — LKP from Redis is enough,
+  // and snapshotAllUsers falls back to cost for anything still missing.
+  const [stock, on] = await Promise.all([getAllTickers(), getAllONTickers()])
+  const allPrices = await fetchQuotes([...stock, ...on])
+  const { stockQuotes, onQuotes } = splitQuotesByAssetClass(allPrices, on)
+
+  await snapshotAllUsers(stockQuotes, onQuotes, date)
+}
+
 // ── Worker ──────────────────────────────────────────────
 const worker = new Worker(
   PRICE_QUEUE_NAME,
@@ -196,15 +235,7 @@ const worker = new Worker(
     }
 
     if (job.name === SNAPSHOT_JOB_NAME) {
-      // Value the day on whatever prices we have — LKP from Redis is enough,
-      // and snapshotAllUsers falls back to cost for anything still missing.
-      const [stock, on] = await Promise.all([getAllTickers(), getAllONTickers()])
-      const allPrices = await fetchQuotes([...stock, ...on])
-      const { stockQuotes, onQuotes } = splitQuotesByAssetClass(allPrices, on)
-
-      // Argentine calendar day, not UTC: the job runs at 02:00 UTC precisely so
-      // it closes the local day, and by then the UTC date is already tomorrow.
-      await snapshotAllUsers(stockQuotes, onQuotes, argentinaDate())
+      await runSnapshotJob()
       return
     }
 
