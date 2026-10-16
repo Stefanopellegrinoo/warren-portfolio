@@ -341,3 +341,47 @@ describe('buildBackfillRows — the funding-side guard', () => {
     expect(days[0].row.total_value).toBeCloseTo(100, 6)
   })
 })
+
+describe('buildBackfillRows — ON prices and vanished positions', () => {
+  const onTx = tx({ ticker: 'AERBD', asset_type: 'ON', quantity: 100, price: 100, date: '2026-04-01' })
+  const input = {
+    userId: 'u1',
+    transactions: [onTx],
+    movements: [{ type: 'DEPOSITO', amount: 20000, date: '2026-03-01' }],
+    dates: ['2026-04-02', '2026-04-03'],
+    barsByTicker: new Map<string, DailyBar[]>(),
+  }
+
+  it('values an ON at the recorded close on or before the day and keeps it out of unpricedTickers', () => {
+    const [d1, d2] = buildBackfillRows({
+      ...input,
+      onBarsByTicker: new Map([['AERBD', bars([['2026-04-02', 101.95]])]]),
+    })
+    expect(d1.row.ons_value).toBeCloseTo(10195, 6)
+    expect(d2.row.ons_value).toBeCloseTo(10195, 6) // carried forward
+    expect(d1.unpricedTickers).toEqual([])
+  })
+
+  it('marks an ON at cost and lists it as unpriced when it has no recorded close yet', () => {
+    const [d1, d2] = buildBackfillRows({
+      ...input,
+      onBarsByTicker: new Map([['AERBD', bars([['2026-04-03', 101.95]])]]),
+    })
+    expect(d1.row.ons_value).toBeCloseTo(10000, 6)
+    expect(d1.unpricedTickers).toEqual(['AERBD'])
+    expect(d2.unpricedTickers).toEqual([])
+  })
+
+  it('without onBarsByTicker every ON is still unpriced (unchanged behaviour)', () => {
+    const [d1] = buildBackfillRows(input)
+    expect(d1.unpricedTickers).toEqual(['AERBD'])
+  })
+
+  it('allowVanished reports a position with no price and no cost instead of throwing', () => {
+    const free = tx({ ticker: 'FREE', price: 0, quantity: 5, date: '2026-04-01' })
+    const args = { ...input, transactions: [free], dates: ['2026-04-02'] }
+    expect(() => buildBackfillRows(args)).toThrow(/would be dropped/)
+    const [d] = buildBackfillRows({ ...args, allowVanished: true })
+    expect(d.vanished).toEqual(['FREE'])
+  })
+})

@@ -33,6 +33,8 @@ export interface BackfillDay {
    * position's entire life. Only this function knows which tickers were held.
    */
   heldTickers: string[]
+  /** Positions with no price AND no usable cost — dropped from the row (see below). */
+  vanished: string[]
 }
 
 export interface BackfillInput {
@@ -41,6 +43,16 @@ export interface BackfillInput {
   movements: ReplayMovement[]
   dates: string[]
   barsByTicker: Map<string, DailyBar[]>
+  /**
+   * Recorded ON closes (on_price_history), keyed by ON ticker. Optional: without
+   * it every ON is marked at cost, as the original backfill always did.
+   */
+  onBarsByTicker?: Map<string, DailyBar[]>
+  /**
+   * Report vanished positions in BackfillDay.vanished instead of throwing. For
+   * the derived series, which must never fail a request over one bad position.
+   */
+  allowVanished?: boolean
   /**
    * Accept a replayed cash balance that goes materially negative.
    *
@@ -78,7 +90,9 @@ export function marketDaysFrom(
 }
 
 export function buildBackfillRows(input: BackfillInput): BackfillDay[] {
-  const { userId, transactions, movements, dates, barsByTicker, allowNegativeCash = false } = input
+  const {
+    userId, transactions, movements, dates, barsByTicker, onBarsByTicker, allowVanished = false, allowNegativeCash = false,
+  } = input
 
   // Index the caller's bars by NORMALIZED key, once for the whole run.
   //
@@ -91,6 +105,11 @@ export function buildBackfillRows(input: BackfillInput): BackfillDay[] {
   const barsByNormalizedTicker = new Map<string, DailyBar[]>()
   barsByTicker.forEach((bars, ticker) => {
     barsByNormalizedTicker.set(String(ticker).trim().toUpperCase(), bars)
+  })
+
+  const onBarsByNormalizedTicker = new Map<string, DailyBar[]>()
+  onBarsByTicker?.forEach((bars, ticker) => {
+    onBarsByNormalizedTicker.set(String(ticker).trim().toUpperCase(), bars)
   })
 
   // The worst day the replayed cash balance reaches over the requested range.
@@ -117,9 +136,15 @@ export function buildBackfillRows(input: BackfillInput): BackfillDay[] {
     }
 
     const stockQuotes = buildQuoteMap(prices)
-    // ONs have no historical source at all — Data912 is spot-only. They go in
-    // with an empty quote map and are marked at cost by the same rule.
-    const onQuotes = new Map<string, Quote>()
+    // ONs are priced only from recorded closes (on_price_history, captured
+    // nightly since the feed is spot-only). Without a recorded close on or
+    // before the day they are marked at cost by the same rule.
+    const onPrices = new Map<string, number>()
+    for (const position of state.onPositions) {
+      const close = closeOnOrBefore(onBarsByNormalizedTicker.get(position.ticker) ?? [], date)
+      if (close !== null) onPrices.set(position.ticker, close)
+    }
+    const onQuotes: Map<string, Quote> = buildQuoteMap(onPrices)
 
     const row = buildSnapshotRow(
       {
@@ -144,7 +169,7 @@ export function buildBackfillRows(input: BackfillInput): BackfillDay[] {
 
     const unpricedTickers = [
       ...state.positions.filter(p => !stockQuotes.has(p.ticker)).map(p => p.ticker),
-      ...state.onPositions.map(p => p.ticker),
+      ...state.onPositions.filter(p => !onQuotes.has(p.ticker)).map(p => p.ticker),
     ]
 
     // applyCostFallback leaves a position out of the quote map entirely when it
@@ -157,16 +182,17 @@ export function buildBackfillRows(input: BackfillInput): BackfillDay[] {
     // predicate, so it can refuse to emit the row. unpricedTickers alone is not
     // a usable signal: on early days that list is long and legitimate, and a
     // vanished position hides inside it.
-    const vanished = [...state.positions, ...state.onPositions].filter(
-      p => !stockQuotes.has(p.ticker) && !(Number(p.avg_cost) > 0)
-    )
-    if (vanished.length > 0) {
+    const vanished = [
+      ...state.positions.filter(p => !stockQuotes.has(p.ticker)),
+      ...state.onPositions.filter(p => !onQuotes.has(p.ticker)),
+    ].filter(p => !(Number(p.avg_cost) > 0))
+    if (vanished.length > 0 && !allowVanished) {
       throw new Error(
         `[Backfill] ${date}: position(s) with no price and no usable cost would be dropped from both value and invested: ${vanished.map(p => p.ticker).join(', ')}`
       )
     }
 
-    return { row: { ...row, source: 'estimated' as const }, unpricedTickers, heldTickers }
+    return { row: { ...row, source: 'estimated' as const }, unpricedTickers, heldTickers, vanished: vanished.map(p => p.ticker) }
   })
 
   // ── The funding-side guard ────────────────────────────────────────────────
