@@ -8,12 +8,12 @@
  * skipped intervals are gaps in the series (surfaced via intervalsSkipped),
  * never zero-filled points.
  *
- * S1 foundation: pure function + tests only, no endpoint or UI consumer yet
- * (Phase 2 wires it to the statistics/history surface).
+ * Consumed by benchmark.ts via /api/statistics?benchmark=.
  */
 import {
   computeFlowAdjustedReturns,
   type ExternalFlow,
+  type FlowAdjustedOptions,
   type SnapshotPoint,
 } from './drawdown'
 
@@ -33,11 +33,13 @@ export interface TwrSeries {
 
 export function computeTwrSeries(
   snapshots: SnapshotPoint[],
-  flows: ExternalFlow[]
+  flows: ExternalFlow[],
+  options: FlowAdjustedOptions = {}
 ): TwrSeries {
   const { intervals, intervalsUsed, intervalsSkipped } = computeFlowAdjustedReturns(
     snapshots,
-    flows
+    flows,
+    options
   )
 
   if (intervals.length === 0) {

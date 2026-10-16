@@ -27,6 +27,7 @@ import {
   computeFlowAdjustedReturns,
 } from './drawdown'
 import { computeReturnStats } from './return-stats'
+import { computeTwrSeries, type TwrSeries } from './twr-series'
 
 export type Universe = 'total' | 'measurable' | 'stocks' | 'ons'
 
@@ -336,21 +337,41 @@ export interface UniverseRiskMetrics {
   pointsDropped: number
 }
 
-export function computeUniverseRiskMetrics(
+/** The exact (points, flows, options) triple behind every flow-adjusted return
+ *  of a universe — shared so the TWR curve and the risk metrics cannot drift. */
+function universeReturnInputs(
   snapshots: ProjectableSnapshot[],
   universe: Universe,
   inputs: UniverseFlowInputs
-): UniverseRiskMetrics {
+) {
   const rows = metricsRows(snapshots, universe)
   const points = projectSeries(rows, universe)
   const flows = universeFlows(universe, inputs)
-
   // In `ons` a coupon day is not measured at all — see universeFlows. Only
   // this universe: `measurable` depends on cash_value, which genuinely rises
   // on the payment date under any mark convention, so there the flow is right
   // and every interval stays measured.
   const options =
     universe === 'ons' ? { unmeasurableDates: couponDates(inputs.income) } : {}
+  return { rows, points, flows, options }
+}
+
+/** Cumulative time-weighted return curve of a universe (same inputs as the metrics). */
+export function computeUniverseTwr(
+  snapshots: ProjectableSnapshot[],
+  universe: Universe,
+  inputs: UniverseFlowInputs
+): TwrSeries {
+  const { points, flows, options } = universeReturnInputs(snapshots, universe, inputs)
+  return computeTwrSeries(points, flows, options)
+}
+
+export function computeUniverseRiskMetrics(
+  snapshots: ProjectableSnapshot[],
+  universe: Universe,
+  inputs: UniverseFlowInputs
+): UniverseRiskMetrics {
+  const { rows, points, flows, options } = universeReturnInputs(snapshots, universe, inputs)
 
   const drawdown = computeFlowAdjustedMaxDrawdown(points, flows, options)
   const returnSeries = computeFlowAdjustedReturns(points, flows, options)

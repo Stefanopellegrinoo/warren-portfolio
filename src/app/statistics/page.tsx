@@ -9,6 +9,7 @@ import {
 import KpiCard from '@/components/ui/KpiCard'
 import ProvenanceNote from '@/components/ui/ProvenanceNote'
 import RiskMetricsRow from '@/components/ui/RiskMetricsRow'
+import BenchmarkComparison from '@/components/charts/BenchmarkComparison'
 import PortfolioChart from '@/components/charts/PortfolioChart'
 import type { PortfolioChartPoint } from '@/components/charts/PortfolioChart'
 import { formatUSD, formatPct, cn } from '@/lib/utils'
@@ -658,6 +659,12 @@ export default function StatisticsPage() {
           </button>
         )}
       </div>
+
+      {/* ON history mixes cost (≤07-22) and market (≥07-23) valuations, a fake +2.7pp jump.
+          Only stocks + cash replay to the dollar, so General compares `measurable`, ONs not at all. */}
+      {activeTab !== 'ons' && (
+        <BenchmarkComparison universe={activeTab === 'general' ? 'measurable' : UNIVERSE_BY_TAB[activeTab]} />
+      )}
 
       {/* General Tab */}
       {activeTab === 'general' && (

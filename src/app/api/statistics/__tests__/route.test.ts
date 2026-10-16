@@ -422,3 +422,11 @@ describe('GET /api/statistics — income reaches the risk computation', () => {
     expect(mockGetCachedRoute.mock.calls[0][0]).toBe('statistics:v4:u1:measurable')
   })
 })
+
+describe('GET /api/statistics — benchmark param', () => {
+  it('rejects a benchmark outside the whitelist with 400, before any fetch', async () => {
+    const res = await GET(makeRequest('/api/statistics?universe=total&benchmark=%5EGSPC%3Bevil'))
+    expect(res.status).toBe(400)
+    expect(mockFetchSnapshotSeries).not.toHaveBeenCalled()
+  })
+})

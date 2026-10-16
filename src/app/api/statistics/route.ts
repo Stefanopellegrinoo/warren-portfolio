@@ -10,12 +10,14 @@ import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { enrichPositionsForStats } from '@/lib/position-stats'
 import { computeTradeStats } from '@/lib/trade-stats'
 import { summarizeProvenance } from '@/lib/series-provenance'
+import { isBenchmarkId, fetchBenchmarkComparison, type BenchmarkComparison } from '@/lib/benchmark'
 import {
   isUniverse,
   UNIVERSES,
   computeUniverseRiskMetrics,
   metricsRows,
   projectHistory,
+  computeUniverseTwr,
   type FlowTransaction,
   type IncomeMovement,
 } from '@/lib/asset-universe'
@@ -39,9 +41,18 @@ export async function GET(req: NextRequest) {
     }
     const universe = rawUniverse
 
+    // Optional benchmark. The value reaches a Yahoo symbol lookup, so it is
+    // matched against the whitelist — never forwarded.
+    const rawBenchmark = req.nextUrl.searchParams.get('benchmark')
+    if (rawBenchmark && !isBenchmarkId(rawBenchmark)) {
+      return NextResponse.json({ error: 'Invalid benchmark' }, { status: 400 })
+    }
+    const benchmarkId = rawBenchmark && isBenchmarkId(rawBenchmark) ? rawBenchmark : null
+
     // v4: income now reaches the risk computation (declared coupon/dividend
     // flows). invalidateUserCache SCANs statistics:v4:{userId}:*.
-    const cacheKey = `statistics:v4:${user.id}:${universe}`
+    // The benchmark suffix keeps the same prefix, so that SCAN still clears it.
+    const cacheKey = `statistics:v4:${user.id}:${universe}${benchmarkId ? `:${benchmarkId}` : ''}`
     const cachedStats = await getCachedRoute(cacheKey)
     if (cachedStats) {
       return NextResponse.json(cachedStats)
@@ -79,6 +90,24 @@ export async function GET(req: NextRequest) {
       universe,
       { externalFlows, transactions: flowTransactions, income }
     )
+
+    // Benchmark comparison is best-effort: a Yahoo failure costs this field,
+    // never the rest of the page.
+    let benchmark: BenchmarkComparison | null = null
+    let benchmarkError = false
+    if (benchmarkId) {
+      try {
+        const { series } = computeUniverseTwr(validSnapshots, universe, {
+          externalFlows,
+          transactions: flowTransactions,
+          income,
+        })
+        benchmark = await fetchBenchmarkComparison(benchmarkId, series)
+      } catch (err) {
+        console.error('[Statistics] benchmark failed:', normalizeError(err).message)
+        benchmarkError = true
+      }
+    }
 
     // 2. Get Positions for Allocation
     const { data: positions, error: posErr } = await supabase
@@ -205,9 +234,12 @@ export async function GET(req: NextRequest) {
       totalTrades: tradeStats.totalTrades,
       arsExposure,
       usdExposure,
+      benchmark,
+      benchmarkError,
     }
 
-    await cacheRoute(cacheKey, responseData, 300)
+    // Do not pin a transient benchmark failure in the cache for 5 minutes.
+    if (!benchmarkError) await cacheRoute(cacheKey, responseData, 300)
 
     return NextResponse.json(responseData)
 
