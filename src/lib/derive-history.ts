@@ -80,10 +80,8 @@ export function deriveHistory(input: DeriveInput): { rows: DerivedRow[]; flags: 
     const { userId, transactions, movements, barsByTicker, onPricesByTicker, onMarks, today, todayQuotes } = input
     if (transactions.length === 0) return { rows, flags }
 
-    const onTickers = new Set(
-      transactions
-        .filter(t => String(t.asset_type ?? '').toUpperCase() === 'ON')
-        .map(t => String(t.ticker).trim().toUpperCase())
+    const tickersWithBars = new Set(
+      Array.from(barsByTicker).filter(([, b]) => b.length > 0).map(([t]) => t.trim().toUpperCase())
     )
     const firstTxDate = transactions.map(t => day(t.date)).sort()[0]
 
@@ -99,11 +97,13 @@ export function deriveHistory(input: DeriveInput): { rows: DerivedRow[]; flags: 
         userId, transactions, movements, dates: [date], barsByTicker,
         onBarsByTicker: onPricesByTicker, allowNegativeCash: true, allowVanished: true,
       })
-      const heldOns = d.heldTickers.filter(t => onTickers.has(t))
-      const unpricedOns = d.unpricedTickers.filter(t => onTickers.has(t))
+      // The replay's own classification — never re-derive it from the raw rows.
+      const onToday = new Set(d.heldOnTickers)
+      const heldOns = d.heldOnTickers
+      const unpricedOns = d.unpricedTickers.filter(t => onToday.has(t))
 
-      d.unpricedTickers.filter(t => !onTickers.has(t)).forEach(t => {
-        if ((barsByTicker.get(t) ?? []).length === 0) noBars.add(t)
+      d.unpricedTickers.filter(t => !onToday.has(t)).forEach(t => {
+        if (!tickersWithBars.has(t)) noBars.add(t)
       })
       d.vanished.forEach(t => vanished.add(t))
 

@@ -13,6 +13,9 @@ function tx(over: Partial<ReplayTransaction>): ReplayTransaction {
     date: '2026-03-02', asset_type: 'ACCION', created_at: null, ...over,
   }
 }
+/** A row that only blows up once the replay reaches its date. */
+const poisoned = (date: string): ReplayTransaction =>
+  Object.defineProperty(tx({ date }), 'quantity', { get() { throw new Error('bad row') } })
 const bars = (rows: Array<[string, number]>): DailyBar[] => rows.map(([date, close]) => ({ date, close }))
 const mv = (type: string, amount: number, date: string): ReplayMovement => ({ type, amount, date })
 
@@ -65,6 +68,12 @@ describe('deriveHistory — shape and calendar', () => {
     expect(out.flags.failure).toMatch(/.+/)
     expect(Array.isArray(out.rows)).toBe(true)
   })
+
+  it('S3.2 a failure mid-series keeps the rows computed before it and does not throw', () => {
+    const out = deriveHistory(input({ transactions: [tx({}), poisoned('2026-03-05')] }))
+    expect(out.flags.failure).toMatch(/.+/)
+    expect(out.rows.map(r => r.snapshot_date)).toEqual(['2026-03-02', '2026-03-03', '2026-03-04'])
+  })
 })
 
 describe('deriveHistory — hand-computed values', () => {
@@ -106,13 +115,22 @@ describe('deriveHistory — hand-computed values', () => {
   })
 
   it('S5.2 deleting that transaction gives back exactly the original history', () => {
-    const H = deriveHistory(input()).rows
-    const withExtra = deriveHistory(input({
+    const base = () => input()
+    const retro = () => input({
       transactions: [tx({}), tx({ date: '2026-03-03', quantity: 5 })],
       movements: [...BASE_MOVES, mv('COMPRA', 250, '2026-03-03')],
-    })).rows
+    })
+    const H = deriveHistory(base()).rows
+    const withExtra = deriveHistory(retro()).rows
     expect(withExtra).not.toEqual(H)
-    expect(deriveHistory(input()).rows).toEqual(H)
+    // delete the retroactive tx (and its funding movement) from the ledger it was added to
+    const afterDelete = retro()
+    const restored = deriveHistory({
+      ...afterDelete,
+      transactions: afterDelete.transactions.filter(t => t.date !== '2026-03-03'),
+      movements: afterDelete.movements.filter(m => m.date !== '2026-03-03'),
+    }).rows
+    expect(restored).toEqual(H)
   })
 
   it('S5.3 patching the quantity 10 -> 4 reprices every row since the trade', () => {
@@ -138,6 +156,24 @@ describe('deriveHistory — hand-computed values', () => {
     }))
     expect(byDate(rows).get('2026-03-03').stocks_value).toBeCloseTo(500 + 600, 6)
     expect(flags.costMarkedStocks).toEqual(['ZZZ'])
+  })
+
+  it('finds bars whatever the case or padding of the caller keys', () => {
+    // BBB has bars, but only from 03-04: it is unpriced on 03-02/03 and the flag must not fire.
+    const { flags } = deriveHistory(input({
+      transactions: [tx({}), tx({ ticker: 'BBB' })],
+      movements: [mv('DEPOSITO', 5000, '2026-03-01')],
+      barsByTicker: new Map([['AAA', AAA], [' bbb ', bars([['2026-03-04', 40], ['2026-03-05', 41]])]]),
+    }))
+    expect(flags.costMarkedStocks).toEqual([])
+  })
+
+  it('classifies a ticker like the replay does: the first typed row wins, so a later ON row cannot turn a stock into an ON', () => {
+    const { flags } = deriveHistory(input({
+      transactions: [tx({}), tx({ ticker: 'MIX', asset_type: 'ACCION' }), tx({ ticker: 'MIX', asset_type: 'ON', date: '2026-03-03' })],
+      movements: [mv('DEPOSITO', 5000, '2026-03-01')],
+    }))
+    expect(flags.costMarkedStocks).toEqual(['MIX'])
   })
 })
 

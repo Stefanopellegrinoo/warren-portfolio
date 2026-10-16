@@ -33,6 +33,8 @@ export interface BackfillDay {
    * position's entire life. Only this function knows which tickers were held.
    */
   heldTickers: string[]
+  /** The subset of heldTickers the replay classified as ONs. */
+  heldOnTickers: string[]
   /** Positions with no price AND no usable cost — dropped from the row (see below). */
   vanished: string[]
 }
@@ -192,7 +194,7 @@ export function buildBackfillRows(input: BackfillInput): BackfillDay[] {
       )
     }
 
-    return { row: { ...row, source: 'estimated' as const }, unpricedTickers, heldTickers, vanished: vanished.map(p => p.ticker) }
+    return { row: { ...row, source: 'estimated' as const }, unpricedTickers, heldTickers, heldOnTickers: state.onPositions.map(p => p.ticker), vanished: vanished.map(p => p.ticker) }
   })
 
   // ── The funding-side guard ────────────────────────────────────────────────
