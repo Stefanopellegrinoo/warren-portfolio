@@ -1,4 +1,5 @@
 import { fetchRawQuotes } from './yahoo-finance'
+import { fetchDailyBars } from './historical-prices'
 import { getRedis, isRedisReady } from './redis'
 
 const REDIS_KEY_CCL = 'currency:ccl'
@@ -61,7 +62,8 @@ export async function getCCLRate(): Promise<number> {
  * Returns a Map<DateString, CCLRate>
  */
 export async function getHistoricalCCL(startDate: Date, endDate: Date = new Date()): Promise<Map<string, number>> {
-  const cacheKey = `currency:h-ccl:${startDate.toISOString().split('T')[0]}`
+  // endDate in the key too: start-only froze the map for 24h, so later closes were divided by a stale CCL.
+  const cacheKey = `currency:h-ccl:${startDate.toISOString().split('T')[0]}:${endDate.toISOString().split('T')[0]}`
   
   if (isRedisReady()) {
     const cached = await getRedis()?.get(cacheKey)
@@ -73,10 +75,11 @@ export async function getHistoricalCCL(startDate: Date, endDate: Date = new Date
 
   const rates = new Map<string, number>()
   try {
-    const { fetchHistoricalQuotes } = await import('./yahoo-finance')
+    // Raw bars, not fetchHistoricalQuotes: that one converts 'BCBA:' tickers by
+    // calling getHistoricalCCL, which recursed forever from here.
     const [adr, local] = await Promise.all([
-      fetchHistoricalQuotes('GGAL', startDate, endDate),
-      fetchHistoricalQuotes('BCBA:GGAL', startDate, endDate)
+      fetchDailyBars('GGAL', startDate, endDate),
+      fetchDailyBars('GGAL.BA', startDate, endDate)
     ])
 
     // Build adr map
