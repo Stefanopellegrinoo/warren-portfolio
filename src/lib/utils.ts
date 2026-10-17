@@ -69,7 +69,16 @@ export function isMarketOpen(now: Date = new Date()): boolean {
 
 /** 6 missed 5-minute refresh cycles while the market is open. */
 export const PRICE_STALE_OPEN_MS = 30 * 60_000
-/** Covers a weekend plus a Monday holiday; Quote.updatedAt is FETCH time, so closed markets keep refreshing. */
+/**
+ * After the open, the first refresh cycle needs a moment: a price from the
+ * previous session is not flagged until open + this grace (3 missed cycles).
+ */
+export const PRICE_STALE_OPEN_GRACE_MS = 15 * 60_000
+/**
+ * Covers a weekend plus a Monday holiday. Quote.updatedAt is FETCH time and the
+ * price worker skips repeat fetches while the market is closed, so the last
+ * fetch is from the previous session's close.
+ */
 export const PRICE_STALE_CLOSED_MS = 96 * 3_600_000
 
 /**
@@ -80,8 +89,33 @@ export const PRICE_STALE_CLOSED_MS = 96 * 3_600_000
 export function isPriceStale(asOf: string | undefined, now: Date = new Date()): boolean {
   const t = asOf ? Date.parse(asOf) : NaN
   if (Number.isNaN(t)) return true
-  const limit = isMarketOpen(now) ? PRICE_STALE_OPEN_MS : PRICE_STALE_CLOSED_MS
-  return now.getTime() - t > limit
+  const age = now.getTime() - t
+  if (age > PRICE_STALE_CLOSED_MS) return true
+  if (!isMarketOpen(now)) return false
+  if (age <= PRICE_STALE_OPEN_MS) return false
+  // Previous-session price right after the open: give the first refresh time.
+  return t >= marketOpenInstant(now) || msSinceOpen(now) > PRICE_STALE_OPEN_GRACE_MS
+}
+
+const OPEN_MINUTES = 10 * 60 + 30 // 10:30 AR, see isMarketOpen
+
+/** Milliseconds since 10:30 AR on `now`'s Argentine day (call only while open). */
+function msSinceOpen(now: Date): number {
+  const ar = new Date(now.getTime() - 3 * 3_600_000) // read with getUTC*: AR is UTC-3, no DST
+  const ms = ((ar.getUTCHours() * 60 + ar.getUTCMinutes() - OPEN_MINUTES) * 60 + ar.getUTCSeconds()) * 1000 + ar.getUTCMilliseconds()
+  return ms
+}
+
+const marketOpenInstant = (now: Date) => now.getTime() - msSinceOpen(now)
+
+/** "hace 5 min" / "hace 2 h" / "hace 3 d"; "sin dato" when there is no usable as-of. */
+export function formatAge(asOf: string | undefined, now: Date = new Date()): string {
+  const t = asOf ? Date.parse(asOf) : NaN
+  if (Number.isNaN(t)) return 'sin dato'
+  const min = Math.max(0, Math.floor((now.getTime() - t) / 60_000))
+  if (min < 60) return `hace ${min} min`
+  const h = Math.floor(min / 60)
+  return h < 48 ? `hace ${h} h` : `hace ${Math.floor(h / 24)} d`
 }
 
 /** Priced positions (current_price set) whose price is stale. Unpriced ones are counted elsewhere. */

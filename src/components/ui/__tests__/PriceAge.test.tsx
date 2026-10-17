@@ -16,6 +16,13 @@ describe('PriceAge', () => {
     expect(html).toContain('14/10/2026')
   })
 
+  it('is an announced image with the label and a visible relative age', () => {
+    const html = renderToStaticMarkup(<PriceAge asOf="2026-10-14T10:00:00Z" now={now} />)
+    expect(html).toContain('role="img"')
+    expect(html).toContain('aria-label="Precio desactualizado')
+    expect(html).toContain('hace 5 h')
+  })
+
   it('says the time is unknown when there is no as-of', () => {
     const html = renderToStaticMarkup(<PriceAge asOf={undefined} now={now} />)
     expect(html).toContain('sin hora de actualización')

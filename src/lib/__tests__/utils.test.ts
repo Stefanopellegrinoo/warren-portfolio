@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatPct, isMarketOpen, isPriceStale, priceHealthSummary, PRICE_STALE_OPEN_MS, PRICE_STALE_CLOSED_MS } from '../utils'
+import { formatAge, PRICE_STALE_OPEN_GRACE_MS, formatPct, isMarketOpen, isPriceStale, priceHealthSummary, PRICE_STALE_OPEN_MS, PRICE_STALE_CLOSED_MS } from '../utils'
 
 describe('formatPct (fraction in)', () => {
   it('formats a fraction as a signed percent by default', () => {
@@ -67,6 +67,22 @@ describe('isPriceStale', () => {
     expect(isPriceStale(over, closed)).toBe(true)
   })
 
+  it('open grace: a previous-session price is not stale until open + grace, then it is', () => {
+    const prev = '2026-10-13T20:55:00Z' // Tue 17:55 AR, last fetch before close
+    const open1030 = new Date('2026-10-14T13:30:00Z').getTime() // Wed 10:30 AR
+    expect(isPriceStale(prev, new Date(open1030 + 60_000))).toBe(false)
+    expect(isPriceStale(prev, new Date(open1030 + PRICE_STALE_OPEN_GRACE_MS))).toBe(false)
+    expect(isPriceStale(prev, new Date(open1030 + PRICE_STALE_OPEN_GRACE_MS + 1))).toBe(true)
+  })
+
+  it('open grace never rescues a price older than the closed-market limit or a current-session price', () => {
+    const open1030 = new Date('2026-10-14T13:30:00Z').getTime()
+    const inGrace = new Date(open1030 + 60_000)
+    expect(isPriceStale(new Date(inGrace.getTime() - PRICE_STALE_CLOSED_MS - 1).toISOString(), inGrace)).toBe(true)
+    // fetched at 10:31 this session, checked at 11:05: 34 min old, past the 30 min open limit, grace over
+    expect(isPriceStale('2026-10-14T13:31:00Z', new Date('2026-10-14T14:05:00Z'))).toBe(true)
+  })
+
   it('clamps a future as-of (clock skew) to fresh', () => {
     expect(isPriceStale(new Date(open.getTime() + 60_000).toISOString(), open)).toBe(false)
   })
@@ -93,5 +109,20 @@ describe('priceHealthSummary', () => {
   it('appends the unpriced count and does not count unpriced as stale', () => {
     expect(priceHealthSummary([stale, unpriced, unpriced], now)).toBe('1 desactualizado · 2 sin precio')
     expect(priceHealthSummary([unpriced], now)).toBe('1 sin precio')
+  })
+})
+
+describe('formatAge', () => {
+  const now = new Date('2026-10-14T15:00:00Z')
+  const ago = (ms: number) => new Date(now.getTime() - ms).toISOString()
+  it('formats minutes, hours and days in Spanish', () => {
+    expect(formatAge(ago(5 * 60_000), now)).toBe('hace 5 min')
+    expect(formatAge(ago(2 * 3_600_000 + 1000), now)).toBe('hace 2 h')
+    expect(formatAge(ago(3 * 86_400_000), now)).toBe('hace 3 d')
+  })
+  it('says "sin dato" for missing/unparseable and clamps the future', () => {
+    expect(formatAge(undefined, now)).toBe('sin dato')
+    expect(formatAge('nope', now)).toBe('sin dato')
+    expect(formatAge(ago(-60_000), now)).toBe('hace 0 min')
   })
 })
