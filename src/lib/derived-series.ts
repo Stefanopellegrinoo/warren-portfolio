@@ -42,6 +42,8 @@ export interface DerivedDeps {
   getHistoricalCCL?: typeof getHistoricalCCL
   fetchQuotes?: typeof fetchQuotes
   derive?: typeof deriveHistory
+  /** Compute from scratch and never touch derived:v1 (the shadow compare script). */
+  skipCache?: boolean
 }
 
 /** Walks every page of a query. The order is re-applied per page on purpose. */
@@ -103,10 +105,11 @@ export async function getDerivedSeries(
 ): Promise<DerivedSeries> {
   const today = deps.today ?? argentinaDate()
 
-  const hit = await readCache(userId, today)
+  const useCache = !deps.skipCache
+  const hit = useCache ? await readCache(userId, today) : null
   if (hit) return { rows: inRange(hit.rows, range), degraded: false, flags: hit.flags }
 
-  const startVersion = await readVersion(userId)
+  const startVersion = useCache ? await readVersion(userId) : undefined
 
   const transactions = await readAll<ReplayTransaction>(
     () => supabase.from('transactions')

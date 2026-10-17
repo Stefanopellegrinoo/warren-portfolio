@@ -107,6 +107,18 @@ describe('getDerivedSeries', () => {
     expect(hit.degraded).toBe(false)
   })
 
+  it('skipCache neither reads nor writes derived:v1 (shadow compare)', async () => {
+    const first = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, deps())
+    store.set('derived:v1:u1', JSON.stringify({ asOf: TODAY, rows: [], flags: first.flags }))
+    redisMock.eval.mockClear()
+    const log: string[] = []
+
+    const res = await getDerivedSeries(fakeSupabase(tables(), log), 'u1', {}, deps({ skipCache: true }))
+    expect(log).toContain('transactions')
+    expect(res.rows.length).toBeGreaterThan(2)
+    expect(redisMock.eval).not.toHaveBeenCalled()
+  })
+
   it('ignores a hit from another day', async () => {
     store.set('derived:v1:u1', JSON.stringify({ asOf: '2026-03-09', rows: [], flags: null }))
     const log: string[] = []

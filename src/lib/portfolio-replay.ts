@@ -40,6 +40,8 @@ export interface ReplayMovement {
   type: string
   amount: number
   date: string
+  /** Insertion timestamp; only the shadow compare reads it (explainDiff). */
+  created_at?: string | null
 }
 
 export interface ReplayedPosition {

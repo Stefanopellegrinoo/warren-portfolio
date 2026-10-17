@@ -146,3 +146,48 @@ export function deriveHistory(input: DeriveInput): { rows: DerivedRow[]; flags: 
 
   return { rows, flags }
 }
+
+export type DiffReason = 'late-loaded' | 'date-shift' | 'split' | 'misprice'
+export interface SplitEvent { ticker: string; date: string }
+
+/**
+ * Tickers whose transaction price was typed wrong (measured 2026-07-28, 7 rows): they
+ * dirty cost and P&L from their transaction date on, never the stocks+cash value.
+ */
+export const MISPRICED_TICKERS: readonly string[] = ['AMD', 'BABA', 'CAH', 'META', 'NIO', 'NU', 'MU']
+
+/** The nightly snapshot job runs at 02:00 UTC (23:00 ART): what it saw was created before that. */
+const nextCutoff = (d: string) => `${new Date(Date.parse(`${d}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)}T02:00:00Z`
+const norm = (t: string) => String(t).trim().toUpperCase()
+
+/**
+ * Why a measured snapshot for `date` may legitimately differ from the derived row.
+ * null = unexplained. First match wins; the order is also the order of likelihood.
+ *  - late-loaded: a row dated <= D that was only inserted after D's snapshot ran
+ *  - date-shift:  a row dated > D inserted during D (evening entry in Argentina time)
+ *    that D's snapshot already saw
+ *  - split:       a held ticker split after D (the snapshot is at the raw, pre-split price)
+ *  - misprice:    a held ticker from MISPRICED_TICKERS
+ */
+export function explainDiff(
+  date: string,
+  txs: ReplayTransaction[],
+  movements: ReplayMovement[],
+  splits: SplitEvent[]
+): DiffReason | null {
+  const cutoff = nextCutoff(date)
+  const dayStart = `${date}T03:00:00Z`
+  const dated = [...txs, ...movements]
+  const created = (r: { created_at?: string | null }) => (r.created_at ? String(r.created_at) : null)
+
+  if (dated.some(r => day(r.date) <= date && (created(r) ?? '') > cutoff)) return 'late-loaded'
+  if (dated.some(r => {
+    const c = created(r)
+    return day(r.date) > date && c !== null && c >= dayStart && c <= cutoff
+  })) return 'date-shift'
+
+  const held = new Set(txs.filter(t => day(t.date) <= date).map(t => norm(t.ticker)))
+  if (splits.some(s => s.date > date && held.has(norm(s.ticker)))) return 'split'
+  if (MISPRICED_TICKERS.some(t => held.has(t))) return 'misprice'
+  return null
+}
