@@ -1,7 +1,6 @@
 import type { Transaction, Position, ClosedTrade, TransactionInput, Quote, PortfolioSummary, AssetType, Moneda, ONPosition, ONClosedTrade } from '@/types'
-import { createServerClientInstance, createServiceClient } from './supabase-server'
+import { createServerClientInstance } from './supabase-server'
 import { getRedis, isRedisReady, SUMMARY_VERSION_TTL } from './redis'
-import { updateWithOptimisticLock } from './concurrency'
 import { processCashMovement, rebuildCashBalance } from './cash-engine'
 import { rebuildONPosition } from './on-engine'
 import { normalizeError } from './errors'
