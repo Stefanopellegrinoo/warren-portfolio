@@ -164,6 +164,21 @@ describe('getDerivedSeries', () => {
     expect(redisMock.eval).not.toHaveBeenCalled()
   })
 
+  it('a stock held today with no quote is degraded and never cached; an unpriced ON alone is not', async () => {
+    const withUnpriced = (todayUnpriced: string[]) => deps({
+      derive: vi.fn(() => ({ rows: [], flags: { ...FLAGS, todayUnpriced } })),
+    })
+    const onTx = tx({ ticker: 'ONX', asset_type: 'ON', quantity: 100, price: 1 })
+
+    const stock = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, withUnpriced(['AAA']))
+    expect(stock.degraded).toBe(true)
+    expect(redisMock.eval).not.toHaveBeenCalled()
+
+    const on = await getDerivedSeries(fakeSupabase(tables({ transactions: { data: [tx(), onTx] } })), 'u1', {}, withUnpriced(['ONX']))
+    expect(on.degraded).toBe(false)
+    expect(redisMock.eval).toHaveBeenCalledTimes(1)
+  })
+
   it('a bars source with unknown splits is degraded; a clean chart() answering [] is not', async () => {
     const unknownSplits = deps({ getBars: vi.fn(async (s: string[]) => new Map(s.map(x => [x, ok(AAA_BARS, { splitsKnown: false })]))) })
     expect((await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, unknownSplits)).degraded).toBe(true)

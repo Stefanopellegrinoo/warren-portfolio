@@ -197,6 +197,9 @@ export async function getDerivedSeries(
     userId, transactions, movements, barsByTicker, onPricesByTicker, onMarks, today, todayQuotes,
   })
   if (flags.failure != null) degraded = true
+  // A stock without a live quote leaves today's row at cost: never cache it. ONs have no
+  // intraday quote by design (on_price_history / aggregate marks cover them), so they do not degrade.
+  if (flags.todayUnpriced.some(t => !onTickers.includes(norm(t)))) degraded = true
 
   if (!degraded && startVersion !== undefined) await writeCache(userId, startVersion, today, rows, flags)
 
