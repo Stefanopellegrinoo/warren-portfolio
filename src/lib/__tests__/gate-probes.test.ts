@@ -1,5 +1,5 @@
 /**
- * The S4 re-verify probes as permanent tests: real deriveHistory + knownAtFrom + evaluateGate over
+ * The S4 re-verify probes (P*: round 2, Q*: round 3) as permanent tests: real deriveHistory + knownAtFrom + evaluateGate over
  * synthetic ledgers, with the wiring's real column shape (movements carry created_at).
  * "Snapshot truth" for D = deriveHistory over the rows created <= D+1T02:00Z, future-dated rows counted at D.
  */
@@ -21,21 +21,32 @@ function baseInput(txs: any[], movs: any[], extra: any = {}): DeriveInput {
     onPricesByTicker: new Map(), onMarks: new Map(), today: TODAY, todayQuotes: new Map(), ...extra,
   }
 }
-function truthAt(input: any, D: string) {
+const ON = tx({ ticker: 'XD', asset_type: 'ON', quantity: 10000, price: 1 })
+const ONMV = mv({ type: 'COMPRA', amount: 10000 })
+const MARKET = 1.08 // ONs held at market: value = invested x 1.08
+function truthAt(input: any, D: string, ratio = 1) {
   const cutoff = Date.parse(`${next(D)}T02:00:00Z`)
   const seen = (rows: any[]) => rows.filter(r => !r.created_at || Date.parse(r.created_at) <= cutoff).map(r => (r.date.slice(0, 10) > D ? { ...r, date: D } : r))
   const { rows } = deriveHistory({ ...input, transactions: seen(input.transactions), movements: seen(input.movements), today: next(D) })
-  return rows.find((r: any) => r.snapshot_date === D)!
+  const r = rows.find((x: any) => x.snapshot_date === D)!
+  const ons = r.ons_invested * ratio
+  return { ...r, ons_value: ons, total_value: r.stocks_value + r.cash_value + ons }
 }
-const snapsFrom = (input: any, over: Record<string, any> = {}) =>
-  DATES.map(D => ({ id: D, ...truthAt(input, D), source: 'live', ...(over[D] ?? {}) })) as any[]
-function gate(input: DeriveInput, snapshots: any[], extra: any = {}) {
+const snapsFrom = (input: any, over: Record<string, any> = {}, ratio = (_d: string) => 1) =>
+  DATES.map(D => ({ id: D, ...truthAt(input, D, ratio(D)), source: 'live', ...(over[D] ?? {}) })) as any[]
+const marksOf = (snaps: any[]) => new Map(snaps.map(s => [s.snapshot_date, { ons_value: s.ons_value, ons_invested: s.ons_invested }]))
+/** The wiring's shape: marks come from the live snapshots under comparison. */
+const withMarks = (txs: any[], movs: any[], ratio = (_d: string) => MARKET) => {
+  const snaps = snapsFrom(baseInput(txs, movs), {}, ratio)
+  return { snaps, input: baseInput(txs, movs, { onMarks: marksOf(snaps) }) }
+}
+function gate(input: DeriveInput, snapshots: any[], bend?: (rows: any[]) => any[]) {
   const { rows, flags } = deriveHistory(input)
-  return evaluateGate({ today: TODAY, derived: rows, snapshots, liveTotal: rows.at(-1)!.total_value, onPriceDates: [], onMarkDates: flags.onAggregateMarkDates, knownAt: knownAtFrom(input), ...extra })
+  return evaluateGate({ today: TODAY, derived: bend ? bend(rows) : rows, snapshots, liveTotal: rows.at(-1)!.total_value, onRecordedDates: flags.onRecordedDates, knownAt: knownAtFrom(input) })
 }
 const diff = (r: any, date: string) => r.diffs.find((x: any) => x.date === date)
 
-describe('S4 re-verify probes', () => {
+describe('S4 re-verify probes (P*: round 2, Q*: round 3)', () => {
   it('P1: an 08-04 evening sale + VENTA + RETIRO (created 00:30Z D+1) is explained as date-shift', () => {
     const ev = '2026-08-05T00:30:00Z'
     const txs = [tx(), tx({ operation: 'VENTA', price: 52, date: '2026-08-05', created_at: ev })]
@@ -58,68 +69,12 @@ describe('S4 re-verify probes', () => {
     expect(r.checks.G2.pass).toBe(true)
   })
 
-  it('P4: an ESTIMATED corrupt snapshot cannot hide a +$50k stocks error', () => {
-    const input = baseInput([tx()], [mv(), mv({ type: 'COMPRA', amount: 3000 })])
-    const snaps = snapsFrom(input, { '2026-08-06': { source: 'estimated', stocks_value: 0, ons_value: 0, cash_value: 0, total_value: 99999 } })
-    const { rows } = deriveHistory(input)
-    const bent = rows.map(r => (r.snapshot_date === '2026-08-06' ? { ...r, stocks_value: r.stocks_value + 50000, total_value: r.total_value + 50000 } : r))
-    const r = evaluateGate({ today: TODAY, derived: bent, snapshots: snaps, liveTotal: rows.at(-1)!.total_value, onPriceDates: [], onMarkDates: [], knownAt: knownAtFrom(input) })
-    expect(diff(r, '2026-08-06').reasons.stocksCash).toBe('unexplained')
-    expect(r.checks.G1.pass).toBe(false)
-    expect(r.pass).toBe(false)
-  })
-
-  describe('P5: the 07-23 replica (live corrupt row: components 0, total = truth with ONs at market 10,800 vs cost 10,000)', () => {
-    const txs = [tx(), tx({ ticker: 'XD', asset_type: 'ON', quantity: 10000, price: 1, date: '2026-07-31' })]
-    const movs = [mv(), mv({ type: 'COMPRA', amount: 3000 }), mv({ type: 'COMPRA', amount: 10000 })]
-    const marksWithCorrupt = (corruptDate: string) => {
-      const m = new Map(DATES.map(d => [d, { ons_value: 10800, ons_invested: 10000 }]))
-      m.set(corruptDate, { ons_value: 0, ons_invested: 0 }) // the corrupt row is also the mark source
-      return m
-    }
-    const corruptOf = (snaps: any[], date: string) => {
-      const s = snaps.find(x => x.snapshot_date === date)
-      Object.assign(s, { total_value: s.stocks_value + s.cash_value + 10800, stocks_value: 0, ons_value: 0, cash_value: 0, ons_invested: 0 })
-    }
-
-    it('with a previous valid mark there is no fake dip: the ON carries the previous ratio, the row is estimated, the gate passes G1/G2', () => {
-      const clean = baseInput(txs, movs, { onMarks: new Map(DATES.map(d => [d, { ons_value: 10800, ons_invested: 10000 }])) })
-      const snaps = snapsFrom(clean)
-      corruptOf(snaps, '2026-08-04')
-      const input = baseInput(txs, movs, { onMarks: marksWithCorrupt('2026-08-04') })
-      const { rows } = deriveHistory(input)
-      const d = rows.find(x => x.snapshot_date === '2026-08-04')!
-      expect(d.ons_value).toBeCloseTo(10800, 6)
-      expect(d.source).toBe('estimated')
-      const r = gate(input, snaps)
-      expect(Math.abs(diff(r, '2026-08-04').dTotal)).toBeLessThanOrEqual(1)
-      expect(diff(r, '2026-08-04').reasons).toMatchObject({ stocksCash: 'corrupt-snapshot', ons: 'corrupt-snapshot', total: null })
-      expect(r.checks.G1.pass).toBe(true)
-      expect(r.checks.G2.pass).toBe(true)
-      expect(r.corruptDates).toEqual(['2026-08-04'])
-    })
-
-    it('with NO previous valid mark the dip is reported as corrupt-snapshot on the total, never silently, and G1 fails on the components', () => {
-      const clean = baseInput(txs, movs, { onMarks: new Map(DATES.map(d => [d, { ons_value: 10800, ons_invested: 10000 }])) })
-      const snaps = snapsFrom(clean)
-      corruptOf(snaps, '2026-08-03')
-      const input = baseInput(txs, movs, { onMarks: marksWithCorrupt('2026-08-03') })
-      const r = gate(input, snaps)
-      const d = diff(r, '2026-08-03')
-      expect(d.dTotal).toBeCloseTo(-800, 6)
-      expect(d.reasons.total).toBe('corrupt-snapshot')
-      expect(d.reasons.stocksCash).toBe('unexplained')
-      expect(r.checks.G1.pass).toBe(false)
-    })
-  })
-
   it('P6: a late ON buy + aggregate marks is NOT explained as late-loaded (no circular marks in knownAt)', () => {
     const late = '2026-08-07T15:00:00Z'
     const txs = [tx(), tx({ ticker: 'XD', asset_type: 'ON', quantity: 10000, price: 1, date: '2026-07-31' }), tx({ ticker: 'YD', asset_type: 'ON', quantity: 5000, price: 1, date: '2026-08-04', created_at: late })]
     const movs = [mv(), mv({ type: 'COMPRA', amount: 3000 }), mv({ type: 'COMPRA', amount: 10000 }), mv({ type: 'COMPRA', amount: 5000, date: '2026-08-04', created_at: late })]
-    const marks = new Map(DATES.map(d => [d, { ons_value: 10800, ons_invested: 10000 }]))
-    const input = baseInput(txs, movs, { onMarks: marks })
-    const r = gate(input, snapsFrom(input))
+    const { snaps, input } = withMarks(txs, movs)
+    const r = gate(input, snaps)
     expect(diff(r, '2026-08-05').reasons.total).toBe('unexplained')
     expect(r.checks.G2.pass).toBe(false)
     expect(r.pass).toBe(false)
@@ -141,5 +96,75 @@ describe('S4 re-verify probes', () => {
     expect(t('2026-08-04T21:30:00-03:00')).toBe('date-shift') // 00:30Z
     expect(t('2026-08-05T01:00:00-03:00')).toBeNull() // 04:00Z: after the cutoff, not yet visible, row dated D+1 -> not late either
     expect(knownLedgerAt('2026-08-04', [tx({ date: '2026-08-04', created_at: '2026-08-05T02:00:00.5+00:00' })] as any, []).reason).toBe('late-loaded')
+  })
+
+  const late = '2026-08-06T15:00:00Z'
+
+  it('Q1: a late-loaded stock trade while ONs are held at market passes G1 and G2', () => {
+    const txs = [tx(), ON, tx({ ticker: 'BBB', quantity: 10, price: 199, date: '2026-08-05', created_at: late })]
+    const movs = [mv(), mv({ type: 'COMPRA', amount: 3000 }), ONMV, mv({ type: 'COMPRA', amount: 1990, date: '2026-08-05', created_at: late })]
+    const { snaps, input } = withMarks(txs, movs)
+    const r = gate(input, snaps)
+    expect(diff(r, '2026-08-05').reasons).toMatchObject({ stocksCash: 'late-loaded', total: 'late-loaded', ons: null })
+    expect(r.checks.G1.pass).toBe(true)
+    expect(r.checks.G2.pass).toBe(true)
+  })
+
+  it('Q3: an 08-04 evening sale (date-shift) while ONs are held at market passes G1 and G2', () => {
+    const ev = '2026-08-05T00:30:00Z'
+    const txs = [tx(), ON, tx({ operation: 'VENTA', price: 52, date: '2026-08-05', created_at: ev })]
+    const movs = [mv(), mv({ type: 'COMPRA', amount: 3000 }), ONMV, mv({ type: 'VENTA', amount: 5200, date: '2026-08-05', created_at: ev }), mv({ type: 'RETIRO', amount: 4000, date: '2026-08-05', created_at: ev })]
+    const { snaps, input } = withMarks(txs, movs)
+    const r = gate(input, snaps)
+    expect(diff(r, '2026-08-04').reasons).toMatchObject({ stocksCash: 'date-shift', total: 'date-shift' })
+    expect(r.checks.G1.pass).toBe(true)
+    expect(r.checks.G2.pass).toBe(true)
+  })
+
+  it('Q4: derived ONs x100 on one date (stocks and cash right) fail G2: the total is not excused on its own', () => {
+    const { snaps, input } = withMarks([tx(), ON], [mv(), mv({ type: 'COMPRA', amount: 3000 }), ONMV])
+    const bend = (rows: any[]) => rows.map(r => (r.snapshot_date === '2026-08-05' ? { ...r, ons_value: r.ons_value * 100, total_value: r.total_value + r.ons_value * 99 } : r))
+    const r = gate(input, snaps, bend)
+    expect(diff(r, '2026-08-05').reasons).toMatchObject({ stocksCash: null, ons: 'unexplained', total: 'unexplained' })
+    expect(r.checks.G2.pass).toBe(false)
+    expect(r.pass).toBe(false)
+  })
+
+  it('Q5: a held ON with no recorded close and a mark that misses the cost basis by $2 cannot satisfy G4', () => {
+    const txs = [tx(), ON]
+    const movs = [mv(), mv({ type: 'COMPRA', amount: 3000 }), ONMV]
+    const snaps = snapsFrom(baseInput(txs, movs), {}, () => MARKET).map(s => ({ ...s, ons_invested: s.ons_invested + 2 }))
+    const input = baseInput(txs, movs, { onMarks: marksOf(snaps) })
+    const { rows, flags } = deriveHistory(input)
+    expect(rows.slice(0, -1).every(r => r.source === 'estimated')).toBe(true)
+    expect(flags.onRecordedDates).toEqual([])
+    const r = gate(input, snaps)
+    expect(r.checks.G4.pass).toBe(false)
+    expect(r.pass).toBe(false)
+  })
+
+  it('Q6: a retroactive ON buy after usable marks is valued at cost, not cost x the old ratio (S7.3)', () => {
+    const txs = [tx(), ON, tx({ ticker: 'YD', asset_type: 'ON', quantity: 2000, price: 1, date: '2026-08-04', created_at: '2026-08-07T15:00:00Z' })]
+    const movs = [mv(), mv({ type: 'COMPRA', amount: 3000 }), ONMV, mv({ type: 'COMPRA', amount: 2000, date: '2026-08-04', created_at: '2026-08-07T15:00:00Z' })]
+    const marks = new Map(DATES.map(d => [d, { ons_value: 10800, ons_invested: 10000 }]))
+    const r = deriveHistory(baseInput(txs, movs, { onMarks: marks })).rows.find(x => x.snapshot_date === '2026-08-05')!
+    expect(r.ons_invested).toBe(12000)
+    expect(r.ons_value).toBeCloseTo(12000, 6)
+    expect(r.source).toBe('estimated')
+  })
+
+  it('real 07-23 replica: a null-breakdown snapshot between cost-marked estimated days and a market live day is skipped, listed, and does not touch the gate', () => {
+    const txs = [tx(), ON]
+    const movs = [mv(), mv({ type: 'COMPRA', amount: 3000 }), ONMV]
+    const C = '2026-08-05'
+    const ratio = (d: string) => (d < C ? 1 : MARKET)
+    const nullRow = { stocks_value: null, ons_value: null, cash_value: null, ons_invested: null, stocks_invested: null }
+    const snaps = snapsFrom(baseInput(txs, movs), {}, ratio).map(s => (s.snapshot_date < C ? { ...s, source: 'estimated' } : s.snapshot_date === C ? { ...s, ...nullRow } : s))
+    const marks = marksOf(snaps.filter(s => s.source === 'live' && s.snapshot_date !== C))
+    const r = gate(baseInput(txs, movs, { onMarks: marks }), snaps)
+    expect(r.skippedNoBreakdown).toEqual([C])
+    expect(r.diffs.find(d => d.date === C)).toBeUndefined()
+    expect(r.checks.G1.pass).toBe(true)
+    expect(r.checks.G2.pass).toBe(true)
   })
 })

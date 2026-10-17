@@ -37,8 +37,6 @@ export interface CompareDeps {
   readSnapshots(): Promise<PortfolioSnapshot[]>
   /** total_value of the stored positions at the same quotes (computeLiveSnapshotRow), null = none. */
   liveTotal(): Promise<number | null>
-  /** Distinct on_price_history.price_date. */
-  onPriceDates(): Promise<string[]>
   now(): number
   log(line: string): void
 }
@@ -48,7 +46,7 @@ const money = (v: number) => (v >= 0 ? '+' : '') + v.toFixed(2)
 function printGate(log: CompareDeps['log'], r: GateResult) {
   log('')
   for (const [name, c] of Object.entries(r.checks)) log(`${c.pass ? 'PASS' : 'FAIL'}  ${name}  ${c.detail}`)
-  log(r.pass ? `GATE PASSED (G4 needs >= ${MIN_ON_DATES} live ON dates with captured prices)` : 'GATE FAILED')
+  log(r.pass ? `GATE PASSED (G4 needs >= ${MIN_ON_DATES} live dates with ONs valued from recorded closes)` : 'GATE FAILED')
 }
 
 export async function runCompare(deps: CompareDeps): Promise<number> {
@@ -69,10 +67,10 @@ export async function runCompare(deps: CompareDeps): Promise<number> {
     return EXIT_DEGRADED
   }
 
-  const [snapshots, onPriceDates] = await Promise.all([deps.readSnapshots(), deps.onPriceDates()])
+  const snapshots = await deps.readSnapshots()
   const result = evaluateGate({
-    today: deps.today, derived: derived.rows, snapshots, liveTotal, onPriceDates,
-    onMarkDates: derived.flags.onAggregateMarkDates, knownAt: derived.knownAt,
+    today: deps.today, derived: derived.rows, snapshots, liveTotal,
+    onRecordedDates: derived.flags.onRecordedDates, knownAt: derived.knownAt,
   })
 
   log('')
@@ -83,10 +81,9 @@ export async function runCompare(deps: CompareDeps): Promise<number> {
     log(`${d.date}  ${d.source.padEnd(9)} ${money(d.dStocksCash).padStart(12)} ${money(d.dTotal).padStart(11)} ${money(d.dOns).padStart(10)}   ${reasons}`)
   }
   log(`${result.diffs.length} dates compared`)
-  log(`corrupt snapshots: ${result.corruptDates.length ? result.corruptDates.join(', ') : 'none'}`)
   log(`dates missing from derived: ${result.missingInDerived.length ? result.missingInDerived.join(', ') : 'none'}`)
-  if (result.skippedNoBreakdown.length) log(`snapshots without breakdown (skipped): ${result.skippedNoBreakdown.join(', ')}`)
-  log(`ON aggregate-mark dates (excluded from G4, circular): ${derived.flags.onAggregateMarkDates.length ? derived.flags.onAggregateMarkDates.join(', ') : 'none'}`)
+  log(`snapshots without breakdown (skipped; more than 1 fails G1): ${result.skippedNoBreakdown.length ? result.skippedNoBreakdown.join(', ') : 'none'}`)
+  log(`ON aggregate-mark dates (not counted by G4, circular): ${derived.flags.onAggregateMarkDates.length ? derived.flags.onAggregateMarkDates.join(', ') : 'none'}`)
   const f = derived.flags
   log(`flags: negativeCash=${f.negativeCash ? `${f.negativeCash.date} ${f.negativeCash.cash.toFixed(2)}` : 'none'} costMarkedStocks=[${f.costMarkedStocks}] vanished=[${f.vanished}] todayUnpriced=[${f.todayUnpriced}]`)
   printGate(log, result)
@@ -94,17 +91,6 @@ export async function runCompare(deps: CompareDeps): Promise<number> {
 }
 
 // --- wiring ------------------------------------------------------------------------------
-
-const PAGE = 1000
-async function readAll<T>(build: () => any, order: string): Promise<T[]> {
-  const out: T[] = []
-  for (let offset = 0; ; offset += PAGE) {
-    const { data, error } = await build().order(order, { ascending: true }).range(offset, offset + PAGE - 1)
-    if (error) throw new Error(error.message)
-    out.push(...((data ?? []) as T[]))
-    if ((data ?? []).length < PAGE) return out
-  }
-}
 
 /** The library pieces the wiring uses, injectable so tests never load Redis or Yahoo. */
 export interface CompareLib {
@@ -132,20 +118,26 @@ export function buildCompareDeps(supabase: any, userId: string, today: string, l
     },
     readSnapshots: () => lib.fetchSnapshotSeries(supabase, userId),
     liveTotal: async () => (await lib.computeLiveSnapshotRow(supabase, userId, today))?.total_value ?? null,
-    onPriceDates: async () => {
-      const rows = await readAll<{ price_date: string }>(() => supabase.from('on_price_history').select('price_date'), 'price_date')
-      return Array.from(new Set(rows.map(r => String(r.price_date).slice(0, 10))))
-    },
     now: () => Date.now(),
     log: l => console.log(l),
   }
 }
 
-async function main() {
+/** Any exception is EXIT_ERROR, never confused with a gate failure (1). */
+export async function exitCodeOf(run: () => Promise<number>, onError: (err: unknown) => void): Promise<number> {
+  try {
+    return await run()
+  } catch (err) {
+    onError(err)
+    return EXIT_ERROR
+  }
+}
+
+async function main(): Promise<number> {
   const parsed = parseArgs(process.argv.slice(2))
   if ('error' in parsed) {
     console.error(parsed.error)
-    process.exit(EXIT_USAGE)
+    return EXIT_USAGE
   }
 
   // Imported here so that importing this file (tests) never loads Redis or Yahoo.
@@ -157,12 +149,9 @@ async function main() {
 
   const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
   const deps = buildCompareDeps(supabase, parsed.userId, argentinaDate(), { getDerivedSeries, getBars, fetchSnapshotSeries, computeLiveSnapshotRow })
-  process.exit(await runCompare(deps))
+  return runCompare(deps)
 }
 
 if (process.argv[1]?.includes('compare-derived-vs-snapshots')) {
-  main().catch(err => {
-    console.error(err)
-    process.exit(1)
-  })
+  exitCodeOf(main, err => console.error(err)).then(code => process.exit(code))
 }

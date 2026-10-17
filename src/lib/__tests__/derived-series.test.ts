@@ -19,7 +19,7 @@ import type { BarsResult } from '../bars-cache'
 import type { DeriveInput } from '../derive-history'
 
 const TODAY = '2026-03-10'
-const FLAGS = { negativeCash: null, costMarkedStocks: [], vanished: [], onAggregateMarkDates: [], todayUnpriced: [], failure: null }
+const FLAGS = { negativeCash: null, costMarkedStocks: [], vanished: [], onAggregateMarkDates: [], onRecordedDates: [], todayUnpriced: [], failure: null }
 const tx = (over: Record<string, unknown> = {}) => ({
   ticker: 'AAA', operation: 'COMPRA', quantity: 10, price: 50, commission: 0,
   date: '2026-03-02', asset_type: 'ACCION', created_at: null, ...over,
@@ -169,7 +169,7 @@ describe('getDerivedSeries', () => {
 
   it('treats a partial derivation (flags.failure) as degraded and uncacheable', async () => {
     const derive = vi.fn((i: DeriveInput) => ({
-      rows: [], flags: { negativeCash: null, costMarkedStocks: [], vanished: [], onAggregateMarkDates: [], todayUnpriced: [], failure: 'boom' },
+      rows: [], flags: { negativeCash: null, costMarkedStocks: [], vanished: [], onAggregateMarkDates: [], onRecordedDates: [], todayUnpriced: [], failure: 'boom' },
     }))
     const res = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, deps({ derive }))
     expect(res.degraded).toBe(true)

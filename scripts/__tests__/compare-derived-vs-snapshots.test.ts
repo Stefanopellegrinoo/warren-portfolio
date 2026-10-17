@@ -11,7 +11,7 @@ vi.mock('../../src/lib/yahoo-finance', async importOriginal => ({
 }))
 
 import {
-  parseArgs, runCompare, buildCompareDeps, EXIT_DEGRADED, EXIT_ERROR, EXIT_GATE_FAILED, EXIT_PASS, EXIT_USAGE, type CompareDeps,
+  parseArgs, runCompare, buildCompareDeps, exitCodeOf, EXIT_DEGRADED, EXIT_ERROR, EXIT_GATE_FAILED, EXIT_PASS, EXIT_USAGE, type CompareDeps,
 } from '../compare-derived-vs-snapshots'
 import { getDerivedSeries } from '../../src/lib/derived-series'
 import { fetchSnapshotSeries } from '../../src/lib/snapshot-series'
@@ -22,7 +22,7 @@ import type { PortfolioSnapshot } from '../../src/types'
 
 const TODAY = '2026-03-20'
 const DATES = ['2026-03-09', '2026-03-10', '2026-03-11', '2026-03-12', '2026-03-13', '2026-03-16']
-const FLAGS = { negativeCash: null, costMarkedStocks: [], vanished: [], onAggregateMarkDates: [], todayUnpriced: [], failure: null }
+const FLAGS = { negativeCash: null, costMarkedStocks: [], vanished: [], onAggregateMarkDates: [], onRecordedDates: DATES, todayUnpriced: [], failure: null }
 
 const row = (date: string, over: Partial<DerivedRow> = {}): DerivedRow => ({
   user_id: 'u1', snapshot_date: date, total_value: 1000, total_invested: 900, pnl: 100, pnl_pct: 0.11,
@@ -42,7 +42,6 @@ function deps(over: Partial<CompareDeps> = {}) {
     }),
     readSnapshots: vi.fn(async () => DATES.map(snap)),
     liveTotal: vi.fn(async () => { calls.push('liveTotal'); return 1010 }),
-    onPriceDates: vi.fn(async () => DATES),
     now: () => (t += 1500),
     log: (l: string) => { lines.push(l) },
     ...over,
@@ -68,7 +67,6 @@ describe('runCompare', () => {
     expect(out).toMatch(/warm/i)
     expect(out).toContain('G1')
     expect(out).toContain('6 dates compared')
-    expect(out).toContain('corrupt snapshots: none')
     expect(d.derive).toHaveBeenCalledTimes(2)
   })
 
@@ -98,15 +96,15 @@ describe('runCompare', () => {
     expect(lines.join('\n')).toMatch(/degraded/i)
   })
 
-  it('W4: ON aggregate-mark dates are excluded from G4 and listed', async () => {
+  it('G4 counts only dates derived from recorded ON closes', async () => {
     const { d, lines } = deps({
       derive: vi.fn(async () => ({
         rows: [...DATES.map(x => row(x)), row(TODAY, { total_value: 1010 })], degraded: false,
-        flags: { ...FLAGS, onAggregateMarkDates: DATES.slice(0, 2) }, knownAt: () => null,
+        flags: { ...FLAGS, onRecordedDates: DATES.slice(2) }, knownAt: () => null,
       })),
     })
-    expect(await runCompare(d)).toBe(EXIT_GATE_FAILED) // 6 dates - 2 marked = 4 < 5
-    expect(lines.join('\n')).toContain('2026-03-09, 2026-03-10')
+    expect(await runCompare(d)).toBe(EXIT_GATE_FAILED) // 4 recorded dates < 5
+    expect(lines.join('\n')).toContain('4 live ON dates compared')
   })
 })
 
@@ -114,7 +112,7 @@ describe('runCompare', () => {
 
 const TX = { ticker: 'AAA', operation: 'COMPRA', quantity: 10, price: 50, commission: 0, date: '2026-03-02', asset_type: 'ACCION', created_at: '2026-03-02T15:00:00Z' }
 const MOVES = [{ type: 'DEPOSITO', amount: 5000, date: '2026-03-01', created_at: '2026-03-01T12:00:00Z' }]
-const DB: Record<string, any[]> = { transactions: [TX], cash_movements: MOVES, on_price_history: [{ price_date: '2026-03-04' }, { price_date: '2026-03-04' }, { price_date: '2026-03-05' }] }
+const DB: Record<string, any[]> = { transactions: [TX], cash_movements: MOVES }
 
 function readOnlySupabase() {
   const ops: string[] = []
@@ -150,8 +148,11 @@ function readOnlySupabase() {
 }
 
 describe('exit codes', () => {
-  it('S4: an exception exits with a code distinct from a gate failure and from degraded', () => {
-    expect(EXIT_ERROR).toBe(4)
+  it('S4: an exception exits EXIT_ERROR, distinct from every other code', async () => {
+    const errors: unknown[] = []
+    expect(await exitCodeOf(async () => { throw new Error('boom') }, e => errors.push(e))).toBe(EXIT_ERROR)
+    expect(errors).toHaveLength(1)
+    expect(await exitCodeOf(async () => EXIT_GATE_FAILED, () => {})).toBe(EXIT_GATE_FAILED)
     expect(new Set([EXIT_PASS, EXIT_GATE_FAILED, EXIT_USAGE, EXIT_DEGRADED, EXIT_ERROR]).size).toBe(5)
   })
 })
@@ -172,10 +173,8 @@ describe('buildCompareDeps (the real wiring)', () => {
     const derived = await d.derive()
     await d.readSnapshots()
     await d.liveTotal()
-    const priceDates = await d.onPriceDates()
-
+    
     expect(derived.degraded).toBe(false)
-    expect(priceDates.sort()).toEqual(['2026-03-04', '2026-03-05'])
     expect(getBars).toHaveBeenCalled()
     expect(getBars.mock.calls.every(c => c[2]?.memoryOnly === true)).toBe(true)
     expect(redis.ensureRedisConnected).not.toHaveBeenCalled()
@@ -183,13 +182,12 @@ describe('buildCompareDeps (the real wiring)', () => {
 
     // every query is a select, and the tables are exactly the ones the gate needs
     expect(new Set(ops.map(o => o.split('.')[0]))).toEqual(new Set([
-      'transactions', 'cash_movements', 'ticker_identity', 'portfolio_snapshots', 'on_price_history',
+      'transactions', 'cash_movements', 'ticker_identity', 'portfolio_snapshots',
       'positions', 'on_positions', 'closed_trades', 'on_closed_trades', 'cash_balance',
     ]))
     expect(ops).toContain('transactions.eq(user_id,u1)')
     expect(ops).toContain('cash_movements.eq(user_id,u1)')
     expect(ops).toContain('portfolio_snapshots.eq(user_id,u1)')
-    expect(ops).toContain('on_price_history.select(price_date)')
 
     // C1: the ledger replay needs created_at on BOTH tables, or knownAt can never drop/re-date a cash leg
     const selected = (t: string) => ops.filter(o => o.startsWith(`${t}.select(`)).join(' ')

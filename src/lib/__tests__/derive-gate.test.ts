@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import * as deriveHistoryModule from '../derive-history'
-import { evaluateGate, isCorruptSnapshot, type GateInput, type KnownAt } from '../derive-gate'
+import { evaluateGate, type GateInput, type KnownAt } from '../derive-gate'
 import type { DerivedRow } from '../derive-history'
 import type { PortfolioSnapshot } from '@/types'
 
@@ -27,8 +27,7 @@ function input(over: Partial<GateInput> = {}): GateInput {
     derived: [...dates.map(d => derived(d)), derived(TODAY, { total_value: 1010 })],
     snapshots: dates.map(d => snap(d)),
     liveTotal: 1010,
-    onPriceDates: dates,
-    onMarkDates: [],
+    onRecordedDates: dates,
     ...over,
   }
 }
@@ -94,12 +93,6 @@ describe('evaluateGate', () => {
       expect(r.diffs.find(d => d.date === '2026-03-16')?.reasons).toMatchObject({ stocksCash: 'late-loaded', ons: 'unexplained' })
       expect(r.checks.G4.pass).toBe(false)
     })
-
-    it('G2 is checked on the total component too', () => {
-      const base = input()
-      const r = evaluateGate({ ...base, derived: lateDiff(base), knownAt: known({ total_value: 1040 }) })
-      expect(r.checks.G2.pass).toBe(false)
-    })
   })
 
   describe('regression: the verifier probes must FAIL the gate', () => {
@@ -128,50 +121,26 @@ describe('evaluateGate', () => {
     })
   })
 
-  describe('corrupt snapshots', () => {
-    const corrupt = snap('2026-03-11', { stocks_value: 0, ons_value: 0, cash_value: 0 })
-    const withCorrupt = (base: GateInput, ...extra: PortfolioSnapshot[]) =>
-      ({ ...base, snapshots: base.snapshots.map(s => extra.find(e => e.snapshot_date === s.snapshot_date) ?? s) })
-
-    it('classifies a snapshot whose components do not sum to its total as corrupt', () => {
-      expect(isCorruptSnapshot(corrupt)).toBe(true)
-      expect(isCorruptSnapshot(snap('2026-03-11'))).toBe(false)
-    })
-
-    it('explains the zeroed components when the derived total agrees with the set total, and reports the date', () => {
-      const r = evaluateGate(withCorrupt(input(), corrupt))
-      expect(r.checks.G1.pass).toBe(true)
+  describe('the total is never explained on its own: dTotal must equal dStocksCash + dOns', () => {
+    it('inherits the ledger reason of stocks+cash when ONs agree (late-loaded stock trade while ONs are held)', () => {
+      const base = input()
+      const r = evaluateGate({ ...base, derived: replace(base.derived, '2026-03-10', { stocks_value: 650, total_value: 1050 }), knownAt: known({}) })
+      expect(r.diffs.find(d => d.date === '2026-03-10')?.reasons).toMatchObject({ stocksCash: 'late-loaded', total: 'late-loaded', ons: null })
       expect(r.checks.G2.pass).toBe(true)
-      expect(r.corruptDates).toEqual(['2026-03-11'])
-      expect(r.diffs.find(d => d.date === '2026-03-11')?.reasons).toMatchObject({ stocksCash: 'corrupt-snapshot', total: null, ons: 'corrupt-snapshot' })
     })
 
-    it('W2: when the derived total is off by more than $1 the components are NOT excused, and the total is reported as corrupt-snapshot', () => {
+    it('a total that does not equal the sum of its components is unexplained even if stocks+cash is explained', () => {
       const base = input()
-      const r = evaluateGate({ ...withCorrupt(base, corrupt), derived: replace(base.derived, '2026-03-11', { total_value: 1300 }) })
-      expect(r.diffs.find(d => d.date === '2026-03-11')?.reasons).toMatchObject({ stocksCash: 'unexplained', total: 'corrupt-snapshot', ons: 'unexplained' })
-      expect(r.checks.G1.pass).toBe(false)
-      expect(r.checks.G2.detail).toContain('2026-03-11')
-    })
-
-    it('with more than one corrupt snapshot the corrupt totals are not excused either', () => {
-      const base = input()
-      const two = withCorrupt(base, corrupt, snap('2026-03-12', { stocks_value: 0, ons_value: 0, cash_value: 0 }))
-      const r = evaluateGate({ ...two, derived: replace(base.derived, '2026-03-11', { total_value: 1300 }) })
-      expect(r.diffs.find(d => d.date === '2026-03-11')?.reasons.total).toBe('unexplained')
+      const r = evaluateGate({ ...base, derived: replace(base.derived, '2026-03-10', { stocks_value: 650, total_value: 1100 }), knownAt: known({}) })
+      expect(r.diffs.find(d => d.date === '2026-03-10')?.reasons).toMatchObject({ stocksCash: 'late-loaded', total: 'unexplained' })
       expect(r.checks.G2.pass).toBe(false)
     })
 
-    it('fails when more than one snapshot is corrupt', () => {
-      const r = evaluateGate(withCorrupt(input(), corrupt, snap('2026-03-12', { stocks_value: 0, ons_value: 0, cash_value: 0 })))
-      expect(r.corruptDates).toEqual(['2026-03-11', '2026-03-12'])
-      expect(r.checks.G1.pass).toBe(false)
-    })
-
-    it('does not count a corrupt date as a compared ON date', () => {
-      const base = input({ onPriceDates: dates.slice(0, 5) })
-      const r = evaluateGate(withCorrupt(base, snap('2026-03-09', { stocks_value: 0, ons_value: 0, cash_value: 0 })))
-      expect(r.checks.G4.pass).toBe(false)
+    it('an unexplained ON diff makes the total unexplained even when stocks+cash is explained', () => {
+      const base = input()
+      const r = evaluateGate({ ...base, derived: replace(base.derived, '2026-03-10', { stocks_value: 650, ons_value: 104, total_value: 1054 }), knownAt: known({}) })
+      expect(r.diffs.find(d => d.date === '2026-03-10')?.reasons).toMatchObject({ stocksCash: 'late-loaded', ons: 'unexplained', total: 'unexplained' })
+      expect(r.checks.G2.pass).toBe(false)
     })
   })
 
@@ -193,22 +162,16 @@ describe('evaluateGate', () => {
   })
 
   describe('G4', () => {
-    it('counts only live dates present in on_price_history, and needs 5 of them', () => {
-      const r = evaluateGate(input({ onPriceDates: ['2026-03-13', '2026-03-16', '2026-03-17'] }))
+    it('counts only live dates derived from recorded ON closes, and needs 5 of them', () => {
+      const r = evaluateGate(input({ onRecordedDates: ['2026-03-13', '2026-03-16', '2026-03-17'] }))
       expect(r.checks.G4.pass).toBe(false)
       expect(r.checks.G4.detail).toContain('3')
-      expect(evaluateGate(input({ onPriceDates: [] })).checks.G4.pass).toBe(false)
-      expect(evaluateGate(input({ onPriceDates: dates.slice(0, 5) })).checks.G4.pass).toBe(true)
+      expect(evaluateGate(input({ onRecordedDates: [] })).checks.G4.pass).toBe(false)
+      expect(evaluateGate(input({ onRecordedDates: dates.slice(0, 5) })).checks.G4.pass).toBe(true)
     })
 
-    it('a snapshot weekday with no captured ON prices (holiday) does not count', () => {
-      expect(evaluateGate(input({ onPriceDates: dates.slice(0, 4) })).checks.G4.pass).toBe(false)
-    })
-
-    it('excludes dates valued by an ON aggregate mark (circular)', () => {
-      const r = evaluateGate(input({ onMarkDates: ['2026-03-09', '2026-03-10', '2026-03-11'] }))
-      expect(r.checks.G4.pass).toBe(false)
-      expect(r.checks.G4.detail).toContain('4')
+    it('a date with no recorded ON closes (cost or mark) does not count', () => {
+      expect(evaluateGate(input({ onRecordedDates: dates.slice(0, 4) })).checks.G4.pass).toBe(false)
     })
 
     it('fails when a qualifying ON date differs by more than $1 and is unexplained', () => {
@@ -233,11 +196,23 @@ describe('evaluateGate', () => {
     expect(r.checks.G1.pass).toBe(true)
   })
 
-  it('skips snapshots with no breakdown', () => {
-    const base = input()
-    const r = evaluateGate({ ...base, snapshots: base.snapshots.map(s => (s.snapshot_date === '2026-03-12' ? { ...s, stocks_value: undefined } : s)) })
-    expect(r.skippedNoBreakdown).toEqual(['2026-03-12'])
-    expect(r.checks.G1.pass).toBe(true)
+  describe('snapshots without breakdown (null components)', () => {
+    const noBreakdown = (base: GateInput, ...ds: string[]) =>
+      ({ ...base, snapshots: base.snapshots.map(s => (ds.includes(s.snapshot_date) ? { ...s, stocks_value: null, ons_value: null, cash_value: null, ons_invested: null, stocks_invested: null } as any : s)) })
+
+    it('one is skipped and listed, and does not affect the gate', () => {
+      const r = evaluateGate(noBreakdown(input(), '2026-03-12'))
+      expect(r.skippedNoBreakdown).toEqual(['2026-03-12'])
+      expect(r.checks.G1.pass).toBe(true)
+      expect(r.checks.G2.pass).toBe(true)
+    })
+
+    it('more than one fails G1 so somebody looks', () => {
+      const r = evaluateGate(noBreakdown(input(), '2026-03-12', '2026-03-13'))
+      expect(r.skippedNoBreakdown).toEqual(['2026-03-12', '2026-03-13'])
+      expect(r.checks.G1.pass).toBe(false)
+      expect(r.checks.G1.detail).toContain('2026-03-13')
+    })
   })
 
   it('W3: each check reports its compared count, and G1/G2 fail when they compared nothing', () => {

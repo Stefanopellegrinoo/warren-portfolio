@@ -32,6 +32,8 @@ export interface DeriveFlags {
   vanished: string[]
   /** Days an ON aggregate mark stood in for per-ticker prices (circular against those snapshots). */
   onAggregateMarkDates: string[]
+  /** Days where EVERY held ON was valued from a recorded on_price_history close (the only independent ON values). */
+  onRecordedDates: string[]
   /** Positions held today with no usable quote. */
   todayUnpriced: string[]
   /** Set when the derivation stopped early; rows hold what was computed before. */
@@ -72,7 +74,7 @@ function withOnMark(row: SnapshotRow, mark: OnMark): SnapshotRow {
 
 export function deriveHistory(input: DeriveInput): { rows: DerivedRow[]; flags: DeriveFlags } {
   const flags: DeriveFlags = {
-    negativeCash: null, costMarkedStocks: [], vanished: [], onAggregateMarkDates: [], todayUnpriced: [], failure: null,
+    negativeCash: null, costMarkedStocks: [], vanished: [], onAggregateMarkDates: [], onRecordedDates: [], todayUnpriced: [], failure: null,
   }
   const rows: DerivedRow[] = []
 
@@ -91,8 +93,6 @@ export function deriveHistory(input: DeriveInput): { rows: DerivedRow[]; flags: 
 
     const noBars = new Set<string>()
     const vanished = new Set<string>()
-    // ons_value / ons_invested of the most recent aggregate mark that was actually usable.
-    let lastMarkRatio: number | null = null
 
     for (const date of dates) {
       const [d] = buildBackfillRows({
@@ -117,15 +117,9 @@ export function deriveHistory(input: DeriveInput): { rows: DerivedRow[]; flags: 
           row = withOnMark(row, mark)
           onsAtCost = false
           flags.onAggregateMarkDates.push(date)
-          if (mark.ons_invested > 0) lastMarkRatio = mark.ons_value / mark.ons_invested
-        } else if (lastMarkRatio != null && row.ons_invested > 0) {
-          // A mark that does not match the replayed cost basis (e.g. a corrupt snapshot with zeroed
-          // components) is never used as a value. Instead of dropping the ONs to cost, which would show a
-          // fake dip, carry the previous usable mark's market/cost ratio over this date's replayed cost.
-          // It is an estimate, not a measurement: the row stays 'estimated' and is not a mark date.
-          row = withOnMark(row, { ons_value: row.ons_invested * lastMarkRatio, ons_invested: row.ons_invested })
         }
       }
+      if (heldOns.length > 0 && unpricedOns.length === 0) flags.onRecordedDates.push(date)
       rows.push({ ...row, source: onsAtCost ? 'estimated' : 'live' })
     }
 

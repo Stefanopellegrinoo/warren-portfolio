@@ -210,19 +210,27 @@ describe('deriveHistory — ON valuation precedence (REQ-7)', () => {
     expect(r.source).toBe('estimated')
   })
 
-  it('W1: a mark that disagrees with the replayed cost carries the previous usable mark ratio, estimated, not a mark date', () => {
-    // 03-03 usable (10,300 / 10,000 = 1.03); 03-04 is a corrupt snapshot (0 / 0); 03-05 usable again
+  it('S7.3b a mark that disagrees with the replayed cost is never carried over from an earlier mark: the ON stays at cost', () => {
+    // 03-03 usable (ratio 1.03); on 03-04 the replayed cost no longer matches the mark (e.g. a retroactive ON buy)
     const marks = new Map([
       ['2026-03-03', { ons_value: 10300, ons_invested: 10000 }],
       ['2026-03-04', { ons_value: 0, ons_invested: 0 }],
-      ['2026-03-05', { ons_value: 10300, ons_invested: 10000 }],
     ])
     const { rows, flags } = deriveHistory(onInput({ onMarks: marks }))
     const r = get(rows, '2026-03-04')
-    expect(r.ons_value).toBeCloseTo(10300, 6)
-    expect(r.total_value).toBeCloseTo(r.stocks_value + 10300 + r.cash_value, 6)
+    expect(r.ons_value).toBeCloseTo(10000, 6)
     expect(r.source).toBe('estimated')
-    expect(flags.onAggregateMarkDates).toEqual(['2026-03-03', '2026-03-05'])
+    expect(flags.onAggregateMarkDates).toEqual(['2026-03-03'])
+  })
+
+  it('onRecordedDates lists only dates where every held ON was valued from a recorded close', () => {
+    const { flags } = deriveHistory(onInput({
+      onPricesByTicker: new Map([['AERBD', bars([['2026-03-02', 101.95]])]]),
+      onMarks: new Map([['2026-03-04', { ons_value: 10150, ons_invested: 10000 }]]),
+    }))
+    expect(flags.onRecordedDates).toContain('2026-03-03')
+    const none = deriveHistory(onInput({ onMarks: new Map([['2026-03-03', { ons_value: 10150, ons_invested: 10000 }]]) })).flags
+    expect(none.onRecordedDates).toEqual([])
   })
 
   it('S7.4 without any mark the ON is at cost and estimated', () => {
