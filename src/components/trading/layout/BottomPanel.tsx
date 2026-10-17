@@ -5,7 +5,8 @@ import { useChartStore } from "@/lib/store/chart-store";
 import { fetchTicker24h } from "@/lib/binance/rest";
 import { getProviderForSymbol } from "@/lib/market-data/resolver";
 import type { Ticker24h } from "@/lib/binance/types";
-import { formatPrice, formatPct, formatVolume } from "@/lib/format";
+import { formatPrice, formatVolume } from "@/lib/format";
+import { formatPct } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
 type YahooQuote = { price: number; change: number; changePct: number };
@@ -73,7 +74,7 @@ export function BottomPanel() {
         />
         <Stat
           label="Cambio %"
-          value={yQuote ? formatPct(yQuote.changePct) : "—"}
+          value={yQuote ? formatPct(yQuote.changePct / 100) : "—"}
           valueClass={yQuote ? upClass(yQuote.changePct) : ""}
         />
         <Stat label="Precio" value={yQuote ? formatPrice(yQuote.price) : "—"} />
@@ -90,7 +91,7 @@ export function BottomPanel() {
       <Stat label="Símbolo" value={symbol} />
       <Stat
         label="24h Cambio"
-        value={t ? formatPct(t.priceChangePercent) : "—"}
+        value={t ? formatPct(t.priceChangePercent / 100) : "—"}
         valueClass={t ? upClass(t.priceChangePercent) : ""}
       />
       <Stat label="24h Alto" value={t ? formatPrice(t.highPrice) : "—"} valueClass="text-tv-green" />

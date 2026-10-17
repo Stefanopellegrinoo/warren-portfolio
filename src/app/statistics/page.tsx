@@ -189,7 +189,7 @@ function DetailedStats({ data, assetLabel }: { data: StatData; assetLabel: strin
           {data.annualizedVol !== null && data.annualizedVol !== undefined ? (
             <>
               <p className="font-display font-700 text-xl mt-0.5 text-white">
-                {(data.annualizedVol * 100).toFixed(1)}%
+                {formatPct(data.annualizedVol, { digits: 1, sign: false })}
               </p>
               <p className="text-[10px] text-slate-500 font-mono">
                 Anualizada · {data.returnIntervals ?? 0} retornos diarios
@@ -221,7 +221,7 @@ function DetailedStats({ data, assetLabel }: { data: StatData; assetLabel: strin
           {data.maxDrawdown !== null && data.maxDrawdown !== undefined ? (
             <>
               <p className={`font-display font-700 text-xl mt-0.5 ${data.maxDrawdown < -0.1 ? 'text-rose' : 'text-slate-300'}`}>
-                {(data.maxDrawdown * 100).toFixed(1)}%
+                {formatPct(data.maxDrawdown, { digits: 1, sign: false })}
               </p>
               <p className="text-[10px] text-slate-500 font-mono">Caída máxima desde pico</p>
               <ProvenanceNote provenance={data.provenance} />
@@ -388,7 +388,7 @@ function DetailedStats({ data, assetLabel }: { data: StatData; assetLabel: strin
                   <div key={item.name} className="flex items-center gap-2 text-[11px] font-mono">
                     <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
                     <span className="text-slate-400 truncate">{item.name}</span>
-                    <span className="text-slate-600 ml-auto">{(item.pct * 100).toFixed(1)}%</span>
+                    <span className="text-slate-600 ml-auto">{formatPct(item.pct, { digits: 1, sign: false })}</span>
                   </div>
                 ))}
               </div>
@@ -454,12 +454,13 @@ function DetailedStats({ data, assetLabel }: { data: StatData; assetLabel: strin
                 { label: 'USD (Mercados Internacionales)', value: data.usdExposure, color: '#10b981' },
                 { label: 'ARS (Mercado Local vía CCL)', value: data.arsExposure, color: '#F59E0B' },
               ].map(({ label, value, color }) => {
-                const pct = data.totalPortfolioValue > 0 ? (value / data.totalPortfolioValue) * 100 : 0
+                const frac = data.totalPortfolioValue > 0 ? value / data.totalPortfolioValue : 0
+                const pct = frac * 100
                 return (
                   <div key={label}>
                     <div className="flex justify-between text-[11px] font-mono mb-1">
                       <span className="text-slate-400">{label}</span>
-                      <span className="text-white font-600">{formatUSD(value)} ({pct.toFixed(1)}%)</span>
+                      <span className="text-white font-600">{formatUSD(value)} ({formatPct(frac, { digits: 1, sign: false })})</span>
                     </div>
                     <div className="w-full h-2 bg-bg-600 rounded-full overflow-hidden">
                       <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: color }} />
@@ -476,7 +477,7 @@ function DetailedStats({ data, assetLabel }: { data: StatData; assetLabel: strin
             <div className="grid grid-cols-2 gap-3">
               {[
                 { label: 'Trades Totales', val: data.totalTrades.toString() },
-                { label: 'Win Rate', val: data.winRate !== null ? `${(data.winRate * 100).toFixed(0)}%` : '—' },
+                { label: 'Win Rate', val: data.winRate !== null ? formatPct(data.winRate, { digits: 0, sign: false }) : '—' },
                 { label: 'Ganancia Prom.', val: formatUSD(data.avgWin), cls: 'text-emerald' },
                 { label: 'Pérdida Prom.', val: formatUSD(data.avgLoss), cls: 'text-rose' },
                 { label: 'Profit Factor', val: profitFactorLabel },
@@ -751,7 +752,7 @@ export default function StatisticsPage() {
                     <div key={item.name} className="flex items-center gap-2 text-[12px] font-mono">
                       <div className="w-3 h-3 rounded-sm flex-shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
                       <span className="text-slate-300 truncate">{item.name}</span>
-                      <span className="text-slate-500 ml-auto font-600">{(item.pct * 100).toFixed(1)}%</span>
+                      <span className="text-slate-500 ml-auto font-600">{formatPct(item.pct, { digits: 1, sign: false })}</span>
                     </div>
                   ))}
                 </div>

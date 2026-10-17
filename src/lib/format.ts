@@ -6,12 +6,6 @@ export function formatPrice(n: number): string {
   return n.toFixed(6);
 }
 
-export function formatPct(n: number): string {
-  if (!isFinite(n)) return "—";
-  const sign = n >= 0 ? "+" : "";
-  return `${sign}${n.toFixed(2)}%`;
-}
-
 export function formatVolume(n: number): string {
   if (n >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
   if (n >= 1e6) return `${(n / 1e6).toFixed(2)}M`;

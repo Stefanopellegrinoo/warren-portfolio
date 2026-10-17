@@ -17,9 +17,14 @@ export function formatUSD(value: number, compact = false): string {
   }).format(value)
 }
 
-export function formatPct(value: number): string {
+/** Formats a FRACTION (0.1234 -> "+12.34%"). Percent-valued inputs must be divided by 100 first. */
+export function formatPct(
+  value: number | null | undefined,
+  { digits = 2, sign = true }: { digits?: number; sign?: boolean } = {},
+): string {
+  if (value == null || !isFinite(value)) return '—'
   const pct = value * 100
-  return `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`
+  return `${sign && pct >= 0 ? '+' : ''}${pct.toFixed(digits)}%`
 }
 
 export function formatDate(dateStr: string): string {

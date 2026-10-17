@@ -6,7 +6,8 @@ import { fetchTickers24h } from "@/lib/binance/rest";
 import { getBinanceWS } from "@/lib/binance/ws";
 import { useChartStore } from "@/lib/store/chart-store";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { formatPrice, formatPct } from "@/lib/format";
+import { formatPrice } from "@/lib/format";
+import { formatPct } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { getProviderForSymbol } from "@/lib/market-data/resolver";
 import { addSymbolToCurrentWatchlist } from "@/lib/warren/watchlist";
@@ -231,7 +232,7 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
                           : "text-tv-red bg-tv-red/10"
                         : "text-tv-text-muted",
                     )}>
-                      {row ? (row.pct >= 0 ? "+" : "") + formatPct(row.pct) : "—"}
+                      {row ? formatPct(row.pct / 100) : "—"}
                     </span>
                     <button
                       onClick={(e) => {
