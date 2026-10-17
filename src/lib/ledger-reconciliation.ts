@@ -11,7 +11,6 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { normalizeError } from './errors'
 import { replayPortfolioAt, type ReplayMovement, type ReplayTransaction } from './portfolio-replay'
 import { reconcileUser, type GateResult, type StoredPosition } from './backfill-gate'
-import { argentinaDate } from './utils'
 
 const PAGE = 1000
 
@@ -38,11 +37,28 @@ async function selectAll<T>(
   }
 }
 
+/**
+ * Current-state check: stored positions/cash already include rows dated in the
+ * future (T+1, settlement dates; nothing blocks future dates on input), so the
+ * replay must not cut by date.
+ */
+const NO_DATE_CUTOFF = '9999-12-31'
+
+/**
+ * The five reads are independent and not one snapshot, so a write landing
+ * between them can look like a mismatch. Re-run once before reporting: a false
+ * alarm on the dashboard costs more trust than a one-read-late true one.
+ */
 export async function reconcileLedger(
   supabase: SupabaseClient,
   userId: string,
-  today: string = argentinaDate()
+  asOf: string = NO_DATE_CUTOFF
 ): Promise<GateResult> {
+  const first = await reconcileOnce(supabase, userId, asOf)
+  return first.ok ? first : reconcileOnce(supabase, userId, asOf)
+}
+
+async function reconcileOnce(supabase: SupabaseClient, userId: string, today: string): Promise<GateResult> {
   const [transactions, movements, positions, onPositions, cash] = await Promise.all([
     selectAll<ReplayTransaction>(
       supabase, 'transactions',

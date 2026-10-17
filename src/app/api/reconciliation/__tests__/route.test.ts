@@ -38,10 +38,11 @@ describe('GET /api/reconciliation', () => {
 
   it('500s when the read fails instead of reporting ok', async () => {
     mockRequireUser.mockResolvedValue({ supabase: {}, user: { id: USER } })
-    mockReconcile.mockRejectedValue(new Error('boom'))
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    mockReconcile.mockRejectedValue(new Error('relation "transactions" boom'))
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     const res = await GET()
     expect(res.status).toBe(500)
-    expect((await res.json()).error).toMatch(/boom/)
+    expect(await res.json()).toEqual({ error: 'Internal error' })
+    expect(logged).toHaveBeenCalled()
   })
 })

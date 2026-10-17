@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { reconcileLedger } from '@/lib/ledger-reconciliation'
-import { normalizeError } from '@/lib/errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,6 +14,6 @@ export async function GET() {
     return NextResponse.json(await reconcileLedger(supabase, user.id))
   } catch (err) {
     console.error(err)
-    return NextResponse.json({ error: normalizeError(err).message }, { status: 500 })
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }
 }
