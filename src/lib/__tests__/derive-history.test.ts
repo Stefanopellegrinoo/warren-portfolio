@@ -200,7 +200,7 @@ describe('deriveHistory — ON valuation precedence (REQ-7)', () => {
     expect(r.source).toBe('live')
     expect(r.total_value).toBeCloseTo(r.stocks_value + 10150 + r.cash_value, 6)
     expect(r.pnl).toBeCloseTo(r.stocks_value - r.stocks_invested + 150, 6)
-    expect(flags.onAggregateMarkDays).toBe(1)
+    expect(flags.onAggregateMarkDates).toEqual(['2026-03-03'])
   })
 
   it('S7.3 when the replayed ON cost basis disagrees with the mark, the ON is held at cost and the day is estimated', () => {

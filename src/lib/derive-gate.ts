@@ -4,10 +4,10 @@
  * No DB, no network — the compare script feeds it.
  */
 import type { PortfolioSnapshot } from '@/types'
-import { explainDiff, type DerivedRow, type DiffReason, type SplitEvent } from './derive-history'
-import type { ReplayMovement, ReplayTransaction } from './portfolio-replay'
+import type { DerivedRow, LedgerReason, KnownAt } from './derive-history'
 
-export type Reason = DiffReason | 'corrupt-snapshot'
+export type Reason = LedgerReason | 'corrupt-snapshot'
+export type Component = 'stocksCash' | 'total' | 'ons'
 
 export interface DiffLine {
   date: string
@@ -15,22 +15,29 @@ export interface DiffLine {
   dStocksCash: number
   dTotal: number
   dOns: number
-  reason: Reason | null
+  /** Per component: null = within tolerance, 'unexplained' = the gate counts it as a failure. */
+  reasons: Record<Component, Reason | 'unexplained' | null>
 }
 
 export interface GateCheck { pass: boolean; detail: string }
+
+export type { KnownAt }
 
 export interface GateInput {
   today: string
   derived: DerivedRow[]
   snapshots: PortfolioSnapshot[]
-  transactions: ReplayTransaction[]
-  movements: ReplayMovement[]
-  splits: SplitEvent[]
   /** Stored positions at the same quotes (computeLiveSnapshotRow). null = nothing to value. */
   liveTotal: number | null
-  /** min(on_price_history.price_date) — ON dates before it can only be aggregate-mark (circular). */
-  onFirstPriceDate: string | null
+  /** Distinct on_price_history.price_date: the sessions whose ON closes were actually captured. */
+  onPriceDates: string[]
+  /** Dates whose derived ONs came from an aggregate mark of these very snapshots (circular). */
+  onMarkDates: string[]
+  /**
+   * Re-derives D over the ledger as D's snapshot saw it (knownLedgerAt). null = nothing was late,
+   * so there is nothing to explain with. Without it, no ledger explanation is ever accepted.
+   */
+  knownAt?: (date: string) => KnownAt | null
 }
 
 export interface GateResult {
@@ -39,9 +46,11 @@ export interface GateResult {
   diffs: DiffLine[]
   missingInDerived: string[]
   skippedNoBreakdown: string[]
+  corruptDates: string[]
 }
 
 export const MIN_ON_DATES = 5
+export const MAX_CORRUPT_DATES = 1
 export const GATE_TOLERANCE = 1
 
 const hasBreakdown = (s: PortfolioSnapshot) =>
@@ -57,60 +66,92 @@ const n = (v: unknown) => Number(v ?? 0)
 const bad = (d: number) => Math.abs(d) > GATE_TOLERANCE
 const listed = (lines: DiffLine[]) => lines.map(l => l.date).join(', ')
 
+type Valued = { stocks_value?: unknown; cash_value?: unknown; total_value?: unknown; ons_value?: unknown }
+const stocksCashOf = (r: Valued) => n(r.stocks_value) + n(r.cash_value)
+const valueOf: Record<Component, (r: Valued) => number> = {
+  stocksCash: stocksCashOf,
+  total: r => n(r.total_value),
+  ons: r => n(r.ons_value),
+}
+
 export function evaluateGate(input: GateInput): GateResult {
-  const { today, transactions, movements, splits } = input
+  const { today } = input
   const derivedByDate = new Map(input.derived.map(r => [r.snapshot_date, r]))
+  const firstDerived = input.derived.map(r => r.snapshot_date).sort()[0]
   const diffs: DiffLine[] = []
   const missingInDerived: string[] = []
   const skippedNoBreakdown: string[] = []
-  const corruptDates = new Set<string>()
+  const corruptDates: string[] = []
 
   for (const s of input.snapshots) {
     const date = String(s.snapshot_date).slice(0, 10)
     if (date >= today) continue // today is G3's job: its snapshot is a partial day
     const d = derivedByDate.get(date)
-    if (!d) { missingInDerived.push(date); continue }
+    if (!d) {
+      // before the ledger starts there is nothing to derive, which is not a hole
+      if (firstDerived && date >= firstDerived) missingInDerived.push(date)
+      continue
+    }
     if (!hasBreakdown(s)) { skippedNoBreakdown.push(date); continue }
     const corrupt = isCorruptSnapshot(s)
-    if (corrupt) corruptDates.add(date)
-    const dStocksCash = d.stocks_value + d.cash_value - (n(s.stocks_value) + n(s.cash_value))
-    const dTotal = d.total_value - n(s.total_value)
-    const dOns = d.ons_value - n(s.ons_value)
-    const differs = bad(dStocksCash) || bad(dTotal) || bad(dOns)
+    if (corrupt) corruptDates.push(date)
+
+    const delta = (c: Component) => valueOf[c](d) - valueOf[c](s)
+    const known = input.knownAt?.(date) ?? null
+    // An explanation excuses a component only if it reproduces THAT component of the snapshot.
+    const reasonFor = (c: Component): DiffLine['reasons'][Component] => {
+      if (!bad(delta(c))) return null
+      if (corrupt && c !== 'total') return 'corrupt-snapshot'
+      if (known && !bad(valueOf[c](known.row) - valueOf[c](s))) return known.reason
+      return 'unexplained'
+    }
     diffs.push({
-      date, source: s.source ?? 'live', dStocksCash, dTotal, dOns,
-      reason: !differs ? null : corrupt ? 'corrupt-snapshot' : explainDiff(date, transactions, movements, splits),
+      date, source: s.source ?? 'live',
+      dStocksCash: delta('stocksCash'), dTotal: delta('total'), dOns: delta('ons'),
+      reasons: { stocksCash: reasonFor('stocksCash'), total: reasonFor('total'), ons: reasonFor('ons') },
     })
   }
 
-  const unexplained = (pick: (l: DiffLine) => number, among: DiffLine[]) =>
-    among.filter(l => bad(pick(l)) && l.reason === null)
+  const unexplained = (c: Component, among: DiffLine[]) => among.filter(l => l.reasons[c] === 'unexplained')
 
-  const g1Bad = unexplained(l => l.dStocksCash, diffs)
   const live = diffs.filter(l => l.source === 'live')
-  const g2Bad = unexplained(l => l.dTotal, live)
+  const g1Bad = unexplained('stocksCash', diffs)
+  const g2Bad = unexplained('total', live)
+
+  const g1Problems = [
+    g1Bad.length ? `unexplained stocks+cash diffs: ${listed(g1Bad)}` : '',
+    missingInDerived.length ? `snapshot dates missing from derived: ${missingInDerived.join(', ')}` : '',
+    corruptDates.length > MAX_CORRUPT_DATES ? `${corruptDates.length} corrupt snapshots (max ${MAX_CORRUPT_DATES}): ${corruptDates.join(', ')}` : '',
+    diffs.length === 0 ? 'nothing compared' : '',
+  ].filter(Boolean)
 
   const todayRow = derivedByDate.get(today)
   const g3: GateCheck = !todayRow || input.liveTotal == null
     ? { pass: false, detail: 'no derived today row or no live valuation to compare with' }
     : { pass: !bad(todayRow.total_value - input.liveTotal), detail: `derived ${todayRow.total_value.toFixed(2)} vs live ${input.liveTotal.toFixed(2)}` }
 
-  // Before the first recorded ON price a derived ON value can only come from the aggregate marks
-  // of these very snapshots: agreement there is circular, so those dates do not count.
-  const onDates = input.onFirstPriceDate ? live.filter(l => l.date >= input.onFirstPriceDate!) : []
-  const g4Bad = unexplained(l => l.dOns, onDates)
+  // Only sessions with captured ON closes count, and never ones valued by the snapshots' own marks
+  // (circular) or whose breakdown is corrupt.
+  const priced = new Set(input.onPriceDates)
+  const marked = new Set(input.onMarkDates)
+  const corrupt = new Set(corruptDates)
+  const onDates = live.filter(l => priced.has(l.date) && !marked.has(l.date) && !corrupt.has(l.date))
+  const g4Bad = unexplained('ons', onDates)
   const g4: GateCheck = onDates.length < MIN_ON_DATES
-    ? { pass: false, detail: `${onDates.length} live ON dates from ${input.onFirstPriceDate ?? 'n/a'}, need ${MIN_ON_DATES}` }
-    : { pass: g4Bad.length === 0, detail: g4Bad.length ? `unexplained ON diffs: ${listed(g4Bad)}` : `${onDates.length} live ON dates agree` }
+    ? { pass: false, detail: `${onDates.length} live ON dates compared, need ${MIN_ON_DATES}` }
+    : { pass: g4Bad.length === 0, detail: g4Bad.length ? `unexplained ON diffs: ${listed(g4Bad)}` : `${onDates.length} live ON dates compared, all agree` }
 
   const checks = {
-    G1: { pass: g1Bad.length === 0, detail: g1Bad.length ? `unexplained stocks+cash diffs: ${listed(g1Bad)}` : `${diffs.length} dates compared` },
-    G2: { pass: g2Bad.length === 0, detail: g2Bad.length ? `unexplained live total diffs: ${listed(g2Bad)}` : `${live.length} live dates compared` },
+    G1: { pass: g1Problems.length === 0, detail: `${diffs.length} dates compared${g1Problems.length ? `; ${g1Problems.join('; ')}` : ''}` },
+    G2: {
+      pass: g2Bad.length === 0 && live.length > 0,
+      detail: `${live.length} live dates compared${g2Bad.length ? `; unexplained live total diffs: ${listed(g2Bad)}` : live.length ? '' : '; nothing compared'}`,
+    },
     G3: g3,
     G4: g4,
   }
   return {
     pass: Object.values(checks).every(c => c.pass),
-    checks, diffs, missingInDerived, skippedNoBreakdown,
+    checks, diffs, missingInDerived, skippedNoBreakdown, corruptDates,
   }
 }

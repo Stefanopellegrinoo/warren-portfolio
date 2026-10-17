@@ -40,7 +40,7 @@ export interface ReplayMovement {
   type: string
   amount: number
   date: string
-  /** Insertion timestamp; only the shadow compare reads it (explainDiff). */
+  /** Insertion timestamp; only the shadow compare reads it (knownLedgerAt). */
   created_at?: string | null
 }
 

@@ -30,8 +30,8 @@ export interface DeriveFlags {
   costMarkedStocks: string[]
   /** Positions with no price and no usable cost, dropped from the row. */
   vanished: string[]
-  /** Days an ON aggregate mark stood in for per-ticker prices (informational). */
-  onAggregateMarkDays: number
+  /** Days an ON aggregate mark stood in for per-ticker prices (circular against those snapshots). */
+  onAggregateMarkDates: string[]
   /** Positions held today with no usable quote. */
   todayUnpriced: string[]
   /** Set when the derivation stopped early; rows hold what was computed before. */
@@ -72,7 +72,7 @@ function withOnMark(row: SnapshotRow, mark: OnMark): SnapshotRow {
 
 export function deriveHistory(input: DeriveInput): { rows: DerivedRow[]; flags: DeriveFlags } {
   const flags: DeriveFlags = {
-    negativeCash: null, costMarkedStocks: [], vanished: [], onAggregateMarkDays: 0, todayUnpriced: [], failure: null,
+    negativeCash: null, costMarkedStocks: [], vanished: [], onAggregateMarkDates: [], todayUnpriced: [], failure: null,
   }
   const rows: DerivedRow[] = []
 
@@ -114,7 +114,7 @@ export function deriveHistory(input: DeriveInput): { rows: DerivedRow[]; flags: 
           Math.abs(row.ons_invested - mark.ons_invested) <= TOLERANCE) {
         row = withOnMark(row, mark)
         onsAtCost = false
-        flags.onAggregateMarkDays++
+        flags.onAggregateMarkDates.push(date)
       }
       rows.push({ ...row, source: onsAtCost ? 'estimated' : 'live' })
     }
@@ -147,47 +147,63 @@ export function deriveHistory(input: DeriveInput): { rows: DerivedRow[]; flags: 
   return { rows, flags }
 }
 
-export type DiffReason = 'late-loaded' | 'date-shift' | 'split' | 'misprice'
-export interface SplitEvent { ticker: string; date: string }
-
-/**
- * Tickers whose transaction price was typed wrong (measured 2026-07-28, 7 rows): they
- * dirty cost and P&L from their transaction date on, never the stocks+cash value.
- */
-export const MISPRICED_TICKERS: readonly string[] = ['AMD', 'BABA', 'CAH', 'META', 'NIO', 'NU', 'MU']
+export type LedgerReason = 'late-loaded' | 'date-shift'
 
 /** The nightly snapshot job runs at 02:00 UTC (23:00 ART): what it saw was created before that. */
 const nextCutoff = (d: string) => `${new Date(Date.parse(`${d}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)}T02:00:00Z`
-const norm = (t: string) => String(t).trim().toUpperCase()
 
 /**
- * Why a measured snapshot for `date` may legitimately differ from the derived row.
- * null = unexplained. First match wins; the order is also the order of likelihood.
- *  - late-loaded: a row dated <= D that was only inserted after D's snapshot ran
- *  - date-shift:  a row dated > D inserted during D (evening entry in Argentina time)
- *    that D's snapshot already saw
- *  - split:       a held ticker split after D (the snapshot is at the raw, pre-split price)
- *  - misprice:    a held ticker from MISPRICED_TICKERS
+ * The ledger as the snapshot of `date` could have seen it (shadow compare):
+ *  - late-loaded: rows inserted after D's cutoff are dropped
+ *  - date-shift:  rows dated > D but inserted during D (evening entry in Argentina time)
+ *    were already visible to D's snapshot, so they are re-dated to D
+ * `reason` is null when nothing changed. It only labels the change: whether it explains
+ * a diff is decided by re-deriving over this ledger and comparing (derive-gate). Pure.
  */
-export function explainDiff(
+export function knownLedgerAt(
   date: string,
   txs: ReplayTransaction[],
-  movements: ReplayMovement[],
-  splits: SplitEvent[]
-): DiffReason | null {
+  movements: ReplayMovement[]
+): { transactions: ReplayTransaction[]; movements: ReplayMovement[]; reason: LedgerReason | null } {
   const cutoff = nextCutoff(date)
   const dayStart = `${date}T03:00:00Z`
-  const dated = [...txs, ...movements]
-  const created = (r: { created_at?: string | null }) => (r.created_at ? String(r.created_at) : null)
+  let dropped = false
+  let shifted = false
 
-  if (dated.some(r => day(r.date) <= date && (created(r) ?? '') > cutoff)) return 'late-loaded'
-  if (dated.some(r => {
-    const c = created(r)
-    return day(r.date) > date && c !== null && c >= dayStart && c <= cutoff
-  })) return 'date-shift'
+  const known = <T extends { date: string; created_at?: string | null }>(rows: T[]): T[] =>
+    rows.flatMap(r => {
+      const c = r.created_at ? String(r.created_at) : null
+      if (c && c > cutoff) {
+        if (day(r.date) <= date) dropped = true
+        return []
+      }
+      if (c && c >= dayStart && day(r.date) > date) {
+        shifted = true
+        return [{ ...r, date }]
+      }
+      return [r]
+    })
 
-  const held = new Set(txs.filter(t => day(t.date) <= date).map(t => norm(t.ticker)))
-  if (splits.some(s => s.date > date && held.has(norm(s.ticker)))) return 'split'
-  if (MISPRICED_TICKERS.some(t => held.has(t))) return 'misprice'
-  return null
+  const transactions = known(txs)
+  const kept = known(movements)
+  return { transactions, movements: kept, reason: dropped ? 'late-loaded' : shifted ? 'date-shift' : null }
+}
+
+/** The derived row of a date over only what that date's snapshot could have known. */
+export interface KnownAt { row: DerivedRow; reason: LedgerReason }
+
+/**
+ * Builds the gate's `knownAt(date)` from the input of a derivation. null = the ledger was fully
+ * known by then (nothing late), or the date cannot be derived without the late rows.
+ */
+export function knownAtFrom(input: DeriveInput): (date: string) => KnownAt | null {
+  return date => {
+    const k = knownLedgerAt(date, input.transactions, input.movements)
+    if (!k.reason) return null
+    // today = D+1 keeps deriveHistory to the days up to D (it emits days < today, plus a today row we ignore)
+    const next = new Date(Date.parse(`${date}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
+    const { rows } = deriveHistory({ ...input, transactions: k.transactions, movements: k.movements, today: next })
+    const row = rows.find(r => r.snapshot_date === date)
+    return row ? { row, reason: k.reason } : null
+  }
 }
