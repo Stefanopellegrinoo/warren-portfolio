@@ -43,6 +43,8 @@ export interface BarsResult {
 export interface BarsDeps {
   fetchChart?: (symbol: string, from: Date, to: Date) => Promise<DailyChart>
   today?: string
+  /** Skip Redis entirely (read-only scripts must not share or pollute the production cache). */
+  memoryOnly?: boolean
 }
 
 // ponytail: never evicted (one entry per distinct symbol, ~1500 bars each) and no singleflight, so
@@ -52,9 +54,9 @@ export const _resetBarsMemory = () => memory.clear()
 
 const keyOf = (symbol: string) => `bars:v1:${symbol}`
 
-async function readEntry(symbol: string): Promise<Entry | null> {
+async function readEntry(symbol: string, memoryOnly?: boolean): Promise<Entry | null> {
   try {
-    if (await ensureRedisConnected()) {
+    if (!memoryOnly && await ensureRedisConnected()) {
       const raw = await getRedis()?.get(keyOf(symbol))
       if (raw) return JSON.parse(raw) as Entry
       return null
@@ -65,9 +67,9 @@ async function readEntry(symbol: string): Promise<Entry | null> {
   return memory.get(symbol) ?? null
 }
 
-async function writeEntry(symbol: string, entry: Entry): Promise<void> {
+async function writeEntry(symbol: string, entry: Entry, memoryOnly?: boolean): Promise<void> {
   try {
-    if (await ensureRedisConnected()) {
+    if (!memoryOnly && await ensureRedisConnected()) {
       await getRedis()?.setex(keyOf(symbol), entry.missingUntil ? MISSING_TTL : BARS_TTL, JSON.stringify(entry))
       return
     }
@@ -88,7 +90,7 @@ const toResult = (e: Entry, degraded: boolean): BarsResult => ({
 async function getOne(symbol: string, from: Date, deps: BarsDeps): Promise<BarsResult> {
   const today = deps.today ?? argentinaDate()
   const fromDay = from.toISOString().slice(0, 10)
-  let stored = await readEntry(symbol)
+  let stored = await readEntry(symbol, deps.memoryOnly)
   if (stored?.missingUntil) {
     if (stored.missingUntil > Date.now()) return { bars: [], splits: [], splitsKnown: false, degraded: true, missing: true }
     stored = null
@@ -105,12 +107,12 @@ async function getOne(symbol: string, from: Date, deps: BarsDeps): Promise<BarsR
       splits: chart.splits.map(s => [s.date, s.numerator, s.denominator]),
       splitsKnown: chart.splitsKnown,
     }
-    await writeEntry(symbol, entry)
+    await writeEntry(symbol, entry, deps.memoryOnly)
     return toResult(entry, false)
   } catch (err) {
     console.warn(`[Bars] Yahoo failed for ${symbol}:`, err instanceof Error ? err.message : err)
     if (stored) return toResult(stored, true)
-    await writeEntry(symbol, { fetchedOn: today, from: fromDay, bars: [], splits: [], splitsKnown: false, missingUntil: Date.now() + MISSING_TTL * 1000 })
+    await writeEntry(symbol, { fetchedOn: today, from: fromDay, bars: [], splits: [], splitsKnown: false, missingUntil: Date.now() + MISSING_TTL * 1000 }, deps.memoryOnly)
     return { bars: [], splits: [], splitsKnown: false, degraded: true, missing: true }
   }
 }

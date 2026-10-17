@@ -30,6 +30,18 @@ beforeEach(() => {
 })
 
 describe('getBars', () => {
+  it('memoryOnly never reads or writes Redis (read-only scripts must not touch the shared cache)', async () => {
+    store.set('bars:v1:AAA', JSON.stringify({ fetchedOn: TODAY, from: '2026-01-02', bars: [['2026-05-14', 99]], splits: [], splitsKnown: true }))
+    const fetchChart = vi.fn(async () => chart(5))
+    const res = await getBars(['AAA'], FROM, { fetchChart, today: TODAY, memoryOnly: true })
+    expect(fetchChart).toHaveBeenCalledTimes(1)
+    expect(res.get('AAA')!.bars).toEqual([{ date: '2026-05-14', close: 5 }])
+    expect(redisMock.get).not.toHaveBeenCalled()
+    expect(redisMock.setex).not.toHaveBeenCalled()
+    await getBars(['AAA'], FROM, { fetchChart, today: TODAY, memoryOnly: true })
+    expect(fetchChart).toHaveBeenCalledTimes(1) // fresh in the module Map
+  })
+
   it('fetches once, stores under bars:v1:{symbol} with a 7 day TTL, and reuses it the same day', async () => {
     const fetchChart = vi.fn(async () => chart())
     const first = await getBars(['AAA'], FROM, { fetchChart, today: TODAY })
