@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { formatUSD, formatPct, cn } from '@/lib/utils'
+import PriceAge from './PriceAge'
+import { formatUSD, formatPct, cn, countStalePrices } from '@/lib/utils'
 import type { Position } from '@/types'
 import { TrendingUp, TrendingDown, Minus, ChevronUp, ChevronDown, DollarSign } from 'lucide-react'
 
@@ -44,6 +45,7 @@ export default function PositionsTable({ positions, loading, summary, onSell }: 
   )
 
   const totalPortfolio = positions.reduce((s, p) => s + (p.market_value ?? 0), 0)
+  const staleCount = countStalePrices(positions)
 
   function getPctCartera(pos: Position) {
     return totalPortfolio > 0 && pos.market_value ? pos.market_value / totalPortfolio : 0
@@ -116,7 +118,7 @@ export default function PositionsTable({ positions, loading, summary, onSell }: 
         <div className="flex items-center gap-3">
           <div>
             <h3 className="font-display font-700 text-white">Posiciones Abiertas</h3>
-            <p className="text-[11px] text-slate-500 font-mono mt-0.5">{positions.length} activos</p>
+            <p className="text-[11px] text-slate-500 font-mono mt-0.5">{positions.length} activos{staleCount > 0 && <span className="text-amber"> · {staleCount} desactualizados</span>}</p>
           </div>
         </div>
         {summary && (
@@ -204,7 +206,7 @@ export default function PositionsTable({ positions, loading, summary, onSell }: 
 
                   {/* Precio */}
                   <td className="px-3 py-3 font-mono text-xs text-white">
-                    {pos.current_price ? formatUSD(pos.current_price) : <span className="text-slate-600">—</span>}
+                    {pos.current_price ? <>{formatUSD(pos.current_price)}<PriceAge asOf={pos.price_as_of} /></> : <span className="text-slate-600">—</span>}
                   </td>
 
                   {/* Posición */}

@@ -192,6 +192,7 @@ export function calculatePortfolioSummary(
     return {
       ...pos,
       current_price: price,
+      price_as_of: quote?.updatedAt,
       market_value,
       pnl,
       pnl_pct,
@@ -214,6 +215,7 @@ export function calculatePortfolioSummary(
     return {
       ...pos,
       current_price: price,
+      price_as_of: quote?.updatedAt,
       market_value,
       pnl,
       pnl_pct,

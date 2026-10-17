@@ -44,8 +44,8 @@ export function pnlBg(value: number): string {
   return 'bg-slate-500/10 text-slate-400 border-slate-500/20'
 }
 
-export function isMarketOpen(): boolean {
-  const d = new Date()
+export function isMarketOpen(now: Date = new Date()): boolean {
+  const d = now
 
   // Create a new date object for Argentina time (UTC-3)
   const utc = d.getTime() + (d.getTimezoneOffset() * 60000)
@@ -65,6 +65,31 @@ export function isMarketOpen(): boolean {
   }
 
   return false
+}
+
+/** 6 missed 5-minute refresh cycles while the market is open. */
+export const PRICE_STALE_OPEN_MS = 30 * 60_000
+/** Covers a weekend plus a Monday holiday; Quote.updatedAt is FETCH time, so closed markets keep refreshing. */
+export const PRICE_STALE_CLOSED_MS = 96 * 3_600_000
+
+/**
+ * True when a price's as-of instant is missing/unparseable or older than the
+ * threshold for the current market state. Future as-of values count as fresh.
+ * ponytail: no holiday calendar; a 4-day AR holiday flags on the evening of day 4.
+ */
+export function isPriceStale(asOf: string | undefined, now: Date = new Date()): boolean {
+  const t = asOf ? Date.parse(asOf) : NaN
+  if (Number.isNaN(t)) return true
+  const limit = isMarketOpen(now) ? PRICE_STALE_OPEN_MS : PRICE_STALE_CLOSED_MS
+  return now.getTime() - t > limit
+}
+
+/** Priced positions (current_price set) whose price is stale. Unpriced ones are counted elsewhere. */
+export function countStalePrices(
+  items: { current_price?: number; price_as_of?: string }[],
+  now: Date = new Date(),
+): number {
+  return items.filter(i => i.current_price && isPriceStale(i.price_as_of, now)).length
 }
 
 /** IANA zone for the market and the user this app serves. */

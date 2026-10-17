@@ -66,6 +66,7 @@ export interface Position {
   version: number  // Optimistic locking
   // enriched client-side
   current_price?: number
+  price_as_of?: string  // quote fetch time (ISO)
   market_value?: number
   pnl?: number
   pnl_pct?: number
@@ -211,6 +212,7 @@ export interface ONPosition {
   version: number  // Optimistic locking
   // enriched fields (calculated at runtime)
   current_price?: number
+  price_as_of?: string  // quote fetch time (ISO)
   market_value?: number
   pnl?: number
   pnl_pct?: number

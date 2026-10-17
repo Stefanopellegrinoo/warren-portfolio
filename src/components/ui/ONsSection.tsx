@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { formatUSD, formatPct, cn } from '@/lib/utils'
+import PriceAge from './PriceAge'
+import { formatUSD, formatPct, cn, countStalePrices } from '@/lib/utils'
 import type { ONPosition } from '@/types'
 import { TrendingUp, TrendingDown, Minus, ChevronUp, ChevronDown, Landmark, DollarSign } from 'lucide-react'
 
@@ -50,6 +51,7 @@ export default function ONsSection({ positions, loading, summary, onSell }: Prop
   }
 
   const totalPortfolio = positions.reduce((s, p) => s + (p.market_value ?? 0), 0)
+  const staleCount = countStalePrices(positions)
 
   function getPctCartera(pos: ONPosition) {
     return totalPortfolio > 0 && pos.market_value ? pos.market_value / totalPortfolio : 0
@@ -99,7 +101,7 @@ export default function ONsSection({ positions, loading, summary, onSell }: Prop
           </div>
           <div>
             <h3 className="font-display font-700 text-white">Obligaciones Negociables</h3>
-            <p className="text-[11px] text-slate-500 font-mono mt-0.5">{positions.length} posición{positions.length !== 1 ? 'es' : ''}</p>
+            <p className="text-[11px] text-slate-500 font-mono mt-0.5">{positions.length} posición{positions.length !== 1 ? 'es' : ''}{staleCount > 0 && <span className="text-amber"> · {staleCount} desactualizados</span>}</p>
           </div>
         </div>
         {positions.length > 0 && summary && (
@@ -185,7 +187,7 @@ export default function ONsSection({ positions, loading, summary, onSell }: Prop
 
                   {/* Precio */}
                   <td className="px-3 py-3 font-mono text-xs text-white">
-                    {pos.current_price ? formatUSD(pos.current_price) : <span className="text-slate-600">—</span>}
+                    {pos.current_price ? <>{formatUSD(pos.current_price)}<PriceAge asOf={pos.price_as_of} /></> : <span className="text-slate-600">—</span>}
                   </td>
 
                   {/* Nominales */}
