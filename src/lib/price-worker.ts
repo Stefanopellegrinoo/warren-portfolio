@@ -23,7 +23,8 @@ import { snapshotAllUsers, splitQuotesByAssetClass } from './portfolio-snapshots
 import { isMarketOpen, argentinaDate } from './utils'
 import { startImportWorker } from './import-worker'
 import { startSignalsWorker } from './signals-worker'
-import { checkNotificationConfig, sendTelegram } from './notifications'
+import { checkNotificationConfig, escapeHtml, sendTelegram } from './notifications'
+import { alertJobFailure, beat, recordRefresh } from './job-health'
 import { ensureRedisAndScheduleJobs, resolveStartupOutcome } from './worker-startup'
 import { auditTickerIdentities } from './ticker-audit'
 
@@ -201,9 +202,7 @@ export async function runSnapshotJob(): Promise<void> {
     // sendTelegram uses parse_mode HTML: an unescaped '<' (e.g. an HTML error page
     // in a JSON parse error) makes Telegram reject the alert. It reports that as
     // {ok:false}, not a throw, so check the result too.
-    const reason = (err instanceof Error ? err.message : String(err))
-      .slice(0, 500)
-      .replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]!)
+    const reason = escapeHtml((err instanceof Error ? err.message : String(err)).slice(0, 500))
     await sendTelegram(`on_price_history capture failed for ${date}: ${reason}`)
       .then(r => { if (!r?.ok) console.error('[Worker] Telegram alert not delivered:', r?.error) })
       .catch(e => console.error('[Worker] Telegram alert failed:', e))
@@ -350,10 +349,7 @@ const worker = new Worker(
     )
 
     // 6. UPDATE GLOBAL TIMESTAMP
-    const redis = getRedis()
-    if (redis) {
-      await redis.set('system:last-refresh', new Date().toISOString())
-    }
+    await recordRefresh()
 
     // 7. CACHE USER SUMMARIES
     // Split allPrices back into stock and ON maps for the summary calculator
@@ -369,10 +365,12 @@ const worker = new Worker(
 
 worker.on('completed', (job) => {
   console.log(`[Worker] Job ${job.name} (${job.id}) completed`)
+  void beat()
 })
 
 worker.on('failed', (job, err) => {
   console.error(`[Worker] Job ${job?.name} (${job?.id}) failed: ${err.message}`)
+  void alertJobFailure('price', job?.name ?? 'unknown', err)
 })
 
 // ── Start ───────────────────────────────────────────────
@@ -442,8 +440,7 @@ async function main() {
       console.warn(`[Worker] No price (fresh or LKP) available for: ${missing.join(', ')}`)
     }
 
-    const redis = getRedis()
-    if (redis) await redis.set('system:last-refresh', new Date().toISOString())
+    await recordRefresh()
 
     // Split combined prices for cacheUserSummaries (mirrors recurring job pattern)
     const { stockQuotes, onQuotes } = splitQuotesByAssetClass(allPrices, onTickers)

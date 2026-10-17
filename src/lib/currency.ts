@@ -3,8 +3,9 @@ import { fetchDailyBars } from './historical-prices'
 import { getRedis, isRedisReady } from './redis'
 
 const REDIS_KEY_CCL = 'currency:ccl'
-const REDIS_KEY_CCL_LKP = 'currency:ccl:lkp'  // persists indefinitely, updated on each fresh fetch
+const REDIS_KEY_CCL_LKP = 'currency:ccl:lkp'  // last-known rate, refreshed on each fresh fetch
 const CACHE_TTL = 3600 // 1 hour
+const LKP_TTL = 30 * 24 * 3600 // 30 days: Redis is noeviction, every key must expire
 
 /**
  * Fetches the implicit Dolar CCL (Contado con Liquidacion) rate
@@ -34,8 +35,8 @@ export async function getCCLRate(): Promise<number> {
         const redis = getRedis()
         // Short-lived cache (refreshed hourly)
         await redis?.setex(REDIS_KEY_CCL, CACHE_TTL, ccl.toString())
-        // LKP — no expiry, always reflects the last successfully fetched rate
-        await redis?.set(REDIS_KEY_CCL_LKP, ccl.toString())
+        // LKP — long-lived, always reflects the last successfully fetched rate
+        await redis?.setex(REDIS_KEY_CCL_LKP, LKP_TTL, ccl.toString())
       }
       return ccl
     }

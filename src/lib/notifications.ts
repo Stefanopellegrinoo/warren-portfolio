@@ -7,6 +7,11 @@
 
 import { Resend } from 'resend'
 
+/** Escape for Telegram parse_mode HTML: an unescaped '<' makes Telegram reject the message. */
+export function escapeHtml(text: string): string {
+  return text.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]!)
+}
+
 export type SendResult = { ok: true } | { ok: false; error: string }
 
 export interface NotificationConfigStatus {

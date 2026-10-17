@@ -25,7 +25,9 @@ vi.mock('../portfolio-snapshots', () => ({
 vi.mock('../utils', () => ({ isMarketOpen: () => false, argentinaDate: () => '2026-10-16' }))
 vi.mock('../import-worker', () => ({ startImportWorker: vi.fn() }))
 vi.mock('../signals-worker', () => ({ startSignalsWorker: vi.fn() }))
-vi.mock('../notifications', () => ({
+vi.mock('../job-health', () => ({ beat: vi.fn(), alertJobFailure: vi.fn(), recordRefresh: vi.fn() }))
+vi.mock('../notifications', async () => ({
+  ...(await vi.importActual<typeof import('../notifications')>('../notifications')),
   checkNotificationConfig: vi.fn(), sendTelegram: (...a: unknown[]) => mockTelegram(...a),
 }))
 vi.mock('../worker-startup', () => ({

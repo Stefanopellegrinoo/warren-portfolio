@@ -17,6 +17,7 @@ import {
 } from './indicators'
 import type { IndicatorSetup } from '../types'
 import { sendTelegram, sendEmail, type SendResult } from './notifications'
+import { alertJobFailure } from './job-health'
 
 type CloseReason = 'SIGNAL' | 'STOP_LOSS' | 'TAKE_PROFIT'
 
@@ -50,9 +51,10 @@ export function startSignalsWorker() {
     concurrency: 1,
   })
 
-  worker.on('failed', (job, err) =>
+  worker.on('failed', (job, err) => {
     console.error('[signals-worker] job failed', job?.id, err.message)
-  )
+    void alertJobFailure('signals', job?.name ?? 'unknown', err)
+  })
 
   console.log('[signals-worker] started')
   return worker

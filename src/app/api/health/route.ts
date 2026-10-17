@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { ensureRedisConnected } from '@/lib/redis'
+import { readBeat } from '@/lib/job-health'
 import { createServiceClient } from '@/lib/supabase-server'
 
 // Next 14 statically caches GET route handlers by default; opt out so the
@@ -16,6 +17,8 @@ interface HealthBody {
   status: 'ok' | 'degraded'
   redis: boolean
   supabase: boolean
+  /** Informational only: a stale worker must never fail the Docker healthcheck. */
+  worker: { lastBeat: string | null; stale: boolean }
 }
 
 let cached: { at: number; body: HealthBody; status: number } | null = null
@@ -30,13 +33,14 @@ export async function GET() {
     return NextResponse.json(cached.body, { status: cached.status })
   }
 
-  const [redisOk, supabaseOk] = await Promise.all([checkRedis(), checkSupabase()])
+  const [redisOk, supabaseOk, worker] = await Promise.all([checkRedis(), checkSupabase(), readBeat()])
 
   const isHealthy = redisOk && supabaseOk
   const body: HealthBody = {
     status: isHealthy ? 'ok' : 'degraded',
     redis: redisOk,
     supabase: supabaseOk,
+    worker,
   }
   const status = isHealthy ? 200 : 503
   cached = { at: Date.now(), body, status }

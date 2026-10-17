@@ -5,6 +5,7 @@ import { createServiceClient } from './supabase-server'
 import { processTransactionBatch } from './portfolio-engine'
 import { invalidateUserCache } from './redis'
 import { fetchQuotesWithFallback } from './yahoo-finance'
+import { alertJobFailure } from './job-health'
 
 export const importWorker = new Worker(
   IMPORT_QUEUE_NAME,
@@ -83,6 +84,8 @@ export const importWorker = new Worker(
 
     } catch (err) {
       console.error(`[ImportWorker] Job ${job.id} failed:`, err)
+      // This handler returns instead of throwing, so BullMQ never emits 'failed'
+      void alertJobFailure('import', job.name, err)
       
       // Return structured error
       return {

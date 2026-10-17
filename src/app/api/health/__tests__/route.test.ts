@@ -6,6 +6,11 @@ vi.mock('@/lib/redis', () => ({
   ensureRedisConnected: mockEnsureRedisConnected,
 }))
 
+// ── Heartbeat mock ────────────────────────────────────────────────────────────
+const mockReadBeat = vi.fn()
+vi.mock('@/lib/job-health', () => ({ readBeat: mockReadBeat }))
+const FRESH = { lastBeat: '2026-01-01T00:00:00.000Z', stale: false }
+
 // ── Supabase service client mock ──────────────────────────────────────────────
 const mockCreateServiceClient = vi.fn()
 vi.mock('@/lib/supabase-server', () => ({
@@ -24,6 +29,7 @@ describe('GET /api/health', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.resetModules()
+    mockReadBeat.mockResolvedValue(FRESH)
   })
 
   it('returns 200 with status ok when Redis and Supabase are both healthy', async () => {
@@ -35,7 +41,7 @@ describe('GET /api/health', () => {
 
     expect(res.status).toBe(200)
     const body = await res.json()
-    expect(body).toEqual({ status: 'ok', redis: true, supabase: true })
+    expect(body).toEqual({ status: 'ok', redis: true, supabase: true, worker: FRESH })
   })
 
   it('returns 503 with redis false when Redis is down', async () => {
@@ -47,7 +53,7 @@ describe('GET /api/health', () => {
 
     expect(res.status).toBe(503)
     const body = await res.json()
-    expect(body).toEqual({ status: 'degraded', redis: false, supabase: true })
+    expect(body).toEqual({ status: 'degraded', redis: false, supabase: true, worker: FRESH })
   })
 
   it('returns 503 with supabase false when the Supabase query errors', async () => {
@@ -59,7 +65,7 @@ describe('GET /api/health', () => {
 
     expect(res.status).toBe(503)
     const body = await res.json()
-    expect(body).toEqual({ status: 'degraded', redis: true, supabase: false })
+    expect(body).toEqual({ status: 'degraded', redis: true, supabase: false, worker: FRESH })
   })
 
   it('returns 503 gracefully when the Supabase client throws', async () => {
@@ -73,7 +79,7 @@ describe('GET /api/health', () => {
 
     expect(res.status).toBe(503)
     const body = await res.json()
-    expect(body).toEqual({ status: 'degraded', redis: true, supabase: false })
+    expect(body).toEqual({ status: 'degraded', redis: true, supabase: false, worker: FRESH })
   })
 
   it('returns 503 with both probes false when Redis is down AND Supabase fails', async () => {
@@ -85,7 +91,7 @@ describe('GET /api/health', () => {
 
     expect(res.status).toBe(503)
     const body = await res.json()
-    expect(body).toEqual({ status: 'degraded', redis: false, supabase: false })
+    expect(body).toEqual({ status: 'degraded', redis: false, supabase: false, worker: FRESH })
   })
 
   it('returns 503 with redis false when the Redis probe rejects (never a 500)', async () => {
@@ -97,7 +103,7 @@ describe('GET /api/health', () => {
 
     expect(res.status).toBe(503)
     const body = await res.json()
-    expect(body).toEqual({ status: 'degraded', redis: false, supabase: true })
+    expect(body).toEqual({ status: 'degraded', redis: false, supabase: true, worker: FRESH })
   })
 
   it('serves the cached result within the TTL instead of re-probing', async () => {
@@ -119,7 +125,33 @@ describe('GET /api/health', () => {
     // Assert — cached result, single probe round
     expect(second.status).toBe(200)
     const body = await second.json()
-    expect(body).toEqual({ status: 'ok', redis: true, supabase: true })
+    expect(body).toEqual({ status: 'ok', redis: true, supabase: true, worker: FRESH })
     expect(mockEnsureRedisConnected).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports a stale worker in the body without changing the status code', async () => {
+    mockEnsureRedisConnected.mockResolvedValue(true)
+    setupSupabaseQuery({ data: [{ ticker: 'YMCID' }], error: null })
+    mockReadBeat.mockResolvedValue({ lastBeat: null, stale: true })
+
+    const { GET } = await import('../route')
+    const res = await GET()
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      status: 'ok', redis: true, supabase: true, worker: { lastBeat: null, stale: true },
+    })
+  })
+
+  it('answers 503 for Redis down with the heartbeat stale too', async () => {
+    mockEnsureRedisConnected.mockResolvedValue(false)
+    setupSupabaseQuery({ data: [], error: null })
+    mockReadBeat.mockResolvedValue({ lastBeat: null, stale: true })
+
+    const { GET } = await import('../route')
+    const res = await GET()
+
+    expect(res.status).toBe(503)
+    expect((await res.json()).worker).toEqual({ lastBeat: null, stale: true })
   })
 })
