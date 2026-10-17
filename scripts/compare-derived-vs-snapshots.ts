@@ -3,7 +3,7 @@
  *
  * Computes the derived series from scratch (no derived:v1 read or write), reads the
  * snapshots, and evaluates the cutover gate (REQ-15, G1-G4). Exit codes:
- *   0 gate passes | 1 gate fails | 2 bad usage | 3 derivation degraded (re-run when sources are healthy)
+ *   0 gate passes | 1 gate fails | 2 bad usage | 3 derivation degraded (re-run when sources are healthy) | 4 unexpected error
  *
  * Writes nothing to the database, and the Yahoo bars go through a MEMORY-ONLY cache: the shared
  * Redis `bars:v1:*` keys are neither read nor written. Quotes are read from the existing LKP cache
@@ -22,6 +22,7 @@ export const EXIT_PASS = 0
 export const EXIT_GATE_FAILED = 1
 export const EXIT_USAGE = 2
 export const EXIT_DEGRADED = 3
+export const EXIT_ERROR = 4
 
 export function parseArgs(argv: string[]): { userId: string } | { error: string } {
   const i = argv.indexOf('--user')

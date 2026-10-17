@@ -11,7 +11,7 @@ vi.mock('../../src/lib/yahoo-finance', async importOriginal => ({
 }))
 
 import {
-  parseArgs, runCompare, buildCompareDeps, EXIT_DEGRADED, EXIT_GATE_FAILED, EXIT_PASS, type CompareDeps,
+  parseArgs, runCompare, buildCompareDeps, EXIT_DEGRADED, EXIT_ERROR, EXIT_GATE_FAILED, EXIT_PASS, EXIT_USAGE, type CompareDeps,
 } from '../compare-derived-vs-snapshots'
 import { getDerivedSeries } from '../../src/lib/derived-series'
 import { fetchSnapshotSeries } from '../../src/lib/snapshot-series'
@@ -124,14 +124,23 @@ function readOnlySupabase() {
     client: {
       from(table: string) {
         let offset = 0
+        let cols: string[] | null = null // like PostgREST: only the selected columns come back
         const b: any = {
-          select: (cols?: string) => { ops.push(`${table}.select(${cols ?? ''})`); return b },
+          select: (c?: string) => {
+            ops.push(`${table}.select(${c ?? ''})`)
+            cols = c && c.trim() !== '*' ? c.split(',').map(x => x.trim()) : null
+            return b
+          },
           eq: (c: string, v: unknown) => { ops.push(`${table}.eq(${c},${v})`); return b },
           in: () => b, gte: () => b, lte: () => b, order: () => b,
           range: (o: number) => { offset = o; return b },
           insert: forbidden(`${table}.insert`), update: forbidden(`${table}.update`),
           upsert: forbidden(`${table}.upsert`), delete: forbidden(`${table}.delete`),
-          then: (res: any, rej: any) => Promise.resolve({ data: (DB[table] ?? []).slice(offset, offset + 1000), error: null }).then(res, rej),
+          then: (res: any, rej: any) => {
+            const rows = (DB[table] ?? []).slice(offset, offset + 1000)
+            const data = cols ? rows.map(r => Object.fromEntries(cols!.filter(c => c in r).map(c => [c, r[c]]))) : rows
+            return Promise.resolve({ data, error: null }).then(res, rej)
+          },
         }
         return b
       },
@@ -139,6 +148,13 @@ function readOnlySupabase() {
     } as any,
   }
 }
+
+describe('exit codes', () => {
+  it('S4: an exception exits with a code distinct from a gate failure and from degraded', () => {
+    expect(EXIT_ERROR).toBe(4)
+    expect(new Set([EXIT_PASS, EXIT_GATE_FAILED, EXIT_USAGE, EXIT_DEGRADED, EXIT_ERROR]).size).toBe(5)
+  })
+})
 
 describe('buildCompareDeps (the real wiring)', () => {
   it('only reads, scopes by user, and sends bars through the memory-only cache', async () => {
@@ -174,6 +190,11 @@ describe('buildCompareDeps (the real wiring)', () => {
     expect(ops).toContain('cash_movements.eq(user_id,u1)')
     expect(ops).toContain('portfolio_snapshots.eq(user_id,u1)')
     expect(ops).toContain('on_price_history.select(price_date)')
+
+    // C1: the ledger replay needs created_at on BOTH tables, or knownAt can never drop/re-date a cash leg
+    const selected = (t: string) => ops.filter(o => o.startsWith(`${t}.select(`)).join(' ')
+    expect(selected('transactions')).toContain('created_at')
+    expect(selected('cash_movements')).toContain('created_at')
   })
 
   it('the fake really blows up on writes (so a passing run proves there were none)', () => {

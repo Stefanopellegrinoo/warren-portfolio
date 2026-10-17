@@ -117,7 +117,7 @@ export async function getDerivedSeries(
     ['id']
   )
   const movements = await readAll<ReplayMovement>(
-    () => supabase.from('cash_movements').select('type, amount, date').eq('user_id', userId),
+    () => supabase.from('cash_movements').select('type, amount, date, created_at').eq('user_id', userId),
     ['id']
   )
 

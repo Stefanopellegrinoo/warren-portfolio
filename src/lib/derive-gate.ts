@@ -82,6 +82,7 @@ export function evaluateGate(input: GateInput): GateResult {
   const missingInDerived: string[] = []
   const skippedNoBreakdown: string[] = []
   const corruptDates: string[] = []
+  const corruptCount = input.snapshots.filter(s => String(s.snapshot_date).slice(0, 10) < today && isCorruptSnapshot(s)).length
 
   for (const s of input.snapshots) {
     const date = String(s.snapshot_date).slice(0, 10)
@@ -97,12 +98,21 @@ export function evaluateGate(input: GateInput): GateResult {
     if (corrupt) corruptDates.push(date)
 
     const delta = (c: Component) => valueOf[c](d) - valueOf[c](s)
-    const known = input.knownAt?.(date) ?? null
+    // Re-deriving is O(history): only when a component is actually off, and at most once per date.
+    let known: KnownAt | null | undefined
+    const knownOnce = () => (known === undefined ? (known = input.knownAt?.(date) ?? null) : known)
+    // A corrupt row has zeroed components but a set total. Its components are excused only if the
+    // derived total still lands on that total (|dTotal| <= $1). If it does not, the total diff is
+    // reported as 'corrupt-snapshot' (visible, never silent) for the single allowed corrupt date, and
+    // the components stay unexplained so the gate fails.
+    const totalAgrees = !bad(delta('total'))
     // An explanation excuses a component only if it reproduces THAT component of the snapshot.
     const reasonFor = (c: Component): DiffLine['reasons'][Component] => {
       if (!bad(delta(c))) return null
-      if (corrupt && c !== 'total') return 'corrupt-snapshot'
-      if (known && !bad(valueOf[c](known.row) - valueOf[c](s))) return known.reason
+      if (corrupt && c !== 'total' && totalAgrees) return 'corrupt-snapshot'
+      if (corrupt && c === 'total' && corruptCount <= MAX_CORRUPT_DATES) return 'corrupt-snapshot'
+      const k = knownOnce()
+      if (k && !bad(valueOf[c](k.row) - valueOf[c](s))) return k.reason
       return 'unexplained'
     }
     diffs.push({
@@ -117,6 +127,7 @@ export function evaluateGate(input: GateInput): GateResult {
   const live = diffs.filter(l => l.source === 'live')
   const g1Bad = unexplained('stocksCash', diffs)
   const g2Bad = unexplained('total', live)
+  const excusedTotals = live.filter(l => l.reasons.total === 'corrupt-snapshot')
 
   const g1Problems = [
     g1Bad.length ? `unexplained stocks+cash diffs: ${listed(g1Bad)}` : '',
@@ -145,7 +156,7 @@ export function evaluateGate(input: GateInput): GateResult {
     G1: { pass: g1Problems.length === 0, detail: `${diffs.length} dates compared${g1Problems.length ? `; ${g1Problems.join('; ')}` : ''}` },
     G2: {
       pass: g2Bad.length === 0 && live.length > 0,
-      detail: `${live.length} live dates compared${g2Bad.length ? `; unexplained live total diffs: ${listed(g2Bad)}` : live.length ? '' : '; nothing compared'}`,
+      detail: `${live.length} live dates compared${excusedTotals.length ? `; corrupt-snapshot totals off by more than $${GATE_TOLERANCE}: ${listed(excusedTotals)}` : ''}${g2Bad.length ? `; unexplained live total diffs: ${listed(g2Bad)}` : live.length ? '' : '; nothing compared'}`,
     },
     G3: g3,
     G4: g4,

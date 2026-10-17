@@ -91,6 +91,8 @@ export function deriveHistory(input: DeriveInput): { rows: DerivedRow[]; flags: 
 
     const noBars = new Set<string>()
     const vanished = new Set<string>()
+    // ons_value / ons_invested of the most recent aggregate mark that was actually usable.
+    let lastMarkRatio: number | null = null
 
     for (const date of dates) {
       const [d] = buildBackfillRows({
@@ -110,11 +112,19 @@ export function deriveHistory(input: DeriveInput): { rows: DerivedRow[]; flags: 
       let row: SnapshotRow = d.row
       let onsAtCost = unpricedOns.length > 0
       const mark = onMarks.get(date)
-      if (heldOns.length > 0 && unpricedOns.length === heldOns.length && mark &&
-          Math.abs(row.ons_invested - mark.ons_invested) <= TOLERANCE) {
-        row = withOnMark(row, mark)
-        onsAtCost = false
-        flags.onAggregateMarkDates.push(date)
+      if (heldOns.length > 0 && unpricedOns.length === heldOns.length && mark) {
+        if (Math.abs(row.ons_invested - mark.ons_invested) <= TOLERANCE) {
+          row = withOnMark(row, mark)
+          onsAtCost = false
+          flags.onAggregateMarkDates.push(date)
+          if (mark.ons_invested > 0) lastMarkRatio = mark.ons_value / mark.ons_invested
+        } else if (lastMarkRatio != null && row.ons_invested > 0) {
+          // A mark that does not match the replayed cost basis (e.g. a corrupt snapshot with zeroed
+          // components) is never used as a value. Instead of dropping the ONs to cost, which would show a
+          // fake dip, carry the previous usable mark's market/cost ratio over this date's replayed cost.
+          // It is an estimate, not a measurement: the row stays 'estimated' and is not a mark date.
+          row = withOnMark(row, { ons_value: row.ons_invested * lastMarkRatio, ons_invested: row.ons_invested })
+        }
       }
       rows.push({ ...row, source: onsAtCost ? 'estimated' : 'live' })
     }
@@ -155,8 +165,8 @@ const nextCutoff = (d: string) => `${new Date(Date.parse(`${d}T00:00:00Z`) + 86_
 /**
  * The ledger as the snapshot of `date` could have seen it (shadow compare):
  *  - late-loaded: rows inserted after D's cutoff are dropped
- *  - date-shift:  rows dated > D but inserted during D (evening entry in Argentina time)
- *    were already visible to D's snapshot, so they are re-dated to D
+ *  - date-shift:  rows dated > D but inserted by D's cutoff (evening entry in Argentina time, or
+ *    entered ahead of time) were already visible to D's snapshot, so they are re-dated to D
  * `reason` is null when nothing changed. It only labels the change: whether it explains
  * a diff is decided by re-deriving over this ledger and comparing (derive-gate). Pure.
  */
@@ -165,19 +175,22 @@ export function knownLedgerAt(
   txs: ReplayTransaction[],
   movements: ReplayMovement[]
 ): { transactions: ReplayTransaction[]; movements: ReplayMovement[]; reason: LedgerReason | null } {
-  const cutoff = nextCutoff(date)
-  const dayStart = `${date}T03:00:00Z`
+  const cutoff = Date.parse(nextCutoff(date))
   let dropped = false
   let shifted = false
 
+  // created_at is compared as an instant (PostgREST may send offsets or fractional seconds).
+  // Anything dated after D that the snapshot could already see (created <= cutoff) was counted at D
+  // by the positions tables, so it is re-dated to D whenever it was entered.
   const known = <T extends { date: string; created_at?: string | null }>(rows: T[]): T[] =>
     rows.flatMap(r => {
-      const c = r.created_at ? String(r.created_at) : null
-      if (c && c > cutoff) {
+      const created = r.created_at ? Date.parse(String(r.created_at)) : NaN
+      if (Number.isNaN(created)) return [r]
+      if (created > cutoff) {
         if (day(r.date) <= date) dropped = true
         return []
       }
-      if (c && c >= dayStart && day(r.date) > date) {
+      if (day(r.date) > date) {
         shifted = true
         return [{ ...r, date }]
       }
@@ -202,7 +215,10 @@ export function knownAtFrom(input: DeriveInput): (date: string) => KnownAt | nul
     if (!k.reason) return null
     // today = D+1 keeps deriveHistory to the days up to D (it emits days < today, plus a today row we ignore)
     const next = new Date(Date.parse(`${date}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
-    const { rows } = deriveHistory({ ...input, transactions: k.transactions, movements: k.movements, today: next })
+    // No aggregate marks: they come from the snapshots under comparison, so with them the known row would
+    // match the snapshot by construction (circular). ONs without a recorded close stay at cost, which can
+    // never excuse an ON/total diff that is really a market-vs-cost gap.
+    const { rows } = deriveHistory({ ...input, transactions: k.transactions, movements: k.movements, onMarks: new Map(), today: next })
     const row = rows.find(r => r.snapshot_date === date)
     return row ? { row, reason: k.reason } : null
   }

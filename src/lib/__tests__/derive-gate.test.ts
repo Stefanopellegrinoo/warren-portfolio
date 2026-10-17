@@ -74,6 +74,13 @@ describe('evaluateGate', () => {
       expect(r.checks.G1.pass).toBe(false)
     })
 
+    it('S3: knownAt is only called for dates where a component is off', () => {
+      const base = input()
+      const calls: string[] = []
+      evaluateGate({ ...base, derived: lateDiff(base), knownAt: d => { calls.push(d); return null } })
+      expect(calls).toEqual(['2026-03-10'])
+    })
+
     it('does NOT explain it when nothing was late (knownAt returns null)', () => {
       const base = input()
       const r = evaluateGate({ ...base, derived: lateDiff(base), knownAt: () => null })
@@ -131,16 +138,28 @@ describe('evaluateGate', () => {
       expect(isCorruptSnapshot(snap('2026-03-11'))).toBe(false)
     })
 
-    it('explains the zeroed components but never the total, and reports the date', () => {
+    it('explains the zeroed components when the derived total agrees with the set total, and reports the date', () => {
       const r = evaluateGate(withCorrupt(input(), corrupt))
       expect(r.checks.G1.pass).toBe(true)
       expect(r.checks.G2.pass).toBe(true)
       expect(r.corruptDates).toEqual(['2026-03-11'])
       expect(r.diffs.find(d => d.date === '2026-03-11')?.reasons).toMatchObject({ stocksCash: 'corrupt-snapshot', total: null, ons: 'corrupt-snapshot' })
+    })
 
+    it('W2: when the derived total is off by more than $1 the components are NOT excused, and the total is reported as corrupt-snapshot', () => {
       const base = input()
-      const wrongTotal = evaluateGate({ ...withCorrupt(base, corrupt), derived: replace(base.derived, '2026-03-11', { total_value: 1300 }) })
-      expect(wrongTotal.checks.G2.pass).toBe(false)
+      const r = evaluateGate({ ...withCorrupt(base, corrupt), derived: replace(base.derived, '2026-03-11', { total_value: 1300 }) })
+      expect(r.diffs.find(d => d.date === '2026-03-11')?.reasons).toMatchObject({ stocksCash: 'unexplained', total: 'corrupt-snapshot', ons: 'unexplained' })
+      expect(r.checks.G1.pass).toBe(false)
+      expect(r.checks.G2.detail).toContain('2026-03-11')
+    })
+
+    it('with more than one corrupt snapshot the corrupt totals are not excused either', () => {
+      const base = input()
+      const two = withCorrupt(base, corrupt, snap('2026-03-12', { stocks_value: 0, ons_value: 0, cash_value: 0 }))
+      const r = evaluateGate({ ...two, derived: replace(base.derived, '2026-03-11', { total_value: 1300 }) })
+      expect(r.diffs.find(d => d.date === '2026-03-11')?.reasons.total).toBe('unexplained')
+      expect(r.checks.G2.pass).toBe(false)
     })
 
     it('fails when more than one snapshot is corrupt', () => {
