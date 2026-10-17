@@ -10,6 +10,8 @@ const withPWA = require('next-pwa')({
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
+  // Lint runs in CI (npm run lint); the Docker build must not depend on it.
+  eslint: { ignoreDuringBuilds: true },
   experimental: { serverComponentsExternalPackages: ['yahoo-finance2'] },
   webpack: (config) => {
     config.resolve.fallback = {

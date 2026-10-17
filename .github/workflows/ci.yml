@@ -16,9 +16,9 @@ jobs:
       - run: npm ci
       - run: npm run type-check
       - run: npm run test
-      # NO `npm run lint` here: the script is `next lint` and the repo has no
-      # ESLint config, so it drops into the interactive setup prompt and hangs
-      # the runner until the job timeout. type-check + build are the real gates.
+      # Errors fail the job; baselined rules are warnings (see eslint.config.mjs).
+      # `next build` is not run here: next.config.js sets ignoreDuringBuilds.
+      - run: npm run lint
 
   image:
     needs: test
