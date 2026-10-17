@@ -22,7 +22,7 @@ import type { PortfolioSnapshot } from '../../src/types'
 
 const TODAY = '2026-03-20'
 const DATES = ['2026-03-09', '2026-03-10', '2026-03-11', '2026-03-12', '2026-03-13', '2026-03-16']
-const FLAGS = { negativeCash: null, costMarkedStocks: [], vanished: [], onAggregateMarkDates: [], onRecordedDates: DATES, todayUnpriced: [], failure: null }
+const FLAGS = { negativeCash: null, costMarkedStocks: [], vanished: [], onAggregateMarkDates: [], onRecordedDates: DATES, onExactCloseDates: DATES, todayUnpriced: [], failure: null }
 
 const row = (date: string, over: Partial<DerivedRow> = {}): DerivedRow => ({
   user_id: 'u1', snapshot_date: date, total_value: 1000, total_invested: 900, pnl: 100, pnl_pct: 0.11,
@@ -100,7 +100,7 @@ describe('runCompare', () => {
     const { d, lines } = deps({
       derive: vi.fn(async () => ({
         rows: [...DATES.map(x => row(x)), row(TODAY, { total_value: 1010 })], degraded: false,
-        flags: { ...FLAGS, onRecordedDates: DATES.slice(2) }, knownAt: () => null,
+        flags: { ...FLAGS, onRecordedDates: DATES.slice(2), onExactCloseDates: DATES.slice(2) }, knownAt: () => null,
       })),
     })
     expect(await runCompare(d)).toBe(EXIT_GATE_FAILED) // 4 recorded dates < 5

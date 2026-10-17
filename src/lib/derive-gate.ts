@@ -31,6 +31,8 @@ export interface GateInput {
   liveTotal: number | null
   /** Dates whose derived ONs all came from recorded on_price_history closes (flags.onRecordedDates): the only independent ON values. */
   onRecordedDates: string[]
+  /** Subset of onRecordedDates with a close dated exactly that day; only these count toward MIN_ON_DATES. */
+  onExactCloseDates: string[]
   /**
    * Re-derives D over the ledger as D's snapshot saw it (knownLedgerAt). null = nothing was late,
    * so there is nothing to explain with. Without it, no ledger explanation is ever accepted.
@@ -132,10 +134,12 @@ export function evaluateGate(input: GateInput): GateResult {
   // Only dates whose derived ONs came from recorded closes count: marks and cost are circular or trivial.
   const recorded = new Set(input.onRecordedDates)
   const onDates = live.filter(l => recorded.has(l.date))
+  const exact = new Set(input.onExactCloseDates)
+  const exactCount = onDates.filter(l => exact.has(l.date)).length
   const g4Bad = unexplained('ons', onDates)
-  const g4: GateCheck = onDates.length < MIN_ON_DATES
-    ? { pass: false, detail: `${onDates.length} live ON dates compared, need ${MIN_ON_DATES}` }
-    : { pass: g4Bad.length === 0, detail: g4Bad.length ? `unexplained ON diffs: ${listed(g4Bad)}` : `${onDates.length} live ON dates compared, all agree` }
+  const g4: GateCheck = exactCount < MIN_ON_DATES
+    ? { pass: false, detail: `${onDates.length} live ON dates compared, ${exactCount} with an exact close, need ${MIN_ON_DATES}` }
+    : { pass: g4Bad.length === 0, detail: g4Bad.length ? `unexplained ON diffs: ${listed(g4Bad)}` : `${onDates.length} live ON dates compared (${exactCount} with an exact close), all agree` }
 
   const checks = {
     G1: { pass: g1Problems.length === 0, detail: `${diffs.length} dates compared${g1Problems.length ? `; ${g1Problems.join('; ')}` : ''}` },

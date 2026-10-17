@@ -46,7 +46,7 @@ const money = (v: number) => (v >= 0 ? '+' : '') + v.toFixed(2)
 function printGate(log: CompareDeps['log'], r: GateResult) {
   log('')
   for (const [name, c] of Object.entries(r.checks)) log(`${c.pass ? 'PASS' : 'FAIL'}  ${name}  ${c.detail}`)
-  log(r.pass ? `GATE PASSED (G4 needs >= ${MIN_ON_DATES} live dates with ONs valued from recorded closes)` : 'GATE FAILED')
+  log(r.pass ? `GATE PASSED (G4 needs >= ${MIN_ON_DATES} live dates where every held ON has a close recorded that day)` : 'GATE FAILED')
 }
 
 export async function runCompare(deps: CompareDeps): Promise<number> {
@@ -70,7 +70,7 @@ export async function runCompare(deps: CompareDeps): Promise<number> {
   const snapshots = await deps.readSnapshots()
   const result = evaluateGate({
     today: deps.today, derived: derived.rows, snapshots, liveTotal,
-    onRecordedDates: derived.flags.onRecordedDates, knownAt: derived.knownAt,
+    onRecordedDates: derived.flags.onRecordedDates, onExactCloseDates: derived.flags.onExactCloseDates, knownAt: derived.knownAt,
   })
 
   log('')
@@ -85,6 +85,7 @@ export async function runCompare(deps: CompareDeps): Promise<number> {
   log(`snapshots without breakdown (skipped; more than 1 fails G1): ${result.skippedNoBreakdown.length ? result.skippedNoBreakdown.join(', ') : 'none'}`)
   log(`ON aggregate-mark dates (not counted by G4, circular): ${derived.flags.onAggregateMarkDates.length ? derived.flags.onAggregateMarkDates.join(', ') : 'none'}`)
   const f = derived.flags
+  log(`ON dates: ${f.onRecordedDates.length} with recorded closes (compared), ${f.onExactCloseDates.length} with an exact close (counted by G4)`)
   log(`flags: negativeCash=${f.negativeCash ? `${f.negativeCash.date} ${f.negativeCash.cash.toFixed(2)}` : 'none'} costMarkedStocks=[${f.costMarkedStocks}] vanished=[${f.vanished}] todayUnpriced=[${f.todayUnpriced}]`)
   printGate(log, result)
   return result.pass ? EXIT_PASS : EXIT_GATE_FAILED

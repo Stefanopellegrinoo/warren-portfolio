@@ -28,6 +28,7 @@ function input(over: Partial<GateInput> = {}): GateInput {
     snapshots: dates.map(d => snap(d)),
     liveTotal: 1010,
     onRecordedDates: dates,
+    onExactCloseDates: dates,
     ...over,
   }
 }

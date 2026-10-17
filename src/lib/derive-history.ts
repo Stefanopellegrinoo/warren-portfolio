@@ -34,6 +34,8 @@ export interface DeriveFlags {
   onAggregateMarkDates: string[]
   /** Days where EVERY held ON was valued from a recorded on_price_history close (the only independent ON values). */
   onRecordedDates: string[]
+  /** Subset of onRecordedDates where every held ON has a close dated exactly that day (not carried from an earlier session). */
+  onExactCloseDates: string[]
   /** Positions held today with no usable quote. */
   todayUnpriced: string[]
   /** Set when the derivation stopped early; rows hold what was computed before. */
@@ -72,9 +74,14 @@ function withOnMark(row: SnapshotRow, mark: OnMark): SnapshotRow {
   }
 }
 
+function hasCloseOn(barsByTicker: Map<string, DailyBar[]>, ticker: string, date: string): boolean {
+  const t = ticker.trim().toUpperCase()
+  return Array.from(barsByTicker).some(([k, bars]) => k.trim().toUpperCase() === t && bars.some(b => b.date === date))
+}
+
 export function deriveHistory(input: DeriveInput): { rows: DerivedRow[]; flags: DeriveFlags } {
   const flags: DeriveFlags = {
-    negativeCash: null, costMarkedStocks: [], vanished: [], onAggregateMarkDates: [], onRecordedDates: [], todayUnpriced: [], failure: null,
+    negativeCash: null, costMarkedStocks: [], vanished: [], onAggregateMarkDates: [], onRecordedDates: [], onExactCloseDates: [], todayUnpriced: [], failure: null,
   }
   const rows: DerivedRow[] = []
 
@@ -119,7 +126,10 @@ export function deriveHistory(input: DeriveInput): { rows: DerivedRow[]; flags: 
           flags.onAggregateMarkDates.push(date)
         }
       }
-      if (heldOns.length > 0 && unpricedOns.length === 0) flags.onRecordedDates.push(date)
+      if (heldOns.length > 0 && unpricedOns.length === 0) {
+        flags.onRecordedDates.push(date)
+        if (heldOns.every(t => hasCloseOn(onPricesByTicker, t, date))) flags.onExactCloseDates.push(date)
+      }
       rows.push({ ...row, source: onsAtCost ? 'estimated' : 'live' })
     }
 

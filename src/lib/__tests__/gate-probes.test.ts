@@ -42,7 +42,7 @@ const withMarks = (txs: any[], movs: any[], ratio = (_d: string) => MARKET) => {
 }
 function gate(input: DeriveInput, snapshots: any[], bend?: (rows: any[]) => any[]) {
   const { rows, flags } = deriveHistory(input)
-  return evaluateGate({ today: TODAY, derived: bend ? bend(rows) : rows, snapshots, liveTotal: rows.at(-1)!.total_value, onRecordedDates: flags.onRecordedDates, knownAt: knownAtFrom(input) })
+  return evaluateGate({ today: TODAY, derived: bend ? bend(rows) : rows, snapshots, liveTotal: rows.at(-1)!.total_value, onRecordedDates: flags.onRecordedDates, onExactCloseDates: flags.onExactCloseDates, knownAt: knownAtFrom(input) })
 }
 const diff = (r: any, date: string) => r.diffs.find((x: any) => x.date === date)
 
@@ -166,5 +166,15 @@ describe('S4 re-verify probes (P*: round 2, Q*: round 3)', () => {
     expect(r.diffs.find(d => d.date === C)).toBeUndefined()
     expect(r.checks.G1.pass).toBe(true)
     expect(r.checks.G2.pass).toBe(true)
+  })
+
+  it('R5b: one capture session carried over 7 flat days agrees but does not reach the 5-date minimum', () => {
+    const txs = [tx(), ON]
+    const movs = [mv(), ONMV]
+    const input = baseInput(txs, movs, { onPricesByTicker: new Map([['XD', [{ date: '2026-08-03', close: 1 }]]]) })
+    const r = gate(input, snapsFrom(input))
+    expect(deriveHistory(input).flags.onRecordedDates.length).toBe(7)
+    expect(r.checks.G4.pass).toBe(false)
+    expect(r.checks.G4.detail).toContain('1 with an exact close')
   })
 })
