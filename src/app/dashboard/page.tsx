@@ -7,6 +7,7 @@ import ONsSection from '@/components/ui/ONsSection'
 import CashSection from '@/components/ui/CashSection'
 import AddTransactionModal from '@/components/ui/AddTransactionModal'
 import ImportModal from '@/components/ui/ImportModal'
+import ReconciliationBanner, { type ReconciliationResult } from '@/components/ui/ReconciliationBanner'
 import type { Position, ONPosition, PortfolioSummary } from '@/types'
 import { formatUSD, formatPct, cn, isMarketOpen } from '@/lib/utils'
 
@@ -49,6 +50,7 @@ export default function DashboardPage() {
   const [marketOpen, setMarketOpen] = useState(isMarketOpen())
   const [autoRefresh, setAutoRefresh] = useState(isMarketOpen())
   const [lastUpdate, setLastUpdate] = useState<string | null>(null)
+  const [reconciliation, setReconciliation] = useState<ReconciliationResult | null>(null)
 
   const countdownRef = useRef(REFRESH_INTERVAL_SEC)
   const [displayCountdown, setDisplayCountdown] = useState(REFRESH_INTERVAL_SEC)
@@ -103,6 +105,15 @@ export default function DashboardPage() {
   }, [fetchPositionsData])
 
   useEffect(() => { fetchPositionsData() }, [fetchPositionsData])
+
+  // Once per visit. A failed check shows nothing: silence is not a PASS, but a
+  // broken checker must not alarm the user either.
+  useEffect(() => {
+    fetch('/api/reconciliation')
+      .then(r => (r.ok ? r.json() : null))
+      .then(setReconciliation)
+      .catch(() => {})
+  }, [])
 
   // Sync market state and autoRefresh
   useEffect(() => {
@@ -197,6 +208,8 @@ export default function DashboardPage() {
             </button>
           </div>
         </div>
+
+        <ReconciliationBanner result={reconciliation} />
 
         {/* ── KPI Grid ── */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
