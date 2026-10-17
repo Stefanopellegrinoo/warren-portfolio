@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import PriceAge from './PriceAge'
-import { formatUSD, formatPct, cn, countStalePrices } from '@/lib/utils'
+import { formatUSD, formatPct, cn, priceHealthSummary } from '@/lib/utils'
 import type { Position } from '@/types'
 import { TrendingUp, TrendingDown, Minus, ChevronUp, ChevronDown, DollarSign } from 'lucide-react'
 
@@ -45,7 +45,7 @@ export default function PositionsTable({ positions, loading, summary, onSell }: 
   )
 
   const totalPortfolio = positions.reduce((s, p) => s + (p.market_value ?? 0), 0)
-  const staleCount = countStalePrices(positions)
+  const priceHealth = priceHealthSummary(positions)
 
   function getPctCartera(pos: Position) {
     return totalPortfolio > 0 && pos.market_value ? pos.market_value / totalPortfolio : 0
@@ -118,7 +118,7 @@ export default function PositionsTable({ positions, loading, summary, onSell }: 
         <div className="flex items-center gap-3">
           <div>
             <h3 className="font-display font-700 text-white">Posiciones Abiertas</h3>
-            <p className="text-[11px] text-slate-500 font-mono mt-0.5">{positions.length} activos{staleCount > 0 && <span className="text-amber"> · {staleCount} desactualizados</span>}</p>
+            <p className="text-[11px] text-slate-500 font-mono mt-0.5">{positions.length} activos{priceHealth && <span className="text-amber"> · {priceHealth}</span>}</p>
           </div>
         </div>
         {summary && (

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatPct, isMarketOpen, isPriceStale, PRICE_STALE_OPEN_MS, PRICE_STALE_CLOSED_MS } from '../utils'
+import { formatPct, isMarketOpen, isPriceStale, priceHealthSummary, PRICE_STALE_OPEN_MS, PRICE_STALE_CLOSED_MS } from '../utils'
 
 describe('formatPct (fraction in)', () => {
   it('formats a fraction as a signed percent by default', () => {
@@ -69,5 +69,29 @@ describe('isPriceStale', () => {
 
   it('clamps a future as-of (clock skew) to fresh', () => {
     expect(isPriceStale(new Date(open.getTime() + 60_000).toISOString(), open)).toBe(false)
+  })
+})
+
+describe('priceHealthSummary', () => {
+  const now = new Date('2026-10-14T15:00:00Z') // open market
+  const fresh = { current_price: 10, price_as_of: '2026-10-14T14:55:00Z' }
+  const stale = { current_price: 10, price_as_of: '2026-10-14T10:00:00Z' }
+  const unpriced = { current_price: 0 }
+
+  it('is empty when everything is fresh and priced', () => {
+    expect(priceHealthSummary([fresh], now)).toBe('')
+  })
+
+  it('uses the singular for exactly one', () => {
+    expect(priceHealthSummary([fresh, stale], now)).toBe('1 desactualizado')
+  })
+
+  it('uses the plural for several', () => {
+    expect(priceHealthSummary([stale, stale, fresh], now)).toBe('2 desactualizados')
+  })
+
+  it('appends the unpriced count and does not count unpriced as stale', () => {
+    expect(priceHealthSummary([stale, unpriced, unpriced], now)).toBe('1 desactualizado · 2 sin precio')
+    expect(priceHealthSummary([unpriced], now)).toBe('1 sin precio')
   })
 })

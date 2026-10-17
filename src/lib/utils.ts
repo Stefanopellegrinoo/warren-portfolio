@@ -92,6 +92,19 @@ export function countStalePrices(
   return items.filter(i => i.current_price && isPriceStale(i.price_as_of, now)).length
 }
 
+/** Header suffix: "1 desactualizado · 2 sin precio". Empty when nothing is wrong. */
+export function priceHealthSummary(
+  items: { current_price?: number; price_as_of?: string }[],
+  now: Date = new Date(),
+): string {
+  const stale = countStalePrices(items, now)
+  const unpriced = items.filter(i => !i.current_price).length
+  const parts: string[] = []
+  if (stale > 0) parts.push(`${stale} desactualizado${stale === 1 ? '' : 's'}`)
+  if (unpriced > 0) parts.push(`${unpriced} sin precio`)
+  return parts.join(' · ')
+}
+
 /** IANA zone for the market and the user this app serves. */
 export const PORTFOLIO_TIMEZONE = 'America/Argentina/Buenos_Aires'
 
