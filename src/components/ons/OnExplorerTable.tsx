@@ -20,13 +20,13 @@ const COLUMNS: { key: SortKey; label: string; numeric: boolean; hint?: string }[
   { key: 'md', label: 'MD', numeric: true, hint: 'Duración modificada, en años' },
   { key: 'paridad', label: 'Paridad', numeric: true, hint: 'Precio sucio sobre valor residual más intereses devengados' },
   { key: 'cy', label: 'TC', numeric: true, hint: 'Tasa corriente: cupón anual sobre precio limpio' },
-  { key: 'wal', label: 'Vida prom.', numeric: true, hint: 'Vida promedio ponderada (WAL), en años' },
+  { key: 'wal', label: 'Vida', numeric: true, hint: 'Vida promedio ponderada (WAL), en años' },
   { key: 'spread', label: 'Spread', numeric: true, hint: 'Opcional, referencial: TIR menos TIR soberana interpolada por duración' },
-  { key: 'adtv', label: 'Volumen prom.', numeric: true, hint: 'Volumen diario promedio de 20 ruedas (suma de líneas O, D y C), en USD' },
+  { key: 'adtv', label: 'Vol. prom.', numeric: true, hint: 'Volumen diario promedio de 20 ruedas (suma de líneas O, D y C), en USD' },
 ]
 
-const TH = 'px-3 py-2.5 text-[10px] font-mono uppercase tracking-widest text-slate-400 whitespace-nowrap'
-const TD = 'px-3 py-2.5 whitespace-nowrap'
+const TH = 'px-2 py-2.5 text-[10px] font-mono uppercase tracking-widest text-slate-400 whitespace-nowrap'
+const TD = 'px-2 py-2.5 whitespace-nowrap'
 const FLOATING_HINT = 'Tasa variable: no se proyectan los cupones, por eso no se calcula TIR ni se puede simular'
 
 function sortAria(active: boolean, dir: 'asc' | 'desc'): 'ascending' | 'descending' | 'none' {
@@ -132,7 +132,7 @@ export default function OnExplorerTable({ rows, sort, onSort }: Props) {
                     )}
                   </div>
                 </td>
-                <td className={cn(TD, 'max-w-[14rem] truncate text-slate-300')} title={r.description ?? r.issuer ?? undefined}>{r.issuer ?? '—'}</td>
+                <td className={cn(TD, 'max-w-[9rem] truncate text-slate-300')} title={r.description ?? r.issuer ?? undefined}>{r.issuer ?? '—'}</td>
                 <td className={TD}>{fmtDate(r.maturityDate)}</td>
                 <td className={cn(TD, 'text-right')}><PriceCell r={r} /></td>
                 <td className={cn(TD, 'text-right')}><YtmCell r={r} /></td>
