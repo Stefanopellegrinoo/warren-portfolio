@@ -142,12 +142,12 @@ describe('buildFlows - fixed rate', () => {
     expect(flows[1].payDate).toBe('2027-03-12') // preceding (Saturday -> Friday)
   })
 
-  it('record date is the unadjusted date minus the offset (calendar days)', () => {
+  it('record date is the offset in business days before the adjusted pay date', () => {
     const [f] = buildFlows(
       { ...base, recordOffsetDays: 15 },
       [{ date: '2026-09-10', ren: 0, amo: 100 }]
     )
-    expect(f.recordDate).toBe('2026-08-26')
+    expect(f.recordDate).toBe('2026-08-20') // 15 business days before the pay date
   })
 
   it('without offset the record date equals the unadjusted date', () => {
@@ -158,6 +158,77 @@ describe('buildFlows - fixed rate', () => {
   it('sorts raw rows by date', () => {
     const flows = buildFlows(base, [...raw].reverse())
     expect(flows.map((f) => f.date)).toEqual(['2026-09-10', '2027-03-10', '2027-09-10'])
+  })
+})
+
+describe('buildFlows - record date, residual, merging', () => {
+  it('offset 1 on a holiday payment: previous business day before the adjusted pay date', () => {
+    // 2026-07-09 holiday, 07-10 decreed -> payDate 2026-07-13 -> record 2026-07-08
+    const [f] = buildFlows(
+      { ...base, recordOffsetDays: 1 },
+      [{ date: '2026-07-09', ren: 0, amo: 100 }]
+    )
+    expect(f.payDate).toBe('2026-07-13')
+    expect(f.recordDate).toBe('2026-07-08')
+  })
+
+  it('does not accumulate float drift in the residual', () => {
+    const flows = buildFlows(base, [
+      { date: '2026-03-10', ren: 0, amo: 33.33 },
+      { date: '2026-06-10', ren: 0, amo: 33.33 },
+      { date: '2026-09-10', ren: 0, amo: 33.33 },
+      { date: '2026-12-10', ren: 0, amo: 0.01 },
+    ])
+    expect(flows[3].residualBeforePct).toBe(0.01)
+    expect(flows[3].amortPct).toBe(0.01)
+  })
+
+  it('merges rows with the same date (sums ren and amo)', () => {
+    const flows = buildFlows(
+      { ...base, rateType: 'byma' },
+      [
+        { date: '2026-09-10', ren: 2, amo: 0 },
+        { date: '2026-09-10', ren: 1, amo: 40 },
+        { date: '2027-03-10', ren: 1, amo: 60 },
+      ]
+    )
+    expect(flows).toHaveLength(2)
+    expect(flows[0]).toMatchObject({ couponPct: 3, amortPct: 40 })
+    expect(flows[1].residualBeforePct).toBe(60)
+  })
+
+  it('byma rateType with no amortization gets a bullet at the last date', () => {
+    const flows = buildFlows(
+      { ...base, rateType: 'byma' },
+      [
+        { date: '2026-09-10', ren: 2, amo: 0 },
+        { date: '2027-03-10', ren: 4, amo: 0 },
+      ]
+    )
+    expect(flows.map((f) => f.amortPct)).toEqual([0, 100])
+    expect(flows.map((f) => f.couponPct)).toEqual([2, 4])
+  })
+})
+
+describe('date validation and extra day counts', () => {
+  it('rejects malformed and rolled-over dates', () => {
+    expect(() => dcf('ACT/365', '2026-02-30', '2026-03-01')).toThrow(/invalid ISO date/)
+    expect(() => dcf('ACT/365', '2026-01-01', '2026-13-01')).toThrow(/invalid ISO date/)
+  })
+
+  it('rejects from > to', () => {
+    expect(() => dcf('ACT/365', '2026-03-01', '2026-01-01')).toThrow(/is after/)
+  })
+
+  it('ACT/ACT over more than two years and with a leap start year', () => {
+    expect(dcf('ACT/ACT', '2023-07-01', '2026-07-01')).toBeCloseTo(3, 12)
+    expect(dcf('ACT/ACT', '2024-07-01', '2025-07-01')).toBeCloseTo(184 / 366 + 181 / 365, 12)
+  })
+
+  it('30/360 with d1=30,d2=31 and February (no end-of-February rule)', () => {
+    expect(dcf('30/360', '2026-01-30', '2026-03-31')).toBeCloseTo(60 / 360, 12)
+    expect(dcf('30/360', '2026-01-31', '2026-02-28')).toBeCloseTo(28 / 360, 12)
+    expect(dcf('30/360', '2026-02-28', '2026-03-28')).toBeCloseTo(30 / 360, 12)
   })
 })
 

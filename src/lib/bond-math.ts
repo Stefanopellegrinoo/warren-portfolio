@@ -1,7 +1,7 @@
 // Pure bond math (no DB, no network). Dates are ISO 'YYYY-MM-DD' strings,
 // handled through UTC arithmetic only, so results do not depend on the TZ.
 // Percentages are per 100 ORIGINAL face value (VN), like BYMA px/ren/amo.
-import { arCalendar, addDays, type Bdc, type Calendar } from './ar-calendar'
+import { arCalendar, addBusinessDays, toMs, type Bdc, type Calendar } from './ar-calendar'
 
 export type { Bdc } from './ar-calendar'
 export type DayCount = '30/360' | 'ACT/365' | 'ACT/360' | 'ACT/ACT'
@@ -39,11 +39,6 @@ export interface FlowTerms {
 
 const DAY_MS = 86_400_000
 
-function toMs(iso: string): number {
-  const [y, m, d] = iso.split('-').map(Number)
-  return Date.UTC(y, m - 1, d)
-}
-
 function actualDays(from: string, to: string): number {
   return Math.round((toMs(to) - toMs(from)) / DAY_MS)
 }
@@ -56,6 +51,8 @@ function daysThrough(year: number, iso: string): number {
   return actualDays(`${year}-01-01`, iso)
 }
 
+// ISDA convention (actual days per calendar year). ICMA would need the coupon
+// frequency; confirm the convention per prospectus.
 function actAct(from: string, to: string): number {
   const y1 = Number(from.slice(0, 4))
   const y2 = Number(to.slice(0, 4))
@@ -76,6 +73,7 @@ function thirty360(from: string, to: string): number {
 
 // Day count fraction between two unadjusted dates (from < to).
 export function dcf(dc: DayCount, from: string, to: string): number {
+  if (toMs(from) > toMs(to)) throw new Error(`dcf: ${from} is after ${to}`)
   if (from === to) return 0
   if (dc === '30/360') return thirty360(from, to)
   if (dc === 'ACT/360') return actualDays(from, to) / 360
@@ -89,6 +87,16 @@ export function defaultDayCount(law: 'ARG' | 'NY'): DayCount {
   return law === 'ARG' ? 'ACT/365' : '30/360'
 }
 
+function mergeByDate(raw: RawFlow[]): RawFlow[] {
+  const byDate = new Map<string, RawFlow>()
+  for (const r of raw) {
+    toMs(r.date) // validates
+    const hit = byDate.get(r.date)
+    byDate.set(r.date, hit ? { date: r.date, ren: hit.ren + r.ren, amo: hit.amo + r.amo } : r)
+  }
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date))
+}
+
 // Fixed-rate coupons are computed (cup x DCF x residual); the first period
 // starts at the issue date. Zero-amortization schedules get a 100% bullet
 // redemption on the last date.
@@ -97,7 +105,7 @@ export function buildFlows(
   raw: RawFlow[],
   cal: Calendar = arCalendar
 ): Flow[] {
-  const rows = [...raw].sort((a, b) => a.date.localeCompare(b.date))
+  const rows = mergeByDate(raw)
   const needsBullet = rows.every((r) => r.amo === 0)
   let residual = 100
   let prev = terms.issueDate
@@ -108,16 +116,18 @@ export function buildFlows(
     const couponPct = computed
       ? (terms.couponPct * dcf(terms.dayCount, prev, row.date) * residual) / 100
       : row.ren
+    const payDate = cal.adjust(row.date, isLast ? terms.maturityBdc : terms.bdc)
     const flow: Flow = {
       date: row.date,
-      payDate: cal.adjust(row.date, isLast ? terms.maturityBdc : terms.bdc),
-      recordDate: addDays(row.date, -(terms.recordOffsetDays ?? 0)),
+      payDate,
+      // Record date counts business days back from the adjusted pay date.
+      recordDate: addBusinessDays(payDate, -(terms.recordOffsetDays ?? 0)),
       couponPct,
       amortPct,
       residualBeforePct: residual,
       couponSource: computed ? 'computed' : 'byma',
     }
-    residual -= amortPct
+    residual = Math.round((residual - amortPct) * 1e9) / 1e9
     prev = row.date
     return flow
   })

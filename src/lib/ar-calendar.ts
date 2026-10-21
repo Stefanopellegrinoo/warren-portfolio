@@ -17,19 +17,37 @@ export interface Calendar {
 
 const DAY_MS = 86_400_000
 
-// Decreed "dias no laborables con fines turisticos" (bank holidays).
+// Decreed "dias no laborables con fines turisticos". They are treated as
+// NON-business days for settlement and payment (banks are closed).
+// Sources: Decreto 106/2023 (2024), Decreto 1027/2024 (2025 and 2026).
+// Decreto 614/2025 lets the government move weekend-falling movable holidays
+// ad hoc, so years without a curated list below are rule-based approximations.
 const DECREED: Record<number, readonly string[]> = {
+  2024: ['2024-04-01', '2024-06-21', '2024-10-11'],
+  2025: ['2025-05-02', '2025-08-15', '2025-11-21'],
   2026: ['2026-03-23', '2026-07-10', '2026-12-07'],
+}
+
+// Explicit per-year placement of a movable holiday (month-day -> actual date).
+// 2025-10-12 fell on a Sunday and was moved to Friday (Resolucion JGM 139/2025).
+const MOVED: Record<number, Record<string, string>> = {
+  2025: { '10-12': '2025-10-10' },
 }
 
 // Fixed (inamovibles): month-day.
 const FIXED = ['01-01', '03-24', '04-02', '05-01', '05-25', '06-20', '07-09', '12-08', '12-25']
+// Holy Thursday is a non-working day, not a holiday: BYMA operates, so it is a business day here.
 // Movable (trasladables): Tue/Wed -> previous Monday, Thu/Fri -> next Monday.
 const MOVABLE = ['06-17', '08-17', '10-12', '11-20']
 
-function toMs(iso: string): number {
-  const [y, m, d] = iso.split('-').map(Number)
-  return Date.UTC(y, m - 1, d)
+export function toMs(iso: string): number {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+  if (!match) throw new Error(`invalid ISO date: ${iso}`)
+  const [y, m, d] = [Number(match[1]), Number(match[2]), Number(match[3])]
+  const ms = Date.UTC(y, m - 1, d)
+  // Reject rolled-over dates such as 2026-02-30.
+  if (new Date(ms).toISOString().slice(0, 10) !== iso) throw new Error(`invalid ISO date: ${iso}`)
+  return ms
 }
 
 function fromMs(ms: number): string {
@@ -81,7 +99,7 @@ function holidaysOf(year: number): Set<string> {
   const easterDate = easter(year)
   const set = new Set<string>([
     ...FIXED.map((md) => `${year}-${md}`),
-    ...MOVABLE.map((md) => moveMovable(`${year}-${md}`)),
+    ...MOVABLE.map((md) => MOVED[year]?.[md] ?? moveMovable(`${year}-${md}`)),
     addDays(easterDate, -48), // Carnival Monday
     addDays(easterDate, -47), // Carnival Tuesday
     addDays(easterDate, -2), // Good Friday
@@ -111,9 +129,10 @@ export function adjust(iso: string, bdc: Bdc): string {
   return next
 }
 
+// Negative n steps backwards.
 export function addBusinessDays(iso: string, n: number): string {
   let d = iso
-  for (let i = 0; i < n; i++) d = step(d, 1)
+  for (let i = 0; i < Math.abs(n); i++) d = step(d, n < 0 ? -1 : 1)
   return d
 }
 
