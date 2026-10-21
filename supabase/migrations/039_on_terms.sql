@@ -156,10 +156,18 @@ CREATE POLICY "on_corporate_events_read_all" ON on_corporate_events FOR SELECT U
 DROP POLICY IF EXISTS "on_corporate_events_modify_service" ON on_corporate_events;
 CREATE POLICY "on_corporate_events_modify_service" ON on_corporate_events FOR ALL TO service_role USING (true) WITH CHECK (true);
 
+-- Defence in depth: RLS already blocks writes; also drop the table privileges.
+REVOKE INSERT, UPDATE, DELETE ON on_terms FROM anon, authenticated;
+REVOKE INSERT, UPDATE, DELETE ON on_cashflows FROM anon, authenticated;
+REVOKE INSERT, UPDATE, DELETE ON on_yield_checks FROM anon, authenticated;
+REVOKE INSERT, UPDATE, DELETE ON on_sov_curve FROM anon, authenticated;
+REVOKE INSERT, UPDATE, DELETE ON on_terms_overrides FROM anon, authenticated;
+REVOKE INSERT, UPDATE, DELETE ON on_corporate_events FROM anon, authenticated;
+
 -- ------------------------------------------------------------------- RPC
 -- One transaction: on_terms and on_cashflows are replaced whole (stale ISINs and
 -- flows disappear), checks are upserted per day, the curve is replaced only when
--- p_sov is not NULL (last-good kept). JSON keys are the snake_case column names.
+-- p_sov is an array of at least 5 rows (otherwise last-good is kept). JSON keys are the snake_case column names.
 -- Callable only by service_role (the Warren worker).
 CREATE OR REPLACE FUNCTION replace_on_terms(
   p_as_of  DATE,
@@ -173,6 +181,18 @@ LANGUAGE plpgsql
 SET search_path = public
 AS $$
 BEGIN
+  -- Guards BEFORE any DELETE: an empty or truncated payload must never wipe the
+  -- catalog (the floor matches the adapter's MIN_VALID_ROWS).
+  IF p_terms IS NULL OR jsonb_typeof(p_terms) <> 'array' OR jsonb_array_length(p_terms) < 200 THEN
+    RAISE EXCEPTION 'replace_on_terms: p_terms must be an array of at least 200 rows';
+  END IF;
+  IF p_flows IS NULL OR jsonb_typeof(p_flows) <> 'array' THEN
+    RAISE EXCEPTION 'replace_on_terms: p_flows must be an array';
+  END IF;
+  IF p_checks IS NULL OR jsonb_typeof(p_checks) <> 'array' THEN
+    RAISE EXCEPTION 'replace_on_terms: p_checks must be an array';
+  END IF;
+
   DELETE FROM on_terms WHERE TRUE; -- cascades to on_cashflows
 
   INSERT INTO on_terms (
@@ -182,7 +202,7 @@ BEGIN
   )
   SELECT
     t.isin, t.ticker_o, t.ticker_d, t.ticker_c, t.issuer, t.description, t.law, t.currency, t.payment_plaza,
-    t.est, t.frequency, t.issue_date, t.maturity_date, t.coupon_rate, t.residual_pct, t.accrual_start,
+    t.est, t.frequency, t.issue_date, t.maturity_date, t.coupon_rate, COALESCE(t.residual_pct, 100), t.accrual_start,
     t.issued_amount_byma, t.adtv_o, t.adtv_d, t.adtv_c, p_as_of, p_source, NOW()
   FROM jsonb_populate_recordset(NULL::on_terms, p_terms) t;
 
@@ -204,7 +224,7 @@ BEGIN
     terms_diff_bp = EXCLUDED.terms_diff_bp,
     flagged = EXCLUDED.flagged;
 
-  IF p_sov IS NOT NULL THEN
+  IF p_sov IS NOT NULL AND jsonb_typeof(p_sov) = 'array' AND jsonb_array_length(p_sov) >= 5 THEN
     DELETE FROM on_sov_curve WHERE TRUE;
     INSERT INTO on_sov_curve (ticker, isin, law, px, ytm, dm, as_of)
     SELECT s.ticker, s.isin, s.law, s.px, s.ytm, s.dm, p_as_of
@@ -223,15 +243,15 @@ GRANT EXECUTE ON FUNCTION replace_on_terms(DATE, TEXT, JSONB, JSONB, JSONB, JSON
 -- Corrections ship as new migrations.
 --
 -- CS50 = Cresud Clase L (AR0394353335)
---   https://bancoprovincia.com.ar/CDN/Get/CRESUD_Suplemento_Prospecto_Clase_L
+--   https://www.bancoprovincia.com.ar/CDN/Get/CRESUD_Suplemento_Prospecto_Clase_L
 -- DNCB = Edenor Clase 11 (AR0585477562)
 --   https://edenor.com/files/investors/2026-07/EDENOR_SUPLEMENTO_ON_11.pdf
 INSERT INTO on_terms_overrides (isin, field, value, source_url, verified_at, note) VALUES
-  ('AR0394353335', 'day_count', '"ACT/365"'::jsonb, 'https://bancoprovincia.com.ar/CDN/Get/CRESUD_Suplemento_Prospecto_Clase_L', '2026-10-21', 'Cresud Clase L: ACT/365 (BYMA ren and ai assume cup/2 and 30/360)'),
-  ('AR0394353335', 'payment_plaza', '"MEP"'::jsonb, 'https://bancoprovincia.com.ar/CDN/Get/CRESUD_Suplemento_Prospecto_Clase_L', '2026-10-21', 'USD paid in Argentina'),
-  ('AR0394353335', 'min_trade_unit', '1'::jsonb, 'https://bancoprovincia.com.ar/CDN/Get/CRESUD_Suplemento_Prospecto_Clase_L', '2026-10-21', 'Minimum trading unit VN USD 1 (minimum subscription USD 100 is primary only)'),
-  ('AR0394353335', 'calls', '[{"from": "2027-06-10", "to": null, "pricePct": 100}]'::jsonb, 'https://bancoprovincia.com.ar/CDN/Get/CRESUD_Suplemento_Prospecto_Clase_L', '2026-10-21', 'Issuer optional redemption from month 18 at 100% (tax call at 100% not modelled)'),
-  ('AR0394353335', 'puts', '[{"kind": "change_of_control", "pricePct": 101, "note": "Holder put on change of control; multiples of USD 1,000"}]'::jsonb, 'https://bancoprovincia.com.ar/CDN/Get/CRESUD_Suplemento_Prospecto_Clase_L', '2026-10-21', 'Change-of-control put at 101%; informational, not a yield-to-worst candidate'),
+  ('AR0394353335', 'day_count', '"ACT/365"'::jsonb, 'https://www.bancoprovincia.com.ar/CDN/Get/CRESUD_Suplemento_Prospecto_Clase_L', '2026-10-21', 'Cresud Clase L: ACT/365 (BYMA ren and ai assume cup/2 and 30/360)'),
+  ('AR0394353335', 'payment_plaza', '"MEP"'::jsonb, 'https://www.bancoprovincia.com.ar/CDN/Get/CRESUD_Suplemento_Prospecto_Clase_L', '2026-10-21', 'USD paid in Argentina'),
+  ('AR0394353335', 'min_trade_unit', '1'::jsonb, 'https://www.bancoprovincia.com.ar/CDN/Get/CRESUD_Suplemento_Prospecto_Clase_L', '2026-10-21', 'Minimum trading unit VN USD 1 (minimum subscription USD 100 is primary only)'),
+  ('AR0394353335', 'calls', '[{"from": "2027-06-10", "to": null, "pricePct": 100}]'::jsonb, 'https://www.bancoprovincia.com.ar/CDN/Get/CRESUD_Suplemento_Prospecto_Clase_L', '2026-10-21', 'Issuer optional redemption from month 18 at 100% (tax call at 100% not modelled)'),
+  ('AR0394353335', 'puts', '[{"kind": "change_of_control", "pricePct": 101, "note": "Holder put on change of control; multiples of USD 1,000"}]'::jsonb, 'https://www.bancoprovincia.com.ar/CDN/Get/CRESUD_Suplemento_Prospecto_Clase_L', '2026-10-21', 'Change-of-control put at 101%; informational, not a yield-to-worst candidate'),
   ('AR0585477562', 'day_count', '"ACT/365"'::jsonb, 'https://edenor.com/files/investors/2026-07/EDENOR_SUPLEMENTO_ON_11.pdf', '2026-10-21', 'Edenor Clase 11: ACT/365'),
   ('AR0585477562', 'payment_plaza', '"CCL"'::jsonb, 'https://edenor.com/files/investors/2026-07/EDENOR_SUPLEMENTO_ON_11.pdf', '2026-10-21', 'USD payable abroad (NY account of CVSA): dollar cable'),
   ('AR0585477562', 'min_trade_unit', '1'::jsonb, 'https://edenor.com/files/investors/2026-07/EDENOR_SUPLEMENTO_ON_11.pdf', '2026-10-21', 'Minimum VN USD 1 (minimum subscription USD 100 is primary only)'),

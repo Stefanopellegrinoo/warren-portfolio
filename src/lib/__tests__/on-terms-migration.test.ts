@@ -82,4 +82,28 @@ describe('039_on_terms.sql', () => {
     for (const t of TABLES) expect(d).toMatch(new RegExp(`DROP TABLE IF EXISTS ${t}\\b`, 'i'))
     expect(d).not.toMatch(/DROP TABLE IF EXISTS (ons|on_price_history|on_positions)\b/i)
   })
+
+  it('replace_on_terms refuses to wipe the catalog: guards on every payload', () => {
+    const fn = sql.match(/CREATE OR REPLACE FUNCTION replace_on_terms.*?\$\$ LANGUAGE|CREATE OR REPLACE FUNCTION replace_on_terms.*?END; \$\$/i)?.[0] ?? ''
+    expect(fn).toMatch(/p_terms IS NULL OR jsonb_typeof\(p_terms\) <> 'array' OR jsonb_array_length\(p_terms\) < 200/i)
+    expect(fn).toMatch(/p_flows IS NULL OR jsonb_typeof\(p_flows\) <> 'array'/i)
+    expect(fn).toMatch(/p_checks IS NULL OR jsonb_typeof\(p_checks\) <> 'array'/i)
+    expect(fn).toMatch(/RAISE EXCEPTION/i)
+    // guards come before the first DELETE
+    expect(fn.search(/RAISE EXCEPTION/i)).toBeLessThan(fn.search(/DELETE FROM on_terms/i))
+  })
+
+  it('replaces the curve only with an array of at least 5 rows', () => {
+    expect(sql).toMatch(/IF p_sov IS NOT NULL AND jsonb_typeof\(p_sov\) = 'array' AND jsonb_array_length\(p_sov\) >= 5 THEN/i)
+  })
+
+  it('revokes table write privileges from anon and authenticated (defence in depth)', () => {
+    for (const t of TABLES)
+      expect(sql).toMatch(new RegExp(`REVOKE INSERT, UPDATE, DELETE ON ${t} FROM anon, authenticated`, 'i'))
+  })
+
+  it('uses the www bancoprovincia URL (the bare host is dead)', () => {
+    expect(sql).toContain('https://www.bancoprovincia.com.ar/CDN/Get/')
+    expect(sql).not.toContain('https://bancoprovincia.com.ar')
+  })
 })
