@@ -142,7 +142,8 @@ export function analyzePortfolio({ items, analyses, today }: { items: PortfolioI
       payments.push({ isin: item.isin, ticker: row.tickerO, date: p.date, payDate: p.payDate, interest: p.interest, principal: p.principal, total: p.total })
     }
 
-    const adjusted = item.mode === 'vn' ? Math.abs(r.vn - item.amount) > EPS : r.lot.known && r.leftover > 0.005
+    // USD mode: rounding to whole VN always leaves < 1 VN of cash; more than that means the lot rules cut the purchase.
+    const adjusted = item.mode === 'vn' ? Math.abs(r.vn - item.amount) > EPS : r.leftover > r.pricePct / 100 + EPS
     if (adjusted) warnings.push({ kind: 'lot-adjusted', isin: item.isin, message: `${row.tickerO}: se ajustó a ${fmtVn(r.vn)} por la lámina mínima y el múltiplo${item.mode === 'usd' ? ` (sobran ${usd(r.leftover)})` : ''}.` })
     const lost = r.payments.filter((p) => p.exCoupon)
     if (lost.length > 0) {

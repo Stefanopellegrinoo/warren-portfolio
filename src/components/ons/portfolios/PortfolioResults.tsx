@@ -23,7 +23,7 @@ function Stat({ label, hint, children }: { label: string; hint?: ReactNode; chil
 
 function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
-    <section className="glass rounded-2xl p-5" aria-labelledby={id}>
+    <section className="glass min-w-0 rounded-2xl p-5" aria-labelledby={id}>
       <h2 id={id} className="mb-3 font-display text-sm font-bold uppercase tracking-widest text-slate-300">{title}</h2>
       {children}
     </section>

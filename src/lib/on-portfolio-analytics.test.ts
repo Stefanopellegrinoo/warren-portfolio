@@ -207,6 +207,17 @@ describe('analyzePortfolio: refusals and warnings', () => {
     expect(r.warnings.find((w) => w.kind === 'lot-adjusted')).toBeTruthy()
   })
 
+  it('USD mode: whole-VN rounding alone is not a warning; losing more than one VN to the lot rules is', () => {
+    const unknownLot = ok([{ isin: A, mode: 'usd', amount: 10_001 }]) // leftover < 1 VN
+    expect(unknownLot.warnings.some((w) => w.kind === 'lot-adjusted')).toBe(false)
+    const small = make(A, { tickerO: 'AAAAO', issuer: 'Emisor Uno S.A.' }, [{ date: '2028-04-21', ren: 3, amo: 100 }], 98, [ov(A, 'min_denomination', 1), ov(A, 'increment', 1)])
+    expect(ok([{ isin: A, mode: 'usd', amount: 10_001 }], [small]).warnings.some((w) => w.kind === 'lot-adjusted')).toBe(false) // known 1-VN lot, USD 0.08 left over
+    const lot = make(A, { tickerO: 'AAAAO', issuer: 'Emisor Uno S.A.' }, [{ date: '2028-04-21', ren: 3, amo: 100 }], 100, [ov(A, 'min_denomination', 10_000), ov(A, 'increment', 1_000)])
+    const r = ok([{ isin: A, mode: 'usd', amount: 10_900 }], [lot]) // 10,900 VN -> 10,000 VN: USD 900 stay out
+    expect(r.positions[0].vn).toBe(10_000)
+    expect(r.warnings.find((w) => w.kind === 'lot-adjusted')!.message).toContain('900')
+  })
+
   it('buying inside the record window loses that coupon: warned with the amount, and the totals exclude it', () => {
     // Coupon on Monday 2026-10-26 with a 5 day record offset: the record date (10-21) is before settlement (10-22).
     const ex = make(A, { tickerO: 'AAAAO', issuer: 'Emisor Uno S.A.' }, [
