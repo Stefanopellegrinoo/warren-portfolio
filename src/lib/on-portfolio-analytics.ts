@@ -29,7 +29,8 @@ export interface PortfolioWarning {
 
 export interface Position {
   isin: string
-  ticker: string
+  ticker: string // display ticker: the D (dollar) line, or O when there is no D line
+  tickerO: string
   issuer: string | null
   plaza: Plaza | null
   maturityDate: string
@@ -67,6 +68,21 @@ export interface PortfolioAnalysis {
   issuers: IssuerRow[]
   plazas: PlazaRow[]
   warnings: PortfolioWarning[]
+}
+
+/** Same calendar day one year later (Feb 29 -> Feb 28). */
+export function plusOneYear(iso: string): string {
+  const y = Number(iso.slice(0, 4)) + 1
+  const md = iso.slice(5)
+  if (md === '02-29' && !(y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0))) return `${y}-02-28`
+  return `${y}-${md}`
+}
+
+export const MATURED_MESSAGE = 'La ON está vencida: ya no tiene pagos futuros'
+/** No payment is left after the settlement date (the analysis drops the price of such an ON, so check this before pricing). */
+export const isMatured = (a: OnAnalysis, today: string): boolean => {
+  const settle = settlementDate(today)
+  return a.detail.schedule.every((s) => s.date <= settle)
 }
 
 const EPS = 1e-9
@@ -125,34 +141,39 @@ export function analyzePortfolio({ items, analyses, today }: { items: PortfolioI
       continue
     }
     const { row } = analysis
+    const tk = row.tickerD ?? row.tickerO
+    if (isMatured(analysis, today)) {
+      skip(item.isin, 'no-payments', `${tk}: ${MATURED_MESSAGE}`)
+      continue
+    }
     const r = simulateOn({ analysis, mode: item.mode, amount: item.amount, manualPrice: item.manualPrice, today })
     if (!r.ok) {
-      skip(item.isin, r.reason, `${row.tickerO}: ${r.message}`)
+      skip(item.isin, r.reason, `${tk}: ${r.message}`)
       continue
     }
     settle = r.settle
     const flows = flowsOf(analysis)
     const rk = risk(r.pricePct, flows, r.settle)
     positions.push({
-      isin: item.isin, ticker: row.tickerO, issuer: row.issuer, plaza: row.plaza, maturityDate: row.maturityDate,
+      isin: item.isin, ticker: tk, tickerO: row.tickerO, issuer: row.issuer, plaza: row.plaza, maturityDate: row.maturityDate,
       vn: r.vn, cost: r.cost, weightPct: 0, pricePct: r.pricePct, ytmPct: r.ytmPct, mdYears: rk?.modified ?? null,
       ytwKind: r.ytw?.kind ?? null, collected: r.totalCollected,
     })
     for (const p of r.payments) {
-      payments.push({ isin: item.isin, ticker: row.tickerO, date: p.date, payDate: p.payDate, interest: p.interest, principal: p.principal, total: p.total })
+      payments.push({ isin: item.isin, ticker: tk, date: p.date, payDate: p.payDate, interest: p.interest, principal: p.principal, total: p.total })
     }
 
     // USD mode: rounding to whole VN always leaves < 1 VN of cash; more than that means the lot rules cut the purchase.
     const adjusted = item.mode === 'vn' ? Math.abs(r.vn - item.amount) > EPS : r.leftover > r.pricePct / 100 + EPS
-    if (adjusted) warnings.push({ kind: 'lot-adjusted', isin: item.isin, message: `${row.tickerO}: se ajustó a ${fmtVn(r.vn)} por la lámina mínima y el múltiplo${item.mode === 'usd' ? ` (sobran ${usd(r.leftover)})` : ''}.` })
+    if (adjusted) warnings.push({ kind: 'lot-adjusted', isin: item.isin, message: `${tk}: se ajustó a ${fmtVn(r.vn)} por la lámina mínima y el múltiplo${item.mode === 'usd' ? ` (sobran ${usd(r.leftover)})` : ''}.` })
     const lost = r.payments.filter((p) => p.exCoupon)
     if (lost.length > 0) {
       const detail = lost.map((p) => `${usd(p.skippedInterest)} del ${fmtDate(p.date)}`).join(', ')
-      warnings.push({ kind: 'record-window', isin: item.isin, message: `${row.tickerO}: comprás dentro de la fecha de registro y no cobrás el cupón (${detail}).` })
+      warnings.push({ kind: 'record-window', isin: item.isin, message: `${tk}: comprás dentro de la fecha de registro y no cobrás el cupón (${detail}).` })
     }
-    if (r.ytw?.kind === 'call') warnings.push({ kind: 'call', isin: item.isin, message: `${row.tickerO}: puede ser rescatada antes del vencimiento (el peor caso es el rescate del ${fmtDate(r.ytw.workoutDate)}); la TIR de la cartera asume que se cobra hasta el vencimiento.` })
-    if (r.lineFallback && r.priceLine !== 'O') warnings.push({ kind: 'price-fallback', isin: item.isin, message: `${row.tickerO}: el precio es de otra línea que la de su plaza de pago; el canje no está incluido.` })
-    if (r.noTrades) warnings.push({ kind: 'reference-price', isin: item.isin, message: `${row.tickerO}: el precio es de referencia, la línea no operó en la rueda.` })
+    if (r.ytw?.kind === 'call') warnings.push({ kind: 'call', isin: item.isin, message: `${tk}: puede ser rescatada antes del vencimiento (el peor caso es el rescate del ${fmtDate(r.ytw.workoutDate)}); la TIR de la cartera asume que se cobra hasta el vencimiento.` })
+    if (r.lineFallback && r.priceLine !== 'O') warnings.push({ kind: 'price-fallback', isin: item.isin, message: `${tk}: el precio es de otra línea que la de su plaza de pago; el canje no está incluido.` })
+    if (r.noTrades) warnings.push({ kind: 'reference-price', isin: item.isin, message: `${tk}: el precio es de referencia, la línea no operó en la rueda.` })
   }
 
   if (positions.length === 0) return emptyAnalysis(settlementDate(today), skipped, warnings)
@@ -194,7 +215,7 @@ export function analyzePortfolio({ items, analyses, today }: { items: PortfolioI
     .filter((y) => yearAcc.get(y)!.principal > EPS)
     .map((year) => ({ year, principal: yearAcc.get(year)!.principal, pct: principal > 0 ? (yearAcc.get(year)!.principal / principal) * 100 : 0 }))
 
-  const horizon = `${Number(settle.slice(0, 4)) + 1}${settle.slice(4)}`
+  const horizon = plusOneYear(settle)
   const inYear = payments.filter((p) => p.payDate <= horizon)
   const next12mInterest = inYear.reduce((s, p) => s + p.interest, 0)
   const next12mPrincipal = inYear.reduce((s, p) => s + p.principal, 0)

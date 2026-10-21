@@ -58,6 +58,14 @@ describe('040_test_portfolios.sql', () => {
     expect(sql).toMatch(/test_portfolio_item_limit/)
   })
 
+  it('re-parenting is impossible: portfolio_id on items and user_id on portfolios are immutable (limit-bypass guard)', () => {
+    expect(sql).toMatch(/BEFORE UPDATE OF portfolio_id ON test_portfolio_items/i)
+    expect(sql).toMatch(/BEFORE UPDATE OF user_id ON test_portfolios/i)
+    expect(sql).toMatch(/IS DISTINCT FROM OLD\.portfolio_id/i)
+    expect(sql).toMatch(/IS DISTINCT FROM OLD\.user_id/i)
+    expect(sql).toMatch(/test_portfolio_immutable_parent/)
+  })
+
   it('indexes the owner and the parent', () => {
     expect(sql).toMatch(/CREATE INDEX IF NOT EXISTS \S+ ON test_portfolios \(user_id\)/i)
     expect(sql).toMatch(/CREATE INDEX IF NOT EXISTS \S+ ON test_portfolio_items \(portfolio_id\)/i)

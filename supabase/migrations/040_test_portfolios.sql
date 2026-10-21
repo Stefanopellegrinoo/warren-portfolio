@@ -77,6 +77,31 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Re-parenting would bypass the insert-time limits (move an item into a full portfolio, or a portfolio
+-- into another user's quota); nothing legitimate needs it, so the parent keys are immutable.
+CREATE OR REPLACE FUNCTION forbid_test_portfolio_item_reparent() RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.portfolio_id IS DISTINCT FROM OLD.portfolio_id THEN
+    RAISE EXCEPTION 'test_portfolio_immutable_parent' USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION forbid_test_portfolio_owner_change() RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.user_id IS DISTINCT FROM OLD.user_id THEN
+    RAISE EXCEPTION 'test_portfolio_immutable_parent' USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_test_portfolio_item_immutable BEFORE UPDATE OF portfolio_id ON test_portfolio_items
+  FOR EACH ROW EXECUTE FUNCTION forbid_test_portfolio_item_reparent();
+CREATE TRIGGER trg_test_portfolio_immutable BEFORE UPDATE OF user_id ON test_portfolios
+  FOR EACH ROW EXECUTE FUNCTION forbid_test_portfolio_owner_change();
+
 CREATE TRIGGER trg_test_portfolio_limit BEFORE INSERT ON test_portfolios
   FOR EACH ROW EXECUTE FUNCTION enforce_test_portfolio_limit();
 CREATE TRIGGER trg_test_portfolio_item_limit BEFORE INSERT ON test_portfolio_items
@@ -118,6 +143,8 @@ CREATE POLICY test_portfolio_items_delete ON test_portfolio_items FOR DELETE TO 
 -- Run only by hand, after exporting the rows you want to keep.
 -- DROP TABLE IF EXISTS test_portfolio_items;
 -- DROP TABLE IF EXISTS test_portfolios;
+-- DROP FUNCTION IF EXISTS forbid_test_portfolio_owner_change();
+-- DROP FUNCTION IF EXISTS forbid_test_portfolio_item_reparent();
 -- DROP FUNCTION IF EXISTS set_test_portfolio_updated_at();
 -- DROP FUNCTION IF EXISTS touch_test_portfolio();
 -- DROP FUNCTION IF EXISTS enforce_test_portfolio_item_limit();

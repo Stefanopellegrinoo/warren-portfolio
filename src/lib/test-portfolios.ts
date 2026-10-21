@@ -4,6 +4,7 @@
 import { NextResponse } from 'next/server'
 import type { ZodType } from 'zod'
 import type { OnAnalysis } from './on-analytics'
+import { isMatured, MATURED_MESSAGE } from './on-portfolio-analytics'
 import { simulateOn } from './on-simulator'
 import { ID_RE, MAX_ITEMS, MAX_PORTFOLIOS } from './schemas/test-portfolio'
 import { argentinaDate } from './utils'
@@ -22,7 +23,10 @@ export async function parseBody<T>(req: Request, schema: ZodType<T>): Promise<[T
     return [null, fail('Cuerpo de la solicitud inválido', 400)]
   }
   const parsed = schema.safeParse(raw)
-  if (!parsed.success) return [null, fail(parsed.error.issues[0]?.message ?? 'Datos inválidos', 400)]
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0]
+    return [null, fail(issue?.code === 'unrecognized_keys' ? 'Campos no permitidos en la solicitud' : issue?.message ?? 'Datos inválidos', 400)]
+  }
   return [parsed.data, null]
 }
 
@@ -59,6 +63,8 @@ export const toItem = (r: ItemRow) => ({
  * manual price can be added later); every other refusal (floating, not USD, lot rules, matured) is not.
  */
 export function itemRefusal(analysis: OnAnalysis, item: { mode: 'usd' | 'vn'; amount: number; manualPrice: number | null }): string | null {
+  if (isMatured(analysis, argentinaDate())) return MATURED_MESSAGE
   const r = simulateOn({ analysis, mode: item.mode, amount: item.amount, manualPrice: item.manualPrice, today: argentinaDate() })
-  return r.ok || r.reason === 'no-price' ? null : r.message
+  if (r.ok || r.reason === 'no-price') return null
+  return r.reason === 'no-payments' ? MATURED_MESSAGE : r.message
 }

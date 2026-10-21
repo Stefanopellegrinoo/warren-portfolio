@@ -218,6 +218,27 @@ describe('POST /api/test-portfolios/[id]/items', () => {
   })
 })
 
+describe('unknown keys and matured ONs', () => {
+  it('unknown keys get a Spanish message', async () => {
+    const res = await list.POST(json({ name: 'x', user_id: 'other' }))
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/campos no permitidos/i)
+  })
+  it('a matured ON cannot be added or edited (clear message) but can be deleted', async () => {
+    mockLoad.mockResolvedValue(catalog(mk(GOOD, { maturityDate: '2026-04-21' })))
+    const old = analyzeOn({ terms: { isin: GOOD, tickerO: 'OLDO', tickerD: 'OLDD', tickerC: null, issuer: 'x', description: null, law: 'NY', currency: 'USD', paymentPlaza: 'CCL', est: 'Step Up', frequency: 'Semestral', issueDate: '2025-04-22', maturityDate: '2026-04-21', couponRate: 0.06, residualPct: 100, accrualStart: '2026-04-21', issuedAmountByma: null, adtvO: null, adtvD: null, adtvC: null, asOf: '2026-10-20' } as any, flows: [{ date: '2026-04-21', ren: 3, amo: 100 }], overrides: [], events: [], check: null, curve: [], price: 100, settle: '2026-10-22' })
+    mockLoad.mockResolvedValue(catalog(old))
+    const add = await items.POST(json({ isin: GOOD, mode: 'usd', amount: 1000 }), ctx())
+    expect(add.status).toBe(422)
+    expect((await add.json()).error).toMatch(/vencida/i)
+    plan['test_portfolio_items.select'] = { data: { id: ITEM, isin: GOOD, input_mode: 'usd', amount: 1000, manual_price: null } }
+    const edit = await item.PATCH(json({ amount: 5 }, 'PATCH'), ctx(ID, ITEM))
+    expect(edit.status).toBe(422)
+    plan['test_portfolio_items.delete'] = { data: [{ id: ITEM }] }
+    expect((await item.DELETE(new Request('http://x'), ctx(ID, ITEM))).status).toBe(204)
+  })
+})
+
 describe('PATCH / DELETE /api/test-portfolios/[id]/items/[itemId]', () => {
   const patch = (b: unknown) => item.PATCH(json(b, 'PATCH'), ctx(ID, ITEM))
   it('edits the amount after re-validating the merged item against the catalog', async () => {

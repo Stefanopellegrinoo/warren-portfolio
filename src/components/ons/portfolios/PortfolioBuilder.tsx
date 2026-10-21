@@ -35,7 +35,9 @@ function ItemRow({ item, row, view, onChanged, onError }: { item: SavedItem; row
   const [vals, setVals] = useState<ItemFieldValues>(EMPTY)
   const position = view.analysis.positions.find((p) => p.isin === item.isin)
   const skipped = view.analysis.skipped.find((s) => s.isin === item.isin)
-  const ticker = row?.tickerO ?? item.isin
+  const ticker = position?.ticker ?? row?.tickerD ?? row?.tickerO ?? item.isin
+  const matured = skipped?.reason === 'no-payments'
+  const [confirming, setConfirming] = useState(false)
 
   const startEdit = () => { setVals({ mode: item.mode, amount: toFieldText(item.amount), price: toFieldText(item.manualPrice) }); setEditing(true) }
   const save = async () => {
@@ -61,6 +63,8 @@ function ItemRow({ item, row, view, onChanged, onError }: { item: SavedItem; row
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <Link href={`/ons/${item.isin}`} className="font-mono text-sm font-bold text-white hover:text-amber">{ticker}</Link>
+          {row && row.tickerD && <span className="ml-1 font-mono text-[11px] text-slate-500">({row.tickerO})</span>}
+          {matured && <span className="ml-2 rounded-full border border-amber/30 px-2 py-0.5 text-[11px] text-amber">vencida</span>}
           <span className="ml-2 text-xs text-slate-400">{row?.issuer ?? 'Emisor sin dato'}</span>
           <p className="mt-0.5 text-xs text-slate-300">
             {item.mode === 'usd' ? `USD ${fmtNum(item.amount)}` : fmtVn(item.amount)}
@@ -69,10 +73,17 @@ function ItemRow({ item, row, view, onChanged, onError }: { item: SavedItem; row
           </p>
           {skipped && <p className="mt-0.5 text-xs text-amber">Fuera del cálculo: {skipped.message}</p>}
         </div>
-        {!editing && (
+        {!editing && !confirming && (
           <div className="flex gap-2">
-            <button type="button" className="btn-ghost" disabled={busy} onClick={startEdit} aria-label={`Editar ${ticker}`}>Editar</button>
-            <button type="button" className="btn-ghost" disabled={busy} onClick={() => void remove()} aria-label={`Quitar ${ticker}`}>Quitar</button>
+            {!matured && <button type="button" className="btn-ghost" disabled={busy} onClick={startEdit} aria-label={`Editar ${ticker}`}>Editar</button>}
+            <button type="button" className="btn-ghost" disabled={busy} onClick={() => setConfirming(true)} aria-label={`Quitar ${ticker}`}>Quitar</button>
+          </div>
+        )}
+        {confirming && (
+          <div className="flex items-center gap-2" role="group" aria-label={`Confirmar quitar ${ticker}`}>
+            <span className="text-xs text-amber">¿Quitar?</span>
+            <button type="button" className="btn-ghost" disabled={busy} onClick={() => void remove()}>Sí, quitar</button>
+            <button type="button" className="btn-ghost" onClick={() => setConfirming(false)}>Cancelar</button>
           </div>
         )}
       </div>
@@ -189,7 +200,7 @@ export default function PortfolioBuilder({ id }: { id: string }) {
           <form onSubmit={(e) => void add(e)} className="space-y-4">
             {picked ? (
               <div className="flex flex-wrap items-center gap-3 text-sm text-slate-200">
-                <span>ON elegida: <strong className="font-mono text-white">{picked.tickerO}</strong> · {picked.issuer ?? 'Emisor sin dato'}</span>
+                <span>ON elegida: <strong className="font-mono text-white">{picked.tickerD ?? picked.tickerO}</strong> · {picked.issuer ?? 'Emisor sin dato'}</span>
                 <button type="button" className="btn-ghost" onClick={() => setPicked(null)}>Cambiar</button>
               </div>
             ) : (
@@ -204,7 +215,7 @@ export default function PortfolioBuilder({ id }: { id: string }) {
                     {matches.map((r) => (
                       <li key={r.isin}>
                         <button type="button" disabled={taken.has(r.isin)} onClick={() => setPicked(r)} className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-white/5 disabled:opacity-50">
-                          <span><span className="font-mono font-bold text-white">{r.tickerO}</span> <span className="text-slate-400">{r.issuer ?? ''}</span></span>
+                          <span><span className="font-mono font-bold text-white">{r.tickerD ?? r.tickerO}</span> <span className="text-slate-400">{r.issuer ?? ''}</span></span>
                           <span className="shrink-0 text-xs text-slate-400">{taken.has(r.isin) ? 'Ya está en la cartera' : `vence ${fmtDate(r.maturityDate)}`}</span>
                         </button>
                       </li>

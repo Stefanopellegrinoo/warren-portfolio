@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { analyzePortfolio, type PortfolioItem } from './on-portfolio-analytics'
+import { analyzePortfolio, plusOneYear, type PortfolioItem } from './on-portfolio-analytics'
 import { analyzeOn, type OnAnalysis, type OnInput, type TermsRow } from './on-analytics'
 import type { OverrideRow } from './on-terms'
 
@@ -240,6 +240,33 @@ describe('analyzePortfolio: refusals and warnings', () => {
 
   it('no sector breakdown is produced (the catalog has no sector data)', () => {
     expect(ok()).not.toHaveProperty('sectors')
+  })
+})
+
+describe('display tickers and horizon', () => {
+  it('positions and warnings lead with the D (dollar) ticker; the O ticker is secondary', () => {
+    const r = ok([{ isin: A, mode: 'vn', amount: 10_000 }, { isin: 'AR0000000003', mode: 'usd', amount: 1 }], [onA, make('AR0000000003', { est: 'Tasa Variable', tickerO: 'FLOAO', tickerD: 'FLOAD' }, [{ date: '2028-04-21', ren: 1, amo: 100 }], 100)])
+    expect(r.positions[0]).toMatchObject({ ticker: 'AAAAD', tickerO: 'AAAAO' })
+    expect(r.skipped[0].message).toContain('FLOAD')
+    expect(r.skipped[0].message).not.toContain('FLOAO')
+  })
+
+  it('falls back to the O ticker when the ON has no D line', () => {
+    const noD = make(A, { tickerO: 'NODLO', tickerD: null }, [{ date: '2028-04-21', ren: 3, amo: 100 }], 100)
+    expect(ok([{ isin: A, mode: 'vn', amount: 10_000 }], [noD]).positions[0].ticker).toBe('NODLO')
+  })
+
+  it('a matured ON is reported as vencida', () => {
+    const old = make(A, { maturityDate: '2026-04-21' }, [{ date: '2026-04-21', ren: 3, amo: 100 }], 100)
+    const r = run([{ isin: A, mode: 'vn', amount: 10_000 }], [old])
+    expect(r.skipped[0].reason).toBe('no-payments')
+    expect(r.skipped[0].message).toMatch(/vencida/i)
+  })
+
+  it('plusOneYear is calendar math: Feb 29 maps to Feb 28 and ordinary dates keep their day', () => {
+    expect(plusOneYear('2027-10-22')).toBe('2028-10-22')
+    expect(plusOneYear('2028-02-29')).toBe('2029-02-28')
+    expect(plusOneYear('2027-12-31')).toBe('2028-12-31')
   })
 })
 

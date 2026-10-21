@@ -39,3 +39,7 @@ The intended execution order is:
 008_link_cash_movements_to_transactions.sql
 ...
 ```
+
+## Test portfolios (040)
+
+Re-run the RLS/limits proof (throwaway local postgres:15, never touches Supabase; not run in CI): `scripts/test-portfolios-rls-proof.sh`.
