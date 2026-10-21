@@ -8,7 +8,7 @@ import CashSection from '@/components/ui/CashSection'
 import AddTransactionModal from '@/components/ui/AddTransactionModal'
 import ImportModal from '@/components/ui/ImportModal'
 import UnpricedNotice from '@/components/ui/UnpricedNotice'
-import ReconciliationBanner,{ type ReconciliationResult } from '@/components/ui/ReconciliationBanner'
+import ReconciliationBanner, { type ReconciliationResult } from '@/components/ui/ReconciliationBanner'
 import type { Position, ONPosition, PortfolioSummary } from '@/types'
 import { formatUSD, formatPct, cn, isMarketOpen } from '@/lib/utils'
 
