@@ -34,10 +34,18 @@ const on3 = make(H3, { tickerO: 'CCCCO', tickerD: 'CCCCD', tickerC: null }, [
   { date: '2026-10-23', ren: 3, amo: 0 }, { date: '2027-10-22', ren: 3, amo: 100 },
 ], 100, [ov(H3, 'record_offset_days', 5)], [{ kind: 'amendment', eventDate: '2026-09-01', note: null, sourceUrl: 'https://example.org/e', verifiedAt: null }])
 const onFl = make(FL, { tickerO: 'FLOO', tickerD: 'FLOD', tickerC: null, est: 'Tasa Variable' }, [{ date: '2028-04-21', ren: 1, amo: 100 }], 100)
-const onNp = make(NP, { tickerO: 'NPNO', tickerD: 'NPND', tickerC: null }, [{ date: '2027-04-22', ren: 3, amo: 100 }], null)
+const onNp = make(NP, { tickerO: 'NPNO', tickerD: 'NPND', tickerC: null, issuer: 'Emisor Sin Precio S.A.' }, [{ date: '2027-04-22', ren: 3, amo: 100 }], null)
 const onMa = make(MA, { tickerO: 'MATO', tickerD: 'MATD', tickerC: null }, [{ date: '2026-10-20', ren: 3, amo: 100 }], 100)
 const ALL = [on1, on2, on3, onFl, onNp, onMa]
-const build = (holdings: { ticker: string; quantity: number }[], analyses = ALL) => buildMyOnPortfolio({ holdings, analyses, today: TODAY })
+const build = (holdings: { ticker: string; quantity: number }[], analyses = ALL, ownPrices?: Record<string, number>) => buildMyOnPortfolio({ holdings, analyses, today: TODAY, ownPrices })
+// Independent effective-annual (ACT/365 from settlement) IRR by bisection: [pay date, amount] flows against a base value.
+const SETTLE = '2026-10-22'
+const handIrr = (flows: [string, number][], base: number): number => {
+  const pv = (y: number) => flows.reduce((s, [d, cf]) => s + cf / Math.pow(1 + y, (Date.parse(d) - Date.parse(SETTLE)) / 86_400_000 / 365), 0)
+  let lo = -0.5, hi = 2
+  for (let i = 0; i < 200; i++) { const mid = (lo + hi) / 2; if (pv(mid) > base) lo = mid; else hi = mid }
+  return ((lo + hi) / 2) * 100
+}
 const pos = (r: ReturnType<typeof build>, isin: string) => r.analysis.positions.find((p) => p.isin === isin)!
 
 describe('buildMyOnPortfolio: held semantics', () => {
@@ -63,10 +71,52 @@ describe('buildMyOnPortfolio: held semantics', () => {
     expect(r.analysis.warnings.map((w) => w.kind)).not.toContain('record-window')
   })
 
-  it('YTM of a single held ON equals its yield at the current price', () => {
-    const r = build([{ ticker: 'AAAAD', quantity: 100 }])
-    expect(pos(r, H1).ytmPct).toBeCloseTo(on1.row.ytmPct!, 6)
-    expect(r.analysis.ytmPct).toBeCloseTo(on1.row.ytmPct!, 4)
+  it('YTM of a single held ON matches an independent hand IRR at the current price', () => {
+    const r = build([{ ticker: 'AAAAD', quantity: 100 }]) // VN 10,000 at 100
+    const hand = handIrr([['2027-04-22', 300], ['2028-04-21', 10_300]], 10_000)
+    expect(pos(r, H1).ytmPct).toBeCloseTo(hand, 5)
+    expect(r.analysis.ytmPct).toBeCloseTo(hand, 5)
+  })
+
+  it('M1: the pooled TIR leaves out a coupon whose record date has passed (the price is already ex), yet the calendar keeps it', () => {
+    const r = build([{ ticker: 'AAAAD', quantity: 100 }, { ticker: 'CCCCD', quantity: 10 }])
+    const hand = handIrr([['2027-04-22', 300], ['2027-10-22', 1_030], ['2028-04-21', 10_300]], 11_000) // the 30 of 2026-10-23 is not in the pool
+    expect(r.analysis.ytmPct).toBeCloseTo(hand, 5)
+    const withIt = handIrr([['2026-10-23', 30], ['2027-04-22', 300], ['2027-10-22', 1_030], ['2028-04-21', 10_300]], 11_000)
+    expect(withIt).toBeGreaterThan(hand + 0.1) // the old (inclusive) pooling would have been visibly higher
+    expect(pos(r, H3).ytmPct).toBeCloseTo(handIrr([['2027-10-22', 1_030]], 1_000), 5) // consistent with the per-ON TIR
+    expect(r.analysis.payments.find((p) => p.payDate === '2026-10-23')).toMatchObject({ interest: 30 })
+    expect(r.analysis.totals.interest).toBeCloseTo(600 + 30 + 30, 9) // the 30 of 2026-10-23 still counts as income
+  })
+
+  it('a payment whose adjusted pay date is today is not projected (already credited)', () => {
+    const edge = make('AR0000000017', { tickerO: 'EDGO', tickerD: 'EDGD', tickerC: null }, [{ date: TODAY, ren: 3, amo: 0 }, { date: '2027-04-22', ren: 3, amo: 100 }], 100)
+    const r = build([{ ticker: 'EDGD', quantity: 10 }], [edge])
+    expect(r.analysis.payments.map((p) => p.payDate)).toEqual(['2027-04-22'])
+  })
+
+  it('M2: market value uses each held ticker at ITS OWN quote (like the dashboard); yields use the payment-plaza price', () => {
+    const r = build([{ ticker: 'AAAAD', quantity: 100 }, { ticker: 'AAAAC', quantity: 50 }], ALL, { AAAAD: 98, AAAAC: 101 })
+    expect(pos(r, H1).vn).toBe(15_000)
+    expect(pos(r, H1).cost).toBeCloseTo(10_000 * 0.98 + 5_000 * 1.01, 9) // 14,850, not 15,000 x plaza price
+    expect(r.analysis.totals.cost).toBeCloseTo(14_850, 9)
+    // yield: the plaza line is 100, so the TIR is the one of VN 15,000 bought at 100 (independent hand IRR)
+    const hand = handIrr([['2027-04-22', 450], ['2028-04-21', 15_450]], 15_000)
+    expect(pos(r, H1).ytmPct).toBeCloseTo(hand, 5)
+    expect(r.analysis.ytmPct).toBeCloseTo(hand, 5)
+  })
+
+  it('M2: a ticker without its own quote falls back to the payment-plaza price, with a warning', () => {
+    const r = build([{ ticker: 'AAAAD', quantity: 100 }, { ticker: 'BBBBD', quantity: 50 }], ALL, { AAAAD: 98 })
+    expect(pos(r, H2).cost).toBeCloseTo(4_900, 9) // plaza price 98 x 5,000
+    expect(r.analysis.warnings.some((w) => w.kind === 'price-fallback' && w.isin === H2 && w.message.includes('cotización propia'))).toBe(true)
+    expect(r.analysis.warnings.some((w) => w.kind === 'price-fallback' && w.isin === H1)).toBe(false)
+  })
+
+  it('unpriced holdings are left out of the issuer and plaza concentration', () => {
+    const r = build([{ ticker: 'NPND', quantity: 10 }, { ticker: 'AAAAD', quantity: 100 }])
+    expect(r.analysis.plazas.reduce((s, p) => s + p.costPct, 0)).toBeCloseTo(100, 9)
+    expect(r.analysis.issuers).toHaveLength(1)
   })
 
   it('monthly calendar, annual totals and ladder come from the held flows by adjusted pay date', () => {
@@ -104,7 +154,7 @@ describe('buildMyOnPortfolio: mapping and warnings', () => {
     expect(r.analysis.payments.some((p) => p.isin === FL)).toBe(false)
     expect(r.analysis.warnings.filter((w) => w.isin === FL).map((w) => w.kind)).toEqual(['floating'])
     // the pooled YTM ignores it: same as the fixed ON alone
-    expect(r.analysis.ytmPct).toBeCloseTo(on1.row.ytmPct!, 4)
+    expect(r.analysis.ytmPct).toBeCloseTo(handIrr([['2027-04-22', 300], ['2028-04-21', 10_300]], 10_000), 5)
   })
 
   it('no price: payments are still projected, but there is no market value or yield, and it is warned', () => {

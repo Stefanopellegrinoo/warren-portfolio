@@ -177,7 +177,7 @@ export interface HeldPayment {
   interest: number
   principal: number
   total: number
-  recordPassed: boolean // the record date is already behind us but the payment is not: the holder still collects it
+  recordPassed: boolean // a buyer today would not get this coupon (record date behind us, same rule as the yield); the holder still collects it
 }
 
 export type HeldResult =
@@ -207,14 +207,15 @@ export function simulateHeld({ analysis, vn, today }: { analysis: OnAnalysis; vn
   const settle = settlementDate(today)
   const flows = flowsOf(analysis)
   const floating = row.rateType === 'floating'
-  const live = flows.filter((f) => f.payDate > today)
+  // A payment due TODAY is not projected: it is treated as already credited.
+  const live = flows.map((f, i) => ({ f, i })).filter(({ f }) => f.payDate > today)
   if (live.length === 0) return { ok: false, reason: 'no-payments', message: 'La ON está vencida: ya no tiene pagos futuros' }
 
   const pricePct = row.price !== null && row.price > 0 ? row.price : null
-  const payments: HeldPayment[] = floating ? [] : live.map((f) => {
+  const payments: HeldPayment[] = floating ? [] : live.map(({ f, i }) => {
     const interest = (vn * f.couponPct) / 100
     const principal = (vn * f.amortPct) / 100
-    return { date: f.date, payDate: f.payDate, interest, principal, total: interest + principal, recordPassed: interest > 0 && f.recordDate < today }
+    return { date: f.date, payDate: f.payDate, interest, principal, total: interest + principal, recordPassed: interest > 0 && isExCoupon(flows, i, settle) }
   })
   const priced = pricePct !== null && !floating
   const y = priced ? ytm(pricePct, flows, settle) : null

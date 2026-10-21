@@ -83,10 +83,10 @@ export default function PortfolioResults({ analysis: a, held = false }: { analys
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Stat label={held ? 'Valor de mercado' : 'Costo total'} hint={held ? 'Al precio actual (sucio), solo ONs con precio' : 'Precio sucio: incluye los intereses devengados'}>{usd(a.totals.cost)}</Stat>
+            <Stat label={held ? 'Valor de mercado' : 'Costo total'} hint={held ? 'Cada ticker a su propia cotización (igual que el dashboard), solo ONs con precio' : 'Precio sucio: incluye los intereses devengados'}>{usd(a.totals.cost)}</Stat>
             <Stat label="Total a cobrar" hint={`Intereses ${usd(a.totals.interest)} · capital ${usd(a.totals.principal)}`}>{usd(a.totals.collected)}</Stat>
             {!held && <Stat label="Ganancia vs. costo" hint="Sin impuestos ni reinversión">{usd(a.totals.profit)}</Stat>}
-            <Stat label="TIR de la cartera" hint={`Flujos combinados contra ${held ? 'el valor de mercado' : 'el costo total'} (no es un promedio de TIRs). Efectiva anual.`}>{fmtPct(a.ytmPct)}</Stat>
+            <Stat label="TIR de la cartera" hint={held ? 'TIR calculada con el precio de la línea de pago (cable/MEP). Flujos combinados, no un promedio de TIRs. Efectiva anual.' : 'Flujos combinados contra el costo total (no es un promedio de TIRs). Efectiva anual.'}>{fmtPct(a.ytmPct)}</Stat>
             <Stat label="Duración modificada" hint="Ponderada por valor de mercado">{a.mdYears === null ? '—' : `${fmtNum(a.mdYears)} años`}</Stat>
             <Stat label="Vida promedio" hint="Plazo medio de devolución del capital">{a.walYears === null ? '—' : `${fmtNum(a.walYears)} años`}</Stat>
             <Stat label="Intereses próximos 12 meses" hint={`Con capital: ${usd(a.next12m.total)}`}>{usd(a.next12m.interest)}</Stat>

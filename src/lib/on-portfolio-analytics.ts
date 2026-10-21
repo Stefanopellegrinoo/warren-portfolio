@@ -44,6 +44,7 @@ export interface Position {
   ytwKind: 'maturity' | 'call' | null
   collected: number
   priced: boolean // false: held ON without a price (no market value, no yield)
+  yieldValue?: number | null // held: value at the payment-plaza price line, the base the TIR is computed against (cost is the shown market value)
   nextPayDate: string | null // adjusted pay date of the first projected payment
   nextPayAmount: number | null
 }
@@ -53,7 +54,7 @@ export interface YearRow { year: number; interest: number; principal: number; to
 export interface LadderRow { year: number; principal: number; pct: number }
 export interface IssuerRow { name: string; cost: number; pct: number }
 export interface PlazaRow { plaza: Plaza | null; cost: number; costPct: number; collected: number }
-export interface PortfolioPayment { isin: string; ticker: string; date: string; payDate: string; interest: number; principal: number; total: number }
+export interface PortfolioPayment { isin: string; ticker: string; date: string; payDate: string; interest: number; principal: number; total: number; exForBuyer?: boolean }
 
 export interface PortfolioAnalysis {
   empty: boolean
@@ -235,21 +236,22 @@ export function aggregate({ positions, payments, skipped, warnings, settle, toda
   const next12mPrincipal = inYear.reduce((s, p) => s + p.principal, 0)
 
   // Pooled yield: only ONs with a price and projected flows (a held floating or unpriced ON has no flows to match against its value).
-  const yielding = new Set(weighted.filter((p) => p.priced && payments.some((x) => x.isin === p.isin)).map((p) => p.isin))
-  const yieldBase = weighted.filter((p) => yielding.has(p.isin)).reduce((s, p) => s + p.cost, 0)
-  const y = yieldBase > 0 ? ytm(100, pooled(payments.filter((p) => yielding.has(p.isin)), settle, yieldBase, (p) => p.total), settle) : null
+  const yielding = new Set(weighted.filter((p) => p.priced && (p.yieldValue ?? p.cost) > 0 && payments.some((x) => x.isin === p.isin)).map((p) => p.isin))
+  // A coupon whose record date has passed is already out of the price, so it is not in the pool (as in the per-ON TIR); it stays in the calendar.
+  const yieldBase = weighted.filter((p) => yielding.has(p.isin)).reduce((s, p) => s + (p.yieldValue ?? p.cost), 0)
+  const y = yieldBase > 0 ? ytm(100, pooled(payments.filter((p) => yielding.has(p.isin)), settle, yieldBase, (p) => p.total - (p.exForBuyer ? p.interest : 0)), settle) : null
   const mds = weighted.filter((p) => p.mdYears !== null)
   const mdCost = mds.reduce((s, p) => s + p.cost, 0)
 
   const issuerCost = new Map<string, number>()
-  for (const p of weighted) {
+  for (const p of weighted.filter((x) => x.cost > 0)) {
     const name = p.issuer?.trim() || NO_ISSUER
     issuerCost.set(name, (issuerCost.get(name) ?? 0) + p.cost)
   }
   const issuers: IssuerRow[] = [...issuerCost.entries()].map(([name, c]) => ({ name, cost: c, pct: cost > 0 ? (c / cost) * 100 : 0 })).sort((a, b) => b.cost - a.cost)
 
   const plazaAcc = new Map<Plaza | null, { cost: number; collected: number }>()
-  for (const p of weighted) {
+  for (const p of weighted.filter((x) => x.cost > 0)) {
     const cur = plazaAcc.get(p.plaza) ?? { cost: 0, collected: 0 }
     plazaAcc.set(p.plaza, { cost: cur.cost + p.cost, collected: cur.collected + p.collected })
   }

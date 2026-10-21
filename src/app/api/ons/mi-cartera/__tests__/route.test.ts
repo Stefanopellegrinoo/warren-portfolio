@@ -4,12 +4,13 @@ import { NextResponse } from 'next/server'
 const mockRequireUser = vi.fn()
 vi.mock('@/lib/api-auth', () => ({ requireUser: () => mockRequireUser(), isAuthFailure: (r: any) => 'error' in r }))
 const mockLoad = vi.fn()
-vi.mock('@/lib/on-catalog', () => ({ loadOnAnalyses: (...a: unknown[]) => mockLoad(...a) }))
+const mockFeed = vi.fn()
+vi.mock('@/lib/on-catalog', () => ({ loadOnAnalyses: (...a: unknown[]) => mockLoad(...a), getOnPrices: () => mockFeed() }))
 const mockHoldings = vi.fn()
 vi.mock('@/lib/on-holdings', () => ({ loadOnHoldings: (...a: unknown[]) => mockHoldings(...a) }))
 
 const { GET } = await import('../route')
-beforeEach(() => { mockRequireUser.mockReset(); mockLoad.mockReset(); mockHoldings.mockReset() })
+beforeEach(() => { mockRequireUser.mockReset(); mockLoad.mockReset(); mockHoldings.mockReset(); mockFeed.mockReset(); mockFeed.mockResolvedValue(null) })
 
 describe('GET /api/ons/mi-cartera', () => {
   it('requires a session', async () => {
