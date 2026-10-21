@@ -200,7 +200,8 @@ describe('liveness is decided on the unadjusted date', () => {
     const a = analyze({ dirtyPx: 105, flows, settle: '2027-01-01', dayCount: 'ACT/365', issueDate: '2026-01-02', couponPct: 10 })
     expect(a.ok).toBe(true)
     if (a.ok) expect(a.accrued).toBeGreaterThan(0)
-    expect(ytm(105, flows, '2027-01-01')).not.toBeNull()
+    // t1 = 0 (cf 10), t2 = 366/365 (cf 110): 105 = 10 + 110/(1+y)^(366/365)
+    expect(ytm(105, flows, '2027-01-01')).toBeCloseTo(Math.pow(110 / 95, 365 / 366) - 1, 9)
   })
 })
 
@@ -220,5 +221,17 @@ describe('analyze failure reasons and risk accuracy', () => {
     const r = risk(P(y), flows, SETTLE)!
     expect(r.modified).toBeCloseTo(-(P(y + h) - P(y - h)) / (2 * h * P(y)), 5)
     expect(r.convexity).toBeCloseTo((P(y + h) + P(y - h) - 2 * P(y)) / (h * h * P(y)), 3)
+  })
+})
+
+describe('final payment is decided by residual, not list position', () => {
+  it('a truncated list from a longer schedule keeps F2 ex-coupon inside its record window', () => {
+    const truncated = [
+      flow('2026-09-10', 3.6, 0, 100, { recordDate: '2026-08-26' }),
+      flow('2027-03-10', 3.6, 33, 100, { recordDate: '2027-02-23' }), // amortizes 33 of 100: not closing
+    ]
+    expect(accrued(truncated, '2027-02-24', 'ACT/365', '2025-12-10')).toBeLessThan(0)
+    const noCoupon = truncated.map((f, i) => (i === 1 ? { ...f, couponPct: 0 } : f))
+    expect(ytm(30, truncated, '2027-02-24')).toBeCloseTo(ytm(30, noCoupon, '2027-02-24')!, 12)
   })
 })

@@ -18,9 +18,13 @@ interface Cash {
 // the coupon due at maturity/redemption goes to whoever is owed the principal
 // (Cresud Clase L prospectus, "Pago de Capital e Intereses"). So a coupon is
 // ex only when it is not the last flow and settle is past its record date; the
-// amortization on that date is kept.
+// amortization on that date is kept. "Closing" means the flow fully redeems
+// the residual (not list position), so a truncated schedule is not misread.
+// Callers should pass the full live schedule to ytm/risk/accrued/wal.
 function isExCoupon(flows: Flow[], i: number, settle: string): boolean {
-  return i < flows.length - 1 && settle > flows[i].recordDate
+  const f = flows[i]
+  const closes = f.residualBeforePct - f.amortPct <= 1e-9
+  return !closes && settle > f.recordDate
 }
 
 function liveCash(flows: Flow[], settle: string): Cash[] {

@@ -2,7 +2,7 @@
 // spread over the sovereign curve. Pure; change-of-control and tax calls are
 // contingent and shown as text only, so they never reach this module.
 import type { Bdc, DayCount, Flow } from './bond-math'
-import { arCalendar, type Calendar } from './ar-calendar'
+import type { Calendar } from './ar-calendar'
 import { accrued, ytm } from './bond-yield'
 
 export interface CallWindow {
@@ -28,9 +28,9 @@ export function yieldToWorst(
   settle: string,
   dc: DayCount,
   issueDate: string,
-  opts: { bdc?: Bdc; cal?: Calendar } = {}
+  opts: { bdc: Bdc; cal: Calendar }
 ): Worst | null {
-  const { bdc = 'following', cal = arCalendar } = opts
+  const { bdc, cal } = opts
   const maturity = ytm(dirtyPx, flows, settle)
   if (maturity === null) return null
   const lastDate = flows[flows.length - 1].date
@@ -54,7 +54,9 @@ export function yieldToWorst(
         recordDate: date,
         couponPct: hit?.couponPct ?? accrued(flows, date, dc, issueDate, true),
         amortPct: (w.pricePct * residual) / 100,
-        residualBeforePct: residual,
+        // Fully redeems: residual before = redemption amount, so the "closing
+        // payment" rule (never ex-coupon) is uniform with maturity.
+        residualBeforePct: (w.pricePct * residual) / 100,
         couponSource: hit?.couponSource ?? 'computed',
       }
       const y = ytm(dirtyPx, [...before, call], settle)
