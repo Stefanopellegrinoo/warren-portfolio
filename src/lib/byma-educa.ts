@@ -8,10 +8,22 @@ export class BymaParseError extends Error {}
 
 export const MIN_VALID_ROWS = 200
 export const MAX_INVALID_RATIO = 0.1
+export const MIN_SOV_ROWS = 5
+// Keys whose absence (undefined, not null) means BYMA changed the payload shape.
+export const CRITICAL_KEYS = ['cup', 'vr', 'ren', 'amo', 'fv', 'isin', 'px'] as const
 
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
-const num = z.number().finite()
-const flowPair = z.tuple([isoDate, num])
+export const isRealDate = (s: string): boolean => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false
+  const t = Date.parse(`${s}T00:00:00Z`)
+  return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === s
+}
+const isoDate = z.string().refine(isRealDate, 'not a real ISO date')
+// Bounded so a value never overflows the NUMERIC column it lands in (a bad row is
+// skipped instead of aborting the whole RPC). Limits sit under each column's range.
+const bounded = (max: number) => z.number().finite().gt(-max).lt(max)
+const num = bounded(1e6) // ytm, ai, dm, residual, adtv checks (NUMERIC(10,4))
+const flowNum = bounded(1e8) // ren, amo (NUMERIC(14,6))
+const flowPair = z.tuple([isoDate, flowNum])
 
 const RowSchema = z.object({
   tk: z.string().min(1),
@@ -25,16 +37,16 @@ const RowSchema = z.object({
   fc: z.string().nullish(),
   fe: isoDate,
   fv: isoDate,
-  cup: num.nullish(), // fraction (0.0725 = 7.25%); null for zero-coupon
+  cup: bounded(1e4).nullish(), // fraction (0.0725 = 7.25%); null for zero-coupon
   vr: num.nullish(),
-  mto: num.nullish(),
-  px: num.nullish(),
+  mto: bounded(1e17).nullish(),
+  px: bounded(1e9).nullish(),
   ytm: num.nullish(),
   ai: num.nullish(),
   dm: num.nullish(),
   ren: z.array(flowPair),
   amo: z.array(flowPair),
-  adtvp: z.array(num.nullable()).nullish(),
+  adtvp: z.array(bounded(1e17).nullable()).nullish(),
   adtve: z.array(z.string()).nullish(),
 })
 
@@ -42,7 +54,7 @@ const SovSchema = z.object({
   tk: z.string().min(1),
   isin: z.string().nullish(),
   ley: z.enum(['ARG', 'NY']),
-  px: num.nullish(),
+  px: bounded(1e9).nullish(),
   ytm: num,
   dm: num,
 })
@@ -97,6 +109,7 @@ export interface BymaResult {
   ons: OnRow[]
   skipped: { tk: string; reason: string }[]
   sov: SovRow[]
+  sovSkipped: { tk: string; reason: string }[]
   sovMissing: boolean
 }
 
@@ -138,12 +151,11 @@ function line(arr: (string | number | null)[] | null | undefined, i: number): nu
 
 function toOn(r: z.infer<typeof RowSchema>, settle: string): OnRow {
   const t = r.adtve ?? []
-  const stem = r.tk.slice(0, -1)
   return {
     isin: r.isin,
     tickerO: t[0] ?? r.tk,
-    tickerD: t[1] ?? `${stem}D`,
-    tickerC: t[2] ?? `${stem}C`,
+    tickerD: t[1] ?? null,
+    tickerC: t[2] ?? null,
     issuer: r.em ?? null,
     description: r.de ?? null,
     law: r.ley,
@@ -176,16 +188,33 @@ function mergeFlows(ren: [string, number][], amo: [string, number][]): RawFlowRo
   return [...by.values()].sort((a, b) => a.date.localeCompare(b.date))
 }
 
-function parseSov(tp: unknown): SovRow[] | null {
+function parseSov(tp: unknown): { rows: SovRow[]; skipped: BymaResult['sovSkipped'] } | null {
   const rows = (tp as { rows?: unknown } | null | undefined)?.rows
   if (!Array.isArray(rows)) return null
   const out: SovRow[] = []
+  const skipped: BymaResult['sovSkipped'] = []
+  const seen = new Set<string>()
   for (const r of rows) {
     if (r?.seg !== 'sob' || r?.me !== 'USD') continue
     const p = SovSchema.safeParse(r)
-    if (p.success) out.push({ ticker: p.data.tk, isin: p.data.isin ?? null, law: p.data.ley, px: p.data.px ?? null, ytm: p.data.ytm, dm: p.data.dm })
+    if (!p.success) continue
+    if (seen.has(p.data.tk)) {
+      skipped.push({ tk: p.data.tk, reason: 'duplicate ticker' })
+      continue
+    }
+    seen.add(p.data.tk)
+    out.push({ ticker: p.data.tk, isin: p.data.isin ?? null, law: p.data.ley, px: p.data.px ?? null, ytm: p.data.ytm, dm: p.data.dm })
   }
-  return out
+  return { rows: out, skipped }
+}
+
+function checkSchemaDrift(rows: unknown[]): void {
+  for (const key of CRITICAL_KEYS) {
+    const missing = rows.filter((r) => (r as Record<string, unknown> | null)?.[key] === undefined).length
+    if (missing / rows.length > MAX_INVALID_RATIO) {
+      throw new BymaParseError(`BYMA payload aborted: schema drift, key "${key}" missing in ${missing} of ${rows.length} rows`)
+    }
+  }
 }
 
 export function parseBymaPayload(payload: unknown): BymaResult {
@@ -196,12 +225,18 @@ export function parseBymaPayload(payload: unknown): BymaResult {
   const asOf = on.fecha as string
   const settle = isoDate.safeParse(on.fecha_liq).success ? (on.fecha_liq as string) : addDays(asOf, 1)
 
+  if (on.rows.length === 0) throw new BymaParseError('BYMA payload aborted: no rows')
+  checkSchemaDrift(on.rows)
   const ons: OnRow[] = []
   const skipped: BymaResult['skipped'] = []
+  const seen = new Set<string>()
   for (const row of on.rows) {
     const p = RowSchema.safeParse(row)
-    if (p.success) ons.push(toOn(p.data, settle))
-    else skipped.push({ tk: String(row?.tk ?? '?'), reason: p.error.issues[0] ? `${p.error.issues[0].path.join('.')}: ${p.error.issues[0].message}` : 'invalid row' })
+    if (p.success && seen.has(p.data.isin)) skipped.push({ tk: p.data.tk, reason: `duplicate isin ${p.data.isin}` })
+    else if (p.success) {
+      seen.add(p.data.isin)
+      ons.push(toOn(p.data, settle))
+    } else skipped.push({ tk: String(row?.tk ?? '?'), reason: p.error.issues[0] ? `${p.error.issues[0].path.join('.')}: ${p.error.issues[0].message}` : 'invalid row' })
   }
   if (skipped.length / on.rows.length > MAX_INVALID_RATIO) {
     throw new BymaParseError(`BYMA payload aborted: ${skipped.length} of ${on.rows.length} rows invalid (more than 10%)`)
@@ -209,6 +244,8 @@ export function parseBymaPayload(payload: unknown): BymaResult {
   if (ons.length < MIN_VALID_ROWS) {
     throw new BymaParseError(`BYMA payload aborted: only ${ons.length} valid rows (need at least ${MIN_VALID_ROWS})`)
   }
-  const sov = parseSov((payload as { tp?: unknown }).tp)
-  return { asOf, settle, ons, skipped, sov: sov ?? [], sovMissing: sov === null || sov.length === 0 }
+  const parsed = parseSov((payload as { tp?: unknown }).tp)
+  // Too few rows is treated like a missing section: the worker keeps the last-good curve.
+  const sovOk = parsed !== null && parsed.rows.length >= MIN_SOV_ROWS
+  return { asOf, settle, ons, skipped, sov: sovOk ? parsed.rows : [], sovSkipped: parsed?.skipped ?? [], sovMissing: !sovOk }
 }

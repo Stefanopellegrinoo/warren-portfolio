@@ -20,6 +20,9 @@ const rows = (n = 228): Row[] => base.slice(0, n).map(mk)
 const sov = (): Row[] => [
   { tk: 'GD30', seg: 'sob', ley: 'NY', me: 'USD', isin: 'ARARGE3209S6', px: 80, ytm: 9.5, dm: 2.1 },
   { tk: 'AL30', seg: 'sob', ley: 'ARG', me: 'USD', isin: 'ARARGE3209S7', px: 79, ytm: 9.7, dm: 2.0 },
+  { tk: 'GD35', seg: 'sob', ley: 'NY', me: 'USD', isin: 'ARARGE3209S9', px: 70, ytm: 10, dm: 5 },
+  { tk: 'GD38', seg: 'sob', ley: 'NY', me: 'USD', isin: 'ARARGE3209T0', px: 72, ytm: 10.2, dm: 6 },
+  { tk: 'GD41', seg: 'sob', ley: 'NY', me: 'USD', isin: 'ARARGE3209T1', px: 68, ytm: 10.4, dm: 7 },
   { tk: 'X', seg: 'ars', ley: 'ARG', me: 'ARS', isin: 'ARARGE3209S8', px: 1, ytm: 1, dm: 1 },
 ]
 const payload = (o: { rows?: Row[]; tp?: unknown } = {}) => ({
@@ -47,7 +50,7 @@ describe('parseBymaPayload', () => {
     expect(r.settle).toBe('2026-10-21')
     expect(r.ons).toHaveLength(228)
     expect(r.skipped).toEqual([])
-    expect(r.sov.map((s) => s.ticker)).toEqual(['GD30', 'AL30'])
+    expect(r.sov.map((s) => s.ticker)).toEqual(['GD30', 'AL30', 'GD35', 'GD38', 'GD41'])
     expect(r.sov[0]).toMatchObject({ law: 'NY', ytm: 9.5, dm: 2.1 })
     expect(r.sovMissing).toBe(false)
   })
@@ -118,6 +121,69 @@ describe('parseBymaPayload', () => {
   it('a broken tp does not abort the ON data', () => {
     const r = parseBymaPayload(payload({ tp: { rows: 'x' } }))
     expect(r.sovMissing).toBe(true)
+  })
+})
+
+describe('hardening', () => {
+  it('aborts on schema drift: a critical key absent from every row', () => {
+    const r = rows().map((x) => {
+      const { vr: _vr, ...rest } = x
+      return rest
+    })
+    expect(() => parseBymaPayload(payload({ rows: r }))).toThrow(/schema drift.*vr/i)
+  })
+  it('aborts on schema drift above 10% of rows, tolerates a few', () => {
+    const drop = (n: number) => rows().map((x, i) => (i < n ? (({ cup: _c, ...rest }) => rest)(x) : x))
+    expect(() => parseBymaPayload(payload({ rows: drop(30) }))).toThrow(/schema drift.*cup/i)
+    expect(parseBymaPayload(payload({ rows: drop(3) })).ons.length).toBe(228)
+  })
+  it('a null cup (zero-coupon) is not drift', () => {
+    const r = rows().map((x) => ({ ...x, cup: null }))
+    expect(parseBymaPayload(payload({ rows: r })).ons).toHaveLength(228)
+  })
+  it('dedupes by isin keeping the first and reporting the duplicate', () => {
+    const r = [...rows(), { ...rows()[0], tk: 'DUPEO' }]
+    const res = parseBymaPayload(payload({ rows: r }))
+    expect(res.ons).toHaveLength(228)
+    expect(res.ons[0].tickerO).toBe(rows()[0].tk)
+    expect(res.skipped).toEqual([{ tk: 'DUPEO', reason: expect.stringMatching(/duplicate isin/i) }])
+  })
+  it('dedupes sovereign rows by ticker', () => {
+    const tp = { rows: [...sov(), { ...sov()[0], ytm: 1 }] }
+    const res = parseBymaPayload(payload({ tp }))
+    expect(res.sov.filter((x) => x.ticker === 'GD30')).toHaveLength(1)
+    expect(res.sov.find((x) => x.ticker === 'GD30')!.ytm).toBe(9.5)
+    expect(res.sovSkipped).toEqual([{ tk: 'GD30', reason: expect.stringMatching(/duplicate/i) }])
+  })
+  it('fewer than 5 sovereign rows keeps the last-good curve', () => {
+    const tp = { rows: sov().slice(0, 4) }
+    const res = parseBymaPayload(payload({ tp }))
+    expect(res.sovMissing).toBe(true)
+    expect(res.sov).toEqual([])
+  })
+  it('rejects impossible calendar dates', () => {
+    const r = rows()
+    r[0] = { ...r[0], fv: '2026-13-45' }
+    r[1] = { ...r[1], fe: '2026-02-30' }
+    const res = parseBymaPayload(payload({ rows: r }))
+    expect(res.skipped.map((s) => s.tk)).toEqual([r[0].tk, r[1].tk])
+  })
+  it('skips rows whose numbers overflow the NUMERIC columns', () => {
+    const r = rows()
+    r[0] = { ...r[0], px: 1e12 }
+    r[1] = { ...r[1], cup: 50_000 }
+    r[2] = { ...r[2], ren: [['2027-01-01', 1e9]] }
+    const res = parseBymaPayload(payload({ rows: r }))
+    expect(res.skipped).toHaveLength(3)
+    expect(res.ons).toHaveLength(225)
+  })
+  it('does not fabricate D/C tickers when adtve is missing', () => {
+    const r = rows()
+    r[0] = { ...r[0], adtve: null }
+    const o = parseBymaPayload(payload({ rows: r })).ons[0]
+    expect(o.tickerO).toBe(r[0].tk)
+    expect(o.tickerD).toBeNull()
+    expect(o.tickerC).toBeNull()
   })
 })
 
