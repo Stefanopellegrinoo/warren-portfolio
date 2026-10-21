@@ -70,3 +70,5 @@ export function lineLabel(line: 'D' | 'C' | 'O' | null, ccl?: { rate: number } |
   if (line === 'O') return `implícito · línea O ÷ CCL${ccl ? ` ($${fmtNum(ccl.rate)})` : ''}`
   return ''
 }
+
+export const TAX_COPY = 'ONs de oferta pública: exentas de Ganancias para personas humanas, art. 36 Ley 23.576; consultá a tu contador. Warren no calcula impuestos.'

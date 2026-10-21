@@ -2,11 +2,12 @@ import Link from 'next/link'
 import type { ReactNode } from 'react'
 import OnPriceChart from './OnPriceChart'
 import OnSchedule from './OnSchedule'
+import OnSimulator from './OnSimulator'
 import OnSourceChip from './OnSourceChip'
 import type { OnAnalysis } from '@/lib/on-analytics'
 import type { PricePoint } from '@/lib/on-catalog'
 import type { F } from '@/lib/on-terms'
-import { lineLabel, eventLabel, fmtBp, fmtDate, fmtNum, fmtPct, fmtVn, plazaCopy, rateTypeLabel, safeHref } from '@/lib/on-format'
+import { lineLabel, eventLabel, TAX_COPY, fmtBp, fmtDate, fmtNum, fmtPct, fmtVn, plazaCopy, rateTypeLabel, safeHref } from '@/lib/on-format'
 import { formatAge } from '@/lib/utils'
 
 interface Props {
@@ -19,7 +20,6 @@ interface Props {
 
 const SRC_WARREN = 'Warren (cálculo propio)'
 const BDC_LABEL = { following: 'Siguiente día hábil', modified_following: 'Siguiente día hábil modificado', preceding: 'Día hábil anterior' }
-const TAX_COPY = 'ONs de oferta pública: exentas de Ganancias para personas humanas, art. 36 Ley 23.576; consultá a tu contador. Warren no calcula impuestos.'
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -162,6 +162,8 @@ export default function OnDetail({ analysis, history, asOf, stale, prices }: Pro
       <Section title="Cronograma de pagos">
         <OnSchedule schedule={detail.schedule} floating={floating} />
       </Section>
+
+      <OnSimulator analysis={analysis} />
 
       <Section title="Condiciones de emisión">
         <dl>
