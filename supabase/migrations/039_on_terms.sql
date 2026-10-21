@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS on_yield_checks (
   terms_ytm      NUMERIC(10,4),
   terms_diff_bp  NUMERIC(10,2),
   flagged        BOOLEAN NOT NULL DEFAULT FALSE,
+  skip_reason    TEXT,
   PRIMARY KEY (isin, as_of)
 );
 
@@ -211,9 +212,9 @@ BEGIN
   FROM jsonb_populate_recordset(NULL::on_cashflows, p_flows) f;
 
   INSERT INTO on_yield_checks (
-    isin, as_of, byma_px, byma_ytm, method_ytm, method_diff_bp, terms_ytm, terms_diff_bp, flagged
+    isin, as_of, byma_px, byma_ytm, method_ytm, method_diff_bp, terms_ytm, terms_diff_bp, flagged, skip_reason
   )
-  SELECT c.isin, p_as_of, c.byma_px, c.byma_ytm, c.method_ytm, c.method_diff_bp, c.terms_ytm, c.terms_diff_bp, c.flagged
+  SELECT c.isin, p_as_of, c.byma_px, c.byma_ytm, c.method_ytm, c.method_diff_bp, c.terms_ytm, c.terms_diff_bp, c.flagged, c.skip_reason
   FROM jsonb_populate_recordset(NULL::on_yield_checks, p_checks) c
   ON CONFLICT (isin, as_of) DO UPDATE SET
     byma_px = EXCLUDED.byma_px,
@@ -222,7 +223,8 @@ BEGIN
     method_diff_bp = EXCLUDED.method_diff_bp,
     terms_ytm = EXCLUDED.terms_ytm,
     terms_diff_bp = EXCLUDED.terms_diff_bp,
-    flagged = EXCLUDED.flagged;
+    flagged = EXCLUDED.flagged,
+    skip_reason = EXCLUDED.skip_reason;
 
   IF p_sov IS NOT NULL AND jsonb_typeof(p_sov) = 'array' AND jsonb_array_length(p_sov) >= 5 THEN
     DELETE FROM on_sov_curve WHERE TRUE;

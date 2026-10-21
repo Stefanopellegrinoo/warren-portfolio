@@ -44,7 +44,8 @@ describe('039_on_terms.sql', () => {
   })
 
   it('yield checks carry method and terms diffs', () => {
-    for (const c of ['method_ytm', 'method_diff_bp', 'terms_ytm', 'terms_diff_bp']) expect(sql).toContain(c)
+    for (const c of ['method_ytm', 'method_diff_bp', 'terms_ytm', 'terms_diff_bp', 'skip_reason']) expect(sql).toContain(c)
+    expect(sql).toMatch(/c\.flagged, c\.skip_reason/)
   })
 
   it('seeds only public ISINs and every seed row has a source URL', () => {
