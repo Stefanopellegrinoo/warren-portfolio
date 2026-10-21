@@ -202,7 +202,7 @@ export async function scheduleTickerAuditJob(pattern = '0 3 * * 6') {
  * Schedule the nightly ON terms ingest (weekdays 21:30 UTC = 18:30 ART, after the
  * BYMA Educa daily report). Replaces only its own previous schedule.
  */
-export async function scheduleOnTermsIngestJob(pattern = '30 21 * * 1-5') {
+export async function scheduleOnTermsIngestJob(pattern = '30 23 * * 1-5') {
   const queue = getPriceQueue()
 
   const repeatable = await queue.getRepeatableJobs()

@@ -92,18 +92,21 @@ describe('scheduleOnTermsIngestJob', () => {
     mockEnsureRedisConnected.mockResolvedValue(true)
   })
 
-  it('adds a weekday 21:30 UTC repeatable that cleans up only its own previous schedule', async () => {
+  it('adds a weekday 23:30 UTC repeatable that removes every previous on-terms-ingest schedule, whatever its cron', async () => {
     mockGetRepeatableJobs.mockResolvedValueOnce([
       { name: ON_TERMS_JOB_NAME, key: 'mine' },
+      { name: ON_TERMS_JOB_NAME, key: 'legacy-2130', pattern: '30 21 * * 1-5' },
       { name: 'daily-snapshot', key: 'other' },
     ])
     await scheduleOnTermsIngestJob()
-    expect(mockRemoveRepeatableByKey).toHaveBeenCalledTimes(1)
+    expect(mockRemoveRepeatableByKey).toHaveBeenCalledTimes(2)
     expect(mockRemoveRepeatableByKey).toHaveBeenCalledWith('mine')
+    expect(mockRemoveRepeatableByKey).toHaveBeenCalledWith('legacy-2130')
+    expect(mockRemoveRepeatableByKey).not.toHaveBeenCalledWith('other')
     expect(mockAdd).toHaveBeenCalledWith(
       ON_TERMS_JOB_NAME,
       {},
-      expect.objectContaining({ repeat: { pattern: '30 21 * * 1-5' }, removeOnComplete: true })
+      expect.objectContaining({ repeat: { pattern: '30 23 * * 1-5' }, removeOnComplete: true })
     )
   })
 })
