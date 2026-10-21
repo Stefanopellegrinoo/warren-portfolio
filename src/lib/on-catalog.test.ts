@@ -1,5 +1,7 @@
-import { describe, it, expect } from 'vitest'
-import { loadOnAnalyses, loadPriceHistory, type PriceFeed } from './on-catalog'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { loadOnAnalyses, loadPriceHistory, getOnPrices, resetOnCaches, type PriceFeed } from './on-catalog'
+
+beforeEach(() => resetOnCaches())
 
 const NOW = new Date('2026-10-21T15:00:00Z') // Wed; settle = Thu 2026-10-22
 const PAGE = 1000
@@ -166,5 +168,63 @@ describe('loadPriceHistory', () => {
     expect(await loadPriceHistory(fakeSupabase({}), null)).toEqual([])
     const broken: any = { from: () => ({ select: () => ({ eq: () => ({ order: () => ({ limit: async () => ({ data: null, error: { message: 'boom' } }) }) }) }) }) }
     expect(await loadPriceHistory(broken, 'T001D')).toEqual([])
+  })
+})
+
+describe('H1: a scoped read keeps the global sovereign curve', () => {
+  it('detail (one ISIN) still gets a spread', async () => {
+    const t = base()
+    t.on_terms = [termsRow('AR0000000001')]
+    t.on_sov_curve = [{ ticker: 'AL30', law: 'NY', ytm: '5', dm: '1', as_of: '2026-10-20' }, { ticker: 'GD41', law: 'NY', ytm: '6', dm: '5', as_of: '2026-10-20' }]
+    const r = await loadOnAnalyses(fakeSupabase(t), { now: NOW, getPrices: feed({ T001D: 100 }), isin: 'AR0000000001' })
+    expect(r.analyses[0].row.spreadBp).not.toBeNull()
+  })
+})
+
+describe('M2: catalog reads are cached in-process for ~60s', () => {
+  it('a second load reuses the tables; after the TTL it reads again', async () => {
+    const sb = fakeSupabase(base())
+    const opts = { now: NOW, getPrices: feed({ T001D: 100 }) }
+    await loadOnAnalyses(sb, opts)
+    const calls = sb.log.length
+    await loadOnAnalyses(sb, opts)
+    await loadOnAnalyses(sb, { ...opts, isin: 'AR0000000001' }) // detail reuses the same snapshot
+    expect(sb.log.length).toBe(calls)
+    vi.useFakeTimers({ now: Date.now() + 61_000, toFake: ['Date'] })
+    await loadOnAnalyses(sb, opts)
+    vi.useRealTimers()
+    expect(sb.log.length).toBeGreaterThan(calls)
+  })
+
+  it('a failed read is not cached', async () => {
+    const bad: any = { from: () => ({ select: () => ({ order: () => ({ range: async () => ({ data: null, error: { message: 'boom' } }) }) }) }) }
+    await expect(loadOnAnalyses(bad, { now: NOW, getPrices: feed({}) })).rejects.toThrow()
+    const ok = await loadOnAnalyses(fakeSupabase(base()), { now: NOW, getPrices: feed({}) })
+    expect(ok.analyses.length).toBe(3)
+  })
+})
+
+describe('M1: data912 on the ON path', () => {
+  const quote = { symbol: 'T001D', c: 100 }
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
+
+  it('passes a timeout signal and caches success', async () => {
+    const f = vi.fn(async () => ({ ok: true, json: async () => [quote] }))
+    vi.stubGlobal('fetch', f)
+    expect((await getOnPrices())?.prices.get('T001D')).toBe(100)
+    await getOnPrices()
+    expect(f).toHaveBeenCalledTimes(1)
+    expect((f.mock.calls[0] as any)[1].signal).toBeInstanceOf(AbortSignal)
+  })
+
+  it('a failure is negative-cached ~45s, then retried', async () => {
+    const f = vi.fn(async () => { throw new Error('timeout') })
+    vi.stubGlobal('fetch', f)
+    expect(await getOnPrices()).toBeNull()
+    expect(await getOnPrices()).toBeNull()
+    expect(f).toHaveBeenCalledTimes(1)
+    vi.useFakeTimers({ now: Date.now() + 46_000, toFake: ['Date'] })
+    await getOnPrices()
+    expect(f).toHaveBeenCalledTimes(2)
   })
 })

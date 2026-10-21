@@ -30,6 +30,10 @@ describe('OnExplorerFilters', () => {
     expect(html).toMatch(/<option value="NY" selected/)
   })
 
+  it('gives the search box room for its placeholder', () => {
+    expect(render()).toMatch(/id="on-q"[^>]*class="[^"]*min-w-\[/)
+  })
+
   it('offers a reset only when a filter is active', () => {
     expect(render()).not.toContain('Limpiar filtros')
     expect(render({ law: 'ARG' })).toContain('Limpiar filtros')

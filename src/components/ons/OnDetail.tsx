@@ -6,7 +6,7 @@ import OnSourceChip from './OnSourceChip'
 import type { OnAnalysis } from '@/lib/on-analytics'
 import type { PricePoint } from '@/lib/on-catalog'
 import type { F } from '@/lib/on-terms'
-import { eventLabel, fmtBp, fmtDate, fmtNum, fmtPct, plazaCopy, rateTypeLabel, safeHref } from '@/lib/on-format'
+import { eventLabel, fmtBp, fmtDate, fmtNum, fmtPct, fmtVn, plazaCopy, rateTypeLabel, safeHref } from '@/lib/on-format'
 import { formatAge } from '@/lib/utils'
 
 interface Props {
@@ -63,7 +63,7 @@ export default function OnDetail({ analysis, history, asOf, stale, prices }: Pro
   const floating = row.rateType === 'floating'
   const flag = row.methodFlag
   const note = row.termsNote
-  const lot = (f: F<number | null>, unknown: string) => (f.value === null ? <span className="text-slate-400">{unknown}</span> : <span>{fmtNum(f.value, 0)} {row.currency}</span>)
+  const lot = (f: F<number | null>, unknown: string) => (f.value === null ? <span className="text-slate-400">{unknown}</span> : <span>{fmtVn(f.value)}</span>)
 
   return (
     <div className="space-y-5">
@@ -151,10 +151,10 @@ export default function OnDetail({ analysis, history, asOf, stale, prices }: Pro
           <Term label="Tickers">{[row.tickerO, row.tickerD, detail.tickerC].filter(Boolean).join(' · ')}</Term>
           <Term label="Plaza de pago"><span>{plazaCopy(t.paymentPlaza.value)}</span>{chip(t.paymentPlaza)}</Term>
           <Term label="Monto emitido">
-            {t.issuedAmount.value === null ? <span className="text-slate-400">sin dato</span> : <span>{fmtNum(t.issuedAmount.value, 0)} {row.currency}</span>}
+            {t.issuedAmount.value === null ? <span className="text-slate-400">sin dato</span> : <span>{fmtVn(t.issuedAmount.value)}</span>}
             {t.issuedAmount.prov !== 'byma' && t.issuedAmount.value !== null && chip(t.issuedAmount)}
             {t.issuedAmountByma !== null && (t.issuedAmount.prov === 'byma' || t.issuedAmount.value !== t.issuedAmountByma) && (
-              <span className="text-[11px] text-slate-500">{fmtNum(t.issuedAmountByma, 0)} según BYMA, puede estar desactualizado</span>
+              <span className="text-[11px] text-slate-500">{fmtVn(t.issuedAmountByma)} según BYMA, puede estar desactualizado</span>
             )}
           </Term>
           <Term label="Emisión / vencimiento">{fmtDate(detail.issueDate)} → {fmtDate(row.maturityDate)}</Term>

@@ -89,13 +89,13 @@ describe('OnDetail: terms, provenance and copy', () => {
   it('unknown lot rules say "lámina mínima desconocida"; known ones show the values', () => {
     expect(render()).toContain('lámina mínima desconocida')
     const html = render(build({ overrides: [ov('min_denomination', 10000), ov('increment', 1000, null)] }))
-    expect(html).toContain('10.000')
+    expect(html).toContain('VN 10.000')
     expect(html).not.toContain('lámina mínima desconocida')
   })
 
   it('issued amount: override wins, BYMA value only as outdated-possible text', () => {
     const html = render(build({ terms: terms({ issuedAmountByma: 313_462_519 }), overrides: [ov('issued_amount', 213_462_519)] }))
-    expect(html).toContain('213.462.519')
+    expect(html).toContain('VN 213.462.519')
     expect(html).toContain('según BYMA, puede estar desactualizado')
     expect(html).toContain('313.462.519')
     const noOverride = render(build({ terms: terms({ issuedAmountByma: 70_000_000 }) }))

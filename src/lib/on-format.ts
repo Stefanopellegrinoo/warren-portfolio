@@ -59,3 +59,6 @@ export function safeHref(url: string | null | undefined): string | undefined {
     return undefined
   }
 }
+
+/** Nominal amount: lots and issued amounts are in VN (valor nominal), not in a currency. */
+export const fmtVn = (x: number | null | undefined): string => (ok(x) ? `VN ${fmtNum(x, 0)}` : DASH)

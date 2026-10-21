@@ -25,7 +25,7 @@ export interface ExplorerState {
 
 export const DEFAULT_STATE: ExplorerState = {
   filters: { q: '', issuer: '', currency: '', law: '', rateType: '', maturityFrom: '', maturityTo: '', ytmMin: null, ytmMax: null, mdMin: null, mdMax: null },
-  sort: { key: 'maturity', dir: 'asc' },
+  sort: { key: 'adtv', dir: 'desc' }, // most liquid first
 }
 
 const NUM_KEYS = ['ytmMin', 'ytmMax', 'mdMin', 'mdMax'] as const

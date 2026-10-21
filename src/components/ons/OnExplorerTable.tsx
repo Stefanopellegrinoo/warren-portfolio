@@ -42,33 +42,32 @@ function YtmCell({ r }: { r: OnListRow }) {
   const f = r.methodFlag
   const n = r.termsNote
   return (
-    <div className="flex flex-col items-end gap-1">
-      <div className="flex items-center gap-1.5">
-        {!f && n && (
-          <span
-            role="note"
-            title={`Con los términos de Warren la TIR es ${fmtPct(n.termsYtmPct)} y BYMA informa ${fmtPct(n.bymaYtmPct)} (${fmtBp(n.diffBp)}): difiere de BYMA por convención de cálculo de intereses. Es informativo.`}
-            className="cursor-help text-[10px] text-slate-500"
-          >
-            ⓘ <span className="sr-only">difiere de BYMA por convención</span>
-          </span>
-        )}
-        {r.shortDated && r.ytmPct !== null && (
-          <span role="note" title="Vence en menos de 90 días: la TIR es muy sensible al precio y poco representativa." className="cursor-help text-[10px] text-slate-500">
-            ⚠ <span className="sr-only">vence en menos de 90 días: TIR poco representativa</span>
-          </span>
-        )}
-        <span className="font-semibold text-white">{fmtPct(r.ytmPct)}</span>
-      </div>
+    <div className="flex items-center justify-end gap-1.5">
       {f && (
         <span
-          title={`Difiere de BYMA: BYMA ${fmtPct(f.bymaYtmPct)}, Warren ${fmtPct(f.methodYtmPct)} (${fmtBp(f.diffBp)}, control del ${fmtDate(f.asOf)}). Ninguno es definitivo.`}
-          className="rounded-md border border-amber/30 bg-amber/10 px-1.5 py-0.5 text-right text-[9px] leading-tight text-amber"
+          role="note"
+          title={`Cálculo no verificado: difiere de BYMA. BYMA ${fmtPct(f.bymaYtmPct)}, Warren ${fmtPct(f.methodYtmPct)} (${fmtBp(f.diffBp)}, control del ${fmtDate(f.asOf)}). Ninguno es definitivo.`}
+          className="cursor-help text-xs text-amber"
         >
-          <span className="block">Cálculo no verificado</span>
-          <span className="block">BYMA {fmtPct(f.bymaYtmPct)} · Warren {fmtPct(f.methodYtmPct)}</span>
+          <span aria-hidden>⚠</span>
+          <span className="sr-only">Cálculo no verificado: BYMA {fmtPct(f.bymaYtmPct)}, Warren {fmtPct(f.methodYtmPct)}</span>
         </span>
       )}
+      {!f && n && (
+        <span
+          role="note"
+          title={`Con los términos de Warren la TIR es ${fmtPct(n.termsYtmPct)} y BYMA informa ${fmtPct(n.bymaYtmPct)} (${fmtBp(n.diffBp)}): difiere de BYMA por convención de cálculo de intereses. Es informativo.`}
+          className="cursor-help text-[10px] text-slate-500"
+        >
+          <span aria-hidden>ⓘ</span> <span className="sr-only">difiere de BYMA por convención</span>
+        </span>
+      )}
+      {r.shortDated && r.ytmPct !== null && (
+        <span title="Vence en menos de 90 días: la TIR es muy sensible al precio y poco representativa." className="rounded border border-slate-500/40 px-1 text-[9px] leading-4 text-slate-300">
+          &lt;90 d
+        </span>
+      )}
+      <span className="font-semibold text-white">{fmtPct(r.ytmPct)}</span>
     </div>
   )
 }
@@ -94,8 +93,9 @@ function Badges({ r }: { r: OnListRow }) {
 
 export default function OnExplorerTable({ rows, sort, onSort }: Props) {
   return (
-    <div className="glass overflow-x-auto rounded-2xl">
-      <table className="w-full min-w-[1100px] text-sm font-mono">
+    <div className="glass relative rounded-2xl">
+      <div className="overflow-x-auto rounded-2xl">
+      <table className="w-full min-w-[1000px] text-sm font-mono">
         <caption className="sr-only">Obligaciones negociables: precio, TIR y duración. Ordená por columna con el encabezado.</caption>
         <thead>
           <tr className="border-b border-bg-600/60 text-left">
@@ -111,14 +111,12 @@ export default function OnExplorerTable({ rows, sort, onSort }: Props) {
               )
             })}
             <th scope="col" className={TH}>Próx. pago</th>
-            <th scope="col" className={TH}>Moneda / ley</th>
-            <th scope="col" className={TH}>Tipo</th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={COLUMNS.length + 3} className="px-3 py-10 text-center text-slate-400">Sin resultados</td>
+              <td colSpan={COLUMNS.length + 1} className="px-3 py-10 text-center text-slate-400">Sin resultados</td>
             </tr>
           ) : (
             rows.map((r) => (
@@ -127,6 +125,12 @@ export default function OnExplorerTable({ rows, sort, onSort }: Props) {
                   <Link href={`/ons/${r.isin}`} className="font-semibold text-amber hover:underline">{r.tickerO}</Link>
                   <Badges r={r} />
                   <div className="text-[10px] text-slate-500">{r.isin}</div>
+                  <div className="text-[10px] text-slate-400">
+                    {r.currencyLabel} · {r.law} · {rateTypeLabel(r.rateType)}
+                    {r.rateType === 'floating' && (
+                      <span title={FLOATING_HINT} className="ml-1.5 cursor-help rounded-full border border-slate-500/30 bg-slate-500/10 px-1.5 py-0.5 text-[9px] leading-none text-slate-400">No simulable</span>
+                    )}
+                  </div>
                 </td>
                 <td className={cn(TD, 'max-w-[14rem] truncate text-slate-300')} title={r.description ?? r.issuer ?? undefined}>{r.issuer ?? '—'}</td>
                 <td className={TD}>{fmtDate(r.maturityDate)}</td>
@@ -146,18 +150,14 @@ export default function OnExplorerTable({ rows, sort, onSort }: Props) {
                     </>
                   ) : '—'}
                 </td>
-                <td className={TD}>{r.currencyLabel} · {r.law}</td>
-                <td className={TD}>
-                  {rateTypeLabel(r.rateType)}
-                  {r.rateType === 'floating' && (
-                    <span title={FLOATING_HINT} className="ml-1.5 cursor-help rounded-full border border-slate-500/30 bg-slate-500/10 px-1.5 py-0.5 text-[9px] leading-none text-slate-400">No simulable</span>
-                  )}
-                </td>
               </tr>
             ))
           )}
         </tbody>
       </table>
+      </div>
+      {/* Right-edge fade: the table scrolls horizontally. */}
+      <div data-scroll-hint aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-10 rounded-r-2xl bg-gradient-to-l from-bg-900/90 to-transparent" />
     </div>
   )
 }

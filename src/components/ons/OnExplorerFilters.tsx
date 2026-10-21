@@ -17,9 +17,9 @@ interface Props {
 const RATE_TYPES: RateType[] = ['fixed', 'step', 'zero', 'floating']
 const FIELD = 'input-field w-full'
 
-function Field({ id, label, children }: { id: string; label: string; children: ReactNode }) {
+function Field({ id, label, children, wide }: { id: string; label: string; children: ReactNode; wide?: boolean }) {
   return (
-    <div className="flex min-w-0 flex-col gap-1">
+    <div className={`flex min-w-0 flex-col gap-1 ${wide ? 'col-span-2 md:col-span-1' : ''}`}>
       <label htmlFor={id} className="text-[10px] font-mono uppercase tracking-widest text-slate-400">{label}</label>
       {children}
     </div>
@@ -43,8 +43,8 @@ export default function OnExplorerFilters({ filters: f, issuers, currencies, onC
         {open ? 'Ocultar filtros' : 'Mostrar filtros'}{isActive(f) ? ' (activos)' : ''}
       </button>
       <form id="on-filters" role="search" aria-label="Filtros de ONs" onSubmit={(e) => e.preventDefault()} className={`glass ${open ? 'grid' : 'hidden'} grid-cols-2 gap-3 rounded-2xl p-4 md:grid md:grid-cols-4 xl:grid-cols-6`}>
-        <Field id="on-q" label="Buscar">
-          <input id="on-q" type="search" placeholder="Ticker, emisor o ISIN" className={FIELD} value={f.q} onChange={(e) => onChange({ q: e.target.value })} />
+        <Field id="on-q" label="Buscar" wide>
+          <input id="on-q" type="search" placeholder="Ticker, emisor o ISIN" className={`${FIELD} md:min-w-[11rem]`} value={f.q} onChange={(e) => onChange({ q: e.target.value })} />
         </Field>
         <Field id="on-issuer" label="Emisor">
           <select id="on-issuer" className={FIELD} value={f.issuer} onChange={(e) => onChange({ issuer: e.target.value })}>

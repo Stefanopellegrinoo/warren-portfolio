@@ -43,8 +43,10 @@ const ids = (rs: OnListRow[]) => rs.map((r) => r.isin.slice(-1))
 const state = (f: object = {}, sort = DEFAULT_STATE.sort) => ({ filters: { ...DEFAULT_STATE.filters, ...f }, sort })
 
 describe('applyExplorer: AND-combined filters', () => {
-  it('returns every row with the default state, sorted by maturity', () => {
-    expect(ids(applyExplorer(rows, DEFAULT_STATE))).toEqual(['3', '1', '4', '2'])
+  it('returns every row with the default state, most liquid first', () => {
+    const liq = [row({ isin: 'AR0000000001', adtvUsd: 10 }), row({ isin: 'AR0000000002', adtvUsd: 500 }), row({ isin: 'AR0000000003', adtvUsd: null })]
+    expect(DEFAULT_STATE.sort).toEqual({ key: 'adtv', dir: 'desc' })
+    expect(ids(applyExplorer(liq, DEFAULT_STATE))).toEqual(['2', '1', '3'])
   })
 
   it('currency + rate type + YTM minimum', () => {

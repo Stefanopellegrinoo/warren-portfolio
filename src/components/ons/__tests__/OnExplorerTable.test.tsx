@@ -65,9 +65,12 @@ describe('OnExplorerTable', () => {
 
   it('method check flag shows both values; a terms note is informational, not an error', () => {
     const flagged = render([row({ methodFlag: { bymaYtmPct: 6.2, methodYtmPct: 6.35, diffBp: 15, asOf: '2026-10-20' } })])
+    // compact icon: sr-only text + tooltip carry both values, no inline paragraph
     expect(flagged).toContain('Cálculo no verificado')
     expect(flagged).toContain('BYMA 6,20%')
     expect(flagged).toContain('Warren 6,35%')
+    expect(flagged).toContain('class="sr-only"')
+    expect(flagged).not.toMatch(/<span class="block">/)
     const note = render([row({ termsNote: { bymaYtmPct: 6.0, termsYtmPct: 6.06, diffBp: 6, asOf: '2026-10-20' } })])
     expect(note).toContain('difiere de BYMA por convención')
     expect(note).not.toContain('Cálculo no verificado')
@@ -82,8 +85,22 @@ describe('OnExplorerTable', () => {
   })
 
   it('warns that the yield of a short-dated bond is very sensitive to price', () => {
-    expect(render([row({ shortDated: true })])).toContain('vence en menos de 90 días')
-    expect(render([row()])).not.toContain('vence en menos de 90 días')
+    // visible text (works on touch), not only a glyph/tooltip
+    expect(render([row({ shortDated: true })])).toContain('&lt;90 d')
+    expect(render([row()])).not.toContain('&lt;90 d')
+  })
+
+  it('keeps currency, law and rate type next to the ticker instead of far-right columns', () => {
+    const html = render([row()])
+    expect(html).not.toContain('>Moneda / ley<')
+    expect(html).not.toContain('>Tipo<')
+    const first = html.match(/<tbody>[\s\S]*?<\/td>/)![0]
+    expect(first).toContain('USD MEP')
+    expect(first).toContain('Tasa fija')
+  })
+
+  it('hints that the table scrolls horizontally', () => {
+    expect(render([row()])).toContain('data-scroll-hint')
   })
 
   it('empty list says "Sin resultados"', () => {

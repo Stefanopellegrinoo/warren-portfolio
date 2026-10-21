@@ -41,9 +41,10 @@ function normalizePriceToUSD(rawPrice: number): number {
 /**
  * Fetch ALL corporate bond quotes from data912.com
  */
-export async function fetchAllData912Quotes(): Promise<Data912RawQuote[]> {
+export async function fetchAllData912Quotes(signal?: AbortSignal): Promise<Data912RawQuote[]> {
   try {
     const response = await fetch('https://data912.com/live/arg_corp', {
+      signal,
       headers: {
         'Accept': 'application/json',
         'User-Agent': 'Warren Portfolio/1.0'
