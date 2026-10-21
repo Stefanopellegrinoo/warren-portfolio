@@ -95,8 +95,8 @@ export function serializeExplorerQuery(s: ExplorerState): string {
   return p.toString()
 }
 
-export function parseExplorerQuery(query: string | URLSearchParams): ExplorerState {
-  const p = typeof query === 'string' ? new URLSearchParams(query) : query
+export function parseExplorerQuery(query: string | { toString(): string }): ExplorerState {
+  const p = new URLSearchParams(query.toString())
   const filters: ExplorerFilters = { ...DEFAULT_STATE.filters }
   for (const k of ['q', 'issuer', 'currency'] as const) filters[k] = p.get(k) ?? ''
   for (const k of ['maturityFrom', 'maturityTo'] as const) {

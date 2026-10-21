@@ -154,6 +154,14 @@ describe('analyzeOn: check disclosure (R3.8)', () => {
   })
 })
 
+describe('analyzeOn: short-dated bonds', () => {
+  it('flags a bond maturing in under 90 days: its yield is hypersensitive to price', () => {
+    const near = analyzeOn(input({ terms: terms({ maturityDate: '2026-12-22' }), flows: [{ date: '2026-12-22', ren: 3, amo: 100 }] }))
+    expect(near.row.shortDated).toBe(true)
+    expect(analyzeOn(input()).row.shortDated).toBe(false)
+  })
+})
+
 describe('analyzeOn: spread, liquidity, events, options', () => {
   const curve = [
     { law: 'NY' as const, ytmPct: 5, dm: 2 },

@@ -1,7 +1,7 @@
 // Read-time analytics for one ON (pure: no DB, no network). Combines the stored
 // catalog row, raw BYMA flows, curated overrides and a live D-line price.
 // Nothing here is persisted (R3.10). Yields are returned in percent (6.09 = 6.09%).
-import { buildFlows, type Bdc, type DayCount, type Flow, type RawFlow } from './bond-math'
+import { actualDays, buildFlows, type Bdc, type DayCount, type Flow, type RawFlow } from './bond-math'
 import { analyze } from './bond-yield'
 import { interpolateSpread, yieldToWorst, type CallWindow } from './bond-options'
 import { arCalendar } from './ar-calendar'
@@ -11,6 +11,7 @@ export type RateType = 'fixed' | 'step' | 'zero' | 'floating' | 'other'
 
 export const FLAG_BP = 5 // method check: |diff| above this is flagged (same as the ingest)
 export const TERMS_NOTE_MIN_BP = 1 // below this the convention difference is noise
+export const SHORT_DATED_DAYS = 90 // under this the yield is hypersensitive to price (same cut as the daily check)
 
 export interface TermsRow {
   isin: string
@@ -99,6 +100,7 @@ export interface OnListRow {
   law: 'ARG' | 'NY'
   rateType: RateType
   maturityDate: string
+  shortDated: boolean
   status: OnStatus
   simulable: boolean
   price: number | null
@@ -274,6 +276,7 @@ export function analyzeOn(i: OnInput): OnAnalysis {
     law: t.law,
     rateType: rt,
     maturityDate: t.maturityDate,
+    shortDated: actualDays(settle, t.maturityDate) < SHORT_DATED_DAYS,
     status,
     // R3.3: floating ONs cannot be simulated; the rest of the catalog can when it is a USD fixed-rate ON.
     simulable: t.currency === 'USD' && rt === 'fixed',
