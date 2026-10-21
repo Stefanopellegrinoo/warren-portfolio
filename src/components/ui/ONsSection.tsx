@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useState } from 'react'
 import PriceAge from './PriceAge'
 import { formatUSD, formatPct, cn, priceHealthSummary } from '@/lib/utils'
@@ -102,6 +103,7 @@ export default function ONsSection({ positions, loading, summary, onSell }: Prop
           <div>
             <h3 className="font-display font-700 text-white">Obligaciones Negociables</h3>
             <p className="text-[11px] text-slate-500 font-mono mt-0.5">{positions.length} posición{positions.length !== 1 ? 'es' : ''}{priceHealth && <span className="text-amber"> · {priceHealth}</span>}</p>
+            <Link href="/ons/mi-cartera" className="text-[11px] text-amber hover:underline">Calendario de cobros →</Link>
           </div>
         </div>
         {positions.length > 0 && summary && (

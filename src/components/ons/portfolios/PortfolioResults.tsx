@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from 'react'
 import type { PortfolioAnalysis } from '@/lib/on-portfolio-analytics'
-import { fmtMonth, fmtNum, fmtPct, TAX_COPY } from '@/lib/on-format'
+import { fmtDate, fmtMonth, fmtNum, fmtPct, TAX_COPY } from '@/lib/on-format'
 import PortfolioCalendarChart from './PortfolioCalendarChart'
 
 const usd = (x: number) => `USD ${fmtNum(x)}`
@@ -63,7 +63,8 @@ function Bars({ rows, label }: { rows: { key: string; name: string; pct: number;
   )
 }
 
-export default function PortfolioResults({ analysis: a }: { analysis: PortfolioAnalysis }) {
+/** `held`: the user's real current holdings (market value, next payment) instead of a hypothetical purchase (cost, profit). */
+export default function PortfolioResults({ analysis: a, held = false }: { analysis: PortfolioAnalysis; held?: boolean }) {
   const [allMonths, setAllMonths] = useState(false)
   const months = allMonths ? a.monthly : a.monthly.slice(0, FIRST_MONTHS)
   return (
@@ -77,15 +78,15 @@ export default function PortfolioResults({ analysis: a }: { analysis: PortfolioA
 
       {a.empty ? (
         <div className="glass rounded-2xl p-6 text-sm text-slate-300">
-          {a.skipped.length > 0 ? 'Ninguna de las ONs se puede simular: revisá los avisos.' : 'Agregá ONs para ver el calendario de cobros y las métricas de la cartera.'}
+          {a.skipped.length > 0 ? `Ninguna de las ONs se puede ${held ? 'proyectar' : 'simular'}: revisá los avisos.` : 'Agregá ONs para ver el calendario de cobros y las métricas de la cartera.'}
         </div>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Stat label="Costo total" hint="Precio sucio: incluye los intereses devengados">{usd(a.totals.cost)}</Stat>
+            <Stat label={held ? 'Valor de mercado' : 'Costo total'} hint={held ? 'Al precio actual (sucio), solo ONs con precio' : 'Precio sucio: incluye los intereses devengados'}>{usd(a.totals.cost)}</Stat>
             <Stat label="Total a cobrar" hint={`Intereses ${usd(a.totals.interest)} · capital ${usd(a.totals.principal)}`}>{usd(a.totals.collected)}</Stat>
-            <Stat label="Ganancia vs. costo" hint="Sin impuestos ni reinversión">{usd(a.totals.profit)}</Stat>
-            <Stat label="TIR de la cartera" hint="Flujos combinados contra el costo total (no es un promedio de TIRs). Efectiva anual.">{fmtPct(a.ytmPct)}</Stat>
+            {!held && <Stat label="Ganancia vs. costo" hint="Sin impuestos ni reinversión">{usd(a.totals.profit)}</Stat>}
+            <Stat label="TIR de la cartera" hint={`Flujos combinados contra ${held ? 'el valor de mercado' : 'el costo total'} (no es un promedio de TIRs). Efectiva anual.`}>{fmtPct(a.ytmPct)}</Stat>
             <Stat label="Duración modificada" hint="Ponderada por valor de mercado">{a.mdYears === null ? '—' : `${fmtNum(a.mdYears)} años`}</Stat>
             <Stat label="Vida promedio" hint="Plazo medio de devolución del capital">{a.walYears === null ? '—' : `${fmtNum(a.walYears)} años`}</Stat>
             <Stat label="Intereses próximos 12 meses" hint={`Con capital: ${usd(a.next12m.total)}`}>{usd(a.next12m.interest)}</Stat>
@@ -144,13 +145,14 @@ export default function PortfolioResults({ analysis: a }: { analysis: PortfolioA
           </div>
 
           <Section id="pf-positions" title="Detalle por ON">
-            <Table caption="Detalle de cada ON de la cartera" head={['ON', 'VN', 'Costo', 'Peso', 'TIR', 'Duración']}>
+            <Table caption="Detalle de cada ON de la cartera" head={held ? ['ON', 'VN', 'Valor de mercado', 'Peso', 'Próximo cobro', 'TIR', 'Duración'] : ['ON', 'VN', 'Costo', 'Peso', 'TIR', 'Duración']}>
               {a.positions.map((p) => (
                 <tr key={p.isin} className="table-row text-right">
                   <td className={`${TD} text-left`}>{p.ticker}</td>
                   <td className={TD}>{fmtNum(p.vn, 0)}</td>
-                  <td className={TD}>{fmtNum(p.cost)}</td>
-                  <td className={TD}>{fmtPct(p.weightPct, 1)}</td>
+                  <td className={TD}>{held && !p.priced ? '—' : fmtNum(p.cost)}</td>
+                  <td className={TD}>{held && !p.priced ? '—' : fmtPct(p.weightPct, 1)}</td>
+                  {held && <td className={TD}>{p.nextPayDate ? `${fmtDate(p.nextPayDate)} · ${usd(p.nextPayAmount ?? 0)}` : '—'}</td>}
                   <td className={TD}>{fmtPct(p.ytmPct)}</td>
                   <td className={TD}>{p.mdYears === null ? '—' : fmtNum(p.mdYears)}</td>
                 </tr>
@@ -159,7 +161,7 @@ export default function PortfolioResults({ analysis: a }: { analysis: PortfolioA
           </Section>
 
           <p className="text-[11px] leading-relaxed text-slate-400">
-            Sin impuestos, comisiones ni reinversión; solo ONs en dólares de tasa fija, step up o cupón cero. Informativo, no es una recomendación de inversión. {TAX_COPY}
+            {held ? 'Proyección de lo que cobrás con las ONs que tenés hoy, sin importar cuándo las compraste. ' : ''}Sin impuestos, comisiones ni reinversión; solo ONs en dólares de tasa fija, step up o cupón cero. Informativo, no es una recomendación de inversión. {TAX_COPY}
           </p>
         </>
       )}

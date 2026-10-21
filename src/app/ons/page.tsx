@@ -11,7 +11,10 @@ export default function OnsPage() {
             <h1 className="font-display text-2xl font-bold tracking-tight text-white">Obligaciones negociables</h1>
             <p className="mt-1 text-sm text-slate-400">Explorá el mercado de ONs: rendimiento, duración y condiciones de emisión.</p>
           </div>
-          <Link href="/ons/carteras" className="btn-ghost">Mis carteras de prueba</Link>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/ons/mi-cartera" className="btn-ghost">Mi cartera de ONs</Link>
+            <Link href="/ons/carteras" className="btn-ghost">Mis carteras de prueba</Link>
+          </div>
         </header>
         <Suspense fallback={null}>
           <OnExplorer />
