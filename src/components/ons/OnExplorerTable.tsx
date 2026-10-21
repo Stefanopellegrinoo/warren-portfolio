@@ -1,0 +1,163 @@
+import Link from 'next/link'
+import { ArrowDown, ArrowUp } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import type { OnListRow } from '@/lib/on-analytics'
+import type { ExplorerState, SortKey } from '@/lib/on-explorer-filters'
+import { eventLabel, fmtBp, fmtDate, fmtNum, fmtPct, fmtUsdCompact, rateTypeLabel, safeHref } from '@/lib/on-format'
+
+interface Props {
+  rows: OnListRow[]
+  sort: ExplorerState['sort']
+  onSort: (key: SortKey) => void
+}
+
+const COLUMNS: { key: SortKey; label: string; numeric: boolean; hint?: string }[] = [
+  { key: 'ticker', label: 'Ticker', numeric: false },
+  { key: 'issuer', label: 'Emisor', numeric: false },
+  { key: 'maturity', label: 'Vence', numeric: false },
+  { key: 'price', label: 'Precio', numeric: true, hint: 'Precio sucio de la línea D (data912), por 100 VN' },
+  { key: 'ytm', label: 'TIR', numeric: true, hint: 'Tasa interna de retorno efectiva anual al vencimiento' },
+  { key: 'md', label: 'MD', numeric: true, hint: 'Duración modificada, en años' },
+  { key: 'paridad', label: 'Paridad', numeric: true, hint: 'Precio sucio sobre valor residual más intereses devengados' },
+  { key: 'cy', label: 'TC', numeric: true, hint: 'Tasa corriente: cupón anual sobre precio limpio' },
+  { key: 'wal', label: 'Vida prom.', numeric: true, hint: 'Vida promedio ponderada (WAL), en años' },
+  { key: 'spread', label: 'Spread', numeric: true, hint: 'Opcional, referencial: TIR menos TIR soberana interpolada por duración' },
+  { key: 'adtv', label: 'Volumen prom.', numeric: true, hint: 'Volumen diario promedio de 20 ruedas (suma de líneas O, D y C), en USD' },
+]
+
+const TH = 'px-3 py-2.5 text-[10px] font-mono uppercase tracking-widest text-slate-400 whitespace-nowrap'
+const TD = 'px-3 py-2.5 whitespace-nowrap'
+const FLOATING_HINT = 'Tasa variable: no se proyectan los cupones, por eso no se calcula TIR ni se puede simular'
+
+function sortAria(active: boolean, dir: 'asc' | 'desc'): 'ascending' | 'descending' | 'none' {
+  return active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'
+}
+
+function PriceCell({ r }: { r: OnListRow }) {
+  if (r.status === 'no-price') return <span className="italic text-slate-500">Sin precio</span>
+  return <>{fmtNum(r.price)}</>
+}
+
+function YtmCell({ r }: { r: OnListRow }) {
+  const f = r.methodFlag
+  const n = r.termsNote
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <div className="flex items-center gap-1.5">
+        {!f && n && (
+          <span
+            role="note"
+            title={`Con los términos de Warren la TIR es ${fmtPct(n.termsYtmPct)} y BYMA informa ${fmtPct(n.bymaYtmPct)} (${fmtBp(n.diffBp)}): difiere de BYMA por convención de cálculo de intereses. Es informativo.`}
+            className="cursor-help text-[10px] text-slate-500"
+          >
+            ⓘ <span className="sr-only">difiere de BYMA por convención</span>
+          </span>
+        )}
+        {r.shortDated && r.ytmPct !== null && (
+          <span role="note" title="Vence en menos de 90 días: la TIR es muy sensible al precio y poco representativa." className="cursor-help text-[10px] text-slate-500">
+            ⚠ <span className="sr-only">vence en menos de 90 días: TIR poco representativa</span>
+          </span>
+        )}
+        <span className="font-semibold text-white">{fmtPct(r.ytmPct)}</span>
+      </div>
+      {f && (
+        <span
+          title={`Difiere de BYMA: BYMA ${fmtPct(f.bymaYtmPct)}, Warren ${fmtPct(f.methodYtmPct)} (${fmtBp(f.diffBp)}, control del ${fmtDate(f.asOf)}). Ninguno es definitivo.`}
+          className="rounded-md border border-amber/30 bg-amber/10 px-1.5 py-0.5 text-right text-[9px] leading-tight text-amber"
+        >
+          <span className="block">Cálculo no verificado</span>
+          <span className="block">BYMA {fmtPct(f.bymaYtmPct)} · Warren {fmtPct(f.methodYtmPct)}</span>
+        </span>
+      )}
+    </div>
+  )
+}
+
+function Badges({ r }: { r: OnListRow }) {
+  return (
+    <>
+      {r.events.map((e) => {
+        const href = safeHref(e.sourceUrl)
+        const text = `${eventLabel(e.kind)} ${fmtDate(e.eventDate)}`
+        const cls = 'ml-1.5 rounded-full border border-sky/30 bg-sky/10 px-1.5 py-0.5 text-[9px] leading-none text-sky'
+        return href ? (
+          <a key={`${e.kind}-${e.eventDate}`} href={href} target="_blank" rel="noopener noreferrer" title={e.note ?? `Evento corporativo: ${eventLabel(e.kind)}`} className={cls}>
+            {text}
+          </a>
+        ) : (
+          <span key={`${e.kind}-${e.eventDate}`} className={cls}>{text}</span>
+        )
+      })}
+    </>
+  )
+}
+
+export default function OnExplorerTable({ rows, sort, onSort }: Props) {
+  return (
+    <div className="glass overflow-x-auto rounded-2xl">
+      <table className="w-full min-w-[1100px] text-sm font-mono">
+        <caption className="sr-only">Obligaciones negociables: precio, TIR y duración. Ordená por columna con el encabezado.</caption>
+        <thead>
+          <tr className="border-b border-bg-600/60 text-left">
+            {COLUMNS.map((c) => {
+              const active = sort.key === c.key
+              return (
+                <th key={c.key} scope="col" aria-sort={sortAria(active, sort.dir)} title={c.hint} className={cn(TH, c.numeric && 'text-right', c.key === 'ticker' && 'sticky left-0 z-10 bg-bg-800')}>
+                  <button type="button" onClick={() => onSort(c.key)} className={cn('inline-flex items-center gap-1 uppercase tracking-widest hover:text-white focus-visible:outline focus-visible:outline-1 focus-visible:outline-amber', active && 'text-amber')}>
+                    {c.label}
+                    {active && (sort.dir === 'asc' ? <ArrowUp aria-hidden className="h-3 w-3" /> : <ArrowDown aria-hidden className="h-3 w-3" />)}
+                  </button>
+                </th>
+              )
+            })}
+            <th scope="col" className={TH}>Próx. pago</th>
+            <th scope="col" className={TH}>Moneda / ley</th>
+            <th scope="col" className={TH}>Tipo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr>
+              <td colSpan={COLUMNS.length + 3} className="px-3 py-10 text-center text-slate-400">Sin resultados</td>
+            </tr>
+          ) : (
+            rows.map((r) => (
+              <tr key={r.isin} className="table-row">
+                <td className={cn(TD, 'sticky left-0 z-10 bg-bg-800')}>
+                  <Link href={`/ons/${r.isin}`} className="font-semibold text-amber hover:underline">{r.tickerO}</Link>
+                  <Badges r={r} />
+                  <div className="text-[10px] text-slate-500">{r.isin}</div>
+                </td>
+                <td className={cn(TD, 'max-w-[14rem] truncate text-slate-300')} title={r.description ?? r.issuer ?? undefined}>{r.issuer ?? '—'}</td>
+                <td className={TD}>{fmtDate(r.maturityDate)}</td>
+                <td className={cn(TD, 'text-right')}><PriceCell r={r} /></td>
+                <td className={cn(TD, 'text-right')}><YtmCell r={r} /></td>
+                <td className={cn(TD, 'text-right')}>{fmtNum(r.mdYears)}</td>
+                <td className={cn(TD, 'text-right')}>{fmtPct(r.paridadPct)}</td>
+                <td className={cn(TD, 'text-right')}>{fmtPct(r.currentYieldPct)}</td>
+                <td className={cn(TD, 'text-right')}>{fmtNum(r.walYears)}</td>
+                <td className={cn(TD, 'text-right')}>{fmtBp(r.spreadBp)}</td>
+                <td className={cn(TD, 'text-right')}>{fmtUsdCompact(r.adtvUsd)}</td>
+                <td className={TD}>
+                  {r.nextPayDate ? (
+                    <>
+                      {fmtDate(r.nextPayDate)}
+                      <span className="ml-1.5 text-[10px] text-slate-500">{fmtNum(r.nextPayAmountPct)}%</span>
+                    </>
+                  ) : '—'}
+                </td>
+                <td className={TD}>{r.currencyLabel} · {r.law}</td>
+                <td className={TD}>
+                  {rateTypeLabel(r.rateType)}
+                  {r.rateType === 'floating' && (
+                    <span title={FLOATING_HINT} className="ml-1.5 cursor-help rounded-full border border-slate-500/30 bg-slate-500/10 px-1.5 py-0.5 text-[9px] leading-none text-slate-400">No simulable</span>
+                  )}
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+  )
+}

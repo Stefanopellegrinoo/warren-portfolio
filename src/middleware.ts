@@ -5,7 +5,7 @@ export async function middleware(req: NextRequest) {
   const res = NextResponse.next();
   const pathname = req.nextUrl.pathname;
 
-  const protectedPaths = ['/dashboard', '/history', '/cashflow', '/statistics', '/strategies'];
+  const protectedPaths = ['/dashboard', '/history', '/cashflow', '/statistics', '/strategies', '/ons'];
   const isProtected = protectedPaths.some((p) => pathname.startsWith(p));
   const isAuthPage = pathname === '/auth/login' || pathname === '/';
 
@@ -34,5 +34,6 @@ export const config = {
     '/cashflow/:path*',
     '/statistics/:path*',
     '/strategies/:path*',
+    '/ons/:path*',
   ],
 };

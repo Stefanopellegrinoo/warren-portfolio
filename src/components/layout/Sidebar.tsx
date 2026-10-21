@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, History, DollarSign, LogOut, TrendingUp, PieChart, BookOpen, LineChart } from 'lucide-react'
+import { LayoutDashboard, History, DollarSign, LogOut, TrendingUp, PieChart, BookOpen, LineChart, Landmark } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase-client'
 import { useRouter } from 'next/navigation'
@@ -14,6 +14,7 @@ const NAV = [
   { href: '/statistics', label: 'Estadísticas', icon: PieChart },
   { href: '/trading',    label: 'Trading',      icon: LineChart },
   { href: '/strategies', label: 'Estrategias',  icon: BookOpen },
+  { href: '/ons',        label: 'ONs',          icon: Landmark },
 ]
 
 export default function Sidebar() {
