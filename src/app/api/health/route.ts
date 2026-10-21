@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { ensureRedisConnected } from '@/lib/redis'
 import { readBeat } from '@/lib/job-health'
 import { createServiceClient } from '@/lib/supabase-server'
+import { readOnTermsFreshness, type OnTermsFreshness } from '@/lib/on-terms-health'
+import { argentinaDate } from '@/lib/utils'
 
 // Next 14 statically caches GET route handlers by default; opt out so the
 // probe runs at request time and reflects live Redis/Supabase health
@@ -19,6 +21,8 @@ interface HealthBody {
   supabase: boolean
   /** Informational only: a stale worker must never fail the Docker healthcheck. */
   worker: { lastBeat: string | null; stale: boolean }
+  /** Informational only (never affects status): freshness of the ON terms catalog. Omitted when unreadable. */
+  onTerms?: OnTermsFreshness
 }
 
 let cached: { at: number; body: HealthBody; status: number } | null = null
@@ -33,7 +37,7 @@ export async function GET() {
     return NextResponse.json(cached.body, { status: cached.status })
   }
 
-  const [redisOk, supabaseOk, worker] = await Promise.all([checkRedis(), checkSupabase(), readBeat()])
+  const [redisOk, supabaseOk, worker, onTerms] = await Promise.all([checkRedis(), checkSupabase(), readBeat(), checkOnTerms()])
 
   const isHealthy = redisOk && supabaseOk
   const body: HealthBody = {
@@ -41,6 +45,7 @@ export async function GET() {
     redis: redisOk,
     supabase: supabaseOk,
     worker,
+    ...(onTerms ? { onTerms } : {}),
   }
   const status = isHealthy ? 200 : 503
   cached = { at: Date.now(), body, status }
@@ -64,5 +69,13 @@ async function checkSupabase(): Promise<boolean> {
     return !error
   } catch {
     return false
+  }
+}
+
+async function checkOnTerms(): Promise<OnTermsFreshness | null> {
+  try {
+    return await readOnTermsFreshness(createServiceClient(), argentinaDate())
+  } catch {
+    return null
   }
 }

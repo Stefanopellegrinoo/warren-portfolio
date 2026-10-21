@@ -154,4 +154,47 @@ describe('GET /api/health', () => {
     expect(res.status).toBe(503)
     expect((await res.json()).worker).toEqual({ lastBeat: null, stale: true })
   })
+
+  describe('ON terms freshness (informational)', () => {
+    // Table-aware client: `ons` answers the probe, `on_terms` answers the freshness read.
+    function setup(onTerms: { data: unknown; error: unknown } | 'throw') {
+      mockCreateServiceClient.mockReturnValue({
+        from: (table: string) => ({
+          select: () =>
+            table === 'ons'
+              ? { limit: () => Promise.resolve({ data: [{ ticker: 'X' }], error: null }) }
+              : onTerms === 'throw'
+                ? (() => { throw new Error('boom') })()
+                : { order: () => ({ limit: () => Promise.resolve(onTerms) }) },
+        }),
+      })
+    }
+
+    it('reports the latest as_of without touching the status', async () => {
+      mockEnsureRedisConnected.mockResolvedValue(true)
+      setup({ data: [{ as_of: '2000-01-03' }], error: null })
+      const { GET } = await import('../route')
+      const res = await GET()
+      expect(res.status).toBe(200)
+      expect((await res.json()).onTerms).toEqual({ asOf: '2000-01-03', stale: true })
+    })
+
+    it('a failing on_terms read never degrades the probe', async () => {
+      mockEnsureRedisConnected.mockResolvedValue(true)
+      setup('throw')
+      const { GET } = await import('../route')
+      const res = await GET()
+      expect(res.status).toBe(200)
+      expect((await res.json()).status).toBe('ok')
+    })
+
+    it('empty on_terms is stale but the status stays driven by Redis and Supabase only', async () => {
+      mockEnsureRedisConnected.mockResolvedValue(true)
+      setup({ data: [], error: null })
+      const { GET } = await import('../route')
+      const res = await GET()
+      expect(res.status).toBe(200)
+      expect((await res.json()).onTerms).toEqual({ asOf: null, stale: true })
+    })
+  })
 })
