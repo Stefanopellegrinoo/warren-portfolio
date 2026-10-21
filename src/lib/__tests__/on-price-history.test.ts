@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const mockFetch = vi.fn()
 vi.mock('../data912-client', () => ({ fetchAllData912Quotes: () => mockFetch() }))
 
-import { captureOnPriceHistory, filterCorporateD } from '../on-price-history'
+import { captureOnPriceHistory, filterCorporateD, DATA912_C_IS_DIRTY } from '../on-price-history'
 
 // Shape verified with a live GET of https://data912.com/live/arg_corp (2026-10-16)
 const row = (symbol: string, c: number | null, v = 100, extra = {}) => ({
@@ -153,5 +153,11 @@ describe('captureOnPriceHistory', () => {
       upsert: async () => ({ error: { message: 'rls' } }),
     })
     await expect(captureOnPriceHistory(db.client, '2026-10-16')).rejects.toThrow('rls')
+  })
+})
+
+describe('data912 `c` is a DIRTY price (task 1c.3)', () => {
+  it('records the finding: downstream must not add accrued interest to c', () => {
+    expect(DATA912_C_IS_DIRTY).toBe(true)
   })
 })

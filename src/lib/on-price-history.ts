@@ -10,6 +10,17 @@ import { fetchAllData912Quotes, type Data912RawQuote } from './data912-client'
 
 const CHUNK = 500
 
+/**
+ * Finding (task 1c.3), measured 2026-10-21 against BYMA Educa (payload of 2026-10-20):
+ * Data912 `c` of the D line is a DIRTY price (it includes accrued interest), the same
+ * convention as BYMA `px`/`fxi.pd`. Over 198 D tickers paired with BYMA's D-line price,
+ * median |c - pd| = 0.20 (day-to-day move) vs median |c - (pd - ai)| = 1.70; among the
+ * 102 ONs with accrued > 1.5, 99 sit closer to dirty (mean c - pd = +0.02 vs mean
+ * accrued 2.68). So dirty = c and clean = c - accrued; never c + accrued.
+ * Caveat: Data912 was intraday 2026-10-21 and BYMA the 10-20 close.
+ */
+export const DATA912_C_IS_DIRTY = true
+
 /** D-suffixed (Dollar-MEP) rows with a usable price. `c` is stored raw, as quoted. */
 export function filterCorporateD(feed: Data912RawQuote[]): Data912RawQuote[] {
   return feed.filter(q => q.symbol?.endsWith('D') && typeof q.c === 'number' && q.c > 0)
