@@ -249,9 +249,23 @@ describe('pickPriceLine: price line follows the payment plaza', () => {
     expect(pickPriceLine('CCL', { C: { px: 96, v: 0 }, D: { px: 100, v: 0 } }, false)).toMatchObject({ line: 'C', noTrades: true })
   })
 
-  it('unknown volume counts as trading; nothing priced gives null', () => {
-    expect(pickPriceLine('CCL', { C: { px: 96, v: null } }, false)).toMatchObject({ line: 'C', noTrades: false })
+  it('unknown D volume counts as trading; nothing priced gives null', () => {
+    expect(pickPriceLine('MEP', { D: { px: 96, v: null } }, false)).toMatchObject({ line: 'D', noTrades: false })
     expect(pickPriceLine('CCL', {}, false)).toBeNull()
+  })
+
+  it('unknown C or O volume is NOT evidence of trades in an active session', () => {
+    expect(pickPriceLine('CCL', { C: { px: 91, v: 0 }, O: { px: 96000, v: null }, D: { px: 97, v: 50 } }, false, 1000)).toMatchObject({ line: 'D', fellBack: true })
+    expect(pickPriceLine('CCL', { C: { px: 91, v: null }, D: { px: 97, v: 50 } }, false, 1000)).toMatchObject({ line: 'D' })
+  })
+
+  it('quiet market keeps the preferred line even with unknown volume', () => {
+    expect(pickPriceLine('CCL', { C: { px: 91, v: null }, D: { px: 97, v: 0 } }, true, 1000)).toMatchObject({ line: 'C', noTrades: false })
+  })
+
+  it('unknown plaza behaves like MEP: D then C', () => {
+    expect(pickPriceLine(null, { C: { px: 91, v: 5 } }, false)).toMatchObject({ line: 'C', fellBack: true })
+    expect(pickPriceLine(null, { C: { px: 91, v: 5 }, D: { px: 97, v: 5 } }, false)).toMatchObject({ line: 'D' })
   })
 })
 

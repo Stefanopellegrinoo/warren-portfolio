@@ -351,9 +351,12 @@ describe('O line and CCL', () => {
   })
 })
 
+const NOW_ISO = () => new Date().toISOString()
+const live = (rate: number) => async () => ({ rate, asOf: NOW_ISO(), source: 'live' as const })
+
 describe('getOnCcl', () => {
-  it('times out instead of blocking, and negative-caches the failure', async () => {
-    const slow = vi.fn(() => new Promise<number>(() => {}))
+  it('times out instead of blocking, clears its timer, and negative-caches the failure', async () => {
+    const slow = vi.fn(() => new Promise<never>(() => {}))
     vi.useFakeTimers()
     const p = getOnCcl(slow, 50)
     await vi.advanceTimersByTimeAsync(60)
@@ -363,20 +366,35 @@ describe('getOnCcl', () => {
     vi.useRealTimers()
   })
 
-  it('caches a good rate and shares one in-flight call', async () => {
-    const f = vi.fn(async () => 1600)
+  it('clears the timeout once the source answers', async () => {
+    const spy = vi.spyOn(globalThis, 'clearTimeout')
+    await getOnCcl(live(1600))
+    expect(spy).toHaveBeenCalled()
+    spy.mockRestore()
+  })
+
+  it('caches a good rate, shares one in-flight call and reports the rate\'s own as-of', async () => {
+    const asOf = new Date(Date.now() - 3_600_000).toISOString()
+    const f = vi.fn(async () => ({ rate: 1600, asOf, source: 'cache' as const }))
     const rs = await Promise.all([getOnCcl(f), getOnCcl(f), getOnCcl(f)])
     await getOnCcl(f)
     expect(f).toHaveBeenCalledTimes(1)
-    expect(rs[0]?.rate).toBe(1600)
-    expect(typeof rs[0]?.at).toBe('string')
+    expect(rs[0]).toEqual({ rate: 1600, at: asOf })
   })
 
-  it('rejects the emergency fallback constant and bad values', async () => {
-    expect(await getOnCcl(async () => 1100)).toBeNull() // getCCLRate returns 1100 when it has nothing
+  it('rejects the hardcoded fallback, a last-known rate older than 24h, and bad values', async () => {
+    expect(await getOnCcl(async () => ({ rate: 1100, asOf: NOW_ISO(), source: 'fallback' as const }))).toBeNull()
     resetOnCaches()
-    expect(await getOnCcl(async () => NaN)).toBeNull()
+    const old = new Date(Date.now() - 25 * 3_600_000).toISOString()
+    expect(await getOnCcl(async () => ({ rate: 1600, asOf: old, source: 'lkp' as const }))).toBeNull()
+    resetOnCaches()
+    expect(await getOnCcl(live(NaN))).toBeNull()
     resetOnCaches()
     expect(await getOnCcl(async () => { throw new Error('x') })).toBeNull()
+  })
+
+  it('accepts a fresh last-known rate (under 24h)', async () => {
+    const recent = new Date(Date.now() - 5 * 3_600_000).toISOString()
+    expect(await getOnCcl(async () => ({ rate: 1600, asOf: recent, source: 'lkp' as const }))).toEqual({ rate: 1600, at: recent })
   })
 })

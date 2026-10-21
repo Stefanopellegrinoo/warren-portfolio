@@ -9,7 +9,7 @@ import { isOnTermsStale } from './on-terms-health'
 import type { OverrideRow } from './on-terms'
 import { fetchAllData912Quotes } from './data912-client'
 import { argentinaDate } from './utils'
-import { getCCLRate } from './currency'
+import { getCCLRateInfo, type CclRateInfo } from './currency'
 
 const PAGE = 1000 // PostgREST default max rows per request
 const PRICE_CACHE_MS = 5 * 60_000
@@ -135,28 +135,33 @@ function groupBy<T>(rows: Row[], map: (r: Row) => T): Map<string, T[]> {
 const CCL_CACHE_MS = 5 * 60_000
 const CCL_FAILURE_CACHE_MS = 45_000
 const CCL_TIMEOUT_MS = 3_000
-// getCCLRate() returns this hardcoded emergency constant when it has neither Yahoo nor a
-// last-known rate; it is not a market value, so it must never price a bond.
-const CCL_EMERGENCY_FALLBACK = 1100
+const CCL_MAX_AGE_MS = 24 * 3_600_000 // a last-known rate older than this is not a market value for pricing
 
 export interface CclRate {
   rate: number
-  at: string // when this process obtained it (the source may serve a cached value up to 1h old)
+  at: string // when the rate itself was observed (not when this process read it)
 }
 
 let cclCache: { at: number; value: CclRate | null } | null = null
 let cclInflight: Promise<CclRate | null> | null = null
 
-/** Implicit CCL for the implied cable price. Never blocks the page: 3s timeout, 5 min cache, 45s negative cache. */
-export function getOnCcl(source: () => Promise<number> = getCCLRate, timeoutMs = CCL_TIMEOUT_MS): Promise<CclRate | null> {
+/**
+ * Implicit CCL for the implied cable price. Never blocks the page: 3s timeout, 5 min cache,
+ * 45s negative cache. Rejects the hardcoded emergency fallback and any rate older than 24h.
+ */
+export function getOnCcl(source: () => Promise<CclRateInfo> = getCCLRateInfo, timeoutMs = CCL_TIMEOUT_MS): Promise<CclRate | null> {
   if (cclCache && Date.now() - cclCache.at < (cclCache.value ? CCL_CACHE_MS : CCL_FAILURE_CACHE_MS)) return Promise.resolve(cclCache.value)
   cclInflight ??= (async () => {
     let value: CclRate | null = null
+    let timer: ReturnType<typeof setTimeout> | undefined
     try {
-      const rate = await Promise.race([source(), new Promise<never>((_, rej) => setTimeout(() => rej(new Error('ccl timeout')), timeoutMs))])
-      if (Number.isFinite(rate) && rate > 0 && rate !== CCL_EMERGENCY_FALLBACK) value = { rate, at: new Date().toISOString() }
+      const info = await Promise.race([source(), new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error('ccl timeout')), timeoutMs) })])
+      const age = Date.now() - Date.parse(info.asOf)
+      if (info.source !== 'fallback' && Number.isFinite(info.rate) && info.rate > 0 && Number.isFinite(age) && age <= CCL_MAX_AGE_MS) value = { rate: info.rate, at: info.asOf }
     } catch {
       value = null
+    } finally {
+      clearTimeout(timer)
     }
     cclCache = { at: Date.now(), value }
     return value
@@ -235,6 +240,7 @@ export async function loadOnAnalyses(sb: SupabaseClient, opts: LoadOptions = {})
   const checkBy = new Map(tables.checks.map((r) => [r.isin as string, toCheck(r)]))
   const sov: SovPoint[] = tables.curve.flatMap((r) => (num(r.ytm) !== null && num(r.dm) !== null ? [{ law: r.law, ytmPct: Number(r.ytm), dm: Number(r.dm) }] : []))
   const settle = settlementDate(today)
+  // Quiet is computed from D-line volumes only (one number for the whole session).
   // Quiet = most D lines show no volume today (pre-open, weekend, holiday).
   const vols = feed ? tables.terms.flatMap((t) => (t.ticker_d && feed.volumes.has(t.ticker_d) ? [feed.volumes.get(t.ticker_d)!] : [])) : []
   const quiet = vols.length > 0 && vols.filter((v) => v === 0).length / vols.length >= QUIET_SESSION_ZERO_RATIO

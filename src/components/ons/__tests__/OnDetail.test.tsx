@@ -232,6 +232,15 @@ describe('OnDetail: implied cable price', () => {
     expect(html).toContain('implícito · línea O ÷ CCL ($1.000,00)')
     expect(html).toContain('Precio implícito: línea O (pesos) ÷ CCL')
     expect(html).toContain('21/10/2026')
-    expect(html).toContain('igual que BYMA')
+    expect(html).toContain('mismo método que BYMA (CCL implícito de GGAL)')
+  })
+})
+
+describe('OnDetail: no-trades text names the line used', () => {
+  it('names C, O or D', () => {
+    const c = render(build({ terms: terms({ paymentPlaza: 'CCL' }), price: null, lines: { C: { px: 96, v: 0 } }, quiet: false }))
+    expect(c).toContain('sin operaciones en la línea C')
+    const o = render(build({ terms: terms({ paymentPlaza: 'CCL' }), price: null, lines: { O: { px: 96000, v: 0 } }, ccl: { rate: 1000, at: '2026-10-21T15:00:00Z' }, quiet: false }))
+    expect(o).toContain('sin operaciones en la línea O')
   })
 })

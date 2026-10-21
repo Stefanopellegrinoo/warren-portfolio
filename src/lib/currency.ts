@@ -58,6 +58,54 @@ export async function getCCLRate(): Promise<number> {
   return 1100
 }
 
+export interface CclRateInfo {
+  rate: number
+  /** ISO instant the rate was observed: live = now, cache/lkp = now minus the Redis key's age. */
+  asOf: string
+  source: 'live' | 'cache' | 'lkp' | 'fallback'
+}
+
+const EMERGENCY_FALLBACK = 1100
+
+async function redisAgeMs(key: string, ttlSeconds: number): Promise<number> {
+  const left = Number(await getRedis()?.ttl(key))
+  return Number.isFinite(left) && left >= 0 ? Math.max(0, ttlSeconds - left) * 1000 : 0
+}
+
+/**
+ * Same lookup order and keys as getCCLRate (which is left untouched for its other callers),
+ * but it says how old the rate is and where it came from, so a caller that prices bonds can
+ * refuse a long-lived last-known rate or the hardcoded emergency fallback.
+ */
+export async function getCCLRateInfo(): Promise<CclRateInfo> {
+  const at = (ageMs: number) => new Date(Date.now() - ageMs).toISOString()
+  if (isRedisReady()) {
+    const cached = await getRedis()?.get(REDIS_KEY_CCL)
+    if (cached) return { rate: parseFloat(cached), asOf: at(await redisAgeMs(REDIS_KEY_CCL, CACHE_TTL)), source: 'cache' }
+  }
+  try {
+    const quotes = await fetchRawQuotes(['GGAL', 'BCBA:GGAL'])
+    const adr = quotes.get('GGAL')
+    const local = quotes.get('BCBA:GGAL')
+    if (adr && local) {
+      const ccl = (local.price * 10) / adr.price
+      if (isRedisReady()) {
+        const redis = getRedis()
+        await redis?.setex(REDIS_KEY_CCL, CACHE_TTL, ccl.toString())
+        await redis?.setex(REDIS_KEY_CCL_LKP, LKP_TTL, ccl.toString())
+      }
+      return { rate: ccl, asOf: at(0), source: 'live' }
+    }
+  } catch (err) {
+    console.error('[Currency] Error calculating CCL rate:', err)
+  }
+  if (isRedisReady()) {
+    const lkp = await getRedis()?.get(REDIS_KEY_CCL_LKP)
+    if (lkp) return { rate: parseFloat(lkp), asOf: at(await redisAgeMs(REDIS_KEY_CCL_LKP, LKP_TTL)), source: 'lkp' }
+  }
+  return { rate: EMERGENCY_FALLBACK, asOf: at(0), source: 'fallback' }
+}
+
 /**
  * Fetches historical CCL rates for a given period.
  * Returns a Map<DateString, CCLRate>

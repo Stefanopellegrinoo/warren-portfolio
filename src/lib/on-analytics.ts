@@ -76,15 +76,17 @@ export interface PickedLine {
 // BYMA converts the O (ARS) price with the FX of the bond's payment plaza, so a cable-paying
 // ON is priced like BYMA does. Order for CCL: traded C line, then the implied cable price
 // (O ÷ CCL, as BYMA computes it), then the D line (ignores the canje), then any priced line
-// flagged as no-trades. MEP ONs use D then C: there is no MEP rate source for an implied price.
+// flagged as no-trades. MEP (or unknown plaza) ONs use D then C: there is no MEP rate source for an implied price.
+// `quiet` comes from D-line volumes (see loadOnAnalyses).
 export function pickPriceLine(plaza: Plaza | null, lines: LineSet, quiet: boolean, ccl: number | null = null): PickedLine | null {
   const cclOk = ccl !== null && Number.isFinite(ccl) && ccl > 0
-  const trades = (l: Line | undefined) => !!l && (quiet || l.v !== 0)
+  // Unknown volume on C/O is NOT evidence of trades in an active session; on D it is tolerated.
+  const trades = (l: Line | undefined, line: 'D' | 'C' | 'O') => !!l && (quiet || (line === 'D' ? l.v !== 0 : (l.v ?? 0) > 0))
   const cand = (line: 'D' | 'C' | 'O', fellBack: boolean): PickedLine | null => {
     const l = lines[line]
     if (!l || !(l.px > 0)) return null
-    if (line === 'O') return cclOk ? { line, price: l.px / ccl!, noTrades: !trades(l), fellBack } : null
-    return { line, price: l.px, noTrades: !trades(l), fellBack }
+    if (line === 'O') return cclOk ? { line, price: l.px / ccl!, noTrades: !trades(l, line), fellBack } : null
+    return { line, price: l.px, noTrades: !trades(l, line), fellBack }
   }
   const order: PickedLine[] = (plaza === 'CCL' ? [cand('C', false), cand('O', true), cand('D', true)] : [cand('D', false), cand('C', true)]).filter((c): c is PickedLine => c !== null)
   const pick = order.find((c) => !c.noTrades) ?? order[0]
