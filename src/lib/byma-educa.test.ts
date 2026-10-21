@@ -187,6 +187,21 @@ describe('hardening', () => {
   })
 })
 
+describe('real payload quirks', () => {
+  it('a line without ticker (adtve null entry) is valid and maps to null', () => {
+    const r = rows()
+    r[0] = { ...r[0], adtve: [r[0].tk, `${String(r[0].tk).slice(0, -1)}D`, null] }
+    const res = parseBymaPayload(payload({ rows: r }))
+    expect(res.skipped).toEqual([])
+    expect(res.ons[0].tickerC).toBeNull()
+    expect(res.ons[0].tickerD).toBe(`${String(r[0].tk).slice(0, -1)}D`)
+  })
+  it('abort message carries sample reasons', () => {
+    const r = rows().map((x) => ({ ...x, ley: 'XX' }))
+    expect(() => parseBymaPayload(payload({ rows: r }))).toThrow(/ley/)
+  })
+})
+
 describe('accrualStartOf', () => {
   it('first listed flow minus one period', () => {
     expect(accrualStartOf('Semestral', '2025-12-10', ['2027-03-10', '2027-09-10'], '2026-10-21')).toBe('2026-09-10')

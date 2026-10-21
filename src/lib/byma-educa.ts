@@ -47,7 +47,7 @@ const RowSchema = z.object({
   ren: z.array(flowPair),
   amo: z.array(flowPair),
   adtvp: z.array(bounded(1e17).nullable()).nullish(),
-  adtve: z.array(z.string()).nullish(),
+  adtve: z.array(z.string().nullable()).nullish(),
 })
 
 const SovSchema = z.object({
@@ -239,7 +239,7 @@ export function parseBymaPayload(payload: unknown): BymaResult {
     } else skipped.push({ tk: String(row?.tk ?? '?'), reason: p.error.issues[0] ? `${p.error.issues[0].path.join('.')}: ${p.error.issues[0].message}` : 'invalid row' })
   }
   if (skipped.length / on.rows.length > MAX_INVALID_RATIO) {
-    throw new BymaParseError(`BYMA payload aborted: ${skipped.length} of ${on.rows.length} rows invalid (more than 10%)`)
+    throw new BymaParseError(`BYMA payload aborted: ${skipped.length} of ${on.rows.length} rows invalid (more than 10%); e.g. ${skipped.slice(0, 3).map((x) => `${x.tk} ${x.reason}`).join(' | ')}`)
   }
   if (ons.length < MIN_VALID_ROWS) {
     throw new BymaParseError(`BYMA payload aborted: only ${ons.length} valid rows (need at least ${MIN_VALID_ROWS})`)
