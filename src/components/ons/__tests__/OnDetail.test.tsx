@@ -209,3 +209,18 @@ describe('OnDetail: quiet market', () => {
     expect(render()).not.toContain('Mercado sin operaciones aún hoy')
   })
 })
+
+describe('OnDetail: price line', () => {
+  it('shows the line used next to the price', () => {
+    expect(render(build({ terms: terms({ paymentPlaza: 'CCL' }), price: null, lines: { D: { px: 100, v: 5 }, C: { px: 96, v: 5 } } }))).toContain('línea C · cable')
+    expect(render()).toContain('línea D · MEP')
+  })
+
+  it('explains the fallback to the other dollar line', () => {
+    const html = render(build({ terms: terms({ paymentPlaza: 'CCL' }), price: null, lines: { D: { px: 100, v: 5 } } }))
+    expect(html).toContain('precio de la línea D; esta ON paga en dólar cable')
+    expect(html).toContain('la TIR no incluye el canje')
+    const mep = render(build({ terms: terms({ paymentPlaza: 'MEP' }), price: null, lines: { C: { px: 96, v: 5 } } }))
+    expect(mep).toContain('precio de la línea C; esta ON paga en dólar MEP')
+  })
+})

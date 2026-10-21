@@ -61,6 +61,30 @@ export interface SovPoint {
   dm: number
 }
 
+export interface Line {
+  px: number
+  v: number | null // data912 volume today (0 = no trades, null = unknown)
+}
+export type LineSet = { D?: Line; C?: Line }
+export interface PickedLine {
+  line: 'D' | 'C'
+  price: number
+  noTrades: boolean
+  fellBack: boolean
+}
+
+// BYMA converts the O (ARS) price with the FX of the bond's payment plaza, so a cable-paying
+// ON is priced on the C (cable dollar) line and a MEP one on the D line. If the preferred line
+// has no price, or no trades in an active session while the other trades, use the other one.
+export function pickPriceLine(plaza: Plaza | null, lines: LineSet, quiet: boolean): PickedLine | null {
+  const order: ('D' | 'C')[] = plaza === 'CCL' ? ['C', 'D'] : ['D', 'C']
+  const priced = order.filter((l) => (lines[l]?.px ?? 0) > 0)
+  if (priced.length === 0) return null
+  const trades = (l: 'D' | 'C') => quiet || lines[l]!.v !== 0
+  const chosen = priced.find(trades) ?? priced[0]
+  return { line: chosen, price: lines[chosen]!.px, noTrades: !trades(chosen), fellBack: chosen !== order[0] }
+}
+
 export interface OnInput {
   terms: TermsRow
   flows: RawFlow[]
@@ -69,6 +93,8 @@ export interface OnInput {
   check: CheckRow | null
   curve: SovPoint[]
   price: number | null // D line, dirty, per 100 VN (data912 c is dirty)
+  lines?: LineSet // when given, the price is picked by payment plaza (overrides `price`)
+  quiet?: boolean // the feed does not look like an active session
   noTrades?: boolean // data912 reports zero volume on the D line today: `c` is only a reference
   settle: string
 }
@@ -103,6 +129,8 @@ export interface OnListRow {
   maturityDate: string
   shortDated: boolean
   priceQuality: 'ok' | 'no-trades'
+  priceLine: 'D' | 'C' | null // which dollar line the price comes from
+  lineFallback: boolean // the other line was used (not the one matching the payment plaza)
   bymaYtm: { pct: number; asOf: string } | null // BYMA's own TIR (peso price / MEP), for comparison
   status: OnStatus
   simulable: boolean
@@ -241,7 +269,9 @@ export function analyzeOn(i: OnInput): OnAnalysis {
   const flows = toFlows(t, rt, resolved, i.flows)
   const next = flows.find((f) => f.date > settle)
   // Price currency must match the flow currency: only USD ONs take the D-line price.
-  const px = !floating && t.currency === 'USD' && i.price !== null && i.price > 0 ? i.price : null
+  const picked = i.lines ? pickPriceLine(resolved.paymentPlaza.value, i.lines, i.quiet ?? false) : i.price !== null && i.price > 0 ? { line: 'D' as const, price: i.price, noTrades: i.noTrades ?? false, fellBack: false } : null
+  const usable = !floating && t.currency === 'USD' ? picked : null
+  const px = usable?.price ?? null
 
   const a = px === null ? null : analyze({
     dirtyPx: px,
@@ -280,7 +310,9 @@ export function analyzeOn(i: OnInput): OnAnalysis {
     rateType: rt,
     maturityDate: t.maturityDate,
     shortDated: actualDays(settle, t.maturityDate) < SHORT_DATED_DAYS,
-    priceQuality: i.noTrades && px !== null ? 'no-trades' : 'ok',
+    priceQuality: usable?.noTrades ? 'no-trades' : 'ok',
+    priceLine: usable?.line ?? null,
+    lineFallback: usable?.fellBack ?? false,
     bymaYtm: i.check && i.check.bymaYtmPct !== null ? { pct: i.check.bymaYtmPct, asOf: i.check.asOf } : null,
     status,
     // R3.3: floating ONs cannot be simulated; the rest of the catalog can when it is a USD fixed-rate ON.

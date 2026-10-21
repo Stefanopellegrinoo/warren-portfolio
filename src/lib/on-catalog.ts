@@ -4,7 +4,7 @@
 // derived is written anywhere, and the only cache is the 5-min data912 fetch.
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { settlementDate } from './ar-calendar'
-import { analyzeOn, type CheckRow, type EventRow, type OnAnalysis, type SovPoint, type TermsRow } from './on-analytics'
+import { analyzeOn, type Line, type CheckRow, type EventRow, type OnAnalysis, type SovPoint, type TermsRow } from './on-analytics'
 import { isOnTermsStale } from './on-terms-health'
 import type { OverrideRow } from './on-terms'
 import { fetchAllData912Quotes } from './data912-client'
@@ -61,7 +61,8 @@ async function fetchPrices(): Promise<PriceFeed | null> {
     const prices = new Map<string, number>()
     const volumes = new Map<string, number>()
     for (const q of quotes) {
-      if (!q.symbol?.endsWith('D') || typeof q.c !== 'number' || !(q.c > 0)) continue
+      // D (dollar MEP) and C (dollar cable) lines; the O line is in pesos.
+      if (!(q.symbol?.endsWith('D') || q.symbol?.endsWith('C')) || typeof q.c !== 'number' || !(q.c > 0)) continue
       prices.set(q.symbol, q.c)
       if (typeof q.v === 'number' && Number.isFinite(q.v)) volumes.set(q.symbol, q.v)
     }
@@ -179,6 +180,11 @@ async function refreshCatalog(sb: SupabaseClient): Promise<CatalogTables> {
   return data
 }
 
+function lineOf(feed: PriceFeed, ticker: string | null): Line | undefined {
+  const px = ticker ? feed.prices.get(ticker) : undefined
+  return ticker && px !== undefined ? { px, v: feed.volumes?.get(ticker) ?? null } : undefined
+}
+
 export async function loadOnAnalyses(sb: SupabaseClient, opts: LoadOptions = {}): Promise<CatalogResult> {
   const now = opts.now ?? new Date()
   const today = argentinaDate(now)
@@ -193,7 +199,8 @@ export async function loadOnAnalyses(sb: SupabaseClient, opts: LoadOptions = {})
   const checkBy = new Map(tables.checks.map((r) => [r.isin as string, toCheck(r)]))
   const sov: SovPoint[] = tables.curve.flatMap((r) => (num(r.ytm) !== null && num(r.dm) !== null ? [{ law: r.law, ytmPct: Number(r.ytm), dm: Number(r.dm) }] : []))
   const settle = settlementDate(today)
-  const vols = feed ? [...feed.volumes.values()] : []
+  // Quiet = most D lines show no volume today (pre-open, weekend, holiday).
+  const vols = feed ? tables.terms.flatMap((t) => (t.ticker_d && feed.volumes.has(t.ticker_d) ? [feed.volumes.get(t.ticker_d)!] : [])) : []
   const quiet = vols.length > 0 && vols.filter((v) => v === 0).length / vols.length >= QUIET_SESSION_ZERO_RATIO
 
   return {
@@ -205,8 +212,9 @@ export async function loadOnAnalyses(sb: SupabaseClient, opts: LoadOptions = {})
         events: eventsBy.get(t.isin) ?? [],
         check: checkBy.get(t.isin) ?? null,
         curve: sov,
-        price: t.tickerD ? feed?.prices.get(t.tickerD) ?? null : null,
-        noTrades: !quiet && t.tickerD ? feed?.volumes?.get(t.tickerD) === 0 : false,
+        price: null,
+        lines: feed ? { D: lineOf(feed, t.tickerD), C: lineOf(feed, t.tickerC) } : {},
+        quiet,
         settle,
       })
     ),

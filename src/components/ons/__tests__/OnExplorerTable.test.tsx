@@ -33,6 +33,8 @@ const row = (over: Partial<OnListRow> = {}): OnListRow => ({
   events: [],
   shortDated: false,
   priceQuality: 'ok',
+  priceLine: 'D',
+  lineFallback: false,
   bymaYtm: null,
   ...over,
 })
@@ -119,6 +121,22 @@ describe('OnExplorerTable', () => {
     // visible secondary line, reachable on touch and keyboard (not only a title)
     expect(html).toContain('BYMA 8,41%')
     expect(html).toContain('20/10/2026')
+  })
+
+  it('no-trades rows show the TIR as a dash in the list (the value stays on the detail page)', () => {
+    const html = render([row({ priceQuality: 'no-trades', ytmPct: -14.96 })])
+    expect(html).not.toContain('14,96')
+    expect(html).toContain('sin operaciones en la rueda')
+  })
+
+  it('says which line the price comes from', () => {
+    expect(render([row({ priceLine: 'C', plaza: 'CCL' })])).toContain('línea C · cable')
+    expect(render([row()])).toContain('línea D · MEP')
+  })
+
+  it('a missing spread renders a dash, never 0 pb', () => {
+    const html = render([row({ spreadBp: null })])
+    expect(html).not.toContain('0 pb')
   })
 
   it('empty list says "Sin resultados"', () => {

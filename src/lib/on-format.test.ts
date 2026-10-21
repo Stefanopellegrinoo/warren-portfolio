@@ -11,6 +11,9 @@ describe('on-format', () => {
     expect(fmtBp(-12.4)).toBe('-12 pb')
     expect(fmtBp(120.6)).toBe('+121 pb')
     expect(fmtBp(null)).toBe('—')
+    expect(fmtBp(undefined)).toBe('—')
+    expect(fmtBp(0.3)).toBe('0 pb')
+    expect(fmtBp(-0.3)).toBe('0 pb') // never "-0 pb"
   })
 
   it('compacts USD volumes', () => {

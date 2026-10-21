@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { analyzeOn, rateTypeOf, currencyLabel, type OnInput, type TermsRow } from './on-analytics'
+import { analyzeOn, rateTypeOf, currencyLabel, pickPriceLine, type OnInput, type TermsRow } from './on-analytics'
 import type { OverrideRow } from './on-terms'
 
 // Synthetic bond: 6% annual, semiannual 3.0 coupons, bullet. NY law => 30/360 default.
@@ -220,5 +220,58 @@ describe('analyzeOn: spread, liquidity, events, options', () => {
     expect(detail.ytw?.kind).toBe('call')
     expect(detail.ytw!.ytwPct).toBeLessThan(row.ytmPct!)
     expect(detail.terms.calls.prov).toBe('verified')
+  })
+})
+
+describe('pickPriceLine: price line follows the payment plaza', () => {
+  const both = { D: { px: 100, v: 50 }, C: { px: 96, v: 20 } }
+
+  it('CCL plaza prefers the C (cable) line, MEP the D line', () => {
+    expect(pickPriceLine('CCL', both, false)).toMatchObject({ line: 'C', price: 96, noTrades: false, fellBack: false })
+    expect(pickPriceLine('MEP', both, false)).toMatchObject({ line: 'D', price: 100, fellBack: false })
+    expect(pickPriceLine(null, both, false)).toMatchObject({ line: 'D' })
+  })
+
+  it('falls back to the other dollar line when the preferred has no price', () => {
+    expect(pickPriceLine('CCL', { D: both.D }, false)).toMatchObject({ line: 'D', price: 100, fellBack: true })
+    expect(pickPriceLine('MEP', { C: both.C }, false)).toMatchObject({ line: 'C', fellBack: true })
+  })
+
+  it('falls back when the preferred has no trades in an active session and the other trades', () => {
+    expect(pickPriceLine('CCL', { C: { px: 96, v: 0 }, D: both.D }, false)).toMatchObject({ line: 'D', fellBack: true, noTrades: false })
+  })
+
+  it('quiet session: the preferred line is kept and not labelled', () => {
+    expect(pickPriceLine('CCL', { C: { px: 96, v: 0 }, D: { px: 100, v: 0 } }, true)).toMatchObject({ line: 'C', noTrades: false, fellBack: false })
+  })
+
+  it('no line trades in an active session: keep the preferred, labelled no-trades', () => {
+    expect(pickPriceLine('CCL', { C: { px: 96, v: 0 }, D: { px: 100, v: 0 } }, false)).toMatchObject({ line: 'C', noTrades: true })
+  })
+
+  it('unknown volume counts as trading; nothing priced gives null', () => {
+    expect(pickPriceLine('CCL', { C: { px: 96, v: null } }, false)).toMatchObject({ line: 'C', noTrades: false })
+    expect(pickPriceLine('CCL', {}, false)).toBeNull()
+  })
+})
+
+describe('analyzeOn with price lines', () => {
+  it('CCL-paying ON discounts with the C price and says which line it used', () => {
+    const { row } = analyzeOn(input({ terms: terms({ paymentPlaza: 'CCL' }), price: null, lines: { D: { px: 100, v: 5 }, C: { px: 96, v: 5 } } }))
+    expect(row.priceLine).toBe('C')
+    expect(row.price).toBe(96)
+    expect(row.lineFallback).toBe(false)
+    expect(row.ytmPct).toBeGreaterThan(analyzeOn(input({ price: 100 })).row.ytmPct!)
+  })
+
+  it('records the fallback when only the other line has a price', () => {
+    const { row } = analyzeOn(input({ terms: terms({ paymentPlaza: 'CCL' }), price: null, lines: { D: { px: 100, v: 5 } } }))
+    expect(row.priceLine).toBe('D')
+    expect(row.lineFallback).toBe(true)
+  })
+
+  it('a legacy single price is the D line', () => {
+    expect(analyzeOn(input()).row.priceLine).toBe('D')
+    expect(analyzeOn(input({ price: null })).row.priceLine).toBeNull()
   })
 })

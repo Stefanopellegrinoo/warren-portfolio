@@ -302,3 +302,24 @@ describe('quiet market: no per-row no-trades labels', () => {
     expect(r.analyses.every((a) => a.row.priceQuality === 'ok')).toBe(true)
   })
 })
+
+describe('C lines in the price feed', () => {
+  it('getOnPrices keeps C prices and volumes next to D', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => [{ symbol: 'T001D', c: 100, v: 5 }, { symbol: 'T001C', c: 96, v: 7 }, { symbol: 'T001O', c: 150000, v: 9 }] })))
+    const f = await getOnPrices()
+    vi.unstubAllGlobals()
+    expect(f?.prices.get('T001C')).toBe(96)
+    expect(f?.volumes.get('T001C')).toBe(7)
+    expect(f?.prices.has('T001O')).toBe(false)
+  })
+
+  it('a CCL ON takes its C line; a missing C falls back to D', async () => {
+    const t = base()
+    t.on_terms = [termsRow('AR0000000001', { payment_plaza: 'CCL', ticker_c: 'T001C' }), termsRow('AR0000000002', { payment_plaza: 'CCL', ticker_c: null })]
+    t.on_cashflows = ['AR0000000001', 'AR0000000002'].flatMap(flowRows)
+    const r = await loadOnAnalyses(fakeSupabase(t), { now: NOW, getPrices: feed({ T001D: 100, T001C: 96, T002D: 100 }, { T001D: 5, T001C: 5, T002D: 5 }) })
+    const by = Object.fromEntries(r.analyses.map((a) => [a.row.isin, a.row]))
+    expect([by.AR0000000001.priceLine, by.AR0000000001.price]).toEqual(['C', 96])
+    expect([by.AR0000000002.priceLine, by.AR0000000002.lineFallback]).toEqual(['D', true])
+  })
+})

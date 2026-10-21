@@ -3,7 +3,7 @@ import { ArrowDown, ArrowUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { OnListRow } from '@/lib/on-analytics'
 import type { ExplorerState, SortKey } from '@/lib/on-explorer-filters'
-import { eventLabel, fmtBp, fmtDate, fmtNum, fmtPct, fmtUsdCompact, rateTypeLabel, safeHref } from '@/lib/on-format'
+import { lineLabel, eventLabel, fmtBp, fmtDate, fmtNum, fmtPct, fmtUsdCompact, rateTypeLabel, safeHref } from '@/lib/on-format'
 
 interface Props {
   rows: OnListRow[]
@@ -13,7 +13,6 @@ interface Props {
 
 const COLUMNS: { key: SortKey; label: string; numeric: boolean; hint?: string }[] = [
   { key: 'ticker', label: 'Ticker', numeric: false },
-  { key: 'issuer', label: 'Emisor', numeric: false },
   { key: 'maturity', label: 'Vence', numeric: false },
   { key: 'price', label: 'Precio', numeric: true, hint: 'Precio sucio de la línea D (data912), por 100 VN' },
   { key: 'ytm', label: 'TIR', numeric: true, hint: 'Tasa interna de retorno efectiva anual al vencimiento' },
@@ -40,8 +39,9 @@ function PriceCell({ r }: { r: OnListRow }) {
   return (
     <div className="flex flex-col items-end gap-0.5">
       <span className={r.priceQuality === 'no-trades' ? 'text-slate-400' : undefined}>{fmtNum(r.price)}</span>
+      <span className="text-[11px] text-slate-400" title={r.lineFallback ? 'Precio de la otra línea en dólares: la de la plaza de pago no tiene precio.' : undefined}>{lineLabel(r.priceLine)}</span>
       {r.priceQuality === 'no-trades' && (
-        <span title={NO_TRADES_HINT} className="cursor-help rounded border border-slate-500/40 px-1 text-[11px] leading-4 text-slate-300">
+        <span title={NO_TRADES_HINT} className="max-w-[7rem] cursor-help whitespace-normal rounded border border-slate-500/40 px-1 text-right text-[11px] leading-4 text-slate-300">
           sin operaciones en la rueda<span className="sr-only">: precio de referencia, la TIR puede no ser representativa</span>
         </span>
       )}
@@ -79,11 +79,7 @@ function YtmCell({ r }: { r: OnListRow }) {
           &lt;90 d
         </span>
       )}
-      <span
-        className={cn('font-semibold', r.priceQuality === 'no-trades' ? 'text-slate-400' : 'text-white')}
-      >
-        {fmtPct(r.ytmPct)}
-      </span>
+      <span className="font-semibold text-white">{r.priceQuality === 'no-trades' ? '—' : fmtPct(r.ytmPct)}</span>
     </div>
     {r.bymaYtm && (
       <div className="text-[11px] text-slate-400" title={`TIR de BYMA al ${fmtDate(r.bymaYtm.asOf)}: precio en pesos ÷ MEP. La de Warren usa el precio en dólares de la línea D.`}>
@@ -146,6 +142,7 @@ export default function OnExplorerTable({ rows, sort, onSort }: Props) {
                 <td className={cn(TD, 'sticky left-0 z-10 bg-bg-800')}>
                   <Link href={`/ons/${r.isin}`} className="font-semibold text-amber hover:underline">{r.tickerO}</Link>
                   <Badges r={r} />
+                  <div className="max-w-[11rem] truncate text-[11px] text-slate-300" title={r.description ?? r.issuer ?? undefined}>{r.issuer ?? '—'}</div>
                   <div className="text-[10px] text-slate-500">{r.isin}</div>
                   <div className="text-[10px] text-slate-400">
                     {r.currencyLabel} · {r.law} · {rateTypeLabel(r.rateType)}
@@ -154,7 +151,6 @@ export default function OnExplorerTable({ rows, sort, onSort }: Props) {
                     )}
                   </div>
                 </td>
-                <td className={cn(TD, 'max-w-[6.5rem] truncate text-slate-300')} title={r.description ?? r.issuer ?? undefined}>{r.issuer ?? '—'}</td>
                 <td className={TD}>{fmtDate(r.maturityDate)}</td>
                 <td className={cn(TD, 'text-right')}><PriceCell r={r} /></td>
                 <td className={cn(TD, 'text-right')}><YtmCell r={r} /></td>
@@ -167,8 +163,8 @@ export default function OnExplorerTable({ rows, sort, onSort }: Props) {
                 <td className={TD}>
                   {r.nextPayDate ? (
                     <>
-                      {fmtDate(r.nextPayDate)}
-                      <span className="ml-1.5 text-[10px] text-slate-500">{fmtNum(r.nextPayAmountPct)}%</span>
+                      <div>{fmtDate(r.nextPayDate)}</div>
+                      <div className="text-[10px] text-slate-500">{fmtNum(r.nextPayAmountPct)}%</div>
                     </>
                   ) : '—'}
                 </td>

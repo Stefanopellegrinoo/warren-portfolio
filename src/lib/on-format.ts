@@ -62,3 +62,6 @@ export function safeHref(url: string | null | undefined): string | undefined {
 
 /** Nominal amount: lots and issued amounts are in VN (valor nominal), not in a currency. */
 export const fmtVn = (x: number | null | undefined): string => (ok(x) ? `VN ${fmtNum(x, 0)}` : DASH)
+
+/** "línea C · cable" / "línea D · MEP": the dollar line a price comes from. */
+export const lineLabel = (line: 'D' | 'C' | null): string => (line === 'C' ? 'línea C · cable' : line === 'D' ? 'línea D · MEP' : '')
