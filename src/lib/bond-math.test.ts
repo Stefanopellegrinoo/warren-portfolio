@@ -142,12 +142,12 @@ describe('buildFlows - fixed rate', () => {
     expect(flows[1].payDate).toBe('2027-03-12') // preceding (Saturday -> Friday)
   })
 
-  it('record date is the offset in business days before the adjusted pay date', () => {
+  it('record date is the offset in CALENDAR days before the unadjusted date', () => {
     const [f] = buildFlows(
       { ...base, recordOffsetDays: 15 },
       [{ date: '2026-09-10', ren: 0, amo: 100 }]
     )
-    expect(f.recordDate).toBe('2026-08-20') // 15 business days before the pay date
+    expect(f.recordDate).toBe('2026-08-26')
   })
 
   it('without offset the record date equals the unadjusted date', () => {
@@ -162,14 +162,18 @@ describe('buildFlows - fixed rate', () => {
 })
 
 describe('buildFlows - record date, residual, merging', () => {
-  it('offset 1 on a holiday payment: previous business day before the adjusted pay date', () => {
-    // 2026-07-09 holiday, 07-10 decreed -> payDate 2026-07-13 -> record 2026-07-08
+  it('record date may land on a non-business day (sea o no un Dia Habil)', () => {
     const [f] = buildFlows(
       { ...base, recordOffsetDays: 1 },
       [{ date: '2026-07-09', ren: 0, amo: 100 }]
     )
     expect(f.payDate).toBe('2026-07-13')
-    expect(f.recordDate).toBe('2026-07-08')
+    expect(f.recordDate).toBe('2026-07-08') // calendar day before the unadjusted date
+    const [g] = buildFlows(
+      { ...base, recordOffsetDays: 4 },
+      [{ date: '2026-09-10', ren: 0, amo: 100 }]
+    )
+    expect(g.recordDate).toBe('2026-09-06') // a Sunday, valid
   })
 
   it('does not accumulate float drift in the residual', () => {

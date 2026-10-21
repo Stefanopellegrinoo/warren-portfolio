@@ -1,7 +1,7 @@
 // Pure bond math (no DB, no network). Dates are ISO 'YYYY-MM-DD' strings,
 // handled through UTC arithmetic only, so results do not depend on the TZ.
 // Percentages are per 100 ORIGINAL face value (VN), like BYMA px/ren/amo.
-import { arCalendar, addBusinessDays, toMs, type Bdc, type Calendar } from './ar-calendar'
+import { arCalendar, addDays, toMs, type Bdc, type Calendar } from './ar-calendar'
 
 export type { Bdc } from './ar-calendar'
 export type DayCount = '30/360' | 'ACT/365' | 'ACT/360' | 'ACT/ACT'
@@ -120,8 +120,10 @@ export function buildFlows(
     const flow: Flow = {
       date: row.date,
       payDate,
-      // Record date counts business days back from the adjusted pay date.
-      recordDate: addBusinessDays(payDate, -(terms.recordOffsetDays ?? 0)),
+      // Record date = calendar days before the UNADJUSTED date, "sea o no un
+      // Dia Habil" (Edenor Clase 11, YPF Clase XXXI prospectuses): it may fall
+      // on a non-business day.
+      recordDate: addDays(row.date, -(terms.recordOffsetDays ?? 0)),
       couponPct,
       amortPct,
       residualBeforePct: residual,
