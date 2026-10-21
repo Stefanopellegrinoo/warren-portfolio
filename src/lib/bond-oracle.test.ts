@@ -2,7 +2,7 @@
 // Fixture: scripts/build-byma-oracle-fixture.ts. Prices are dirty per 100 ORIGINAL VN.
 import { describe, expect, it } from 'vitest'
 import fixture from './__fixtures__/byma-oracle.json'
-import { buildFlows, defaultDayCount, type DayCount, type RawFlow } from './bond-math'
+import { buildFlows, dcf, defaultDayCount, type DayCount, type RawFlow } from './bond-math'
 import { accrued, ytm } from './bond-yield'
 
 interface Row {
@@ -15,6 +15,8 @@ interface Row {
   px: number
   ai: number
   ytm: number
+  fc: string
+  vr: number
   ren: [string, number][]
   amo: [string, number][]
 }
@@ -37,8 +39,6 @@ const addMonths = (iso: string, n: number) => {
   const [y, m, d] = iso.split('-').map(Number)
   return new Date(Date.UTC(y, m - 1 + n, d)).toISOString().slice(0, 10)
 }
-const monthsBetween = (a: string, b: string) =>
-  (Number(b.slice(0, 4)) - Number(a.slice(0, 4))) * 12 + Number(b.slice(5, 7)) - Number(a.slice(5, 7))
 const q = (xs: number[], p: number) => [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor(p * xs.length))]
 const stats = (d: { bp: number }[]) => {
   const v = d.map((x) => x.bp)
@@ -46,9 +46,9 @@ const stats = (d: { bp: number }[]) => {
 }
 
 describe('BYMA oracle fixture', () => {
-  it('has >= 200 public fixed-rate-or-bullet USD rows and only public fields', () => {
+  it("has >= 200 public USD rows and only public fields", () => {
     expect(rows.length).toBeGreaterThanOrEqual(200)
-    const allowed = ['tk', 'isin', 'ley', 'me', 'est', 'fe', 'fv', 'cup', 'px', 'ai', 'ytm', 'dm', 'ren', 'amo', 'vr']
+    const allowed = ['tk', 'isin', 'ley', 'me', 'est', 'fc', 'fe', 'fv', 'cup', 'px', 'ai', 'ytm', 'dm', 'ren', 'amo', 'vr']
     for (const r of rows) expect(Object.keys(r).sort()).toEqual([...allowed].sort())
   })
 
@@ -61,21 +61,26 @@ describe('BYMA oracle fixture', () => {
     expect(s.n).toBeGreaterThanOrEqual(200)
     expect(s.median).toBeLessThanOrEqual(0.5)
     expect(s.p90).toBeLessThanOrEqual(2)
+    // Tail guard (measured 17 of 228 above 5bp: long first periods, plus distressed or
+    // under-90-day bonds where yield is hypersensitive). A regression shows up here.
+    expect(d.filter((x) => x.bp > 5).length).toBeLessThanOrEqual(18)
   })
 
-  // BYMA `ren` only lists FUTURE coupons, so the accrual period that contains settle
-  // starts at the last regular cycle date <= settle (clamped to the issue date).
-  // ponytail: cycle length = gap between the first two coupons (6 months if only one).
+  // BYMA `ren` only lists FUTURE coupons: the accrual period that contains settle starts
+  // one coupon period (from `fc`) before the first listed flow, clamped to the issue date.
+  const PERIOD_MONTHS: Record<string, number> = { Mensual: 1, Trimestral: 3, Semestral: 6, Anual: 12 }
   const periodStart = (r: Row) => {
-    const gap = r.ren.length > 1 ? monthsBetween(r.ren[0][0], r.ren[1][0]) : 6
-    let k = 0
-    let cand = r.ren[0][0]
-    while (cand > settle) cand = addMonths(r.ren[0][0], -gap * ++k)
-    return cand > r.fe ? cand : r.fe
+    const m = PERIOD_MONTHS[r.fc]
+    if (!m) return r.fe
+    const prev = addMonths(r.ren[0][0], -m)
+    // prev after settle means a long first period: accrual runs from issue.
+    return prev > r.fe && prev <= settle ? prev : r.fe
   }
   const fixed = rows.filter((r) => r.est === 'Tasa Fija' && r.cup > 0 && r.ren.length > 0)
   const termsOf = (r: Row, dayCount: DayCount) => ({
-    issueDate: periodStart(r),
+    issueDate: r.fe,
+    accrualStart: periodStart(r),
+    residualPct: r.vr,
     rateType: 'fixed' as const,
     couponPct: r.cup * 100,
     dayCount,
@@ -88,23 +93,28 @@ describe('BYMA oracle fixture', () => {
     const flowsOf = (r: Row) => buildFlows(termsOf(r, defaultDayCount(r.ley)), bymaRaw(r))
     const ny = stats(deltasBp(flowsOf, fixed.filter((r) => r.ley === 'NY')))
     const arg = stats(deltasBp(flowsOf, fixed.filter((r) => r.ley === 'ARG')))
-    // Measured: NY 30/360 median 0.28bp (35 of 42 within 1bp), so terms == method for
-    // regular NY bonds. ARG ACT/365 differs from BYMA's cup/2 (median 1.5bp, long tail
-    // from period-start inference); never thresholded, only sanity bounds.
+    // Measured: NY 30/360 median 0.20bp, p90 0.7bp, so terms == method for
+    // regular NY bonds. ARG ACT/365 differs from BYMA's cup/2 (median 1.36bp, p90 33bp: irregular
+    // first periods); informational, only sanity bounds.
     expect(ny.n).toBeGreaterThan(30)
     expect(arg.n).toBeGreaterThan(100)
-    expect(ny.median).toBeLessThanOrEqual(1)
-    expect(arg.median).toBeLessThanOrEqual(10)
+    expect(ny.median).toBeLessThanOrEqual(0.5)
+    expect(arg.median).toBeLessThanOrEqual(3)
   })
 
-  it('accrued: BYMA ai is cup x 30/360 days since the period start', () => {
-    const near = fixed.filter((r) => {
+  it('accrued: BYMA ai is cup x residual x 30/360 days since the period start', () => {
+    const off = fixed.filter((r) => {
       const flows = buildFlows(termsOf(r, '30/360'), bymaRaw(r))
-      return Math.abs(accrued(flows, settle, '30/360', periodStart(r)) - r.ai) < 0.02
+      const ours = accrued(flows, settle, '30/360', periodStart(r))
+      // Independent closed form, so accrued() is not only compared with itself.
+      const closed = (r.cup * 100 * r.vr * dcf('30/360', periodStart(r), settle)) / 100
+      expect(ours).toBeCloseTo(closed, 6)
+      return Math.abs(ours - r.ai) >= 0.02
     })
-    // Measured 185/212 within 0.02 (the rest are irregular first periods / single coupons),
-    // against 70/212 for ACT/360. So BYMA ai is 30/360 even for ACT/365 ARG bonds
-    // (CS50: 0.8257 = 7.25 x 41/360 vs ours 7.25 x 41/365 = 0.8144).
-    expect(near.length / fixed.length).toBeGreaterThanOrEqual(0.8)
+    // Measured 12 of 212 unmatched: AERBO, BYCWO, BYCXO, CS52O, CS53O, EAC2O, IRCPO, OTS6O,
+    // PLC6O, PLC7O, VAC3P, YM43O (irregular first periods). BYMA ai is 30/360 even for
+    // ACT/365 ARG bonds (27 unmatched before `fc`/`vr` were used); BYMA ai is 30/360 even for ACT/365 ARG
+    // bonds (CS50: 0.8257 = 7.25 x 41/360 vs ours 7.25 x 41/365 = 0.8144).
+    expect(off.length).toBeLessThanOrEqual(12)
   })
 })

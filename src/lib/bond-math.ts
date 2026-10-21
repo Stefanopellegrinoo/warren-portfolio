@@ -35,6 +35,11 @@ export interface FlowTerms {
   bdc: Bdc
   maturityBdc: Bdc
   recordOffsetDays: number | null
+  // Seasoned bonds (BYMA `ren` lists FUTURE flows only): residual still outstanding
+  // (BYMA `vr`, default 100) and the start of the accrual period that contains the
+  // first listed flow (default issueDate).
+  residualPct?: number
+  accrualStart?: string
 }
 
 const DAY_MS = 86_400_000
@@ -99,7 +104,7 @@ function mergeByDate(raw: RawFlow[]): RawFlow[] {
 
 // Fixed-rate coupons are computed (cup x DCF x residual); the first period
 // starts at the issue date. Zero-amortization schedules get a 100% bullet
-// redemption on the last date.
+// redemption (of the residual) on the last date.
 export function buildFlows(
   terms: FlowTerms,
   raw: RawFlow[],
@@ -107,11 +112,11 @@ export function buildFlows(
 ): Flow[] {
   const rows = mergeByDate(raw)
   const needsBullet = rows.every((r) => r.amo === 0)
-  let residual = 100
-  let prev = terms.issueDate
+  let residual = terms.residualPct ?? 100
+  let prev = terms.accrualStart ?? terms.issueDate
   return rows.map((row, i) => {
     const isLast = i === rows.length - 1
-    const amortPct = needsBullet && isLast ? 100 : row.amo
+    const amortPct = needsBullet && isLast ? residual : row.amo
     const computed = terms.rateType === 'fixed'
     const couponPct = computed
       ? (terms.couponPct * dcf(terms.dayCount, prev, row.date) * residual) / 100

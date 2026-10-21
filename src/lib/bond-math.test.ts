@@ -214,6 +214,33 @@ describe('buildFlows - record date, residual, merging', () => {
   })
 })
 
+describe('buildFlows - seasoned bonds (residualPct, accrualStart)', () => {
+  const terms: FlowTerms = { ...base, rateType: 'fixed', couponPct: 8, dayCount: '30/360', issueDate: '2026-01-16' }
+
+  it('computes coupons on the real residual of a partially amortized bond (BYMA vr 82)', () => {
+    const raw: RawFlow[] = [
+      { date: '2027-01-16', ren: 0, amo: 9 },
+      { date: '2027-04-16', ren: 0, amo: 73 },
+    ]
+    const flows = buildFlows({ ...terms, residualPct: 82, accrualStart: '2026-10-16' }, raw)
+    expect(flows[0].residualBeforePct).toBe(82)
+    expect(flows[0].couponPct).toBeCloseTo((8 * 0.25 * 82) / 100, 10)
+    expect(flows[1].residualBeforePct).toBe(73)
+    expect(flows[1].couponPct).toBeCloseTo((8 * 0.25 * 73) / 100, 10)
+  })
+
+  it('accrualStart (not issueDate) starts the first live coupon period', () => {
+    const raw: RawFlow[] = [{ date: '2027-01-16', ren: 0, amo: 100 }]
+    const flows = buildFlows({ ...terms, accrualStart: '2026-10-16' }, raw)
+    expect(flows[0].couponPct).toBeCloseTo(8 * 0.25, 10)
+  })
+
+  it('a bullet on a residual below 100 redeems the residual', () => {
+    const flows = buildFlows({ ...terms, residualPct: 82 }, [{ date: '2027-01-16', ren: 0, amo: 0 }])
+    expect(flows[0].amortPct).toBe(82)
+  })
+})
+
 describe('date validation and extra day counts', () => {
   it('rejects malformed and rolled-over dates', () => {
     expect(() => dcf('ACT/365', '2026-02-30', '2026-03-01')).toThrow(/invalid ISO date/)
