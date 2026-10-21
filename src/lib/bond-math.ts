@@ -39,7 +39,7 @@ export interface FlowTerms {
 
 const DAY_MS = 86_400_000
 
-function actualDays(from: string, to: string): number {
+export function actualDays(from: string, to: string): number {
   return Math.round((toMs(to) - toMs(from)) / DAY_MS)
 }
 
