@@ -21,7 +21,7 @@ interface Cash {
 // amortization on that date is kept. "Closing" means the flow fully redeems
 // the residual (not list position), so a truncated schedule is not misread.
 // Callers should pass the full live schedule to ytm/risk/accrued/wal.
-function isExCoupon(flows: Flow[], i: number, settle: string): boolean {
+export function isExCoupon(flows: Flow[], i: number, settle: string): boolean {
   const f = flows[i]
   const closes = f.residualBeforePct - f.amortPct <= 1e-9
   return !closes && settle > f.recordDate

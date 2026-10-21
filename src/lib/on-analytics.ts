@@ -169,6 +169,7 @@ export interface ScheduleRow {
 
 export interface OnDetail {
   issueDate: string
+  accrualStart: string // start of the accrual period of the first listed flow (accrued-interest base)
   couponRatePct: number | null
   frequency: string | null
   residualPct: number
@@ -349,6 +350,7 @@ export function analyzeOn(i: OnInput): OnAnalysis {
 
   const detail: OnDetail = {
     issueDate: t.issueDate,
+    accrualStart: t.accrualStart,
     couponRatePct: t.couponRate === null ? null : t.couponRate * 100,
     frequency: t.frequency,
     residualPct: t.residualPct,
