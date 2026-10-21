@@ -24,7 +24,8 @@ export interface CclRateInfo {
 }
 
 async function redisAgeMs(key: string, ttlSeconds: number): Promise<number> {
-  const left = Number(await getRedis()?.ttl(key))
+  let left = NaN
+  try { left = Number(await getRedis()?.ttl(key)) } catch { /* age unknown: report 0, never fail a cache hit */ }
   return Number.isFinite(left) && left >= 0 ? Math.max(0, ttlSeconds - left) * 1000 : 0
 }
 

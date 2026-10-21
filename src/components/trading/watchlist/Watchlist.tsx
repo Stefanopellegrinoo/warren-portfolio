@@ -115,7 +115,8 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
           const data = await res.json();
           setRows((prev) => {
             const next = { ...prev };
-            data.forEach((q: { ticker: string; price: number; change_pct: number }) => {
+            data.forEach((q: { ticker: string; price: number | null; change_pct: number }) => {
+              if (q.price === null) return // unavailable: keep the last row
               next[q.ticker] = { symbol: q.ticker, price: q.price, pct: q.change_pct ?? 0 };
             });
             return next;

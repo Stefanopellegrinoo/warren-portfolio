@@ -157,6 +157,26 @@ describe('GET /api/watchlist', () => {
     expect(body.items[0].changePercent).toBeNull()
   })
 
+  it('returns a null price row when the provider refuses (no CCL for a BCBA symbol)', async () => {
+    mockFrom
+      .mockReturnValueOnce(buildOwnershipChain({ id: 'list-1', user_id: 'user-1', name: 'AR' }))
+      .mockReturnValueOnce(buildItemsSelectChain([
+        { id: 'id-1', symbol: 'AAPL', added_at: '2026-01-01T00:00:00Z' },
+        { id: 'id-2', symbol: 'BCBA:GGAL', added_at: '2026-01-01T00:00:00Z' },
+      ]))
+    mockGetQuote.mockImplementation(async (s: string) => {
+      if (s.startsWith('BCBA:')) throw new MarketDataError('PROVIDER_UNAVAILABLE', 'No CCL rate available')
+      return { ticker: s, price: 150, change: 1, changePercent: 0.01, previousClose: 149, updatedAt: '2026-01-01T00:00:00Z' }
+    })
+
+    const { GET } = await import('./route')
+    const res = await GET(makeGetRequest({ watchlistId: 'list-1' }))
+    const body = await res.json()
+    expect(res.status).toBe(200)
+    expect(body.items[0].price).toBe(150)
+    expect(body.items[1].price).toBeNull()
+  })
+
   it('returns { items: [] } for an empty list', async () => {
     const ownershipChain = buildOwnershipChain({ id: 'list-1', user_id: 'user-1', name: 'Tech US' })
     const itemsChain = buildItemsSelectChain([])

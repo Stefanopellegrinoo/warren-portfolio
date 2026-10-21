@@ -99,11 +99,29 @@ describe('GET /api/quote', () => {
     expect(res.status).toBe(404)
   })
 
-  it('returns 500 when provider throws PROVIDER_UNAVAILABLE', async () => {
+  it('returns 503 with a generic message when every ticker is unavailable', async () => {
     const { GET } = await import('./route')
-    mockGetQuote.mockRejectedValue(new MarketDataError('PROVIDER_UNAVAILABLE', 'Yahoo down'))
+    mockGetQuote.mockRejectedValue(new MarketDataError('PROVIDER_UNAVAILABLE', 'No CCL rate available for BCBA:GGAL (ARS)'))
 
     const res = await GET(makeRequest({ ticker: 'AAPL' }))
-    expect(res.status).toBe(500)
+    expect(res.status).toBe(503)
+    const body = await res.json()
+    expect(body.error).not.toMatch(/CCL|ARS|BCBA/)
+  })
+
+  it('one unavailable ticker does not blank the batch', async () => {
+    const { GET } = await import('./route')
+    mockGetQuote.mockImplementation(async (t: string) => {
+      if (t === 'BCBA:GGAL') throw new MarketDataError('PROVIDER_UNAVAILABLE', 'No CCL rate available')
+      return fakeQuote
+    })
+
+    const res = await GET(makeRequest({ tickers: 'AAPL,BCBA:GGAL' }))
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data).toHaveLength(2)
+    expect(data[0]).toMatchObject({ ticker: 'AAPL', price: 150.5 })
+    expect(data[1]).toMatchObject({ ticker: 'BCBA:GGAL', price: null, unavailable: true })
+    expect(JSON.stringify(data[1])).not.toMatch(/CCL|ARS/)
   })
 })

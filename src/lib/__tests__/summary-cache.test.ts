@@ -170,5 +170,7 @@ describe('cacheUserSummaries', () => {
     expect(payload.summary.open_pnl).toBe(500)
     expect(payload.positions).toHaveLength(2)             // MISS still listed…
     expect(payload.positions[1].market_value).toBeUndefined() // …just unpriced
+    expect(payload.unpricedCount).toBe(1)                 // …and now said out loud
+    expect(payload.unpricedTickers).toEqual(['MISS'])
   })
 })

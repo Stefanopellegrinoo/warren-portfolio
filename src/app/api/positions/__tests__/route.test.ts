@@ -96,6 +96,35 @@ describe('GET /api/positions — characterization before valuation refactor', ()
     expect(miss.market_value).toBeUndefined()
   })
 
+  it('surfaces how many positions have no price at all instead of dropping them silently', async () => {
+    const supabase = clientWith(
+      {
+        positions: [
+          { user_id: 'u1', ticker: 'AAPL', quantity: 10, avg_cost: 100, total_invested: 1000 },
+          { user_id: 'u1', ticker: 'BCBA:GGAL', quantity: 5, avg_cost: 100, total_invested: 500 },
+        ],
+        on_positions: [], closed_trades: [], on_closed_trades: [],
+      },
+      0
+    )
+    mockRequireUser.mockResolvedValue({ supabase, user: { id: 'u1' } })
+    mockFetchQuotesWithFallback.mockResolvedValue(new Map([['AAPL', quote('AAPL', 150)]]))
+
+    const body = await (await GET(req)).json()
+    expect(body.unpricedCount).toBe(1)
+    expect(body.unpricedTickers).toEqual(['BCBA:GGAL'])
+  })
+
+  it('reports zero unpriced positions when every quote is present', async () => {
+    const supabase = clientWith(
+      { positions: [{ user_id: 'u1', ticker: 'AAPL', quantity: 10, avg_cost: 100, total_invested: 1000 }], on_positions: [], closed_trades: [], on_closed_trades: [] },
+      0
+    )
+    mockRequireUser.mockResolvedValue({ supabase, user: { id: 'u1' } })
+    mockFetchQuotesWithFallback.mockResolvedValue(new Map([['AAPL', quote('AAPL', 150)]]))
+    expect((await (await GET(req)).json()).unpricedCount).toBe(0)
+  })
+
   it('returns a cash-only summary for an empty portfolio', async () => {
     // Arrange
     const supabase = clientWith(

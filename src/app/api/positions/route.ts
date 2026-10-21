@@ -71,7 +71,7 @@ export async function GET(req: NextRequest) {
     // 5. Calculate complete portfolio summary — canonical entry, policy 'drop':
     // quotes pass through untouched, unpriced positions fall out of the totals
     // exactly as before (no displayed dashboard number changes).
-    const { positions, onPositions, summary } = valuePortfolio(
+    const { positions, onPositions, summary, unpricedCount, unpricedTickers } = valuePortfolio(
       {
         positions: portfolio.stockPositions,
         onPositions: portfolio.onPositions,
@@ -88,7 +88,7 @@ export async function GET(req: NextRequest) {
     //    and produce inconsistent snapshots (e.g. missing positions after a buy).
     //    The worker's cacheUserSummaries is the only writer for summary:* keys.
 
-    return NextResponse.json({ positions, onPositions, summary, lastRefresh })
+    return NextResponse.json({ positions, onPositions, summary, unpricedCount, unpricedTickers, lastRefresh })
   } catch (err) {
     console.error(err)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })

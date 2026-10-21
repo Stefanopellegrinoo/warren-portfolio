@@ -69,3 +69,14 @@ describe('fetchQuotesWithFallback without a CCL rate', () => {
     expect(keys).toEqual(['price:MSFT'])
   })
 })
+
+describe('last-good LKP during a CCL outage', () => {
+  it('serves the cached BCBA price (stale updatedAt kept) without calling Yahoo', async () => {
+    const lkp = { ticker: 'BCBA:LKPTEST', price: 5, change: 0, changePercent: 0, previousClose: 5, updatedAt: '2026-10-10T15:00:00Z' }
+    redis.mget.mockResolvedValueOnce([JSON.stringify(lkp)])
+    const { fetchQuotesWithFallback } = await import('../yahoo-finance')
+    const out = await fetchQuotesWithFallback(['BCBA:LKPTEST'])
+    expect(out.get('BCBA:LKPTEST')).toEqual(lkp)
+    expect(mockQuote).not.toHaveBeenCalled()
+  })
+})

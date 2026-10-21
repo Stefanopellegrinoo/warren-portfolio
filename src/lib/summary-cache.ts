@@ -93,7 +93,7 @@ export async function cacheUserSummaries(
     // Read version at the start of the per-user computation
     const startVersion = await redis.get(`summary:version:${userId}`)
 
-    const { positions: enriched, onPositions: enrichedONs, summary } = valuePortfolio(
+    const { positions: enriched, onPositions: enrichedONs, summary, unpricedCount, unpricedTickers } = valuePortfolio(
       {
         positions: portfolio.positions,
         onPositions: portfolio.onPositions,
@@ -105,7 +105,7 @@ export async function cacheUserSummaries(
       { missingQuotePolicy: 'drop' }
     )
 
-    const payload = JSON.stringify({ positions: enriched, onPositions: enrichedONs, summary })
+    const payload = JSON.stringify({ positions: enriched, onPositions: enrichedONs, summary, unpricedCount, unpricedTickers })
     await setSummaryIfVersion(userId, payload, startVersion)
   }
 

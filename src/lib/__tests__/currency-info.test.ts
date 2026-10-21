@@ -50,4 +50,11 @@ describe('getCCLRateInfo', () => {
     fetchRawQuotes.mockRejectedValueOnce(new Error('down'))
     expect(await getCCLRateInfo()).toBeNull()
   })
+
+  it('a ttl() failure never turns a cached hit into a throw', async () => {
+    redis.get.mockResolvedValueOnce('1600')
+    redis.ttl.mockRejectedValueOnce(new Error('redis timeout'))
+    const r = (await getCCLRateInfo())!
+    expect(r).toMatchObject({ rate: 1600, source: 'cache' })
+  })
 })
