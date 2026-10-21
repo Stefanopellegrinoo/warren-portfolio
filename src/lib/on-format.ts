@@ -89,3 +89,10 @@ export function parseEsArNumber(text: string): number | null {
   if (/^\d+\.\d+$/.test(t)) return Number(t)
   return null
 }
+
+const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+/** yyyy-mm to "abr 2027" by string slicing. */
+export function fmtMonth(ym: string | null | undefined): string {
+  const m = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(ym ?? '')
+  return m ? `${MONTHS[Number(m[2]) - 1]} ${m[1]}` : DASH
+}

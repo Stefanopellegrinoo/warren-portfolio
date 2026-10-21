@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fmtPct, fmtNum, fmtBp, fmtUsdCompact, fmtDate, plazaCopy, rateTypeLabel, eventLabel, safeHref, parseEsArNumber } from './on-format'
+import { fmtPct, fmtNum, fmtBp, fmtUsdCompact, fmtDate, plazaCopy, rateTypeLabel, eventLabel, safeHref, parseEsArNumber, fmtMonth } from './on-format'
 
 describe('on-format', () => {
   it('formats numbers in es-AR and shows a dash for missing values', () => {
@@ -61,5 +61,11 @@ describe('parseEsArNumber', () => {
   it.each(['abc', '', '   ', '1,2,3', '1..000', '1.00.0', '10.00,5', '-5', '+5', '1e5', '1 000', '$100', '.5', ',5', '5.', '5,', '1.000,5,5', '10,000.50', 'NaN', 'Infinity', '0.500.000', '0.500,5', '01.000.000'])('rejects %j', (text) => {
     expect(parseEsArNumber(text)).toBeNull()
   })
-})
 
+  it('formats a yyyy-mm month by slicing, so no timezone can shift it', () => {
+    expect(fmtMonth('2027-04')).toBe('abr 2027')
+    expect(fmtMonth('2027-12')).toBe('dic 2027')
+    expect(fmtMonth('2027-13')).toBe('—')
+    expect(fmtMonth(null)).toBe('—')
+  })
+})
