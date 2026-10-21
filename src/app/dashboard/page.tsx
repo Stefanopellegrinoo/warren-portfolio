@@ -7,7 +7,8 @@ import ONsSection from '@/components/ui/ONsSection'
 import CashSection from '@/components/ui/CashSection'
 import AddTransactionModal from '@/components/ui/AddTransactionModal'
 import ImportModal from '@/components/ui/ImportModal'
-import ReconciliationBanner, { type ReconciliationResult } from '@/components/ui/ReconciliationBanner'
+import UnpricedNotice from '@/components/ui/UnpricedNotice'
+import ReconciliationBanner,{ type ReconciliationResult } from '@/components/ui/ReconciliationBanner'
 import type { Position, ONPosition, PortfolioSummary } from '@/types'
 import { formatUSD, formatPct, cn, isMarketOpen } from '@/lib/utils'
 
@@ -43,6 +44,7 @@ export default function DashboardPage() {
   const [cedears, setCedears] = useState<any[]>([])
   const [cashBalance, setCashBalance] = useState<number>(0)
   const [summary, setSummary] = useState<PortfolioSummary | null>(null)
+  const [unpriced, setUnpriced] = useState<{ count?: number; tickers?: string[] }>({})
   const [positionsLoading, setPositionsLoading] = useState(true)
   const [showAddTx, setShowAddTx] = useState(false)
   const [quickSellData, setQuickSellData] = useState<{ assetClass: any; ticker: string; quantity: number; price: number } | null>(null)
@@ -83,6 +85,7 @@ export default function DashboardPage() {
       setOnPositions(posData.onPositions ?? [])
       setCashBalance(posData.summary?.cash?.balance ?? 0)
       setSummary(posData.summary ?? null)
+      setUnpriced({ count: posData.unpricedCount, tickers: posData.unpricedTickers })
 
       if (posData.lastRefresh) {
         setLastUpdate(posData.lastRefresh)
@@ -210,6 +213,7 @@ export default function DashboardPage() {
         </div>
 
         <ReconciliationBanner result={reconciliation} />
+        <UnpricedNotice count={unpriced.count} tickers={unpriced.tickers} />
 
         {/* ── KPI Grid ── */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
