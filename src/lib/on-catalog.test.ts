@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { loadOnAnalyses, loadPriceHistory, getOnPrices, resetOnCaches, type PriceFeed } from './on-catalog'
+import { loadOnAnalyses, loadPriceHistory, getOnPrices, getOnCcl, resetOnCaches, type PriceFeed } from './on-catalog'
 
 beforeEach(() => resetOnCaches())
 
@@ -310,7 +310,7 @@ describe('C lines in the price feed', () => {
     vi.unstubAllGlobals()
     expect(f?.prices.get('T001C')).toBe(96)
     expect(f?.volumes.get('T001C')).toBe(7)
-    expect(f?.prices.has('T001O')).toBe(false)
+    expect(f?.prices.get('T001O')).toBe(150000) // O (pesos) is kept for the implied cable price
   })
 
   it('a CCL ON takes its C line; a missing C falls back to D', async () => {
@@ -321,5 +321,62 @@ describe('C lines in the price feed', () => {
     const by = Object.fromEntries(r.analyses.map((a) => [a.row.isin, a.row]))
     expect([by.AR0000000001.priceLine, by.AR0000000001.price]).toEqual(['C', 96])
     expect([by.AR0000000002.priceLine, by.AR0000000002.lineFallback]).toEqual(['D', true])
+  })
+})
+
+describe('O line and CCL', () => {
+  it('getOnPrices keeps O prices (pesos) and volumes', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => [{ symbol: 'T001D', c: 100, v: 5 }, { symbol: 'T001O', c: 150000, v: 9 }] })))
+    const f = await getOnPrices()
+    vi.unstubAllGlobals()
+    expect(f?.prices.get('T001O')).toBe(150000)
+    expect(f?.volumes.get('T001O')).toBe(9)
+  })
+
+  it('a CCL ON without a C line is priced off O ÷ CCL', async () => {
+    const t = base()
+    t.on_terms = [termsRow('AR0000000001', { payment_plaza: 'CCL', ticker_c: null })]
+    t.on_cashflows = flowRows('AR0000000001')
+    const r = await loadOnAnalyses(fakeSupabase(t), { now: NOW, getPrices: feed({ T001D: 100, T001O: 96000 }, { T001D: 5, T001O: 5 }), getCcl: async () => ({ rate: 1000, at: '2026-10-21T15:00:00Z' }) })
+    expect(r.analyses[0].row.priceLine).toBe('O')
+    expect(r.analyses[0].row.price).toBeCloseTo(96, 9)
+  })
+
+  it('a missing CCL never blocks: falls back to D', async () => {
+    const t = base()
+    t.on_terms = [termsRow('AR0000000001', { payment_plaza: 'CCL', ticker_c: null })]
+    t.on_cashflows = flowRows('AR0000000001')
+    const r = await loadOnAnalyses(fakeSupabase(t), { now: NOW, getPrices: feed({ T001D: 100, T001O: 96000 }, { T001D: 5, T001O: 5 }), getCcl: async () => null })
+    expect([r.analyses[0].row.priceLine, r.analyses[0].row.lineFallback]).toEqual(['D', true])
+  })
+})
+
+describe('getOnCcl', () => {
+  it('times out instead of blocking, and negative-caches the failure', async () => {
+    const slow = vi.fn(() => new Promise<number>(() => {}))
+    vi.useFakeTimers()
+    const p = getOnCcl(slow, 50)
+    await vi.advanceTimersByTimeAsync(60)
+    expect(await p).toBeNull()
+    expect(await getOnCcl(slow, 50)).toBeNull()
+    expect(slow).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
+
+  it('caches a good rate and shares one in-flight call', async () => {
+    const f = vi.fn(async () => 1600)
+    const rs = await Promise.all([getOnCcl(f), getOnCcl(f), getOnCcl(f)])
+    await getOnCcl(f)
+    expect(f).toHaveBeenCalledTimes(1)
+    expect(rs[0]?.rate).toBe(1600)
+    expect(typeof rs[0]?.at).toBe('string')
+  })
+
+  it('rejects the emergency fallback constant and bad values', async () => {
+    expect(await getOnCcl(async () => 1100)).toBeNull() // getCCLRate returns 1100 when it has nothing
+    resetOnCaches()
+    expect(await getOnCcl(async () => NaN)).toBeNull()
+    resetOnCaches()
+    expect(await getOnCcl(async () => { throw new Error('x') })).toBeNull()
   })
 })

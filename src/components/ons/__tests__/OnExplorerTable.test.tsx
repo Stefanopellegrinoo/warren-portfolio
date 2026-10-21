@@ -35,6 +35,7 @@ const row = (over: Partial<OnListRow> = {}): OnListRow => ({
   priceQuality: 'ok',
   priceLine: 'D',
   lineFallback: false,
+  cclUsed: null,
   bymaYtm: null,
   ...over,
 })
@@ -132,6 +133,11 @@ describe('OnExplorerTable', () => {
   it('says which line the price comes from', () => {
     expect(render([row({ priceLine: 'C', plaza: 'CCL' })])).toContain('línea C · cable')
     expect(render([row()])).toContain('línea D · MEP')
+  })
+
+  it('implied cable price shows the O ÷ CCL label with the rate', () => {
+    const html = render([row({ priceLine: 'O', plaza: 'CCL', lineFallback: true, cclUsed: { rate: 1629.5, asOf: '2026-10-21T15:00:00Z' } })])
+    expect(html).toContain('implícito · línea O ÷ CCL ($1.629,50)')
   })
 
   it('a missing spread renders a dash, never 0 pb', () => {

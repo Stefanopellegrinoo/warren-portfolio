@@ -9,6 +9,7 @@ import { isOnTermsStale } from './on-terms-health'
 import type { OverrideRow } from './on-terms'
 import { fetchAllData912Quotes } from './data912-client'
 import { argentinaDate } from './utils'
+import { getCCLRate } from './currency'
 
 const PAGE = 1000 // PostgREST default max rows per request
 const PRICE_CACHE_MS = 5 * 60_000
@@ -44,6 +45,8 @@ export function resetOnCaches(): void {
   catalogCache = null
   priceInflight = null
   catalogInflight = null
+  cclCache = null
+  cclInflight = null
 }
 
 /** D-suffixed rows of the data912 corporate feed: 5 min cache on success, ~45s on failure. Null on outage. */
@@ -61,8 +64,8 @@ async function fetchPrices(): Promise<PriceFeed | null> {
     const prices = new Map<string, number>()
     const volumes = new Map<string, number>()
     for (const q of quotes) {
-      // D (dollar MEP) and C (dollar cable) lines; the O line is in pesos.
-      if (!(q.symbol?.endsWith('D') || q.symbol?.endsWith('C')) || typeof q.c !== 'number' || !(q.c > 0)) continue
+      // D (dollar MEP), C (dollar cable) and O (pesos, used for the implied cable price).
+      if (!(q.symbol?.endsWith('D') || q.symbol?.endsWith('C') || q.symbol?.endsWith('O')) || typeof q.c !== 'number' || !(q.c > 0)) continue
       prices.set(q.symbol, q.c)
       if (typeof q.v === 'number' && Number.isFinite(q.v)) volumes.set(q.symbol, q.v)
     }
@@ -129,7 +132,40 @@ function groupBy<T>(rows: Row[], map: (r: Row) => T): Map<string, T[]> {
   return out
 }
 
+const CCL_CACHE_MS = 5 * 60_000
+const CCL_FAILURE_CACHE_MS = 45_000
+const CCL_TIMEOUT_MS = 3_000
+// getCCLRate() returns this hardcoded emergency constant when it has neither Yahoo nor a
+// last-known rate; it is not a market value, so it must never price a bond.
+const CCL_EMERGENCY_FALLBACK = 1100
+
+export interface CclRate {
+  rate: number
+  at: string // when this process obtained it (the source may serve a cached value up to 1h old)
+}
+
+let cclCache: { at: number; value: CclRate | null } | null = null
+let cclInflight: Promise<CclRate | null> | null = null
+
+/** Implicit CCL for the implied cable price. Never blocks the page: 3s timeout, 5 min cache, 45s negative cache. */
+export function getOnCcl(source: () => Promise<number> = getCCLRate, timeoutMs = CCL_TIMEOUT_MS): Promise<CclRate | null> {
+  if (cclCache && Date.now() - cclCache.at < (cclCache.value ? CCL_CACHE_MS : CCL_FAILURE_CACHE_MS)) return Promise.resolve(cclCache.value)
+  cclInflight ??= (async () => {
+    let value: CclRate | null = null
+    try {
+      const rate = await Promise.race([source(), new Promise<never>((_, rej) => setTimeout(() => rej(new Error('ccl timeout')), timeoutMs))])
+      if (Number.isFinite(rate) && rate > 0 && rate !== CCL_EMERGENCY_FALLBACK) value = { rate, at: new Date().toISOString() }
+    } catch {
+      value = null
+    }
+    cclCache = { at: Date.now(), value }
+    return value
+  })().finally(() => { cclInflight = null })
+  return cclInflight
+}
+
 export interface LoadOptions {
+  getCcl?: () => Promise<CclRate | null>
   now?: Date
   isin?: string
   getPrices?: () => Promise<PriceFeed | null>
@@ -188,7 +224,7 @@ function lineOf(feed: PriceFeed, ticker: string | null): Line | undefined {
 export async function loadOnAnalyses(sb: SupabaseClient, opts: LoadOptions = {}): Promise<CatalogResult> {
   const now = opts.now ?? new Date()
   const today = argentinaDate(now)
-  const [tables, feed] = await Promise.all([readCatalog(sb), (opts.getPrices ?? getOnPrices)()])
+  const [tables, feed, ccl] = await Promise.all([readCatalog(sb), (opts.getPrices ?? getOnPrices)(), (opts.getCcl ?? (() => getOnCcl()))()])
   // Scope by ISIN in memory; the sovereign curve is global and is never scoped.
   const terms = opts.isin ? tables.terms.filter((r) => r.isin === opts.isin) : tables.terms
   const asOf = tables.terms.map((t) => t.as_of as string).sort().pop() ?? null
@@ -213,7 +249,8 @@ export async function loadOnAnalyses(sb: SupabaseClient, opts: LoadOptions = {})
         check: checkBy.get(t.isin) ?? null,
         curve: sov,
         price: null,
-        lines: feed ? { D: lineOf(feed, t.tickerD), C: lineOf(feed, t.tickerC) } : {},
+        lines: feed ? { D: lineOf(feed, t.tickerD), C: lineOf(feed, t.tickerC), O: lineOf(feed, t.tickerO) } : {},
+        ccl,
         quiet,
         settle,
       })

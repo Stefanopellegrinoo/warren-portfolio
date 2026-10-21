@@ -39,7 +39,7 @@ function PriceCell({ r }: { r: OnListRow }) {
   return (
     <div className="flex flex-col items-end gap-0.5">
       <span className={r.priceQuality === 'no-trades' ? 'text-slate-400' : undefined}>{fmtNum(r.price)}</span>
-      <span className="text-[11px] text-slate-400" title={r.lineFallback ? 'Precio de la otra línea en dólares: la de la plaza de pago no tiene precio.' : undefined}>{lineLabel(r.priceLine)}</span>
+      <span className="max-w-[7rem] whitespace-normal text-right text-[11px] leading-tight text-slate-400" title={r.lineFallback ? 'Precio de la otra línea en dólares: la de la plaza de pago no tiene precio.' : undefined}>{lineLabel(r.priceLine, r.cclUsed)}</span>
       {r.priceQuality === 'no-trades' && (
         <span title={NO_TRADES_HINT} className="max-w-[7rem] cursor-help whitespace-normal rounded border border-slate-500/40 px-1 text-right text-[11px] leading-4 text-slate-300">
           sin operaciones en la rueda<span className="sr-only">: precio de referencia, la TIR puede no ser representativa</span>

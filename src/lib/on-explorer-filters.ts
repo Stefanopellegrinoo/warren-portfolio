@@ -34,12 +34,15 @@ const SORT_KEYS: SortKey[] = ['ticker', 'issuer', 'maturity', 'price', 'ytm', 'm
 const RATE_TYPES: RateType[] = ['fixed', 'step', 'zero', 'floating', 'other']
 const ISO = /^\d{4}-\d{2}-\d{2}$/
 
+// A row without trades today shows no TIR in the list: its hidden value is null for sorting and filtering.
+const tirOf = (r: OnListRow): number | null => (r.priceQuality === 'no-trades' ? null : r.ytmPct)
+
 const SORTERS: Record<SortKey, (r: OnListRow) => number | string | null> = {
   ticker: (r) => r.tickerO,
   issuer: (r) => r.issuer,
   maturity: (r) => r.maturityDate,
   price: (r) => r.price,
-  ytm: (r) => r.ytmPct,
+  ytm: (r) => tirOf(r),
   md: (r) => r.mdYears,
   paridad: (r) => r.paridadPct,
   cy: (r) => r.currentYieldPct,
@@ -60,7 +63,7 @@ function matches(r: OnListRow, f: ExplorerFilters): boolean {
   if (f.rateType && r.rateType !== f.rateType) return false
   if (f.maturityFrom && r.maturityDate < f.maturityFrom) return false
   if (f.maturityTo && r.maturityDate > f.maturityTo) return false
-  return within(r.ytmPct, f.ytmMin, f.ytmMax) && within(r.mdYears, f.mdMin, f.mdMax)
+  return within(tirOf(r), f.ytmMin, f.ytmMax) && within(r.mdYears, f.mdMin, f.mdMax)
 }
 
 function compare(a: number | string | null, b: number | string | null, dir: 'asc' | 'desc'): number {

@@ -275,3 +275,50 @@ describe('analyzeOn with price lines', () => {
     expect(analyzeOn(input({ price: null })).row.priceLine).toBeNull()
   })
 })
+
+describe('pickPriceLine: implied cable price from the O line', () => {
+  const O = { px: 150_000, v: 30 }
+  const CCL = 1600 // 93.75 per 100 VN
+
+  it('CCL ON with no traded C: implied O ÷ CCL beats the D line', () => {
+    const p = pickPriceLine('CCL', { C: { px: 91.5, v: 0 }, D: { px: 97, v: 50 }, O }, false, CCL)
+    expect(p).toMatchObject({ line: 'O', noTrades: false, fellBack: true })
+    expect(p!.price).toBeCloseTo(93.75, 6)
+  })
+
+  it('no C symbol at all: implied price too', () => {
+    expect(pickPriceLine('CCL', { D: { px: 97, v: 50 }, O }, false, CCL)).toMatchObject({ line: 'O' })
+  })
+
+  it('a traded C still wins over the implied price', () => {
+    expect(pickPriceLine('CCL', { C: { px: 91.5, v: 4 }, D: { px: 97, v: 50 }, O }, false, CCL)).toMatchObject({ line: 'C', price: 91.5 })
+  })
+
+  it('no CCL, or O not trading in an active session: D with the fallback flag', () => {
+    expect(pickPriceLine('CCL', { D: { px: 97, v: 50 }, O }, false, null)).toMatchObject({ line: 'D', fellBack: true })
+    expect(pickPriceLine('CCL', { D: { px: 97, v: 50 }, O: { px: 150_000, v: 0 } }, false, CCL)).toMatchObject({ line: 'D' })
+  })
+
+  it('nothing trades: any priced line, flagged', () => {
+    expect(pickPriceLine('CCL', { D: { px: 97, v: 0 }, O: { px: 150_000, v: 0 } }, false, CCL)).toMatchObject({ noTrades: true })
+  })
+
+  it('MEP ONs never use the implied price (no MEP source)', () => {
+    expect(pickPriceLine('MEP', { D: { px: 97, v: 50 }, O }, false, CCL)).toMatchObject({ line: 'D' })
+    expect(pickPriceLine('MEP', { C: { px: 91, v: 5 }, O }, false, CCL)).toMatchObject({ line: 'C' })
+  })
+
+  it('rejects an invalid CCL', () => {
+    expect(pickPriceLine('CCL', { D: { px: 97, v: 5 }, O }, false, 0)).toMatchObject({ line: 'D' })
+  })
+})
+
+describe('analyzeOn with an implied cable price', () => {
+  it('prices off O ÷ CCL and reports the CCL used', () => {
+    const { row } = analyzeOn(input({ terms: terms({ paymentPlaza: 'CCL' }), price: null, lines: { D: { px: 100, v: 5 }, O: { px: 96_000, v: 5 } }, ccl: { rate: 1000, at: '2026-10-21T15:00:00Z' } }))
+    expect(row.priceLine).toBe('O')
+    expect(row.price).toBeCloseTo(96, 9)
+    expect(row.cclUsed).toEqual({ rate: 1000, asOf: '2026-10-21T15:00:00Z' })
+    expect(analyzeOn(input()).row.cclUsed).toBeNull()
+  })
+})

@@ -33,6 +33,7 @@ const row = (over: Partial<OnListRow>): OnListRow => ({
   priceQuality: 'ok',
   priceLine: 'D',
   lineFallback: false,
+  cclUsed: null,
   bymaYtm: null,
   ...over,
 })
@@ -76,6 +77,18 @@ describe('applyExplorer: AND-combined filters', () => {
     expect(ids(applyExplorer(rows, state({ q: 'bbbb' })))).toEqual(['2'])
     expect(ids(applyExplorer(rows, state({ q: 'delta' })))).toEqual(['4'])
     expect(ids(applyExplorer(rows, state({ q: 'ar0000000003' })))).toEqual(['3'])
+  })
+})
+
+describe('no-trades rows: hidden TIR is null', () => {
+  const nt = [row({ isin: 'AR0000000001', ytmPct: 9 }), row({ isin: 'AR0000000002', ytmPct: -14.96, priceQuality: 'no-trades' }), row({ isin: 'AR0000000003', ytmPct: 5 })]
+  it('sorts last in both directions', () => {
+    expect(ids(applyExplorer(nt, state({}, { key: 'ytm', dir: 'asc' })))).toEqual(['3', '1', '2'])
+    expect(ids(applyExplorer(nt, state({}, { key: 'ytm', dir: 'desc' })))).toEqual(['1', '3', '2'])
+  })
+  it('is excluded from min and max filters', () => {
+    expect(ids(applyExplorer(nt, state({ ytmMax: 0 })))).toEqual([])
+    expect(ids(applyExplorer(nt, state({ ytmMin: -50 })))).toEqual(['3', '1'].sort())
   })
 })
 

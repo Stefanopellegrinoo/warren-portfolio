@@ -92,8 +92,13 @@ export default function OnDetail({ analysis, history, asOf, stale, prices }: Pro
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {priced ? (
           <>
-            <Tile label="Precio sucio" value={fmtNum(row.price)} source={`data912, ${lineLabel(row.priceLine)}${prices.fetchedAt ? ` · ${formatAge(prices.fetchedAt)}` : ''}`}>
-              {row.lineFallback && (
+            <Tile label="Precio sucio" value={fmtNum(row.price)} source={`data912, ${lineLabel(row.priceLine, row.cclUsed)}${prices.fetchedAt ? ` · ${formatAge(prices.fetchedAt)}` : ''}`}>
+              {row.priceLine === 'O' && row.cclUsed && (
+                <span className="text-[11px] leading-tight text-slate-400">
+                  Precio implícito: línea O (pesos) ÷ CCL de ${fmtNum(row.cclUsed.rate)} (consultado el {fmtDate(row.cclUsed.asOf.slice(0, 10))}), igual que BYMA.
+                </span>
+              )}
+              {row.lineFallback && row.priceLine !== 'O' && (
                 <span className="text-[11px] leading-tight text-slate-400">
                   Atención: precio de la línea {row.priceLine}; esta ON paga en dólar {row.plaza === 'CCL' ? 'cable' : 'MEP'}: la TIR no incluye el canje.
                 </span>
@@ -102,7 +107,7 @@ export default function OnDetail({ analysis, history, asOf, stale, prices }: Pro
             <Tile label="Precio limpio" value={fmtNum(detail.clean)} source={SRC_WARREN} />
             <Tile label="Intereses devengados" value={fmtNum(detail.accrued, 4)} source={SRC_WARREN} />
             <Tile label="Paridad" value={fmtPct(row.paridadPct)} source={SRC_WARREN} />
-            <Tile label={`TIR Warren (precio en dólares, línea ${row.priceLine})`} value={fmtPct(row.ytmPct)} source={SRC_WARREN}>
+            <Tile label={row.priceLine === 'O' ? 'TIR Warren (precio en dólares, implícito O ÷ CCL)' : `TIR Warren (precio en dólares, línea ${row.priceLine})`} value={fmtPct(row.ytmPct)} source={SRC_WARREN}>
               {row.priceQuality === 'no-trades' && <span className="text-[11px] text-slate-400">Atención: precio de referencia sin operaciones en la línea D en la rueda; la TIR puede no ser representativa.</span>}
               {row.shortDated && <span className="text-[10px] text-slate-400">Vence en menos de 90 días: la TIR es muy sensible al precio y poco representativa.</span>}
               {flag && (

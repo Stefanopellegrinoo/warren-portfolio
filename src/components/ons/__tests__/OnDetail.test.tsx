@@ -224,3 +224,14 @@ describe('OnDetail: price line', () => {
     expect(mep).toContain('precio de la línea C; esta ON paga en dólar MEP')
   })
 })
+
+describe('OnDetail: implied cable price', () => {
+  it('explains the method with the CCL value and its as-of', () => {
+    const a = build({ terms: terms({ paymentPlaza: 'CCL' }), price: null, lines: { D: { px: 100, v: 5 }, O: { px: 96000, v: 5 } }, ccl: { rate: 1000, at: '2026-10-21T15:00:00Z' } })
+    const html = render(a)
+    expect(html).toContain('implícito · línea O ÷ CCL ($1.000,00)')
+    expect(html).toContain('Precio implícito: línea O (pesos) ÷ CCL')
+    expect(html).toContain('21/10/2026')
+    expect(html).toContain('igual que BYMA')
+  })
+})

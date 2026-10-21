@@ -63,5 +63,10 @@ export function safeHref(url: string | null | undefined): string | undefined {
 /** Nominal amount: lots and issued amounts are in VN (valor nominal), not in a currency. */
 export const fmtVn = (x: number | null | undefined): string => (ok(x) ? `VN ${fmtNum(x, 0)}` : DASH)
 
-/** "línea C · cable" / "línea D · MEP": the dollar line a price comes from. */
-export const lineLabel = (line: 'D' | 'C' | null): string => (line === 'C' ? 'línea C · cable' : line === 'D' ? 'línea D · MEP' : '')
+/** Which line a price comes from; O is the implied cable price (O ÷ CCL). */
+export function lineLabel(line: 'D' | 'C' | 'O' | null, ccl?: { rate: number } | null): string {
+  if (line === 'C') return 'línea C · cable'
+  if (line === 'D') return 'línea D · MEP'
+  if (line === 'O') return `implícito · línea O ÷ CCL${ccl ? ` ($${fmtNum(ccl.rate)})` : ''}`
+  return ''
+}
