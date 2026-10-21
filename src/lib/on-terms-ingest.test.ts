@@ -4,7 +4,7 @@ import { ingestOnTerms, toRpcArgs, fetchBymaHtml } from './on-terms-ingest'
 import { parseBymaPayload } from './byma-educa'
 
 type Row = Record<string, unknown>
-const rows = (oracle.rows as Row[]).map((r, i) => ({ ...r, seg: 'hd', em: 'E', de: `C${i}`, mp: 'MEP', mto: 1, adtvp: [1, 2, 3], adtve: [r.tk, `${r.tk}D`, `${r.tk}C`] }))
+const rows: Row[] = (oracle.rows as Row[]).map((r, i) => ({ ...r, seg: 'hd', em: 'E', de: `C${i}`, mp: 'MEP', mto: 1, adtvp: [1, 2, 3], adtve: [r.tk, `${r.tk}D`, `${r.tk}C`] }))
 const sov = ['A', 'B', 'C', 'D', 'E'].map((t, i) => ({ tk: `S${t}`, seg: 'sob', ley: 'NY', me: 'USD', isin: `ARARGE3209S${i}`, px: 1, ytm: 9, dm: 1 + i }))
 const payload = (r = rows, tp: unknown = { rows: sov }) => ({ on: { fecha: '2026-10-20', fecha_liq: '2026-10-21', rows: r }, tp })
 const html = (p: unknown) => `<script id="payload" type="application/json">${JSON.stringify(p)}</script>`

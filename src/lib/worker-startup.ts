@@ -1,5 +1,5 @@
 import { ensureRedisConnected } from './redis'
-import { scheduleRepeatingPriceJob, scheduleDailySnapshotJob, scheduleTickerAuditJob } from './queue'
+import { scheduleRepeatingPriceJob, scheduleDailySnapshotJob, scheduleTickerAuditJob, scheduleOnTermsIngestJob } from './queue'
 import { scheduleSignalsEvaluationJobs } from './signals-queue'
 
 export type StartupResult =
@@ -44,6 +44,7 @@ export async function ensureRedisAndScheduleJobs(): Promise<StartupResult> {
     await scheduleRepeatingPriceJob(5)
     await scheduleDailySnapshotJob()
     await scheduleTickerAuditJob()
+    await scheduleOnTermsIngestJob()
     await scheduleSignalsEvaluationJobs()
     return { ok: true }
   } catch (error) {

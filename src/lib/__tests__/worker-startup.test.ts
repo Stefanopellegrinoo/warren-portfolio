@@ -10,10 +10,12 @@ vi.mock('../redis', () => ({
 const mockScheduleRepeatingPriceJob = vi.fn()
 const mockScheduleDailySnapshotJob = vi.fn()
 const mockScheduleTickerAuditJob = vi.fn()
+const mockScheduleOnTermsIngestJob = vi.fn()
 vi.mock('../queue', () => ({
   scheduleRepeatingPriceJob: (...args: unknown[]) => mockScheduleRepeatingPriceJob(...args),
   scheduleDailySnapshotJob: (...args: unknown[]) => mockScheduleDailySnapshotJob(...args),
   scheduleTickerAuditJob: (...args: unknown[]) => mockScheduleTickerAuditJob(...args),
+  scheduleOnTermsIngestJob: (...args: unknown[]) => mockScheduleOnTermsIngestJob(...args),
 }))
 
 const mockScheduleSignalsEvaluationJobs = vi.fn()
@@ -34,6 +36,7 @@ describe('ensureRedisAndScheduleJobs', () => {
     mockScheduleRepeatingPriceJob.mockResolvedValue(undefined)
     mockScheduleDailySnapshotJob.mockResolvedValue(undefined)
     mockScheduleTickerAuditJob.mockResolvedValue(undefined)
+    mockScheduleOnTermsIngestJob.mockResolvedValue(undefined)
     mockScheduleSignalsEvaluationJobs.mockResolvedValue(undefined)
   })
 
@@ -51,6 +54,11 @@ describe('ensureRedisAndScheduleJobs', () => {
 
     // Assert — without this held tickers never get re-verified against Yahoo
     expect(mockScheduleTickerAuditJob).toHaveBeenCalledTimes(1)
+  })
+
+  it('schedules the nightly ON terms ingest alongside the other jobs', async () => {
+    await ensureRedisAndScheduleJobs()
+    expect(mockScheduleOnTermsIngestJob).toHaveBeenCalledTimes(1)
   })
 
   it('does not schedule the snapshot when Redis is unreachable', async () => {

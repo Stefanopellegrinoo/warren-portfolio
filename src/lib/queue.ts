@@ -23,6 +23,7 @@ export const IMPORT_QUEUE_NAME = 'import-transactions'
 export const PRICE_REPEAT_JOB_NAME = 'update-all-prices'
 export const SNAPSHOT_JOB_NAME = 'daily-snapshot'
 export const TICKER_AUDIT_JOB_NAME = 'ticker-audit'
+export const ON_TERMS_JOB_NAME = 'on-terms-ingest'
 
 /**
  * Parse Redis connection URL from REDIS_URL env var
@@ -195,4 +196,27 @@ export async function scheduleTickerAuditJob(pattern = '0 3 * * 6') {
   })
 
   console.log(`[Queue] Weekly ticker identity audit scheduled (${pattern} UTC)`)
+}
+
+/**
+ * Schedule the nightly ON terms ingest (weekdays 21:30 UTC = 18:30 ART, after the
+ * BYMA Educa daily report). Replaces only its own previous schedule.
+ */
+export async function scheduleOnTermsIngestJob(pattern = '30 21 * * 1-5') {
+  const queue = getPriceQueue()
+
+  const repeatable = await queue.getRepeatableJobs()
+  for (const job of repeatable) {
+    if (job.name === ON_TERMS_JOB_NAME) {
+      await queue.removeRepeatableByKey(job.key)
+    }
+  }
+
+  await queue.add(ON_TERMS_JOB_NAME, {}, {
+    repeat: { pattern },
+    removeOnComplete: true,
+    removeOnFail: { age: 24 * 3600 },
+  })
+
+  console.log(`[Queue] ON terms ingest scheduled (${pattern} UTC)`)
 }

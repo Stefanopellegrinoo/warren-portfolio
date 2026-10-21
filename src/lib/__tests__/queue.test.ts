@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { addRefreshSummaryJob, addPriceUpdateJob, addImportJob, QueueUnavailableError } from '../queue'
+import { addRefreshSummaryJob, addPriceUpdateJob, addImportJob, QueueUnavailableError, scheduleOnTermsIngestJob, ON_TERMS_JOB_NAME } from '../queue'
 
 process.env.REDIS_URL = 'redis://localhost:6379'
 
@@ -82,5 +82,28 @@ describe('enqueue guards when Redis is unreachable', () => {
   it('addImportJob rejects with QueueUnavailableError — imports NEED the queue', async () => {
     await expect(addImportJob('u1', [], false)).rejects.toBeInstanceOf(QueueUnavailableError)
     expect(mockAdd).not.toHaveBeenCalled()
+  })
+})
+
+
+describe('scheduleOnTermsIngestJob', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockEnsureRedisConnected.mockResolvedValue(true)
+  })
+
+  it('adds a weekday 21:30 UTC repeatable that cleans up only its own previous schedule', async () => {
+    mockGetRepeatableJobs.mockResolvedValueOnce([
+      { name: ON_TERMS_JOB_NAME, key: 'mine' },
+      { name: 'daily-snapshot', key: 'other' },
+    ])
+    await scheduleOnTermsIngestJob()
+    expect(mockRemoveRepeatableByKey).toHaveBeenCalledTimes(1)
+    expect(mockRemoveRepeatableByKey).toHaveBeenCalledWith('mine')
+    expect(mockAdd).toHaveBeenCalledWith(
+      ON_TERMS_JOB_NAME,
+      {},
+      expect.objectContaining({ repeat: { pattern: '30 21 * * 1-5' }, removeOnComplete: true })
+    )
   })
 })
