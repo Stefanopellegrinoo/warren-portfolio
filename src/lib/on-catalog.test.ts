@@ -89,7 +89,7 @@ describe('loadOnAnalyses', () => {
     expect(by.AR0000000003.status).toBe('floating')
     expect(r.asOf).toBe('2026-10-20')
     expect(r.stale).toBe(false)
-    expect(r.prices).toEqual({ ok: true, fetchedAt: '2026-10-21T14:58:00Z' })
+    expect(r.prices).toEqual({ ok: true, quiet: false, fetchedAt: '2026-10-21T14:58:00Z' })
   })
 
   it('reads every page of a table larger than one PostgREST page', async () => {
@@ -119,7 +119,7 @@ describe('loadOnAnalyses', () => {
 
   it('a price feed outage keeps the catalog and says prices are unavailable', async () => {
     const r = await loadOnAnalyses(fakeSupabase(base()), { now: NOW, getPrices: async () => null })
-    expect(r.prices).toEqual({ ok: false, fetchedAt: null })
+    expect(r.prices).toEqual({ ok: false, quiet: false, fetchedAt: null })
     expect(r.analyses.map((a) => a.row.status)).toEqual(['no-price', 'no-price', 'floating'])
   })
 
@@ -246,5 +246,59 @@ describe('price quality from data912 volume', () => {
     vi.unstubAllGlobals()
     expect(f?.volumes.get('T001D')).toBe(0)
     expect(f?.volumes.get('T002D')).toBe(12)
+  })
+})
+
+describe('single-flight and stale-on-error', () => {
+  it('N concurrent price loads share one fetch', async () => {
+    const f = vi.fn(async () => { await new Promise((r) => setTimeout(r, 10)); return { ok: true, json: async () => [{ symbol: 'T001D', c: 100, v: 5 }] } })
+    vi.stubGlobal('fetch', f)
+    const rs = await Promise.all(Array.from({ length: 8 }, () => getOnPrices()))
+    vi.unstubAllGlobals()
+    expect(f).toHaveBeenCalledTimes(1)
+    expect(rs.every((r) => r?.prices.get('T001D') === 100)).toBe(true)
+  })
+
+  it('N concurrent catalog loads read the tables once', async () => {
+    const sb = fakeSupabase(base())
+    await Promise.all(Array.from({ length: 6 }, () => loadOnAnalyses(sb, { now: NOW, getPrices: feed({}) })))
+    expect(sb.log.filter((l: any) => l.table === 'on_terms')).toHaveLength(1)
+  })
+
+  it('a failed refresh serves the last-good snapshot with its as-of, and is not cached', async () => {
+    const sb = fakeSupabase(base())
+    const opts = { now: NOW, getPrices: feed({}) }
+    await loadOnAnalyses(sb, opts)
+    const bad: any = { from: () => ({ select: () => ({ order: () => ({ range: async () => ({ data: null, error: { message: 'boom' } }) }) }) }) }
+    vi.useFakeTimers({ now: Date.now() + 61_000, toFake: ['Date'] })
+    const r = await loadOnAnalyses(bad, opts)
+    expect(r.analyses).toHaveLength(3)
+    expect(r.asOf).toBe('2026-10-20')
+    const calls = sb.log.length
+    await loadOnAnalyses(sb, opts) // not cached as a failure: the next call retries
+    vi.useRealTimers()
+    expect(sb.log.length).toBeGreaterThan(calls)
+  })
+})
+
+describe('quiet market: no per-row no-trades labels', () => {
+  const t = () => {
+    const x = base()
+    x.on_terms = ['1', '2', '3', '4', '5'].map((n) => termsRow(`AR000000000${n}`, { ticker_d: `T00${n}D` }))
+    x.on_cashflows = x.on_terms.flatMap((r) => flowRows(String(r.isin)))
+    return x
+  }
+  const prices = { T001D: 100, T002D: 100, T003D: 100, T004D: 100, T005D: 100 }
+
+  it('active session (< 60% zero volume): zero-volume lines are labelled', async () => {
+    const r = await loadOnAnalyses(fakeSupabase(t()), { now: NOW, getPrices: feed(prices, { T001D: 0, T002D: 9, T003D: 9, T004D: 9, T005D: 9 }) })
+    expect(r.prices.quiet).toBe(false)
+    expect(r.analyses[0].row.priceQuality).toBe('no-trades')
+  })
+
+  it('quiet session (>= 60% zero volume): nothing labelled, feed flagged quiet', async () => {
+    const r = await loadOnAnalyses(fakeSupabase(t()), { now: NOW, getPrices: feed(prices, { T001D: 0, T002D: 0, T003D: 0, T004D: 9, T005D: 9 }) })
+    expect(r.prices.quiet).toBe(true)
+    expect(r.analyses.every((a) => a.row.priceQuality === 'ok')).toBe(true)
   })
 })

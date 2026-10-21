@@ -14,7 +14,7 @@ interface Props {
   history: PricePoint[]
   asOf: string | null
   stale: boolean
-  prices: { ok: boolean; fetchedAt: string | null }
+  prices: { ok: boolean; quiet?: boolean; fetchedAt: string | null }
 }
 
 const SRC_WARREN = 'Warren (cálculo propio)'
@@ -86,6 +86,7 @@ export default function OnDetail({ analysis, history, asOf, stale, prices }: Pro
       </header>
 
       {stale && <Banner>Catálogo desactualizado: los datos de BYMA Educa son del {fmtDate(asOf)}.</Banner>}
+      {prices.ok && prices.quiet && <Banner>Mercado sin operaciones aún hoy: se muestran los precios de la última rueda.</Banner>}
       {!prices.ok && <Banner>Precios no disponibles en este momento (data912): no se calculan TIR ni duración.</Banner>}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -96,7 +97,7 @@ export default function OnDetail({ analysis, history, asOf, stale, prices }: Pro
             <Tile label="Intereses devengados" value={fmtNum(detail.accrued, 4)} source={SRC_WARREN} />
             <Tile label="Paridad" value={fmtPct(row.paridadPct)} source={SRC_WARREN} />
             <Tile label="TIR Warren (precio en dólares, línea D)" value={fmtPct(row.ytmPct)} source={SRC_WARREN}>
-              {row.priceQuality === 'no-trades' && <span className="text-[11px] text-slate-400">Atención: precio de referencia sin operaciones en la línea D hoy; la TIR puede no ser representativa.</span>}
+              {row.priceQuality === 'no-trades' && <span className="text-[11px] text-slate-400">Atención: precio de referencia sin operaciones en la línea D en la rueda; la TIR puede no ser representativa.</span>}
               {row.shortDated && <span className="text-[10px] text-slate-400">Vence en menos de 90 días: la TIR es muy sensible al precio y poco representativa.</span>}
               {flag && (
                 <span className="rounded-md border border-amber/30 bg-amber/10 px-1.5 py-1 text-[11px] leading-tight text-amber">

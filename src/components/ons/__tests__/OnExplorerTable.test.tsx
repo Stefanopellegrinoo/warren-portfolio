@@ -107,15 +107,17 @@ describe('OnExplorerTable', () => {
 
   it('no-trades: visible tag, dimmed yield, sr-only text', () => {
     const html = render([row({ priceQuality: 'no-trades' })])
-    expect(html).toContain('sin operaciones hoy')
-    expect(html).toContain('opacity-50')
+    expect(html).toContain('sin operaciones en la rueda')
+    expect(html).toContain('text-[11px]')
+    expect(html).not.toContain('opacity-50') // dimming must keep AA contrast
     expect(html).toContain('class="sr-only"')
-    expect(render([row()])).not.toContain('sin operaciones hoy')
+    expect(render([row()])).not.toContain('sin operaciones en la rueda')
   })
 
   it('the TIR cell tooltip carries the BYMA yield for comparison', () => {
     const html = render([row({ bymaYtm: { pct: 8.41, asOf: '2026-10-20' } })])
-    expect(html).toContain('TIR BYMA 8,41%')
+    // visible secondary line, reachable on touch and keyboard (not only a title)
+    expect(html).toContain('BYMA 8,41%')
     expect(html).toContain('20/10/2026')
   })
 

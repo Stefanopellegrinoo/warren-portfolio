@@ -33,16 +33,16 @@ function sortAria(active: boolean, dir: 'asc' | 'desc'): 'ascending' | 'descendi
   return active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'
 }
 
-const NO_TRADES_HINT = 'La línea D no tuvo operaciones hoy: el precio es de referencia y la TIR puede no ser representativa.'
+const NO_TRADES_HINT = 'La línea D no tuvo operaciones en la rueda: el precio es de referencia y la TIR puede no ser representativa.'
 
 function PriceCell({ r }: { r: OnListRow }) {
   if (r.status === 'no-price') return <span className="italic text-slate-500">Sin precio</span>
   return (
     <div className="flex flex-col items-end gap-0.5">
-      <span className={r.priceQuality === 'no-trades' ? 'opacity-50' : undefined}>{fmtNum(r.price)}</span>
+      <span className={r.priceQuality === 'no-trades' ? 'text-slate-400' : undefined}>{fmtNum(r.price)}</span>
       {r.priceQuality === 'no-trades' && (
-        <span title={NO_TRADES_HINT} className="cursor-help rounded border border-slate-500/40 px-1 text-[9px] leading-4 text-slate-300">
-          sin operaciones hoy<span className="sr-only">: precio de referencia, la TIR puede no ser representativa</span>
+        <span title={NO_TRADES_HINT} className="cursor-help rounded border border-slate-500/40 px-1 text-[11px] leading-4 text-slate-300">
+          sin operaciones en la rueda<span className="sr-only">: precio de referencia, la TIR puede no ser representativa</span>
         </span>
       )}
     </div>
@@ -53,6 +53,7 @@ function YtmCell({ r }: { r: OnListRow }) {
   const f = r.methodFlag
   const n = r.termsNote
   return (
+    <div className="flex flex-col items-end gap-0.5">
     <div className="flex items-center justify-end gap-1.5">
       {f && (
         <span
@@ -74,16 +75,21 @@ function YtmCell({ r }: { r: OnListRow }) {
         </span>
       )}
       {r.shortDated && r.ytmPct !== null && (
-        <span title="Vence en menos de 90 días: la TIR es muy sensible al precio y poco representativa." className="rounded border border-slate-500/40 px-1 text-[9px] leading-4 text-slate-300">
+        <span title="Vence en menos de 90 días: la TIR es muy sensible al precio y poco representativa." className="rounded border border-slate-500/40 px-1 text-[11px] leading-4 text-slate-300">
           &lt;90 d
         </span>
       )}
       <span
-        title={r.bymaYtm ? `TIR BYMA ${fmtPct(r.bymaYtm.pct)} al ${fmtDate(r.bymaYtm.asOf)} (precio en pesos ÷ MEP); la de Warren usa el precio en dólares de la línea D.` : undefined}
-        className={cn('font-semibold text-white', r.priceQuality === 'no-trades' && 'opacity-50')}
+        className={cn('font-semibold', r.priceQuality === 'no-trades' ? 'text-slate-400' : 'text-white')}
       >
         {fmtPct(r.ytmPct)}
       </span>
+    </div>
+    {r.bymaYtm && (
+      <div className="text-[11px] text-slate-400" title={`TIR de BYMA al ${fmtDate(r.bymaYtm.asOf)}: precio en pesos ÷ MEP. La de Warren usa el precio en dólares de la línea D.`}>
+        BYMA {fmtPct(r.bymaYtm.pct)}
+      </div>
+    )}
     </div>
   )
 }

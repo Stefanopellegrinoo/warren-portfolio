@@ -201,3 +201,11 @@ describe('OnDetail: BYMA yield and price quality', () => {
     expect(render()).not.toContain('sin operaciones en la línea D')
   })
 })
+
+describe('OnDetail: quiet market', () => {
+  it('shows one banner instead of per-row claims', () => {
+    const html = render(build(), history, { prices: { ok: true, quiet: true, fetchedAt: null } })
+    expect(html).toContain('Mercado sin operaciones aún hoy')
+    expect(render()).not.toContain('Mercado sin operaciones aún hoy')
+  })
+})

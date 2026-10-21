@@ -26,21 +26,35 @@ export interface CatalogResult {
   analyses: OnAnalysis[]
   asOf: string | null // BYMA Educa as-of of the stored catalog
   stale: boolean
-  prices: { ok: boolean; fetchedAt: string | null }
+  prices: { ok: boolean; quiet: boolean; fetchedAt: string | null } // quiet: the feed does not look like an active session
 }
 
+export const QUIET_SESSION_ZERO_RATIO = 0.6 // >= this share of D lines with v=0: pre-open, weekend or holiday
+
 let priceCache: { at: number; feed: PriceFeed | null } | null = null
+// Safe to share across requests ONLY because the catalog tables are public-read (RLS USING true).
+// If they ever become per-user, key this cache by user.
 let catalogCache: { at: number; data: CatalogTables } | null = null
+let priceInflight: Promise<PriceFeed | null> | null = null
+let catalogInflight: Promise<CatalogTables> | null = null
 
 /** Test hook: forget both in-process caches. */
 export function resetOnCaches(): void {
   priceCache = null
   catalogCache = null
+  priceInflight = null
+  catalogInflight = null
 }
 
 /** D-suffixed rows of the data912 corporate feed: 5 min cache on success, ~45s on failure. Null on outage. */
 export async function getOnPrices(): Promise<PriceFeed | null> {
   if (priceCache && Date.now() - priceCache.at < (priceCache.feed ? PRICE_CACHE_MS : PRICE_FAILURE_CACHE_MS)) return priceCache.feed
+  // Single flight: concurrent misses share one fetch.
+  priceInflight ??= fetchPrices().finally(() => { priceInflight = null })
+  return priceInflight
+}
+
+async function fetchPrices(): Promise<PriceFeed | null> {
   let feed: PriceFeed | null = null
   try {
     const quotes = await fetchAllData912Quotes(AbortSignal.timeout(PRICE_TIMEOUT_MS))
@@ -140,6 +154,17 @@ const readTable = (sb: SupabaseClient, table: string, orders: string[], filter?:
 /** The whole public catalog, cached ~60s in-process (shared by list and detail; failures are never cached). */
 async function readCatalog(sb: SupabaseClient): Promise<CatalogTables> {
   if (catalogCache && Date.now() - catalogCache.at < CATALOG_CACHE_MS) return catalogCache.data
+  // Single flight; a failed refresh serves the last-good snapshot (never caching the failure).
+  catalogInflight ??= refreshCatalog(sb)
+    .catch((e) => {
+      if (catalogCache) return catalogCache.data
+      throw e
+    })
+    .finally(() => { catalogInflight = null })
+  return catalogInflight
+}
+
+async function refreshCatalog(sb: SupabaseClient): Promise<CatalogTables> {
   const terms = await readTable(sb, 'on_terms', ['isin'])
   const asOf = terms.map((t) => t.as_of as string).sort().pop() ?? null
   const [flows, overrides, events, checks, curve] = await Promise.all([
@@ -168,6 +193,8 @@ export async function loadOnAnalyses(sb: SupabaseClient, opts: LoadOptions = {})
   const checkBy = new Map(tables.checks.map((r) => [r.isin as string, toCheck(r)]))
   const sov: SovPoint[] = tables.curve.flatMap((r) => (num(r.ytm) !== null && num(r.dm) !== null ? [{ law: r.law, ytmPct: Number(r.ytm), dm: Number(r.dm) }] : []))
   const settle = settlementDate(today)
+  const vols = feed ? [...feed.volumes.values()] : []
+  const quiet = vols.length > 0 && vols.filter((v) => v === 0).length / vols.length >= QUIET_SESSION_ZERO_RATIO
 
   return {
     analyses: terms.map(toTerms).map((t) =>
@@ -179,13 +206,13 @@ export async function loadOnAnalyses(sb: SupabaseClient, opts: LoadOptions = {})
         check: checkBy.get(t.isin) ?? null,
         curve: sov,
         price: t.tickerD ? feed?.prices.get(t.tickerD) ?? null : null,
-        noTrades: t.tickerD ? feed?.volumes?.get(t.tickerD) === 0 : false,
+        noTrades: !quiet && t.tickerD ? feed?.volumes?.get(t.tickerD) === 0 : false,
         settle,
       })
     ),
     asOf,
     stale: asOf === null || isOnTermsStale(asOf, today),
-    prices: { ok: feed !== null, fetchedAt: feed?.fetchedAt ?? null },
+    prices: { ok: feed !== null, quiet, fetchedAt: feed?.fetchedAt ?? null },
   }
 }
 

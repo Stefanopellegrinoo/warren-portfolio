@@ -13,7 +13,7 @@ interface CatalogResponse {
   rows: OnListRow[]
   asOf: string | null
   stale: boolean
-  prices: { ok: boolean; fetchedAt: string | null }
+  prices: { ok: boolean; quiet?: boolean; fetchedAt: string | null }
 }
 
 const PAGE_SIZE = 100
@@ -82,6 +82,9 @@ export default function OnExplorer() {
       )}
       {!data.prices.ok && rows.length > 0 && (
         <Banner tone="warn">Precios no disponibles en este momento (data912). Se muestran los términos sin TIR ni duración.</Banner>
+      )}
+      {rows.length > 0 && data.prices.ok && data.prices.quiet && (
+        <Banner tone="info">Mercado sin operaciones aún hoy: se muestran los precios de la última rueda.</Banner>
       )}
       {rows.length > 0 && (
         <>
