@@ -89,4 +89,32 @@ describe('resolveTerms: precedence override > BYMA > default', () => {
     const r = resolveTerms(base(), [{ ...ov('day_count', 'ACT/360'), isin: 'AR0000000000' }, ov('whatever', 1)])
     expect(r.dayCount.prov).toBe('default')
   })
+
+  it('surfaces malformed overrides as warnings and keeps the default', () => {
+    const r = resolveTerms(base(), [ov('day_count', '30/365'), ov('increment', -1), ov('mystery', 1), ov('min_trade_unit', 1)])
+    expect(r.dayCount.prov).toBe('default')
+    expect(r.warnings.map((w) => [w.isin, w.field])).toEqual([
+      ['AR0394353335', 'day_count'],
+      ['AR0394353335', 'increment'],
+      ['AR0394353335', 'mystery'],
+    ])
+    expect(r.warnings.every((w) => w.reason.length > 0)).toBe(true)
+  })
+
+  it('no warnings when every override is valid or belongs to another ISIN', () => {
+    expect(resolveTerms(base(), [ov('day_count', 'ACT/365'), { ...ov('day_count', 'x'), isin: 'AR0000000000' }]).warnings).toEqual([])
+  })
+
+  it('rejects call windows with to <= from or out of order', () => {
+    const bad = (calls: unknown) => resolveTerms(base(), [ov('calls', calls)])
+    expect(bad([{ from: '2027-01-01', to: '2027-01-01', pricePct: 100 }]).calls.prov).toBe('default')
+    expect(bad([{ from: '2027-01-01', to: '2026-01-01', pricePct: 100 }]).calls.prov).toBe('default')
+    expect(bad([{ from: '2028-01-01', to: '2029-01-01', pricePct: 100 }, { from: '2026-01-01', to: '2027-01-01', pricePct: 101 }]).calls.prov).toBe('default')
+    expect(bad([{ from: '2026-01-01', to: '2028-01-01', pricePct: 100 }, { from: '2027-01-01', to: null, pricePct: 99 }]).calls.prov).toBe('default')
+    expect(bad([{ from: '2026-01-01', to: null, pricePct: 100 }, { from: '2027-01-01', to: null, pricePct: 99 }]).calls.prov).toBe('default')
+  })
+
+  it('rejects impossible override dates', () => {
+    expect(resolveTerms(base(), [ov('calls', [{ from: '2026-13-45', to: null, pricePct: 100 }])]).calls.prov).toBe('default')
+  })
 })
