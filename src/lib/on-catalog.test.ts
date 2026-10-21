@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { loadOnAnalyses, type PriceFeed } from './on-catalog'
+import { loadOnAnalyses, loadPriceHistory, type PriceFeed } from './on-catalog'
 
 const NOW = new Date('2026-10-21T15:00:00Z') // Wed; settle = Thu 2026-10-22
 const PAGE = 1000
@@ -47,7 +47,11 @@ function fakeSupabase(tables: Tables) {
       const b: any = {
         select: () => b,
         eq: (col: string, v: unknown) => ((rows = rows.filter((r) => r[col] === v)), b),
-        order: () => b,
+        order: (col: string, o?: { ascending?: boolean }) => {
+          if (o?.ascending === false) rows = [...rows].sort((x, y) => String(y[col]).localeCompare(String(x[col])))
+          return b
+        },
+        limit: (n: number) => Promise.resolve({ data: rows.slice(0, n), error: null }),
         range: (from: number, to: number) => {
           entry.ranges.push([from, to])
           return Promise.resolve({ data: rows.slice(from, to + 1), error: null })
@@ -140,5 +144,27 @@ describe('loadOnAnalyses', () => {
   it('throws when a table cannot be read', async () => {
     const sb: any = { from: () => ({ select: () => ({ order: () => ({ range: async () => ({ data: null, error: { message: 'boom' } }) }), eq: () => ({ order: () => ({ range: async () => ({ data: null, error: { message: 'boom' } }) }) }) }) }) }
     await expect(loadOnAnalyses(sb, { now: NOW, getPrices: feed({}) })).rejects.toThrow(/boom/)
+  })
+})
+
+describe('loadPriceHistory', () => {
+  const hist = [
+    { ticker: 'T001D', price_date: '2026-10-19', close: '100.5' },
+    { ticker: 'T001D', price_date: '2026-10-20', close: '101' },
+    { ticker: 'OTHER', price_date: '2026-10-20', close: '50' },
+  ]
+
+  it('returns the ticker closes oldest first as numbers', async () => {
+    const sb = fakeSupabase({ on_price_history: hist })
+    expect(await loadPriceHistory(sb, 'T001D')).toEqual([
+      { date: '2026-10-19', close: 100.5 },
+      { date: '2026-10-20', close: 101 },
+    ])
+  })
+
+  it('no D ticker or a read error gives an empty history, never a failure', async () => {
+    expect(await loadPriceHistory(fakeSupabase({}), null)).toEqual([])
+    const broken: any = { from: () => ({ select: () => ({ eq: () => ({ order: () => ({ limit: async () => ({ data: null, error: { message: 'boom' } }) }) }) }) }) }
+    expect(await loadPriceHistory(broken, 'T001D')).toEqual([])
   })
 })

@@ -152,3 +152,30 @@ export async function loadOnAnalyses(sb: SupabaseClient, opts: LoadOptions = {})
     prices: { ok: feed !== null, fetchedAt: feed?.fetchedAt ?? null },
   }
 }
+
+export interface PricePoint {
+  date: string
+  close: number // data912 `c` of the D line: dirty
+}
+
+const HISTORY_DAYS = 365
+
+/** Closes of the D line, oldest first. History is secondary: any failure yields an empty chart, not an error. */
+export async function loadPriceHistory(sb: SupabaseClient, tickerD: string | null): Promise<PricePoint[]> {
+  if (!tickerD) return []
+  try {
+    const { data, error } = await sb
+      .from('on_price_history')
+      .select('price_date, close')
+      .eq('ticker', tickerD)
+      .order('price_date', { ascending: false })
+      .limit(HISTORY_DAYS)
+    if (error) return []
+    return (data ?? [])
+      .map((r: Row) => ({ date: r.price_date as string, close: Number(r.close) }))
+      .filter((p: PricePoint) => Number.isFinite(p.close))
+      .reverse()
+  } catch {
+    return []
+  }
+}
