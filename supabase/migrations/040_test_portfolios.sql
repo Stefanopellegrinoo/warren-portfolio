@@ -50,7 +50,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = public;
 
 CREATE OR REPLACE FUNCTION enforce_test_portfolio_item_limit() RETURNS TRIGGER AS $$
 BEGIN
@@ -60,7 +60,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = public;
 
 -- Keeps the portfolio's updated_at honest when its items change (runs as the caller, so RLS applies).
 CREATE OR REPLACE FUNCTION touch_test_portfolio() RETURNS TRIGGER AS $$
@@ -68,14 +68,14 @@ BEGIN
   UPDATE test_portfolios SET updated_at = NOW() WHERE id = COALESCE(NEW.portfolio_id, OLD.portfolio_id);
   RETURN NULL;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = public;
 
 CREATE OR REPLACE FUNCTION set_test_portfolio_updated_at() RETURNS TRIGGER AS $$
 BEGIN
   NEW.updated_at := NOW();
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = public;
 
 -- Re-parenting would bypass the insert-time limits (move an item into a full portfolio, or a portfolio
 -- into another user's quota); nothing legitimate needs it, so the parent keys are immutable.
@@ -86,7 +86,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = public;
 
 CREATE OR REPLACE FUNCTION forbid_test_portfolio_owner_change() RETURNS TRIGGER AS $$
 BEGIN
@@ -95,7 +95,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = public;
 
 CREATE TRIGGER trg_test_portfolio_item_immutable BEFORE UPDATE OF portfolio_id ON test_portfolio_items
   FOR EACH ROW EXECUTE FUNCTION forbid_test_portfolio_item_reparent();
