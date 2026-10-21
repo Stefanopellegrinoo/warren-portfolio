@@ -1,9 +1,9 @@
 'use client'
 
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { simulateOn, type SimResult } from '@/lib/on-simulator'
 import type { OnAnalysis } from '@/lib/on-analytics'
-import { fmtDate, fmtNum, fmtPct, fmtVn, lineLabel, plazaCopy, TAX_COPY } from '@/lib/on-format'
+import { fmtDate, fmtNum, fmtPct, fmtVn, lineLabel, parseEsArNumber, plazaCopy, TAX_COPY } from '@/lib/on-format'
 import { argentinaDate } from '@/lib/utils'
 
 interface Props {
@@ -46,17 +46,18 @@ function Result({ r, analysis }: { r: Extract<SimResult, { ok: true }>; analysis
         <Stat label="Ganancia vs. costo" hint={r.paybackDate ? `Recuperás lo invertido el ${fmtDate(r.paybackDate)}` : 'No se recupera lo invertido con los pagos'}>{usd(r.profit)}</Stat>
         <Stat label="TIR al precio de hoy" hint="Efectiva anual, hasta el vencimiento">{fmtPct(r.ytmPct)}</Stat>
         {r.ytw && (
-          <Stat label="Rendimiento al peor (YTW)" hint={`${r.ytw.kind === 'call' ? 'Hasta rescate' : 'Hasta vencimiento'} el ${fmtDate(r.ytw.workoutDate)}. La TIR al vencimiento podría no darse: puede ser rescatado antes.`}>{fmtPct(r.ytw.ytwPct)}</Stat>
+          <Stat label="Rendimiento al peor (YTW)" hint={r.ytw.kind === 'call' ? `Hasta rescate el ${fmtDate(r.ytw.workoutDate)}. La TIR al vencimiento podría no darse: puede ser rescatado antes.` : `Hasta vencimiento el ${fmtDate(r.ytw.workoutDate)}. La ON tiene rescate anticipado; al precio actual el peor caso es el vencimiento.`}>{fmtPct(r.ytw.ytwPct)}</Stat>
         )}
       </div>
 
       {r.notes.length > 0 && (
-        <ul role="status" className="space-y-1 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
+        <ul className="space-y-1 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">
           {r.notes.map((n) => <li key={n}>{n}</li>)}
         </ul>
       )}
 
-      <div className="overflow-x-auto">
+      <div className="relative">
+      <div tabIndex={0} role="region" aria-label="Pagos futuros de la tenencia simulada (desplazable)" className="overflow-x-auto rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-amber/50">
         <table className="w-full min-w-[640px] text-sm font-mono">
           <caption className="sr-only">Pagos futuros de la tenencia simulada, en dólares</caption>
           <thead>
@@ -89,6 +90,9 @@ function Result({ r, analysis }: { r: Extract<SimResult, { ok: true }>; analysis
           </tbody>
         </table>
       </div>
+      {/* Right-edge fade: the table scrolls horizontally on narrow screens. */}
+      <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-bg-800/90 to-transparent md:hidden" />
+      </div>
 
       <div className="space-y-1 text-[11px] leading-relaxed text-slate-400">
         <p>{plazaCopy(r.plaza)}, sin importar la línea en la que comprás.</p>
@@ -102,24 +106,39 @@ function Result({ r, analysis }: { r: Extract<SimResult, { ok: true }>; analysis
   )
 }
 
+const noSubscribe = () => () => {}
+const FORMAT_ERROR = 'Formato de número inválido'
+
 /** Single-ON payment simulator: everything is computed in the browser from the detail payload (no writes). */
 export default function OnSimulator({ analysis, today, initial }: Props) {
   const [mode, setMode] = useState<'usd' | 'vn'>(initial?.mode ?? 'usd')
   const [amount, setAmount] = useState(initial?.amount ?? '1000')
   const [manual, setManual] = useState(initial?.manualPrice ?? '')
-  const day = today ?? argentinaDate()
+  // Computed after mount so server and client markup agree (the date is the browser's).
+  const clientDay = useSyncExternalStore(noSubscribe, () => argentinaDate(), () => null)
+  const day = today ?? clientDay
 
-  const result = useMemo(
-    () => simulateOn({ analysis, mode, amount: amount.trim() === '' ? NaN : Number(amount), manualPrice: manual.trim() === '' ? null : Number(manual), today: day }),
-    [analysis, mode, amount, manual, day]
-  )
+  const amountValue = parseEsArNumber(amount)
+  const amountFormatError = amount.trim() !== '' && amountValue === null
+  const manualValue = manual.trim() === '' ? null : parseEsArNumber(manual)
+  const manualFormatError = manual.trim() !== '' && manualValue === null
+
+  const result = useMemo(() => {
+    if (day === null || amountFormatError || manualFormatError) return null
+    return simulateOn({ analysis, mode, amount: amountValue ?? NaN, manualPrice: manualValue, today: day })
+  }, [analysis, mode, amountValue, manualValue, amountFormatError, manualFormatError, day])
   const floating = analysis.row.rateType === 'floating'
+
+  const error = amountFormatError || manualFormatError ? FORMAT_ERROR : result && !result.ok ? result.message : null
+  const amountInvalid = amountFormatError || (result?.ok === false && (result.reason === 'bad-amount' || result.reason === 'below-min'))
+  const priceInvalid = manualFormatError || (result?.ok === false && result.reason === 'bad-price')
+  const summary = result?.ok ? `Comprás ${fmtVn(result.vn)}, costo ${usd(result.cost)}, TIR ${fmtPct(result.ytmPct)}` : null
 
   return (
     <section className="glass rounded-2xl p-5" aria-labelledby="sim-title">
       <h2 id="sim-title" className="mb-3 font-display text-sm font-bold uppercase tracking-widest text-slate-300">Simulador de pagos</h2>
       {floating ? (
-        <p role="status" className="text-sm text-slate-300">{result.ok ? '' : result.message}. Los cupones de una tasa variable no se proyectan.</p>
+        <p className="text-sm text-slate-300">No simulable: tasa variable. Los cupones de una tasa variable no se proyectan.</p>
       ) : (
         <div className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-[auto_1fr_1fr] sm:items-end">
@@ -136,16 +155,15 @@ export default function OnSimulator({ analysis, today, initial }: Props) {
             </fieldset>
             <div className="flex flex-col gap-1">
               <label htmlFor="sim-amount" className="text-[11px] font-mono uppercase tracking-widest text-slate-400">{mode === 'usd' ? 'Monto (USD)' : 'Valor nominal (VN)'}</label>
-              <input id="sim-amount" className="input-field" type="number" inputMode="decimal" min="0" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} />
+              <input id="sim-amount" className="input-field" type="text" inputMode="decimal" autoComplete="off" value={amount} aria-invalid={amountInvalid || undefined} aria-describedby={amountInvalid ? 'sim-status' : undefined} onChange={(e) => setAmount(e.target.value)} />
             </div>
             <div className="flex flex-col gap-1">
               <label htmlFor="sim-price" className="text-[11px] font-mono uppercase tracking-widest text-slate-400">Precio manual (opcional, sucio por 100 VN)</label>
-              <input id="sim-price" className="input-field" type="number" inputMode="decimal" min="0" step="any" placeholder={analysis.row.price !== null ? fmtNum(analysis.row.price) : 'Sin precio de mercado'} value={manual} onChange={(e) => setManual(e.target.value)} />
+              <input id="sim-price" className="input-field" type="text" inputMode="decimal" autoComplete="off" placeholder={analysis.row.price !== null ? fmtNum(analysis.row.price) : 'Sin precio de mercado'} value={manual} aria-invalid={priceInvalid || undefined} aria-describedby={priceInvalid ? 'sim-status' : undefined} onChange={(e) => setManual(e.target.value)} />
             </div>
           </div>
-          <div aria-live="polite">
-            {result.ok ? <Result r={result} analysis={analysis} /> : <p role="alert" className="text-sm text-amber">{result.message}</p>}
-          </div>
+          <p id="sim-status" aria-live="polite" className={error ? 'text-sm text-amber' : 'sr-only'}>{error ?? summary}</p>
+          {result?.ok && <Result r={result} analysis={analysis} />}
         </div>
       )}
     </section>

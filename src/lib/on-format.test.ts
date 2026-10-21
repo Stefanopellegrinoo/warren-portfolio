@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fmtPct, fmtNum, fmtBp, fmtUsdCompact, fmtDate, plazaCopy, rateTypeLabel, eventLabel, safeHref } from './on-format'
+import { fmtPct, fmtNum, fmtBp, fmtUsdCompact, fmtDate, plazaCopy, rateTypeLabel, eventLabel, safeHref, parseEsArNumber } from './on-format'
 
 describe('on-format', () => {
   it('formats numbers in es-AR and shows a dash for missing values', () => {
@@ -48,3 +48,18 @@ describe('on-format', () => {
     expect(safeHref('not a url')).toBeUndefined()
   })
 })
+
+describe('parseEsArNumber', () => {
+  it.each([
+    ['10000', 10000], ['10.000', 10000], ['10.000,50', 10000.5], ['10000,50', 10000.5], ['10000.50', 10000.5],
+    ['1.000', 1000], ['1000', 1000], ['1,5', 1.5], ['1.5', 1.5], ['0,5', 0.5], ['1.000.000', 1000000], ['1.000.000,25', 1000000.25],
+    ['  42  ', 42], ['0', 0], ['1.5000', 1.5],
+  ])('accepts %s', (text, value) => {
+    expect(parseEsArNumber(text)).toBe(value)
+  })
+
+  it.each(['abc', '', '   ', '1,2,3', '1..000', '1.00.0', '10.00,5', '-5', '+5', '1e5', '1 000', '$100', '.5', ',5', '5.', '5,', '1.000,5,5', '10,000.50', 'NaN', 'Infinity'])('rejects %j', (text) => {
+    expect(parseEsArNumber(text)).toBeNull()
+  })
+})
+

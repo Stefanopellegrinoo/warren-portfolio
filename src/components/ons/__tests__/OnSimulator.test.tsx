@@ -92,6 +92,67 @@ describe('OnSimulator', () => {
     expect(html).toContain('no cobrás el cupón')
   })
 
+  it('amount inputs are text with decimal keyboard (locale-safe), not type=number', () => {
+    const html = render()
+    expect(html).not.toContain('type="number"')
+    expect(html).toMatch(/id="sim-amount"[^>]*inputMode="decimal"|inputMode="decimal"[^>]*id="sim-amount"/)
+  })
+
+  it('accepts es-AR formats: comma decimal and thousands dots', () => {
+    expect(render(build(), { amount: '10000,50' })).toContain('VN 10.204')
+    expect(render(build(), { amount: '10.000,50' })).toContain('VN 10.204')
+    expect(render(build(), { amount: '10.000' })).toContain('VN 10.204')
+  })
+
+  it('unparseable amount: explicit format error, aria-invalid, described-by, no result', () => {
+    const html = render(build(), { amount: 'abc' })
+    expect(html).toContain('Formato de número inválido')
+    expect(html).toMatch(/aria-invalid="true"/)
+    expect(html).toMatch(/aria-describedby="sim-status"/)
+    expect(html).not.toContain('Total cobrado')
+  })
+
+  it('invalid manual price: error, never falls back to the market price', () => {
+    for (const manualPrice of ['abc', '0', '-4']) {
+      const html = render(build(), { manualPrice })
+      expect(html).toMatch(/Formato de número inválido|Precio manual inválido/)
+      expect(html).not.toContain('Total cobrado')
+    }
+    expect(render(build(), { manualPrice: '98,5' })).toContain('precio manual')
+  })
+
+  it('huge amount: refused with a clear message', () => {
+    expect(render(build(), { amount: '1000000000000000' })).toContain('demasiado grande')
+  })
+
+  it('a11y: no role=alert inside a live region; one short polite summary/error line', () => {
+    const html = render()
+    expect(html).not.toContain('role="alert"')
+    expect(html.match(/aria-live=/g)).toHaveLength(1)
+    expect(html).toMatch(/id="sim-status"[^>]*aria-live="polite"|aria-live="polite"[^>]*id="sim-status"/)
+    expect(html).toMatch(/Comprás VN 10\.204.*TIR 8,28%/)
+  })
+
+  it('YTW: warning only when a call is the worst case; neutral note when maturity is', () => {
+    const call = render(build({ price: 104, overrides: [ov('calls', [{ from: '2027-04-22', to: null, pricePct: 100 }])] }))
+    expect(call).toContain('puede ser rescatado antes')
+    const mat = render(build({ price: 98, overrides: [ov('calls', [{ from: '2027-04-22', to: null, pricePct: 100 }])] }))
+    expect(mat).toContain('tiene rescate anticipado; al precio actual el peor caso es el vencimiento')
+    expect(mat).not.toContain('puede ser rescatado antes')
+  })
+
+  it('payments table wrapper is keyboard-focusable and labelled', () => {
+    const html = render()
+    expect(html).toMatch(/tabindex="0"/i)
+    expect(html).toContain('aria-label="Pagos futuros')
+  })
+
+  it('without a today prop nothing is computed on the server render (client sets it after mount)', () => {
+    const html = renderToStaticMarkup(<OnSimulator analysis={build()} initial={{ mode: 'usd', amount: '10000' }} />)
+    expect(html).toContain('Simulador de pagos')
+    expect(html).not.toContain('Total cobrado')
+  })
+
   it('is part of the detail page', () => {
     const html = renderToStaticMarkup(<OnDetail analysis={build()} history={[]} asOf="2026-10-20" stale={false} prices={{ ok: true, fetchedAt: '2026-10-21T15:00:00Z' }} />)
     expect(html).toContain('Simulador de pagos')

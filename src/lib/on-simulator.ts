@@ -29,7 +29,7 @@ export interface SimPayment {
   skippedInterest: number // the coupon the buyer does not get (0 unless exCoupon)
 }
 
-export type SimRefusal = 'floating' | 'not-usd' | 'bad-amount' | 'no-price' | 'below-min' | 'no-payments'
+export type SimRefusal = 'floating' | 'not-usd' | 'bad-amount' | 'bad-price' | 'no-price' | 'below-min' | 'no-payments'
 
 export type SimResult =
   | { ok: false; reason: SimRefusal; message: string }
@@ -62,6 +62,7 @@ export type SimResult =
 
 const refuse = (reason: SimRefusal, message: string): SimResult => ({ ok: false, reason, message })
 const EPS = 1e-9
+const MAX_SIM = 1e12 // sanity cap on VN and cost
 
 export function simulateOn({ analysis, mode, amount, manualPrice, today }: SimParams): SimResult {
   const { row, detail } = analysis
@@ -70,7 +71,9 @@ export function simulateOn({ analysis, mode, amount, manualPrice, today }: SimPa
   if (row.currency !== 'USD') return refuse('not-usd', 'No simulable: la ON no está en dólares')
   if (!(amount > 0) || !Number.isFinite(amount)) return refuse('bad-amount', 'Ingresá un monto mayor a cero')
 
-  const manual = manualPrice != null && manualPrice > 0 && Number.isFinite(manualPrice)
+  // A manual price that was typed but is not usable must never fall back to the market price.
+  if (manualPrice != null && !(manualPrice > 0 && Number.isFinite(manualPrice))) return refuse('bad-price', 'Precio manual inválido: ingresá un número mayor a cero')
+  const manual = manualPrice != null
   const pricePct = manual ? manualPrice! : row.price
   if (pricePct === null || !(pricePct > 0)) return refuse('no-price', 'Sin precio: ingresá un precio manual para simular')
 
@@ -79,15 +82,22 @@ export function simulateOn({ analysis, mode, amount, manualPrice, today }: SimPa
   const minUnit = t.minTradeUnit.value
   const step = t.increment.value
   const known = minDen !== null || minUnit !== null || step !== null
-  const minVn = Math.max(minDen ?? 0, minUnit ?? 0) || step || 1
+  const minKnown = Math.max(minDen ?? 0, minUnit ?? 0)
+  // Increment known but no minimum: the multiple is assumed as the minimum (stated in the notes).
+  const minVn = minKnown || step || 1
   const incrementVn = step ?? 1
   const raw = mode === 'vn' ? amount : amount / (pricePct / 100)
+  if (!Number.isFinite(raw) || raw > MAX_SIM) return refuse('bad-amount', 'Monto demasiado grande')
   if (raw < minVn - EPS) return refuse('below-min', `Mínimo: ${fmtVn(minVn)}`)
   const vn = minVn + Math.floor((raw - minVn) / incrementVn + EPS) * incrementVn
 
+  const cost = (vn * pricePct) / 100
+  if (!Number.isFinite(vn) || !Number.isFinite(cost) || vn > MAX_SIM || cost > MAX_SIM) return refuse('bad-amount', 'Monto demasiado grande')
+
   const notes: string[] = []
   if (!known) notes.push('Con la lámina mínima desconocida se permite desde VN 1.')
-  else if (step === null) notes.push('Múltiplo de negociación desconocido: se asume VN 1.')
+  else if (minKnown === 0) notes.push(`Con la lámina mínima desconocida se asume el múltiplo () como mínimo.`)
+  if (known && step === null) notes.push('Múltiplo de negociación desconocido: se asume VN 1.')
   if (known ? Math.abs(vn - raw) > EPS && (mode === 'vn' || incrementVn > 1) : mode === 'vn' && vn !== raw) {
     notes.push(`Se redondeó hacia abajo a ${fmtVn(vn)} para respetar la lámina mínima y el múltiplo.`)
   }
@@ -119,7 +129,6 @@ export function simulateOn({ analysis, mode, amount, manualPrice, today }: SimPa
     notes.push('Comprás dentro de la fecha de registro: no cobrás el cupón que se paga en esa fecha (lo cobra quien vendió); la amortización sí.')
   }
 
-  const cost = (vn * pricePct) / 100
   const totalInterest = payments.reduce((s, p) => s + p.interest, 0)
   const totalPrincipal = payments.reduce((s, p) => s + p.principal, 0)
   const totalCollected = totalInterest + totalPrincipal

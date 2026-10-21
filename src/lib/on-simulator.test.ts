@@ -201,3 +201,39 @@ describe('simulateOn: yield, price and notes', () => {
     expect(sim()).toEqual(sim())
   })
 })
+
+describe('simulateOn: review hardening', () => {
+  it('YTM equals an independent XIRR (ACT/365 on adjusted pay dates)', () => {
+    // cash per 100 VN: 36 (2027-04-22), 35.01 (2027-10-22), 35.02 (2028-04-24) at 98 settling 2026-10-22
+    expect(okSim().ytmPct).toBeCloseTo(8.276396854, 6)
+  })
+
+  it('refuses absurdly large amounts and non-finite results', () => {
+    expect(sim({ amount: 1e15 })).toMatchObject({ ok: false, reason: 'bad-amount' })
+    expect(sim({ mode: 'vn', amount: 2e12 })).toMatchObject({ ok: false, reason: 'bad-amount' })
+    expect(sim({ amount: 1e15 }).ok === false && (sim({ amount: 1e15 }) as { message: string }).message).toContain('demasiado grande')
+    expect(sim({ amount: Number.MAX_VALUE })).toMatchObject({ ok: false, reason: 'bad-amount' })
+    expect(sim({ amount: NaN })).toMatchObject({ ok: false, reason: 'bad-amount' })
+  })
+
+  it.each([0, -3, NaN, Infinity])('invalid manual price %s is refused, never replaced by the market price', (manualPrice) => {
+    const r = sim({ manualPrice })
+    expect(r).toMatchObject({ ok: false, reason: 'bad-price' })
+    expect(r.ok === false && r.message).toContain('Precio manual inválido')
+  })
+
+  it('YTW kind is maturity when the call is not the worst case', () => {
+    const a = analysis({ price: 98, overrides: [ov('calls', [{ from: '2027-04-22', to: null, pricePct: 100 }])] })
+    expect(okSim({}, a).ytw?.kind).toBe('maturity')
+  })
+
+  it('only the increment known: the multiple is assumed as the minimum and the notes say so', () => {
+    const a = analysis({ price: 100, overrides: [ov('increment', 1_000)] })
+    const r = okSim({ mode: 'vn', amount: 5_500 }, a)
+    expect(r.vn).toBe(5_000)
+    expect(r.notes.join(' ')).toContain('lámina mínima desconocida')
+    expect(r.notes.join(' ')).toContain('múltiplo')
+    expect(sim({ mode: 'vn', amount: 500 }, a)).toMatchObject({ ok: false, reason: 'below-min' })
+  })
+})
+
