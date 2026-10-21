@@ -26,8 +26,8 @@ describe('041_on_flow_history.sql', () => {
     expect(sql).toMatch(/ALTER TABLE on_flow_history ENABLE ROW LEVEL SECURITY/i)
     expect(sql).toMatch(/ON on_flow_history FOR SELECT USING \(true\)/i)
     expect(sql).toMatch(/ON on_flow_history FOR ALL TO service_role USING \(true\) WITH CHECK \(true\)/i)
-    expect(sql).toMatch(/REVOKE INSERT, UPDATE, DELETE ON on_flow_history FROM anon, authenticated/i)
-    expect(sql).not.toMatch(/(FOR (ALL|INSERT|UPDATE|DELETE)|GRANT \w+(, \w+)* ON \w+) TO (anon|authenticated|public)/i)
+    expect(sql).toMatch(/REVOKE ALL ON on_flow_history FROM anon, authenticated; GRANT SELECT ON on_flow_history TO anon, authenticated/i)
+    expect(sql).not.toMatch(/(FOR (ALL|INSERT|UPDATE|DELETE)|GRANT (?!SELECT ON)\w+(, \w+)* ON \w+) TO (anon|authenticated|public)/i)
   })
 
   it('never deletes from the history table', () => {
@@ -63,13 +63,15 @@ describe('041_on_flow_history.sql', () => {
     const b = strip(historyBlock)
     expect(b).toMatch(/SELECT f\.isin, f\.flow_date, f\.ren, f\.amo, p_as_of, p_as_of, p_source/)
     expect(b).toMatch(/ON CONFLICT \(isin, flow_date\) DO UPDATE SET ren = EXCLUDED\.ren, amo = EXCLUDED\.amo, last_seen_as_of = EXCLUDED\.last_seen_as_of/)
-    expect(b).toMatch(/WHERE on_flow_history\.flow_date > EXCLUDED\.last_seen_as_of/)
+    expect(b).toMatch(/WHERE on_flow_history\.flow_date > EXCLUDED\.last_seen_as_of AND on_flow_history\.last_seen_as_of <= EXCLUDED\.last_seen_as_of;/)
     expect(b).not.toMatch(/\bDELETE\b/i)
   })
 
   it('rollback restores the 039 body and drops only the history table', () => {
     const d = strip(down.replace(/^-- /gm, ''))
     expect(d).toMatch(/039_on_terms\.sql/)
+    expect(d.match(FN)?.[0]).toBeDefined()
+    expect(strip(d.match(FN)?.[0] ?? '')).toBe(fn039)
     expect(d).toMatch(/DROP TABLE IF EXISTS on_flow_history/i)
     expect(d).not.toMatch(/DROP TABLE IF EXISTS (on_terms|on_cashflows|ons|on_price_history|on_positions)\b/i)
   })

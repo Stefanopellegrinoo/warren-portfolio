@@ -6,11 +6,12 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 NAME="pg041-proof-$$"
-trap 'docker rm -f "$NAME" >/dev/null 2>&1 || true' EXIT
+OUT="$(mktemp)"
+trap 'docker rm -f "$NAME" >/dev/null 2>&1 || true; rm -f "$OUT"' EXIT
 docker run -d --name "$NAME" -e POSTGRES_PASSWORD=x -v "$ROOT/supabase/migrations:/m:ro" postgres:15 >/dev/null
 for _ in $(seq 1 30); do docker exec "$NAME" pg_isready -U postgres >/dev/null 2>&1 && break; sleep 1; done
 sleep 2
-docker exec -i "$NAME" psql -U postgres -v ON_ERROR_STOP=1 -q 2>&1 >/dev/null <<'SQL' | tee /tmp/pg041-proof.out
+docker exec -i "$NAME" psql -U postgres -v ON_ERROR_STOP=1 -q 2>&1 >/dev/null <<'SQL' | tee "$OUT"
 CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN BYPASSRLS;
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated, service_role;
@@ -78,12 +79,17 @@ SELECT replace_on_terms('2026-10-27','byma_educa', terms_payload(),
   '[]'::jsonb, NULL);
 SELECT expect_val('day3: passed flow is frozen against later revisions', $$SELECT ren::text FROM on_flow_history WHERE isin='AR0000000011' AND flow_date='2026-10-25'$$, '1.500000');
 SELECT expect_val('history never shrank', 'SELECT count(*)::text FROM on_flow_history', '4');
+-- a future flow BYMA removed (11-25 is no longer listed from day 3 on) stays, with a STALE last_seen so readers can flag it
+SELECT expect_val('removed future flow stays in history with stale last_seen', $$SELECT last_seen_as_of::text FROM on_flow_history WHERE isin='AR0000000011' AND flow_date='2026-11-25'$$, '2026-10-26');
+-- LOW1: an older payload replayed later must not overwrite a newer row
+SELECT replace_on_terms('2026-10-22','byma_educa', terms_payload(),
+  '[{"isin":"AR0000000011","flow_date":"2026-12-25","ren":55,"amo":0}]'::jsonb, '[]'::jsonb, NULL);
+SELECT expect_val('older replayed payload does not overwrite a newer row', $$SELECT ren::text||' '||last_seen_as_of FROM on_flow_history WHERE isin='AR0000000011' AND flow_date='2026-12-25'$$, '1.700000 2026-10-27');
 
 -- guards still fire before any write: history, terms untouched
 SELECT expect_fail('guard: p_terms too short', $q$SELECT replace_on_terms('2026-10-28','x','[]'::jsonb,'[{"isin":"AR0000000011","flow_date":"2026-12-25","ren":9,"amo":9}]'::jsonb,'[]'::jsonb,NULL)$q$, 'at least 200');
 SELECT expect_fail('guard: p_flows not an array', $q$SELECT replace_on_terms('2026-10-28','x',terms_payload(),'{}'::jsonb,'[]'::jsonb,NULL)$q$, 'p_flows must be an array');
 SELECT expect_fail('guard: p_checks null', $q$SELECT replace_on_terms('2026-10-28','x',terms_payload(),'[]'::jsonb,NULL,NULL)$q$, 'p_checks must be an array');
-SELECT expect_val('guards left history untouched', 'SELECT count(*)::text||sum(ren)::text FROM on_flow_history', '56' || '9.200000' ) WHERE false;
 SELECT expect_val('guards left terms untouched', 'SELECT count(*)::text FROM on_terms', '200');
 SELECT expect_val('guards left history untouched (no 9/9 row)', $$SELECT count(*)::text FROM on_flow_history WHERE ren = 9$$, '0');
 RESET ROLE;

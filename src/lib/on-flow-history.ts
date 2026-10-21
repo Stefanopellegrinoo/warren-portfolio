@@ -6,8 +6,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { NON_PERIODIC_FC, PERIOD_MONTHS, addMonths } from './byma-educa'
 import { dcf, type DayCount } from './bond-math'
+import { addBusinessDays } from './ar-calendar'
 
-export type FlowProvenance = 'byma-history' | 'byma' | 'derived'
+export type FlowProvenance = 'byma-history' | 'byma-history-unconfirmed' | 'byma' | 'derived'
 
 export interface FlowRow {
   date: string // unadjusted
@@ -17,6 +18,7 @@ export interface FlowRow {
 
 export interface HistoryFlow extends FlowRow {
   provenance: FlowProvenance
+  reason?: string // set when provenance is 'byma-history-unconfirmed'
 }
 
 export interface DerivationInput {
@@ -91,37 +93,66 @@ export function deriveBackwardFlows(i: DerivationInput): DerivationResult {
   return { ok: true, flows, warnings: first === undefined && kept.length > 0 && !regularStart ? ['first-period-assumed'] : [] }
 }
 
+export interface HistoryRow extends FlowRow {
+  firstSeenAsOf: string
+  lastSeenAsOf: string
+}
+
 export interface MergeInput {
   today: string
-  history: FlowRow[]
+  history: HistoryRow[]
   current: FlowRow[]
+  inCatalog: boolean // the ISIN is in today's on_terms: then on_cashflows is the whole truth about the future
   derived: HistoryFlow[]
 }
 
-export function mergeFlowHistory({ today, history, current, derived }: MergeInput): HistoryFlow[] {
-  const byDate = new Map<string, HistoryFlow>()
-  const put = (rows: FlowRow[], provenance: FlowProvenance) => {
-    for (const r of rows) if (!byDate.has(r.date)) byDate.set(r.date, { date: r.date, ren: r.ren, amo: r.amo, provenance })
+export const CONFIRM_WINDOW_BUSINESS_DAYS = 5
+
+// A past row is confirmed (BYMA still listed it right up to its date) when it was last seen within the
+// window before flow_date. Otherwise BYMA may have removed it (early redemption, canje, schedule fix)
+// while it was still future: downstream proposals must ask the user to confirm it explicitly.
+const isConfirmed = (r: HistoryRow) => addBusinessDays(r.lastSeenAsOf, CONFIRM_WINDOW_BUSINESS_DAYS) >= r.date
+
+export function mergeFlowHistory({ today, history, current, inCatalog, derived }: MergeInput): HistoryFlow[] {
+  const out: HistoryFlow[] = []
+  const taken = new Set<string>()
+  const add = (f: HistoryFlow) => {
+    if (taken.has(f.date)) return
+    taken.add(f.date)
+    out.push(f)
   }
-  // First writer wins, so insert in priority order: past and future differ only in who goes first.
-  put(history.filter((f) => f.date < today), 'byma-history')
-  put(current, 'byma')
-  put(history, 'byma-history')
-  put(derived.filter((f) => f.date < today), 'derived')
-  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date))
+  // First writer wins, so insert in priority order: past = history > on_cashflows > derived;
+  // future = on_cashflows only (history adds future rows only for an ISIN no longer in the catalog).
+  for (const r of history.filter((x) => x.date < today)) {
+    const { date, ren, amo } = r
+    add(isConfirmed(r)
+      ? { date, ren, amo, provenance: 'byma-history' }
+      : { date, ren, amo, provenance: 'byma-history-unconfirmed', reason: `last-seen-${r.lastSeenAsOf}-more-than-${CONFIRM_WINDOW_BUSINESS_DAYS}-business-days-before` })
+  }
+  for (const r of current) add({ date: r.date, ren: r.ren, amo: r.amo, provenance: 'byma' })
+  if (!inCatalog) {
+    for (const r of history.filter((x) => x.date >= today)) add({ date: r.date, ren: r.ren, amo: r.amo, provenance: 'byma-history-unconfirmed', reason: 'isin-not-in-catalog' })
+  }
+  for (const f of derived.filter((x) => x.date < today)) add(f)
+  return out.sort((x, y) => x.date.localeCompare(y.date))
 }
 
 type Row = Record<string, unknown>
 const toRows = (data: Row[] | null): FlowRow[] =>
   (data ?? []).map((r) => ({ date: r.flow_date as string, ren: Number(r.ren), amo: Number(r.amo) }))
+const toHistoryRows = (data: Row[] | null): HistoryRow[] =>
+  (data ?? []).map((r) => ({ date: r.flow_date as string, ren: Number(r.ren), amo: Number(r.amo), firstSeenAsOf: r.first_seen_as_of as string, lastSeenAsOf: r.last_seen_as_of as string }))
 
 /** Both public tables for one ISIN. Throws on any read error: a partial schedule is worse than none. */
-export async function loadFlowRows(sb: SupabaseClient, isin: string): Promise<{ history: FlowRow[]; current: FlowRow[] }> {
-  const read = async (table: string) => {
-    const { data, error } = await sb.from(table).select('flow_date, ren, amo').eq('isin', isin).order('flow_date')
+export async function loadFlowRows(sb: SupabaseClient, isin: string): Promise<{ history: HistoryRow[]; current: FlowRow[] }> {
+  const read = async (table: string, cols: string) => {
+    const { data, error } = await sb.from(table).select(cols).eq('isin', isin).order('flow_date')
     if (error) throw new Error(`${table}: ${error.message}`)
-    return toRows(data as Row[] | null)
+    return data as unknown as Row[] | null
   }
-  const [history, current] = await Promise.all([read('on_flow_history'), read('on_cashflows')])
-  return { history, current }
+  const [history, current] = await Promise.all([
+    read('on_flow_history', 'flow_date, ren, amo, first_seen_as_of, last_seen_as_of'),
+    read('on_cashflows', 'flow_date, ren, amo'),
+  ])
+  return { history: toHistoryRows(history), current: toRows(current) }
 }

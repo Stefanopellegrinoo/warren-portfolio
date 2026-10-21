@@ -103,24 +103,47 @@ describe('deriveBackwardFlows', () => {
 
 describe('mergeFlowHistory', () => {
   const TODAY = '2026-10-21'
-  const h = (date: string, ren: number, amo = 0) => ({ date, ren, amo })
+  const h = (date: string, ren: number, lastSeenAsOf = date, amo = 0) => ({ date, ren, amo, firstSeenAsOf: '2026-01-01', lastSeenAsOf })
+  const c = (date: string, ren: number, amo = 0) => ({ date, ren, amo })
+  const base = { today: TODAY, inCatalog: true, derived: [] }
 
-  it('history wins for past dates, on_cashflows for future ones, with provenance', () => {
-    const out = mergeFlowHistory({
-      today: TODAY,
-      history: [h('2026-10-10', 2), h('2026-11-10', 9)],
-      current: [h('2026-10-10', 7), h('2026-11-10', 3)],
-      derived: [],
-    })
+  it('past: history wins over on_cashflows; future: on_cashflows wins over history', () => {
+    const out = mergeFlowHistory({ ...base, history: [h('2026-10-10', 2), h('2026-11-10', 9)], current: [c('2026-10-10', 7), c('2026-11-10', 3)] })
     expect(out).toEqual([
       { date: '2026-10-10', ren: 2, amo: 0, provenance: 'byma-history' },
       { date: '2026-11-10', ren: 3, amo: 0, provenance: 'byma' },
     ])
   })
 
-  it('a flow that dropped out of the payload on its own date stays as history', () => {
-    const out = mergeFlowHistory({ today: TODAY, history: [h('2026-10-21', 1.5)], current: [h('2027-04-21', 1.5)], derived: [] })
-    expect(out.map((f) => [f.date, f.provenance])).toEqual([['2026-10-21', 'byma-history'], ['2027-04-21', 'byma']])
+  it('a future flow BYMA removed does not come back from history while the ISIN is in the catalog', () => {
+    const out = mergeFlowHistory({ ...base, history: [h('2026-11-10', 1.5, '2026-10-20'), h('2027-05-10', 1.5, '2026-10-20')], current: [c('2027-05-10', 1.5)] })
+    expect(out.map((f) => [f.date, f.provenance])).toEqual([['2027-05-10', 'byma']])
+  })
+
+  it('an ISIN absent from the catalog keeps its future history rows, flagged unconfirmed with a reason', () => {
+    const out = mergeFlowHistory({ ...base, inCatalog: false, history: [h('2026-11-10', 1.5, '2026-10-20')], current: [] })
+    expect(out).toEqual([{ date: '2026-11-10', ren: 1.5, amo: 0, provenance: 'byma-history-unconfirmed', reason: 'isin-not-in-catalog' }])
+  })
+
+  it('a past history row is confirmed when last seen within 5 business days before its date', () => {
+    // 2026-09-10 is a Thursday: 5 business days before is Thu 2026-09-03; 6 is Wed 2026-09-02.
+    const ok = mergeFlowHistory({ ...base, history: [h('2026-09-10', 3.6, '2026-09-03')], current: [] })
+    expect(ok[0].provenance).toBe('byma-history')
+    const late = mergeFlowHistory({ ...base, history: [h('2026-09-10', 3.6, '2026-09-02')], current: [] })
+    expect(late[0]).toMatchObject({ provenance: 'byma-history-unconfirmed', reason: 'last-seen-2026-09-02-more-than-5-business-days-before' })
+  })
+
+  it('a past row last seen long before its date (removed future flow) is unconfirmed', () => {
+    const out = mergeFlowHistory({ ...base, history: [h('2026-09-10', 3.6, '2026-06-01')], current: [] })
+    expect(out[0].provenance).toBe('byma-history-unconfirmed')
+  })
+
+  it('a past row last seen on or after its date counts as confirmed', () => {
+    expect(mergeFlowHistory({ ...base, history: [h('2026-09-10', 3.6, '2026-09-11')], current: [] })[0].provenance).toBe('byma-history')
+  })
+
+  it('a flow due today and already dropped from the payload is not resurrected (it becomes past tomorrow)', () => {
+    expect(mergeFlowHistory({ ...base, history: [h('2026-10-21', 1.5, '2026-10-20')], current: [c('2027-04-21', 1.5)] }).map((f) => f.date)).toEqual(['2027-04-21'])
   })
 
   it('derived flows only fill past dates that history does not cover', () => {
@@ -128,7 +151,7 @@ describe('mergeFlowHistory', () => {
       { date: '2026-03-10', ren: 1.78, amo: 0, provenance: 'derived' as const },
       { date: '2026-09-10', ren: 5.44, amo: 0, provenance: 'derived' as const },
     ]
-    const out = mergeFlowHistory({ today: TODAY, history: [h('2026-09-10', 3.625)], current: [h('2027-03-10', 3.625)], derived })
+    const out = mergeFlowHistory({ ...base, history: [h('2026-09-10', 3.625, '2026-09-09')], current: [c('2027-03-10', 3.625)], derived })
     expect(out.map((f) => [f.date, f.ren, f.provenance])).toEqual([
       ['2026-03-10', 1.78, 'derived'],
       ['2026-09-10', 3.625, 'byma-history'],
@@ -138,13 +161,8 @@ describe('mergeFlowHistory', () => {
 
   it('output is sorted by date and does not mutate its inputs', () => {
     const history = Object.freeze([h('2026-09-01', 1)]) as ReturnType<typeof h>[]
-    const current = Object.freeze([h('2027-01-01', 1), h('2026-12-01', 1)]) as ReturnType<typeof h>[]
-    const out = mergeFlowHistory({ today: TODAY, history, current, derived: [] })
-    expect(out.map((f) => f.date)).toEqual(['2026-09-01', '2026-12-01', '2027-01-01'])
-  })
-
-  it('with no history it is just the current schedule', () => {
-    expect(mergeFlowHistory({ today: TODAY, history: [], current: [h('2027-01-01', 1)], derived: [] })).toEqual([{ date: '2027-01-01', ren: 1, amo: 0, provenance: 'byma' }])
+    const current = Object.freeze([c('2027-01-01', 1), c('2026-12-01', 1)]) as ReturnType<typeof c>[]
+    expect(mergeFlowHistory({ ...base, history, current }).map((f) => f.date)).toEqual(['2026-09-01', '2026-12-01', '2027-01-01'])
   })
 })
 
@@ -164,11 +182,11 @@ describe('loadFlowRows', () => {
 
   it('reads both tables for one ISIN and maps numerics', async () => {
     const sb = stub({
-      on_flow_history: [{ flow_date: '2026-10-10', ren: '1.500000', amo: '0.000000' }],
+      on_flow_history: [{ flow_date: '2026-10-10', ren: '1.500000', amo: '0.000000', first_seen_as_of: '2026-09-01', last_seen_as_of: '2026-10-09' }],
       on_cashflows: [{ flow_date: '2027-04-10', ren: '1.5', amo: '100' }],
     })
     await expect(loadFlowRows(sb as never, 'AR0394353335')).resolves.toEqual({
-      history: [{ date: '2026-10-10', ren: 1.5, amo: 0 }],
+      history: [{ date: '2026-10-10', ren: 1.5, amo: 0, firstSeenAsOf: '2026-09-01', lastSeenAsOf: '2026-10-09' }],
       current: [{ date: '2027-04-10', ren: 1.5, amo: 100 }],
     })
   })
