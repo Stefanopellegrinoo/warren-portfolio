@@ -60,6 +60,20 @@ export type SimResult =
       notes: string[]
     }
 
+/** The live schedule as bond-math flows (record date applied); shared by the simulator and the portfolio analytics. */
+export function flowsOf({ detail }: OnAnalysis): Flow[] {
+  const offset = detail.terms.recordOffsetDays.value ?? 0
+  return detail.schedule.map((s) => ({
+    date: s.date,
+    payDate: s.payDate,
+    recordDate: addDays(s.date, -offset),
+    couponPct: s.couponPct ?? 0,
+    amortPct: s.amortPct,
+    residualBeforePct: s.residualBeforePct,
+    couponSource: 'byma',
+  }))
+}
+
 const refuse = (reason: SimRefusal, message: string): SimResult => ({ ok: false, reason, message })
 const EPS = 1e-9
 const MAX_SIM = 1e12 // sanity cap on VN and cost
@@ -103,16 +117,7 @@ export function simulateOn({ analysis, mode, amount, manualPrice, today }: SimPa
   }
 
   const settle = settlementDate(today)
-  const offset = t.recordOffsetDays.value ?? 0
-  const flows: Flow[] = detail.schedule.map((s) => ({
-    date: s.date,
-    payDate: s.payDate,
-    recordDate: addDays(s.date, -offset),
-    couponPct: s.couponPct ?? 0,
-    amortPct: s.amortPct,
-    residualBeforePct: s.residualBeforePct,
-    couponSource: 'byma',
-  }))
+  const flows = flowsOf(analysis)
 
   let cumulative = 0
   const payments: SimPayment[] = []
