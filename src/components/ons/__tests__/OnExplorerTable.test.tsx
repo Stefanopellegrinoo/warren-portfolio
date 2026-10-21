@@ -32,6 +32,8 @@ const row = (over: Partial<OnListRow> = {}): OnListRow => ({
   termsNote: null,
   events: [],
   shortDated: false,
+  priceQuality: 'ok',
+  bymaYtm: null,
   ...over,
 })
 const render = (rows: OnListRow[], sort: ExplorerState['sort'] = { key: 'maturity', dir: 'asc' }) =>
@@ -101,6 +103,20 @@ describe('OnExplorerTable', () => {
 
   it('hints that the table scrolls horizontally', () => {
     expect(render([row()])).toContain('data-scroll-hint')
+  })
+
+  it('no-trades: visible tag, dimmed yield, sr-only text', () => {
+    const html = render([row({ priceQuality: 'no-trades' })])
+    expect(html).toContain('sin operaciones hoy')
+    expect(html).toContain('opacity-50')
+    expect(html).toContain('class="sr-only"')
+    expect(render([row()])).not.toContain('sin operaciones hoy')
+  })
+
+  it('the TIR cell tooltip carries the BYMA yield for comparison', () => {
+    const html = render([row({ bymaYtm: { pct: 8.41, asOf: '2026-10-20' } })])
+    expect(html).toContain('TIR BYMA 8,41%')
+    expect(html).toContain('20/10/2026')
   })
 
   it('empty list says "Sin resultados"', () => {

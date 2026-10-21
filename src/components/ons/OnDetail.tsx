@@ -95,7 +95,8 @@ export default function OnDetail({ analysis, history, asOf, stale, prices }: Pro
             <Tile label="Precio limpio" value={fmtNum(detail.clean)} source={SRC_WARREN} />
             <Tile label="Intereses devengados" value={fmtNum(detail.accrued, 4)} source={SRC_WARREN} />
             <Tile label="Paridad" value={fmtPct(row.paridadPct)} source={SRC_WARREN} />
-            <Tile label="TIR" value={fmtPct(row.ytmPct)} source={SRC_WARREN}>
+            <Tile label="TIR Warren (precio en dólares, línea D)" value={fmtPct(row.ytmPct)} source={SRC_WARREN}>
+              {row.priceQuality === 'no-trades' && <span className="text-[11px] text-slate-400">Atención: precio de referencia sin operaciones en la línea D hoy; la TIR puede no ser representativa.</span>}
               {row.shortDated && <span className="text-[10px] text-slate-400">Vence en menos de 90 días: la TIR es muy sensible al precio y poco representativa.</span>}
               {flag && (
                 <span className="rounded-md border border-amber/30 bg-amber/10 px-1.5 py-1 text-[11px] leading-tight text-amber">
@@ -108,6 +109,11 @@ export default function OnDetail({ analysis, history, asOf, stale, prices }: Pro
                 </span>
               )}
             </Tile>
+            {row.bymaYtm && (
+              <Tile label="TIR BYMA (precio en pesos ÷ MEP)" value={fmtPct(row.bymaYtm.pct)} source={`BYMA Educa · ${fmtDate(row.bymaYtm.asOf)}`}>
+                <span className="text-[11px] leading-tight text-slate-400">Ambas TIR son válidas y pueden diferir porque parten de precios distintos: la de BYMA usa el precio en pesos dividido por el MEP; la de Warren, el precio en dólares de la línea D.</span>
+              </Tile>
+            )}
             {detail.ytw && (
               <Tile
                 label="Rendimiento al peor (YTW)"

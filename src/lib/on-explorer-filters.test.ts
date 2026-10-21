@@ -30,6 +30,8 @@ const row = (over: Partial<OnListRow>): OnListRow => ({
   termsNote: null,
   events: [],
   shortDated: false,
+  priceQuality: 'ok',
+  bymaYtm: null,
   ...over,
 })
 

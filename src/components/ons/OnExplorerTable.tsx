@@ -33,9 +33,20 @@ function sortAria(active: boolean, dir: 'asc' | 'desc'): 'ascending' | 'descendi
   return active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'
 }
 
+const NO_TRADES_HINT = 'La línea D no tuvo operaciones hoy: el precio es de referencia y la TIR puede no ser representativa.'
+
 function PriceCell({ r }: { r: OnListRow }) {
   if (r.status === 'no-price') return <span className="italic text-slate-500">Sin precio</span>
-  return <>{fmtNum(r.price)}</>
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <span className={r.priceQuality === 'no-trades' ? 'opacity-50' : undefined}>{fmtNum(r.price)}</span>
+      {r.priceQuality === 'no-trades' && (
+        <span title={NO_TRADES_HINT} className="cursor-help rounded border border-slate-500/40 px-1 text-[9px] leading-4 text-slate-300">
+          sin operaciones hoy<span className="sr-only">: precio de referencia, la TIR puede no ser representativa</span>
+        </span>
+      )}
+    </div>
+  )
 }
 
 function YtmCell({ r }: { r: OnListRow }) {
@@ -67,7 +78,12 @@ function YtmCell({ r }: { r: OnListRow }) {
           &lt;90 d
         </span>
       )}
-      <span className="font-semibold text-white">{fmtPct(r.ytmPct)}</span>
+      <span
+        title={r.bymaYtm ? `TIR BYMA ${fmtPct(r.bymaYtm.pct)} al ${fmtDate(r.bymaYtm.asOf)} (precio en pesos ÷ MEP); la de Warren usa el precio en dólares de la línea D.` : undefined}
+        className={cn('font-semibold text-white', r.priceQuality === 'no-trades' && 'opacity-50')}
+      >
+        {fmtPct(r.ytmPct)}
+      </span>
     </div>
   )
 }
@@ -132,7 +148,7 @@ export default function OnExplorerTable({ rows, sort, onSort }: Props) {
                     )}
                   </div>
                 </td>
-                <td className={cn(TD, 'max-w-[9rem] truncate text-slate-300')} title={r.description ?? r.issuer ?? undefined}>{r.issuer ?? '—'}</td>
+                <td className={cn(TD, 'max-w-[6.5rem] truncate text-slate-300')} title={r.description ?? r.issuer ?? undefined}>{r.issuer ?? '—'}</td>
                 <td className={TD}>{fmtDate(r.maturityDate)}</td>
                 <td className={cn(TD, 'text-right')}><PriceCell r={r} /></td>
                 <td className={cn(TD, 'text-right')}><YtmCell r={r} /></td>

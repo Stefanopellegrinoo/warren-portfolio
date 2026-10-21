@@ -179,3 +179,25 @@ describe('OnNotFound', () => {
     expect(html).toContain('href="/ons"')
   })
 })
+
+describe('OnDetail: BYMA yield and price quality', () => {
+  it('shows both yields side by side with the one-line explanation', () => {
+    const check = { asOf: '2026-10-20', bymaYtmPct: 8.41, methodYtmPct: 8.41, methodDiffBp: 0, termsYtmPct: 8.41, termsDiffBp: 0, flagged: false }
+    const html = render(build({ check }))
+    expect(html).toContain('TIR Warren (precio en dólares, línea D)')
+    expect(html).toContain('TIR BYMA (precio en pesos ÷ MEP)')
+    expect(html).toContain('8,41%')
+    expect(html).toContain('20/10/2026')
+    expect(html).toContain('pueden diferir porque parten de precios distintos')
+  })
+
+  it('no BYMA yield: no comparison tile', () => {
+    expect(render()).not.toContain('TIR BYMA')
+  })
+
+  it('no trades today: explains that the D price is only a reference', () => {
+    const html = render(build({ noTrades: true }))
+    expect(html).toContain('precio de referencia sin operaciones en la línea D')
+    expect(render()).not.toContain('sin operaciones en la línea D')
+  })
+})

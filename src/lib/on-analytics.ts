@@ -69,6 +69,7 @@ export interface OnInput {
   check: CheckRow | null
   curve: SovPoint[]
   price: number | null // D line, dirty, per 100 VN (data912 c is dirty)
+  noTrades?: boolean // data912 reports zero volume on the D line today: `c` is only a reference
   settle: string
 }
 
@@ -101,6 +102,8 @@ export interface OnListRow {
   rateType: RateType
   maturityDate: string
   shortDated: boolean
+  priceQuality: 'ok' | 'no-trades'
+  bymaYtm: { pct: number; asOf: string } | null // BYMA's own TIR (peso price / MEP), for comparison
   status: OnStatus
   simulable: boolean
   price: number | null
@@ -277,6 +280,8 @@ export function analyzeOn(i: OnInput): OnAnalysis {
     rateType: rt,
     maturityDate: t.maturityDate,
     shortDated: actualDays(settle, t.maturityDate) < SHORT_DATED_DAYS,
+    priceQuality: i.noTrades && px !== null ? 'no-trades' : 'ok',
+    bymaYtm: i.check && i.check.bymaYtmPct !== null ? { pct: i.check.bymaYtmPct, asOf: i.check.asOf } : null,
     status,
     // R3.3: floating ONs cannot be simulated; the rest of the catalog can when it is a USD fixed-rate ON.
     simulable: t.currency === 'USD' && rt === 'fixed',

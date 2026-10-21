@@ -64,8 +64,9 @@ function fakeSupabase(tables: Tables) {
   } as any
 }
 
-const feed = (entries: Record<string, number>): (() => Promise<PriceFeed | null>) => async () => ({
+const feed = (entries: Record<string, number>, volumes: Record<string, number> = {}): (() => Promise<PriceFeed | null>) => async () => ({
   prices: new Map(Object.entries(entries)),
+  volumes: new Map(Object.entries(volumes)),
   fetchedAt: '2026-10-21T14:58:00Z',
 })
 
@@ -226,5 +227,24 @@ describe('M1: data912 on the ON path', () => {
     vi.useFakeTimers({ now: Date.now() + 46_000, toFake: ['Date'] })
     await getOnPrices()
     expect(f).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('price quality from data912 volume', () => {
+  it('zero volume today marks the row no-trades; positive or unknown volume is ok', async () => {
+    const t = base()
+    t.on_terms = [termsRow('AR0000000001'), termsRow('AR0000000002', { ticker_d: 'T002D' }), termsRow('AR0000000003', { ticker_d: 'T003D' })]
+    t.on_cashflows = ['AR0000000001', 'AR0000000002', 'AR0000000003'].flatMap(flowRows)
+    const r = await loadOnAnalyses(fakeSupabase(t), { now: NOW, getPrices: feed({ T001D: 100, T002D: 100, T003D: 100 }, { T001D: 0, T002D: 25 }) })
+    const q = Object.fromEntries(r.analyses.map((a) => [a.row.isin, a.row.priceQuality]))
+    expect(q).toEqual({ AR0000000001: 'no-trades', AR0000000002: 'ok', AR0000000003: 'ok' })
+  })
+
+  it('getOnPrices keeps data912 volume per D ticker', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => [{ symbol: 'T001D', c: 100, v: 0 }, { symbol: 'T002D', c: 90, v: 12 }] })))
+    const f = await getOnPrices()
+    vi.unstubAllGlobals()
+    expect(f?.volumes.get('T001D')).toBe(0)
+    expect(f?.volumes.get('T002D')).toBe(12)
   })
 })

@@ -17,6 +17,7 @@ const PRICE_TIMEOUT_MS = 5_000
 const CATALOG_CACHE_MS = 60_000 // the catalog changes once a day (nightly ingest)
 
 export interface PriceFeed {
+  volumes: Map<string, number> // D ticker -> data912 `v` today (0 = no trades)
   prices: Map<string, number> // D ticker -> data912 `c` (a DIRTY price, see DATA912_C_IS_DIRTY)
   fetchedAt: string
 }
@@ -44,8 +45,13 @@ export async function getOnPrices(): Promise<PriceFeed | null> {
   try {
     const quotes = await fetchAllData912Quotes(AbortSignal.timeout(PRICE_TIMEOUT_MS))
     const prices = new Map<string, number>()
-    for (const q of quotes) if (q.symbol?.endsWith('D') && typeof q.c === 'number' && q.c > 0) prices.set(q.symbol, q.c)
-    if (prices.size > 0) feed = { prices, fetchedAt: new Date().toISOString() }
+    const volumes = new Map<string, number>()
+    for (const q of quotes) {
+      if (!q.symbol?.endsWith('D') || typeof q.c !== 'number' || !(q.c > 0)) continue
+      prices.set(q.symbol, q.c)
+      if (typeof q.v === 'number' && Number.isFinite(q.v)) volumes.set(q.symbol, q.v)
+    }
+    if (prices.size > 0) feed = { prices, volumes, fetchedAt: new Date().toISOString() }
   } catch {
     feed = null
   }
@@ -173,6 +179,7 @@ export async function loadOnAnalyses(sb: SupabaseClient, opts: LoadOptions = {})
         check: checkBy.get(t.isin) ?? null,
         curve: sov,
         price: t.tickerD ? feed?.prices.get(t.tickerD) ?? null : null,
+        noTrades: t.tickerD ? feed?.volumes?.get(t.tickerD) === 0 : false,
         settle,
       })
     ),

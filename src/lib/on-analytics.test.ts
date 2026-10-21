@@ -154,6 +154,25 @@ describe('analyzeOn: check disclosure (R3.8)', () => {
   })
 })
 
+describe('analyzeOn: price quality and BYMA yield', () => {
+  const check = { asOf: '2026-10-20', bymaYtmPct: 8.41, methodYtmPct: 8.41, methodDiffBp: 0, termsYtmPct: 8.41, termsDiffBp: 0, flagged: false }
+
+  it('a D line with no volume today is labelled no-trades; analytics are still computed', () => {
+    const { row } = analyzeOn(input({ noTrades: true }))
+    expect(row.priceQuality).toBe('no-trades')
+    expect(row.ytmPct).not.toBeNull()
+    expect(analyzeOn(input()).row.priceQuality).toBe('ok')
+  })
+
+  it('exposes the BYMA yield and its date next to ours, without touching the flag', () => {
+    const { row } = analyzeOn(input({ check }))
+    expect(row.bymaYtm).toEqual({ pct: 8.41, asOf: '2026-10-20' })
+    expect(row.methodFlag).toBeNull()
+    expect(analyzeOn(input()).row.bymaYtm).toBeNull()
+    expect(analyzeOn(input({ check: { ...check, bymaYtmPct: null } })).row.bymaYtm).toBeNull()
+  })
+})
+
 describe('analyzeOn: short-dated bonds', () => {
   it('flags a bond maturing in under 90 days: its yield is hypersensitive to price', () => {
     const near = analyzeOn(input({ terms: terms({ maturityDate: '2026-12-22' }), flows: [{ date: '2026-12-22', ren: 3, amo: 100 }] }))
