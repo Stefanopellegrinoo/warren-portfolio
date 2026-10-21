@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { Flow } from './bond-math'
 import { ytm } from './bond-yield'
 import { yieldToWorst, interpolateSpread } from './bond-options'
+import { accrued } from './bond-yield'
 
 function flow(date: string, couponPct: number, amortPct: number, residualBeforePct = 100): Flow {
   return { date, payDate: date, recordDate: date, couponPct, amortPct, residualBeforePct, couponSource: 'computed' }
@@ -54,7 +55,47 @@ describe('yieldToWorst', () => {
   })
 })
 
+describe('yieldToWorst edge cases', () => {
+  it('window `to` is inclusive of a coupon date, exclusive after it', () => {
+    const open = [{ from: '2025-06-01', to: '2027-01-01', pricePct: 90 }]
+    const closed = [{ from: '2025-06-01', to: '2026-12-31', pricePct: 90 }]
+    expect(yieldToWorst(108, flows, open, SETTLE, 'ACT/365', ISSUE)!.kind).toBe('call')
+    expect(yieldToWorst(108, flows, closed, SETTLE, 'ACT/365', ISSUE)!.kind).toBe('maturity')
+  })
+
+  it('a window starting at maturity is treated like maturity', () => {
+    const calls = [{ from: '2028-01-01', to: null, pricePct: 50 }]
+    const w = yieldToWorst(108, flows, calls, SETTLE, 'ACT/365', ISSUE)!
+    expect(w.kind).toBe('maturity')
+    expect(w.ytw).toBeCloseTo(ytm(108, flows, SETTLE)!, 12)
+  })
+
+  it('call inside a record window: interest goes to the principal holder (positive accrual)', () => {
+    const three = [
+      { ...flow('2026-07-01', 5, 0), recordDate: '2026-06-16' },
+      flow('2027-01-01', 5, 100),
+    ]
+    const calls = [{ from: '2026-06-20', to: '2026-12-31', pricePct: 100 }]
+    // call on the window start 2026-06-20 = inside the record window of the 07-01 coupon
+    expect(accrued(three, '2026-06-20', 'ACT/365', '2026-01-01')).toBeLessThan(0)
+    const w = yieldToWorst(104, three, calls, '2026-02-01', 'ACT/365', '2026-01-01')!
+    const cumAccrued = (5 * 170) / 181 // 5 x 170/181: 2026-01-01 -> 2026-06-20 over 2026-01-01 -> 2026-07-01
+    const redemption = 100 + (5 * 170) / 181
+    expect(cumAccrued).toBeGreaterThan(0)
+    expect(w.kind).toBe('call')
+    expect(w.workoutDate).toBe('2026-06-20')
+    expect(w.ytw).toBeCloseTo(Math.pow(redemption / 104, 365 / 141) - 1, 9) // 06-20 is a Saturday: paid Monday 06-22 (calendar bdc)
+  })
+})
+
 describe('interpolateSpread', () => {
+  it('is null for non-finite inputs or a NaN curve', () => {
+    const curve = [{ duration: 2, ytm: 0.05 }, { duration: 4, ytm: 0.07 }]
+    expect(interpolateSpread(0.09, NaN, curve)).toBeNull()
+    expect(interpolateSpread(NaN, 3, curve)).toBeNull()
+    expect(interpolateSpread(0.09, 3, [{ duration: NaN, ytm: 0.05 }])).toBeNull()
+  })
+
   const curve = [
     { duration: 4, ytm: 0.07 },
     { duration: 2, ytm: 0.05 },

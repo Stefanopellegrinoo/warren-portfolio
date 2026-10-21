@@ -95,7 +95,8 @@ describe('accrued', () => {
   describe('ex-coupon (record date 15 calendar days before)', () => {
     const rec = [
       flow('2026-09-10', 3.6, 0, 100, { recordDate: '2026-08-26' }),
-      flow('2027-03-10', 3.6, 100, 100, { recordDate: '2027-02-23' }),
+      flow('2027-03-10', 3.6, 0, 100, { recordDate: '2027-02-23' }),
+      flow('2027-09-10', 3.6, 100, 100, { recordDate: '2027-08-26' }),
     ]
     it('is negative after the record date: -coupon x DCF(settle,next)/DCF(prev,next)', () => {
       expect(accrued(rec, '2027-02-24', 'ACT/365', '2025-12-10')).toBeCloseTo((-3.6 * 14) / 181, 9)
@@ -139,11 +140,11 @@ describe('analyze', () => {
   it('derives clean, paridad and current yield on CLEAN', () => {
     const a = analyze(input)
     if (!a.ok) throw new Error('expected ok')
-    const acc = (7.25 * 41) / 365
-    expect(a.accrued).toBeCloseTo(acc, 9)
-    expect(a.clean).toBeCloseTo(103 - acc, 9)
-    expect(a.paridad).toBeCloseTo(103 / (100 + acc), 9)
-    expect(a.currentYield).toBeCloseTo((0.0725 * 100) / 100 / ((103 - acc) / 100) / 1, 9)
+    // Hand-computed: 7.25 x 41/365 = 0.814384; clean = 103 - 0.814384
+    expect(a.accrued).toBeCloseTo(0.814384, 6)
+    expect(a.clean).toBeCloseTo(102.185616, 6)
+    expect(a.paridad).toBeCloseTo(1.02168, 5)
+    expect(a.currentYield).toBeCloseTo(0.070949, 6)
     expect(a.ytm).toBeGreaterThan(0)
     expect(a.wal).toBeGreaterThan(1)
   })
@@ -154,5 +155,70 @@ describe('analyze', () => {
 
   it('types a missing price instead of throwing', () => {
     expect(analyze({ ...input, dirtyPx: 0 })).toEqual({ ok: false, reason: 'no-price' })
+  })
+})
+
+describe('record date applies to interest only, and not at maturity (Cresud Clase L)', () => {
+  const issue = '2026-01-15'
+  const amortizing = [
+    flow('2026-07-15', 4, 33, 100, { recordDate: '2026-06-30' }),
+    flow('2027-01-15', 2.68, 33, 67, { recordDate: '2026-12-31' }),
+    flow('2027-07-15', 1.36, 34, 34, { recordDate: '2027-06-30' }),
+  ]
+  const settle = '2026-07-05' // inside the record window of the first (intermediate) payment
+
+  it('intermediate payment: coupon excluded, amortization kept, accrued negative', () => {
+    const noCoupon = amortizing.map((f, i) => (i === 0 ? { ...f, couponPct: 0 } : f))
+    expect(ytm(99, amortizing, settle)).toBeCloseTo(ytm(99, noCoupon, settle)!, 12)
+    expect(accrued(amortizing, settle, '30/360', issue)).toBeCloseTo((-4 * 10) / 180, 9)
+  })
+
+  it('paridad and current yield use the residual outstanding before the payment', () => {
+    const a = analyze({ dirtyPx: 99, flows: amortizing, settle, dayCount: '30/360', issueDate: issue, couponPct: 8 })
+    if (!a.ok) throw new Error('expected ok')
+    expect(a.paridad).toBeCloseTo(99 / (100 - 40 / 180), 9)
+    expect(a.currentYield).toBeCloseTo((8 * 100) / 100 / (99 + 40 / 180), 9)
+  })
+
+  it('final payment: coupon is never ex (accrued positive, coupon kept in the yield)', () => {
+    const last = [
+      flow('2026-07-15', 4, 0, 100, { recordDate: '2026-06-30' }),
+      flow('2027-01-15', 4, 100, 100, { recordDate: '2027-01-01' }),
+    ]
+    const cum = last.map((f) => ({ ...f, recordDate: f.date }))
+    expect(accrued(last, '2027-01-05', '30/360', issue)).toBeGreaterThan(0)
+    expect(ytm(100.5, last, '2027-01-05')).toBeCloseTo(ytm(100.5, cum, '2027-01-05')!, 12)
+  })
+})
+
+describe('liveness is decided on the unadjusted date', () => {
+  it('preceding adjustment (payDate before date) with settle on the pay date: ytm and accrued agree', () => {
+    const flows = [
+      flow('2027-01-02', 10, 0, 100, { payDate: '2027-01-01' }),
+      flow('2028-01-02', 10, 100),
+    ]
+    const a = analyze({ dirtyPx: 105, flows, settle: '2027-01-01', dayCount: 'ACT/365', issueDate: '2026-01-02', couponPct: 10 })
+    expect(a.ok).toBe(true)
+    if (a.ok) expect(a.accrued).toBeGreaterThan(0)
+    expect(ytm(105, flows, '2027-01-01')).not.toBeNull()
+  })
+})
+
+describe('analyze failure reasons and risk accuracy', () => {
+  it("distinguishes 'no-yield' (cannot bracket) from 'no-flows'", () => {
+    const flows = [flow('2026-01-02', 0, 100)] // one day out, price 1: needs ~1e730 yield
+    const input = { dirtyPx: 1, flows, settle: SETTLE, dayCount: 'ACT/365' as const, issueDate: '2025-01-02', couponPct: 0 }
+    expect(analyze(input)).toEqual({ ok: false, reason: 'no-yield' })
+    expect(analyze({ ...input, settle: '2026-06-01' })).toEqual({ ok: false, reason: 'no-flows' })
+  })
+
+  it('modified duration and convexity match finite differences of price in y', () => {
+    const flows = [flow('2027-01-01', 8, 0), flow('2028-01-01', 8, 100)]
+    const P = (y: number) => 8 / (1 + y) + 108 / (1 + y) ** 2
+    const y = 0.08
+    const h = 1e-4
+    const r = risk(P(y), flows, SETTLE)!
+    expect(r.modified).toBeCloseTo(-(P(y + h) - P(y - h)) / (2 * h * P(y)), 5)
+    expect(r.convexity).toBeCloseTo((P(y + h) + P(y - h) - 2 * P(y)) / (h * h * P(y)), 3)
   })
 })

@@ -11,15 +11,27 @@ interface Cash {
   amort: number
 }
 
-// Flows still ahead of settle. A coupon whose record date has passed is
-// excluded (ex-coupon); the amortization on that date is kept.
+// One liveness rule everywhere: a flow is live iff its UNADJUSTED date is after
+// settle. Accrual runs on that date, discounting on the adjusted pay date
+// (clamped at 0 for 'preceding' adjustments that land before settle).
+// Record date applies to INTEREST only, and only to intermediate payments:
+// the coupon due at maturity/redemption goes to whoever is owed the principal
+// (Cresud Clase L prospectus, "Pago de Capital e Intereses"). So a coupon is
+// ex only when it is not the last flow and settle is past its record date; the
+// amortization on that date is kept.
+function isExCoupon(flows: Flow[], i: number, settle: string): boolean {
+  return i < flows.length - 1 && settle > flows[i].recordDate
+}
+
 function liveCash(flows: Flow[], settle: string): Cash[] {
-  return flows
-    .filter((f) => f.payDate > settle)
-    .map((f) => {
-      const coupon = settle > f.recordDate ? 0 : f.couponPct
-      return { t: actualDays(settle, f.payDate) / 365, cf: coupon + f.amortPct, amort: f.amortPct }
-    })
+  const out: Cash[] = []
+  flows.forEach((f, i) => {
+    if (f.date <= settle) return
+    const coupon = isExCoupon(flows, i, settle) ? 0 : f.couponPct
+    const t = Math.max(0, actualDays(settle, f.payDate) / 365)
+    out.push({ t, cf: coupon + f.amortPct, amort: f.amortPct })
+  })
+  return out
 }
 
 const pv = (cash: Cash[], y: number) => cash.reduce((s, c) => s + c.cf * Math.pow(1 + y, -c.t), 0)
@@ -27,6 +39,12 @@ const pv = (cash: Cash[], y: number) => cash.reduce((s, c) => s + c.cf * Math.po
 // Newton inside a bracket, bisection when a step leaves it. pv is strictly
 // decreasing in y, so the bracket always holds the root if there is one.
 function solve(cash: Cash[], px: number): number | null {
+  const y = bracketSolve(cash, px)
+  // Reject a non-converged root instead of returning a bogus yield.
+  return y !== null && Math.abs(pv(cash, y) - px) <= 1e-8 * px ? y : null
+}
+
+function bracketSolve(cash: Cash[], px: number): number | null {
   let lo = -0.99
   let hi = 10
   if (pv(cash, lo) < px || pv(cash, hi) > px) return null
@@ -70,7 +88,15 @@ export function risk(dirtyPx: number, flows: Flow[], settle: string): Risk | nul
 // accrued = nextCoupon x DCF(prev, settle) / DCF(prev, next) on unadjusted
 // dates. Past the record date it turns negative: -nextCoupon x
 // DCF(settle, next) / DCF(prev, next). Zero when there is no next flow.
-export function accrued(flows: Flow[], settle: string, dc: DayCount, issueDate: string): number {
+// `cum` ignores the record date (redemption/call: interest goes to the
+// principal holder, so accrual is never negative there).
+export function accrued(
+  flows: Flow[],
+  settle: string,
+  dc: DayCount,
+  issueDate: string,
+  cum = false
+): number {
   const i = flows.findIndex((f) => f.date > settle)
   if (i < 0) return 0
   const prev = i > 0 ? flows[i - 1].date : issueDate
@@ -78,7 +104,7 @@ export function accrued(flows: Flow[], settle: string, dc: DayCount, issueDate: 
   if (settle <= prev) return 0
   const period = dcf(dc, prev, next.date)
   if (period === 0) return 0
-  if (settle > next.recordDate) return (-next.couponPct * dcf(dc, settle, next.date)) / period
+  if (!cum && isExCoupon(flows, i, settle)) return (-next.couponPct * dcf(dc, settle, next.date)) / period
   return (next.couponPct * dcf(dc, prev, settle)) / period
 }
 
@@ -101,16 +127,17 @@ export interface AnalyzeInput {
 }
 
 export type Analytics =
-  | { ok: false; reason: 'floating' | 'no-price' | 'no-flows' }
+  | { ok: false; reason: 'floating' | 'no-price' | 'no-flows' | 'no-yield' }
   | ({ ok: true; dirty: number; clean: number; accrued: number; paridad: number; currentYield: number; wal: number | null } & Risk)
 
 export function analyze(input: AnalyzeInput): Analytics {
   const { dirtyPx, flows, settle } = input
   if (input.floating) return { ok: false, reason: 'floating' }
   if (!(dirtyPx > 0)) return { ok: false, reason: 'no-price' }
-  const r = risk(dirtyPx, flows, settle)
   const next = flows.find((f) => f.date > settle)
-  if (!r || !next) return { ok: false, reason: 'no-flows' }
+  if (!next) return { ok: false, reason: 'no-flows' }
+  const r = risk(dirtyPx, flows, settle)
+  if (!r) return { ok: false, reason: 'no-yield' }
   const acc = accrued(flows, settle, input.dayCount, input.issueDate)
   const clean = dirtyPx - acc
   return {
@@ -119,6 +146,7 @@ export function analyze(input: AnalyzeInput): Analytics {
     dirty: dirtyPx,
     accrued: acc,
     clean,
+    // Ratio (1.0217), not percent: the UI multiplies by 100.
     paridad: dirtyPx / (next.residualBeforePct + acc),
     // On CLEAN price (BYMA's cy divides by dirty).
     currentYield: (input.couponPct * next.residualBeforePct) / 100 / clean,
