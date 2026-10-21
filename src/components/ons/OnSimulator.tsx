@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { simulateOn, type SimResult } from '@/lib/on-simulator'
 import type { OnAnalysis } from '@/lib/on-analytics'
 import { fmtDate, fmtNum, fmtPct, fmtVn, lineLabel, parseEsArNumber, plazaCopy, TAX_COPY } from '@/lib/on-format'
@@ -106,6 +106,7 @@ function Result({ r, analysis }: { r: Extract<SimResult, { ok: true }>; analysis
   )
 }
 
+const typed = (x: number) => new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(x)
 const noSubscribe = () => () => {}
 const FORMAT_ERROR = 'Formato de número inválido'
 
@@ -134,6 +135,16 @@ export default function OnSimulator({ analysis, today, initial }: Props) {
   const priceInvalid = manualFormatError || (result?.ok === false && result.reason === 'bad-price')
   const summary = result?.ok ? `Comprás ${fmtVn(result.vn)}, costo ${usd(result.cost)}, TIR ${fmtPct(result.ytmPct)}` : null
 
+  // Screen readers hear the summary after a pause or on blur, not on every keystroke.
+  const [announced, setAnnounced] = useState(summary)
+  useEffect(() => {
+    const id = setTimeout(() => setAnnounced(summary), 600)
+    return () => clearTimeout(id)
+  }, [summary])
+  const amountHint = amountValue !== null && !amountFormatError && amount.trim() !== '' ? `Interpretado: ${mode === 'usd' ? 'USD' : 'VN'} ${typed(amountValue)}` : null
+  const priceHint = manualValue !== null ? `Interpretado: ${typed(manualValue)} por 100 VN` : null
+  const describe = (invalid: boolean, hint: string | null, id: string) => [hint ? id : null, invalid ? 'sim-status' : null].filter(Boolean).join(' ') || undefined
+
   return (
     <section className="glass rounded-2xl p-5" aria-labelledby="sim-title">
       <h2 id="sim-title" className="mb-3 font-display text-sm font-bold uppercase tracking-widest text-slate-300">Simulador de pagos</h2>
@@ -155,14 +166,16 @@ export default function OnSimulator({ analysis, today, initial }: Props) {
             </fieldset>
             <div className="flex flex-col gap-1">
               <label htmlFor="sim-amount" className="text-[11px] font-mono uppercase tracking-widest text-slate-400">{mode === 'usd' ? 'Monto (USD)' : 'Valor nominal (VN)'}</label>
-              <input id="sim-amount" className="input-field" type="text" inputMode="decimal" autoComplete="off" value={amount} aria-invalid={amountInvalid || undefined} aria-describedby={amountInvalid ? 'sim-status' : undefined} onChange={(e) => setAmount(e.target.value)} />
+              <input id="sim-amount" className="input-field" type="text" inputMode="decimal" autoComplete="off" value={amount} aria-invalid={amountInvalid || undefined} aria-describedby={describe(amountInvalid, amountHint, 'sim-amount-hint')} onChange={(e) => setAmount(e.target.value)} onBlur={() => setAnnounced(summary)} />
+              {amountHint && <p id="sim-amount-hint" className="text-[11px] text-slate-400">{amountHint}</p>}
             </div>
             <div className="flex flex-col gap-1">
               <label htmlFor="sim-price" className="text-[11px] font-mono uppercase tracking-widest text-slate-400">Precio manual (opcional, sucio por 100 VN)</label>
-              <input id="sim-price" className="input-field" type="text" inputMode="decimal" autoComplete="off" placeholder={analysis.row.price !== null ? fmtNum(analysis.row.price) : 'Sin precio de mercado'} value={manual} aria-invalid={priceInvalid || undefined} aria-describedby={priceInvalid ? 'sim-status' : undefined} onChange={(e) => setManual(e.target.value)} />
+              <input id="sim-price" className="input-field" type="text" inputMode="decimal" autoComplete="off" placeholder={analysis.row.price !== null ? fmtNum(analysis.row.price) : 'Sin precio de mercado'} value={manual} aria-invalid={priceInvalid || undefined} aria-describedby={describe(priceInvalid, priceHint, 'sim-price-hint')} onChange={(e) => setManual(e.target.value)} onBlur={() => setAnnounced(summary)} />
+              {priceHint && <p id="sim-price-hint" className="text-[11px] text-slate-400">{priceHint}</p>}
             </div>
           </div>
-          <p id="sim-status" aria-live="polite" className={error ? 'text-sm text-amber' : 'sr-only'}>{error ?? summary}</p>
+          <p id="sim-status" aria-live="polite" className={error ? 'text-sm text-amber' : 'sr-only'}>{error ?? announced}</p>
           {result?.ok && <Result r={result} analysis={analysis} />}
         </div>
       )}

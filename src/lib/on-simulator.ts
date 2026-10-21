@@ -96,7 +96,7 @@ export function simulateOn({ analysis, mode, amount, manualPrice, today }: SimPa
 
   const notes: string[] = []
   if (!known) notes.push('Con la lámina mínima desconocida se permite desde VN 1.')
-  else if (minKnown === 0) notes.push(`Con la lámina mínima desconocida se asume el múltiplo () como mínimo.`)
+  else if (minKnown === 0) notes.push(`Con la lámina mínima desconocida se asume el múltiplo (${fmtVn(step)}) como mínimo.`)
   if (known && step === null) notes.push('Múltiplo de negociación desconocido: se asume VN 1.')
   if (known ? Math.abs(vn - raw) > EPS && (mode === 'vn' || incrementVn > 1) : mode === 'vn' && vn !== raw) {
     notes.push(`Se redondeó hacia abajo a ${fmtVn(vn)} para respetar la lámina mínima y el múltiplo.`)

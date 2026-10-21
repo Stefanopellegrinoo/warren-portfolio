@@ -153,6 +153,16 @@ describe('OnSimulator', () => {
     expect(html).not.toContain('Total cobrado')
   })
 
+  it('always shows the interpreted value under each input', () => {
+    expect(render(build(), { amount: '10000' })).toContain('Interpretado: USD 10.000,00')
+    expect(render(build(), { amount: '1.234' })).toContain('Interpretado: USD 1.234,00')
+    expect(render(build(), { amount: '1,000' })).toContain('Interpretado: USD 1,00')
+    expect(render(build(), { mode: 'vn', amount: '1.000' })).toContain('Interpretado: VN 1.000')
+    expect(render(build(), { manualPrice: '95.5' })).toContain('Interpretado: 95,50 por 100 VN')
+    expect(render(build(), { amount: 'abc' })).not.toContain('Interpretado')
+    expect(render(build(), { amount: '10000' })).toMatch(/aria-describedby="sim-amount-hint"/)
+  })
+
   it('is part of the detail page', () => {
     const html = renderToStaticMarkup(<OnDetail analysis={build()} history={[]} asOf="2026-10-20" stale={false} prices={{ ok: true, fetchedAt: '2026-10-21T15:00:00Z' }} />)
     expect(html).toContain('Simulador de pagos')

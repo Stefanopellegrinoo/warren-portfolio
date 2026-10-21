@@ -78,14 +78,14 @@ export const TAX_COPY = 'ONs de oferta pública: exentas de Ganancias para perso
  * Rules: comma is always the decimal separator; dots are thousands separators only when
  * they form exact groups of 3 digits ("10.000", "1.000.000", "10.000,50"). A single dot
  * NOT followed by exactly 3 digits is a decimal point ("10000.50", "1.5"). So "1.000" is
- * one thousand, never 1.0. No sign, exponent, spaces or currency symbols.
+ * one thousand, never 1.0. A thousands group never leads with 0: "0.500" and "00.500" are 0.5. No sign, exponent, spaces or currency symbols.
  */
 export function parseEsArNumber(text: string): number | null {
   const t = text.trim()
-  const withComma = /^(\d{1,3}(?:\.\d{3})*|\d+),(\d+)$/.exec(t)
+  const withComma = /^([1-9]\d{0,2}(?:\.\d{3})+|\d+),(\d+)$/.exec(t)
   if (withComma) return Number(`${withComma[1].replace(/\./g, '')}.${withComma[2]}`)
   if (/^\d+$/.test(t)) return Number(t)
-  if (/^\d{1,3}(?:\.\d{3})+$/.test(t)) return Number(t.replace(/\./g, ''))
+  if (/^[1-9]\d{0,2}(?:\.\d{3})+$/.test(t)) return Number(t.replace(/\./g, ''))
   if (/^\d+\.\d+$/.test(t)) return Number(t)
   return null
 }
