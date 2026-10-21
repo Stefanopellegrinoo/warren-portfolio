@@ -25,7 +25,13 @@ export async function GET(req: NextRequest) {
   const authResult = await requireUser()
   if (isAuthFailure(authResult)) return authResult.error
 
-  const provider = getMarketDataProvider()
+  let provider: ReturnType<typeof getMarketDataProvider>
+  try {
+    provider = getMarketDataProvider()
+  } catch (err) {
+    console.error('[/api/quote]', err)
+    return NextResponse.json({ error: 'Failed to fetch quotes' }, { status: 500 })
+  }
   const settled = await Promise.allSettled(
     tickers.map(async (ticker) => {
       const q = await provider.getQuote(ticker)

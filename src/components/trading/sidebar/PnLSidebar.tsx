@@ -108,6 +108,7 @@ export function PnLSidebar() {
       setChanges((prev) => {
         const next = new Map(prev);
         data.forEach((q) => {
+          if (q.price === null) return; // unavailable: keep the last change
           next.set(q.ticker, q.change ?? 0);
         });
         return next;

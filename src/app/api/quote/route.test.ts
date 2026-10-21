@@ -4,12 +4,16 @@ import { MarketDataError } from '@/lib/market-data/types'
 
 // ── Mock provider ────────────────────────────────────────────────────────────
 const mockGetQuote = vi.fn()
+let providerFactoryThrows = false
 vi.mock('@/lib/market-data', () => ({
-  getMarketDataProvider: () => ({
+  getMarketDataProvider: () => {
+    if (providerFactoryThrows) throw new Error('provider misconfigured')
+    return {
     getCandles: vi.fn(),
     getQuote: mockGetQuote,
     searchTickers: vi.fn(),
-  }),
+    }
+  },
   MarketDataError,
 }))
 
@@ -39,6 +43,7 @@ const fakeQuote = {
 describe('GET /api/quote', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    providerFactoryThrows = false
     mockRequireUser.mockResolvedValue({ user: { id: 'user-1' }, supabase: {} })
     mockIsAuthFailure.mockReturnValue(false)
   })
@@ -83,6 +88,14 @@ describe('GET /api/quote', () => {
     const res = await GET(makeRequest({ ticker: 'AAPL' }))
     const data = await res.json()
     expect(data[0].change).toBe(0)
+  })
+
+  it('returns a generic 500 JSON when the provider factory throws', async () => {
+    const { GET } = await import('./route')
+    providerFactoryThrows = true
+    const res = await GET(makeRequest({ ticker: 'AAPL' }))
+    expect(res.status).toBe(500)
+    expect((await res.json()).error).toBe('Failed to fetch quotes')
   })
 
   it('returns 400 when no ticker provided', async () => {
