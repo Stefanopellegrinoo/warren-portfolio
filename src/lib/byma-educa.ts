@@ -123,9 +123,13 @@ export function extractPayload(html: string): unknown {
   }
 }
 
-const PERIOD_MONTHS: Record<string, number> = { Anual: 12, Semestral: 6, Trimestral: 3 }
+// Every BYMA `fc` value seen in the payload (2026-10-20: Semestral, Trimestral, plus the two non-periodic
+// ones below). Mensual and Anual are not in today's payload but are standard frequencies.
+export const PERIOD_MONTHS: Record<string, number> = { Mensual: 1, Trimestral: 3, Semestral: 6, Anual: 12 }
+// No periodic coupon: interest (if any) is paid at maturity.
+export const NON_PERIODIC_FC: readonly string[] = ['Vencimiento', 'No Paga Cupon']
 
-function addMonths(iso: string, months: number): string {
+export function addMonths(iso: string, months: number): string {
   const d = new Date(toMs(iso))
   const day = d.getUTCDate()
   const t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + months, 1)

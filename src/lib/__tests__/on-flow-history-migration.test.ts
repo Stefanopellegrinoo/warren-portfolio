@@ -7,11 +7,11 @@ const raw = read('041_on_flow_history.sql')
 const [up, down = ''] = raw.split(/-- ={3,} ROLLBACK/i)
 const strip = (s: string) => s.replace(/--.*$/gm, '').replace(/\s+/g, ' ').trim()
 const sql = strip(up)
-const FN = /CREATE OR REPLACE FUNCTION replace_on_terms\(.*?END;\s*\$\$;/is
+const FN = /CREATE OR REPLACE FUNCTION replace_on_terms\([\s\S]*?END;\s*\$\$;/i
 const fn039 = strip(read('039_on_terms.sql').match(FN)?.[0] ?? '')
 const fn041Raw = up.match(FN)?.[0] ?? ''
 const fn041 = strip(fn041Raw)
-const historyBlock = fn041Raw.match(/-- BEGIN history upsert.*?-- END history upsert\n?/s)?.[0] ?? ''
+const historyBlock = fn041Raw.match(/-- BEGIN history upsert[\s\S]*?-- END history upsert\n?/)?.[0] ?? ''
 
 describe('041_on_flow_history.sql', () => {
   it('creates the append-only table with the agreed columns and PK', () => {
