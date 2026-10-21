@@ -5,7 +5,7 @@
 import { addDays, arCalendar, settlementDate } from './ar-calendar'
 import type { Flow } from './bond-math'
 import { yieldToWorst } from './bond-options'
-import { accrued, isExCoupon, ytm } from './bond-yield'
+import { accrued, isExCoupon, risk, ytm } from './bond-yield'
 import { fmtVn } from './on-format'
 import type { OnAnalysis } from './on-analytics'
 import type { Plaza } from './on-terms'
@@ -168,5 +168,61 @@ export function simulateOn({ analysis, mode, amount, manualPrice, today }: SimPa
     ytmPct: y === null ? null : y * 100,
     ytw: worst ? { ytwPct: worst.ytw * 100, workoutDate: worst.workoutDate, kind: worst.kind } : null,
     notes,
+  }
+}
+
+export interface HeldPayment {
+  date: string
+  payDate: string
+  interest: number
+  principal: number
+  total: number
+  recordPassed: boolean // the record date is already behind us but the payment is not: the holder still collects it
+}
+
+export type HeldResult =
+  | { ok: false; reason: 'not-usd' | 'no-payments'; message: string }
+  | {
+      ok: true
+      settle: string
+      floating: boolean // listed and valued, but its payments are not projected
+      pricePct: number | null
+      marketValue: number | null
+      payments: HeldPayment[]
+      ytmPct: number | null
+      mdYears: number | null
+      priceLine: 'D' | 'C' | 'O' | null
+      lineFallback: boolean
+      noTrades: boolean
+    }
+
+/**
+ * What a CURRENT holder collects. `vn` is the exact nominal held (ledger quantity x 100, original VN): no lot rounding,
+ * no purchase cost. A payment counts while its adjusted pay date is still ahead, even if the record date has passed
+ * (the buyer-side ex-coupon rule does not apply to someone who already holds). The price only feeds market value and yield.
+ */
+export function simulateHeld({ analysis, vn, today }: { analysis: OnAnalysis; vn: number; today: string }): HeldResult {
+  const { row } = analysis
+  if (row.currency !== 'USD') return { ok: false, reason: 'not-usd', message: 'No proyectable: la ON no está en dólares' }
+  const settle = settlementDate(today)
+  const flows = flowsOf(analysis)
+  const floating = row.rateType === 'floating'
+  const live = flows.filter((f) => f.payDate > today)
+  if (live.length === 0) return { ok: false, reason: 'no-payments', message: 'La ON está vencida: ya no tiene pagos futuros' }
+
+  const pricePct = row.price !== null && row.price > 0 ? row.price : null
+  const payments: HeldPayment[] = floating ? [] : live.map((f) => {
+    const interest = (vn * f.couponPct) / 100
+    const principal = (vn * f.amortPct) / 100
+    return { date: f.date, payDate: f.payDate, interest, principal, total: interest + principal, recordPassed: interest > 0 && f.recordDate < today }
+  })
+  const priced = pricePct !== null && !floating
+  const y = priced ? ytm(pricePct, flows, settle) : null
+  const rk = priced ? risk(pricePct, flows, settle) : null
+  return {
+    ok: true, settle, floating, pricePct,
+    marketValue: pricePct === null ? null : (vn * pricePct) / 100,
+    payments, ytmPct: y === null ? null : y * 100, mdYears: rk?.modified ?? null,
+    priceLine: row.priceLine, lineFallback: row.lineFallback, noTrades: row.priceQuality === 'no-trades',
   }
 }

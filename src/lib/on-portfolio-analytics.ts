@@ -20,6 +20,7 @@ export interface PortfolioItem {
 
 export type SkipReason = SimRefusal | 'unknown-isin'
 export type WarningKind = 'floating' | 'not-usd' | 'no-price' | 'unknown-isin' | 'invalid' | 'lot-adjusted' | 'record-window' | 'call' | 'price-fallback' | 'reference-price'
+  | 'unmapped' | 'held-record-passed' | 'day-count-unverified' | 'event'
 
 export interface PortfolioWarning {
   kind: WarningKind
@@ -42,6 +43,9 @@ export interface Position {
   mdYears: number | null
   ytwKind: 'maturity' | 'call' | null
   collected: number
+  priced: boolean // false: held ON without a price (no market value, no yield)
+  nextPayDate: string | null // adjusted pay date of the first projected payment
+  nextPayAmount: number | null
 }
 
 export interface MonthRow { month: string; interest: number; principal: number; total: number; cumulative: number }
@@ -157,7 +161,7 @@ export function analyzePortfolio({ items, analyses, today }: { items: PortfolioI
     positions.push({
       isin: item.isin, ticker: tk, tickerO: row.tickerO, issuer: row.issuer, plaza: row.plaza, maturityDate: row.maturityDate,
       vn: r.vn, cost: r.cost, weightPct: 0, pricePct: r.pricePct, ytmPct: r.ytmPct, mdYears: rk?.modified ?? null,
-      ytwKind: r.ytw?.kind ?? null, collected: r.totalCollected,
+      ytwKind: r.ytw?.kind ?? null, collected: r.totalCollected, priced: true, nextPayDate: null, nextPayAmount: null,
     })
     for (const p of r.payments) {
       payments.push({ isin: item.isin, ticker: tk, date: p.date, payDate: p.payDate, interest: p.interest, principal: p.principal, total: p.total })
@@ -176,14 +180,24 @@ export function analyzePortfolio({ items, analyses, today }: { items: PortfolioI
     if (r.noTrades) warnings.push({ kind: 'reference-price', isin: item.isin, message: `${tk}: el precio es de referencia, la línea no operó en la rueda.` })
   }
 
+  return aggregate({ positions, payments, skipped, warnings, settle, today })
+}
+
+/** Combines per-ON positions and payments into the portfolio view. Shared by the test portfolios and the held (real) portfolio. */
+export function aggregate({ positions, payments, skipped, warnings, settle, today }: {
+  positions: Position[]; payments: PortfolioPayment[]; skipped: PortfolioAnalysis['skipped']; warnings: PortfolioWarning[]; settle: string; today: string
+}): PortfolioAnalysis {
   if (positions.length === 0) return emptyAnalysis(settlementDate(today), skipped, warnings)
 
   const cost = positions.reduce((s, p) => s + p.cost, 0)
   const interest = payments.reduce((s, p) => s + p.interest, 0)
   const principal = payments.reduce((s, p) => s + p.principal, 0)
   const collected = interest + principal
-  const weighted = positions.map((p) => ({ ...p, weightPct: (p.cost / cost) * 100 }))
   payments.sort((a, b) => (a.payDate === b.payDate ? (a.isin < b.isin ? -1 : 1) : a.payDate < b.payDate ? -1 : 1))
+  const weighted = positions.map((p) => {
+    const next = payments.find((x) => x.isin === p.isin)
+    return { ...p, weightPct: cost > 0 ? (p.cost / cost) * 100 : 0, nextPayDate: next?.payDate ?? null, nextPayAmount: next?.total ?? null }
+  })
 
   // Monthly calendar by ADJUSTED pay date, continuous from the first to the last payment month.
   const monthAcc = new Map<string, { interest: number; principal: number }>()
@@ -194,7 +208,7 @@ export function analyzePortfolio({ items, analyses, today }: { items: PortfolioI
   }
   const monthly: MonthRow[] = []
   let running = 0
-  for (let m = payments[0].payDate.slice(0, 7); m <= payments[payments.length - 1].payDate.slice(0, 7); m = nextMonth(m)) {
+  for (let m = payments[0]?.payDate.slice(0, 7) ?? ''; payments.length > 0 && m <= payments[payments.length - 1].payDate.slice(0, 7); m = nextMonth(m)) {
     const a = monthAcc.get(m) ?? { interest: 0, principal: 0 }
     running += a.interest + a.principal
     monthly.push({ month: m, interest: a.interest, principal: a.principal, total: a.interest + a.principal, cumulative: running })
@@ -220,7 +234,10 @@ export function analyzePortfolio({ items, analyses, today }: { items: PortfolioI
   const next12mInterest = inYear.reduce((s, p) => s + p.interest, 0)
   const next12mPrincipal = inYear.reduce((s, p) => s + p.principal, 0)
 
-  const y = ytm(100, pooled(payments, settle, cost, (p) => p.total), settle)
+  // Pooled yield: only ONs with a price and projected flows (a held floating or unpriced ON has no flows to match against its value).
+  const yielding = new Set(weighted.filter((p) => p.priced && payments.some((x) => x.isin === p.isin)).map((p) => p.isin))
+  const yieldBase = weighted.filter((p) => yielding.has(p.isin)).reduce((s, p) => s + p.cost, 0)
+  const y = yieldBase > 0 ? ytm(100, pooled(payments.filter((p) => yielding.has(p.isin)), settle, yieldBase, (p) => p.total), settle) : null
   const mds = weighted.filter((p) => p.mdYears !== null)
   const mdCost = mds.reduce((s, p) => s + p.cost, 0)
 
@@ -229,14 +246,14 @@ export function analyzePortfolio({ items, analyses, today }: { items: PortfolioI
     const name = p.issuer?.trim() || NO_ISSUER
     issuerCost.set(name, (issuerCost.get(name) ?? 0) + p.cost)
   }
-  const issuers: IssuerRow[] = [...issuerCost.entries()].map(([name, c]) => ({ name, cost: c, pct: (c / cost) * 100 })).sort((a, b) => b.cost - a.cost)
+  const issuers: IssuerRow[] = [...issuerCost.entries()].map(([name, c]) => ({ name, cost: c, pct: cost > 0 ? (c / cost) * 100 : 0 })).sort((a, b) => b.cost - a.cost)
 
   const plazaAcc = new Map<Plaza | null, { cost: number; collected: number }>()
   for (const p of weighted) {
     const cur = plazaAcc.get(p.plaza) ?? { cost: 0, collected: 0 }
     plazaAcc.set(p.plaza, { cost: cur.cost + p.cost, collected: cur.collected + p.collected })
   }
-  const plazas: PlazaRow[] = [...plazaAcc.entries()].map(([plaza, a]) => ({ plaza, cost: a.cost, costPct: (a.cost / cost) * 100, collected: a.collected })).sort((a, b) => b.cost - a.cost)
+  const plazas: PlazaRow[] = [...plazaAcc.entries()].map(([plaza, a]) => ({ plaza, cost: a.cost, costPct: cost > 0 ? (a.cost / cost) * 100 : 0, collected: a.collected })).sort((a, b) => b.cost - a.cost)
 
   return {
     empty: false,
