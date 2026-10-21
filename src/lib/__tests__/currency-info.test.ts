@@ -21,7 +21,7 @@ describe('getCCLRateInfo', () => {
   it('short cache: age comes from the key TTL', async () => {
     redis.get.mockResolvedValueOnce('1600')
     redis.ttl.mockResolvedValueOnce(3600 - 600) // cached 10 min ago
-    const r = await getCCLRateInfo()
+    const r = (await getCCLRateInfo())!
     expect(r.source).toBe('cache')
     expect(r.rate).toBe(1600)
     expect(Date.now() - Date.parse(r.asOf)).toBeGreaterThan(9 * 60_000)
@@ -31,7 +31,7 @@ describe('getCCLRateInfo', () => {
   it('live fetch is stamped now', async () => {
     redis.get.mockResolvedValueOnce(null)
     fetchRawQuotes.mockResolvedValueOnce(new Map([['GGAL', { price: 50 }], ['BCBA:GGAL', { price: 8000 }]]))
-    const r = await getCCLRateInfo()
+    const r = (await getCCLRateInfo())!
     expect(r).toMatchObject({ rate: 1600, source: 'live' })
     expect(Date.now() - Date.parse(r.asOf)).toBeLessThan(5_000)
   })
@@ -40,14 +40,14 @@ describe('getCCLRateInfo', () => {
     redis.get.mockResolvedValueOnce(null).mockResolvedValueOnce('1500')
     redis.ttl.mockResolvedValueOnce(30 * 86400 - 3 * 86400) // fetched 3 days ago
     fetchRawQuotes.mockRejectedValueOnce(new Error('down'))
-    const r = await getCCLRateInfo()
+    const r = (await getCCLRateInfo())!
     expect(r.source).toBe('lkp')
     expect(Date.now() - Date.parse(r.asOf)).toBeGreaterThan(2.9 * 86400_000)
   })
 
-  it('nothing available: explicit fallback source', async () => {
+  it('nothing available: null, never an invented rate', async () => {
     ready = false
     fetchRawQuotes.mockRejectedValueOnce(new Error('down'))
-    expect(await getCCLRateInfo()).toMatchObject({ rate: 1100, source: 'fallback' })
+    expect(await getCCLRateInfo()).toBeNull()
   })
 })

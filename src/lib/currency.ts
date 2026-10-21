@@ -8,64 +8,20 @@ const CACHE_TTL = 3600 // 1 hour
 const LKP_TTL = 30 * 24 * 3600 // 30 days: Redis is noeviction, every key must expire
 
 /**
- * Fetches the implicit Dolar CCL (Contado con Liquidacion) rate
- * by comparing GGAL (NASDAQ) vs GGAL.BA (Buenos Aires).
- * GGAL 1 ADR = 10 local shares.
+ * Implicit Dolar CCL (GGAL ADR vs GGAL.BA, 1 ADR = 10 local shares).
+ * Returns null when no real rate exists (Yahoo down, Redis empty): callers MUST NOT
+ * price ARS quotes with an invented number, they skip them instead.
  */
-export async function getCCLRate(): Promise<number> {
-  // 1. Try short-lived cache (1h TTL)
-  if (isRedisReady()) {
-    const cached = await getRedis()?.get(REDIS_KEY_CCL)
-    if (cached) return parseFloat(cached)
-  }
-
-  try {
-    // 2. Fetch GGAL (USD) and GGAL.BA (ARS)
-    // GGAL ratio is 1:10 (1 ADR = 10 local shares)
-    const quotes = await fetchRawQuotes(['GGAL', 'BCBA:GGAL'])
-    const adr = quotes.get('GGAL')
-    const local = quotes.get('BCBA:GGAL')
-
-    if (adr && local) {
-      // CCL = (Local Price * Ratio) / ADR Price
-      // Example: GGAL.BA = 5000, GGAL = 50, Ratio = 10 -> (5000*10)/50 = 1000
-      const ccl = (local.price * 10) / adr.price
-
-      if (isRedisReady()) {
-        const redis = getRedis()
-        // Short-lived cache (refreshed hourly)
-        await redis?.setex(REDIS_KEY_CCL, CACHE_TTL, ccl.toString())
-        // LKP — long-lived, always reflects the last successfully fetched rate
-        await redis?.setex(REDIS_KEY_CCL_LKP, LKP_TTL, ccl.toString())
-      }
-      return ccl
-    }
-  } catch (err) {
-    console.error('[Currency] Error calculating CCL rate:', err)
-  }
-
-  // 3. Fallback to last known price (LKP) rather than a stale hardcoded constant
-  if (isRedisReady()) {
-    const lkp = await getRedis()?.get(REDIS_KEY_CCL_LKP)
-    if (lkp) {
-      console.warn('[Currency] Using LKP CCL rate — live fetch failed')
-      return parseFloat(lkp)
-    }
-  }
-
-  // Absolute last resort — log loudly so it's visible in production
-  console.error('[Currency] No CCL rate available (live fetch failed, no LKP in Redis). Using emergency fallback.')
-  return 1100
+export async function getCCLRate(): Promise<number | null> {
+  return (await getCCLRateInfo())?.rate ?? null
 }
 
 export interface CclRateInfo {
   rate: number
   /** ISO instant the rate was observed: live = now, cache/lkp = now minus the Redis key's age. */
   asOf: string
-  source: 'live' | 'cache' | 'lkp' | 'fallback'
+  source: 'live' | 'cache' | 'lkp'
 }
-
-const EMERGENCY_FALLBACK = 1100
 
 async function redisAgeMs(key: string, ttlSeconds: number): Promise<number> {
   const left = Number(await getRedis()?.ttl(key))
@@ -73,11 +29,11 @@ async function redisAgeMs(key: string, ttlSeconds: number): Promise<number> {
 }
 
 /**
- * Same lookup order and keys as getCCLRate (which is left untouched for its other callers),
- * but it says how old the rate is and where it came from, so a caller that prices bonds can
- * refuse a long-lived last-known rate or the hardcoded emergency fallback.
+ * Lookup order: 1h cache, live Yahoo, 30-day last-known. Says how old the rate is and where it
+ * came from, so a caller that prices bonds can refuse a long-lived last-known rate.
+ * Returns null when nothing real exists; there is no hardcoded fallback.
  */
-export async function getCCLRateInfo(): Promise<CclRateInfo> {
+export async function getCCLRateInfo(): Promise<CclRateInfo | null> {
   const at = (ageMs: number) => new Date(Date.now() - ageMs).toISOString()
   if (isRedisReady()) {
     const cached = await getRedis()?.get(REDIS_KEY_CCL)
@@ -103,7 +59,8 @@ export async function getCCLRateInfo(): Promise<CclRateInfo> {
     const lkp = await getRedis()?.get(REDIS_KEY_CCL_LKP)
     if (lkp) return { rate: parseFloat(lkp), asOf: at(await redisAgeMs(REDIS_KEY_CCL_LKP, LKP_TTL)), source: 'lkp' }
   }
-  return { rate: EMERGENCY_FALLBACK, asOf: at(0), source: 'fallback' }
+  console.error('[Currency] No CCL rate available (live fetch failed, no LKP in Redis)')
+  return null
 }
 
 /**

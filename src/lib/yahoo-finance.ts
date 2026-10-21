@@ -6,6 +6,7 @@
 import { getRedis, isRedisReady, ensureRedisConnected } from './redis'
 import type { Quote } from '@/types'
 import { getCCLRate } from './currency'
+import { alertJobFailure } from './job-health'
 
 // ── In-memory price cache (fallback when Redis is unavailable) ──
 interface CacheEntry {
@@ -123,12 +124,20 @@ export async function fetchQuotesFromYahoo(tickers: string[]): Promise<Map<strin
     const hasBCBA = tickers.some(t => t.startsWith('BCBA:'))
     if (hasBCBA) {
       const ccl = await getCCLRate()
-      quotesMap.forEach((quote, ticker) => {
-        if (ticker.startsWith('BCBA:')) {
-          quote.price = quote.price / ccl
-          quote.change = quote.change / ccl
-        }
-      })
+      if (ccl === null) {
+        // Never price ARS with an invented rate: drop BCBA quotes so the last-good LKP stays.
+        const err = new Error('CCL unavailable: BCBA quotes skipped, last-known prices kept')
+        console.error('[Yahoo Finance]', err.message)
+        void alertJobFailure('price', 'ccl-unavailable', err)
+        for (const ticker of [...quotesMap.keys()]) if (ticker.startsWith('BCBA:')) quotesMap.delete(ticker)
+      } else {
+        quotesMap.forEach((quote, ticker) => {
+          if (ticker.startsWith('BCBA:')) {
+            quote.price = quote.price / ccl
+            quote.change = quote.change / ccl
+          }
+        })
+      }
     }
     
     return quotesMap
@@ -269,9 +278,9 @@ export async function fetchQuotesWithFallback(tickers: string[]): Promise<Map<st
       
       // Convert ARS→USD for any BCBA tickers in this batch
       const batchHasBCBA = batch.some(t => t.startsWith('BCBA:'))
-      let ccl = 0
+      let ccl: number | null = null
       if (batchHasBCBA) {
-        try { ccl = await getCCLRate() } catch { ccl = 0 }
+        try { ccl = await getCCLRate() } catch { ccl = null }
       }
 
       // Process batch results
@@ -284,8 +293,12 @@ export async function fetchQuotesWithFallback(tickers: string[]): Promise<Map<st
           let price = result.regularMarketPrice
           let change = result.regularMarketChange || 0
 
-          // BCBA prices from Yahoo are in ARS — convert to USD
-          if (ticker.startsWith('BCBA:') && ccl > 0) {
+          // BCBA prices from Yahoo are in ARS — convert to USD, or skip when there is no real CCL
+          if (ticker.startsWith('BCBA:')) {
+            if (ccl === null) {
+              console.warn(`[Quote Fetch] Skipping ${ticker} — CCL unavailable, price is in ARS`)
+              continue
+            }
             price = price / ccl
             change = change / ccl
           }
@@ -302,18 +315,9 @@ export async function fetchQuotesWithFallback(tickers: string[]): Promise<Map<st
             updatedAt: now.toISOString()
           }
 
-          // Add to map (always — even if CCL was unavailable)
           quotesMap.set(ticker, quote)
-
-          // Only cache in Redis if the price is in USD.
-          // BCBA tickers without CCL would store ARS prices as USD, corrupting the LKP.
-          const isBCBAWithoutCCL = ticker.startsWith('BCBA:') && ccl === 0
-          if (!isBCBAWithoutCCL) {
-            await cacheQuoteInRedis(ticker, quote)
-            console.log(`[Quote Fetch] Successfully cached ${ticker}: ${quote.price}`)
-          } else {
-            console.warn(`[Quote Fetch] Skipping Redis cache for ${ticker} — CCL unavailable, price is in ARS`)
-          }
+          await cacheQuoteInRedis(ticker, quote)
+          console.log(`[Quote Fetch] Successfully cached ${ticker}: ${quote.price}`)
         } else {
           console.warn(`[Quote Fetch] No price data for ${ticker}`, result)
         }

@@ -117,15 +117,13 @@ export class YahooProvider implements MarketDataProvider {
 
       // BCBA prices from Yahoo are in ARS — convert to USD via CCL
       if (ticker.startsWith('BCBA:')) {
-        try {
-          const ccl = await getCCLRate()
-          if (ccl > 0) {
-            price = price / ccl
-            change = change / ccl
-          }
-        } catch {
-          // If CCL unavailable, leave as-is
+        const ccl = await getCCLRate()
+        if (ccl === null) {
+          // Thrown (not returned): an ARS price handed back as USD is the bug.
+          throw new MarketDataError('PROVIDER_UNAVAILABLE', `No CCL rate available — refusing to return an ARS quote for ${ticker} as USD`)
         }
+        price = price / ccl
+        change = change / ccl
       }
 
       return {

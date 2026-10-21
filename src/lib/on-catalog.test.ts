@@ -382,8 +382,8 @@ describe('getOnCcl', () => {
     expect(rs[0]).toEqual({ rate: 1600, at: asOf })
   })
 
-  it('rejects the hardcoded fallback, a last-known rate older than 24h, and bad values', async () => {
-    expect(await getOnCcl(async () => ({ rate: 1100, asOf: NOW_ISO(), source: 'fallback' as const }))).toBeNull()
+  it('rejects an unavailable rate, a last-known rate older than 24h, and bad values', async () => {
+    expect(await getOnCcl(async () => null)).toBeNull()
     resetOnCaches()
     const old = new Date(Date.now() - 25 * 3_600_000).toISOString()
     expect(await getOnCcl(async () => ({ rate: 1600, asOf: old, source: 'lkp' as const }))).toBeNull()

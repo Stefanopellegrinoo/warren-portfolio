@@ -147,17 +147,17 @@ let cclInflight: Promise<CclRate | null> | null = null
 
 /**
  * Implicit CCL for the implied cable price. Never blocks the page: 3s timeout, 5 min cache,
- * 45s negative cache. Rejects the hardcoded emergency fallback and any rate older than 24h.
+ * 45s negative cache. Rejects a missing rate and any rate older than 24h.
  */
-export function getOnCcl(source: () => Promise<CclRateInfo> = getCCLRateInfo, timeoutMs = CCL_TIMEOUT_MS): Promise<CclRate | null> {
+export function getOnCcl(source: () => Promise<CclRateInfo | null> = getCCLRateInfo, timeoutMs = CCL_TIMEOUT_MS): Promise<CclRate | null> {
   if (cclCache && Date.now() - cclCache.at < (cclCache.value ? CCL_CACHE_MS : CCL_FAILURE_CACHE_MS)) return Promise.resolve(cclCache.value)
   cclInflight ??= (async () => {
     let value: CclRate | null = null
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       const info = await Promise.race([source(), new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error('ccl timeout')), timeoutMs) })])
-      const age = Date.now() - Date.parse(info.asOf)
-      if (info.source !== 'fallback' && Number.isFinite(info.rate) && info.rate > 0 && Number.isFinite(age) && age <= CCL_MAX_AGE_MS) value = { rate: info.rate, at: info.asOf }
+      const age = info ? Date.now() - Date.parse(info.asOf) : NaN
+      if (info && Number.isFinite(info.rate) && info.rate > 0 && Number.isFinite(age) && age <= CCL_MAX_AGE_MS) value = { rate: info.rate, at: info.asOf }
     } catch {
       value = null
     } finally {

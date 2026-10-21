@@ -360,3 +360,12 @@ describe('YahooProvider.searchTickers', () => {
     expect(results).toHaveLength(0)
   })
 })
+
+describe('YahooProvider.getQuote without a CCL rate', () => {
+  it('throws instead of returning an ARS price as USD', async () => {
+    const { YahooProvider } = await import('./yahoo')
+    ;(mockYahooInstance as any).quote = vi.fn().mockResolvedValue({ regularMarketPrice: 8000, regularMarketChange: 10 })
+    mockGetCCLRate.mockResolvedValueOnce(null as any)
+    await expect(new YahooProvider().getQuote('BCBA:GGAL')).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE' })
+  })
+})

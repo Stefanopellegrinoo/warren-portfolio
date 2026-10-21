@@ -25,4 +25,12 @@ describe('getCCLRate Redis writes', () => {
     expect(keys).toContain('currency:ccl:lkp')
     for (const c of redis.setex.mock.calls) expect(c[1]).toBeGreaterThan(0)
   })
+
+  it('returns null, not an invented rate, when Yahoo and Redis have nothing', async () => {
+    const { fetchRawQuotes } = await import('../yahoo-finance')
+    vi.mocked(fetchRawQuotes).mockRejectedValueOnce(new Error('down'))
+    redis.get.mockResolvedValue(null)
+    const { getCCLRate } = await import('../currency')
+    expect(await getCCLRate()).toBeNull()
+  })
 })
