@@ -66,13 +66,27 @@ function indexBars(...sources: Map<string, DailyBar[]>[]): Map<string, DailyBar[
   return out
 }
 
-/** The latest close in [since, date], or null. */
-function lastClose(bars: DailyBar[] | undefined, date: string, since: string): number | null {
+/**
+ * The latest close in [since, date], or null. An ON close taken before a payment that
+ * was made by `date` still includes what was paid (the bond has not traded since), so
+ * it is taken ex-payment: minus the coupon and the amortized share of the price. That
+ * keeps cash and bond value moving together instead of a false gain until the next trade.
+ */
+// ponytail: a close dated between the ex-date and the payment day is treated as cum-payment;
+// exact ex-dates per bond would remove that one-day edge.
+function lastClose(bars: DailyBar[] | undefined, date: string, since: string, flows: FlowRow[] = []): number | null {
   let best: DailyBar | null = null
   for (const b of bars ?? []) {
     if (b.date >= since && b.date <= date && b.close > 0 && (!best || b.date > best.date)) best = b
   }
-  return best ? best.close : null
+  if (!best) return null
+  let price = best.close
+  let residual = 100
+  for (const f of [...flows].sort((a, b) => a.date.localeCompare(b.date))) {
+    if (f.date > best.date && f.date <= date) price -= f.ren + f.amo * (price / residual)
+    if (f.date > best.date) residual -= f.amo
+  }
+  return price
 }
 
 function rowAt(userId: string, date: string, state: LedgerState, price: (h: Holding) => number | null): DerivedRow {
@@ -120,14 +134,14 @@ export function deriveHistory(input: DeriveInput): DeriveResult {
     for (const date of [...calendar].sort()) {
       const state = ledgerAt(transactions, movements, date, options)
       for (const h of state.holdings) if (h.assetType === 'STOCK' && !closes.get(h.ticker)?.length) noBars.add(h.ticker)
-      rows.push(rowAt(userId, date, state, h => lastClose(closes.get(h.ticker), date, h.firstBought)))
+      rows.push(rowAt(userId, date, state, h => lastClose(closes.get(h.ticker), date, h.firstBought, schedules.get(h.ticker))))
     }
 
     const now = ledgerAt(transactions, movements, today, options)
     const live = new Map(Array.from(todayQuotes, ([t, q]) => [norm(t), Number(q?.price)]))
     flags.todayUnpriced = now.holdings.filter(h => !(live.get(h.ticker)! > 0)).map(h => h.ticker)
     rows.push(rowAt(userId, today, now, h =>
-      live.get(h.ticker)! > 0 ? live.get(h.ticker)! : lastClose(closes.get(h.ticker), today, h.firstBought)))
+      live.get(h.ticker)! > 0 ? live.get(h.ticker)! : lastClose(closes.get(h.ticker), today, h.firstBought, schedules.get(h.ticker))))
     income = now.income
 
     for (const r of rows) {

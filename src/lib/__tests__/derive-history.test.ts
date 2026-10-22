@@ -224,6 +224,18 @@ describe('deriveHistory — automatic ON payments from the schedule (S4)', () =>
     })
   })
 
+  it('a close from before a payment is taken ex-payment once the payment is made, so the total does not jump', () => {
+    // The bond stops trading on 03-04 and pays on 03-05: its last close still includes what was paid.
+    const stale = bars([['2026-03-02', 100], ['2026-03-03', 100], ['2026-03-04', 100]])
+    for (const { flow, after } of [{ flow: { date: '2026-03-05', ren: 2, amo: 0 }, after: 98 }, { flow: { date: '2026-03-05', ren: 0, amo: 50 }, after: 50 }]) {
+      const r = byDate(deriveHistory(base([flow], { onPricesByTicker: new Map([['XD', stale]]) })).rows)
+      expect(r.get('2026-03-04').ons_value).toBeCloseTo(10000, 6)
+      // No market day after 03-04 has a bar, so the next row is today's, with no live quote.
+      expect(r.get(TODAY).ons_value).toBeCloseTo(after * 100, 6)
+      expect(r.get(TODAY).total_value).toBeCloseTo(r.get('2026-03-04').total_value, 6)
+    }
+  })
+
   it('a coupon or an amortization is neither a gain nor a loss of the whole portfolio (S9)', () => {
     // The market quotes the bond ex-payment (per 100 original VN): 2 less after
     // the coupon, half after the 50% amortization. The cash rises by the same
