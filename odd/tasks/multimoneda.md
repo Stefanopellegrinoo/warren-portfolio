@@ -92,3 +92,4 @@ Branch: `feat/multimoneda`. Delivery: ask-on-risk. Test runner: vitest. Design: 
   - Real holdings: all 14 are CEDEARs with a data912 peso price (none estimated).
   - Parent fixed the wrapping of long peso amounts. Note: b30b98b was committed while one test failed (the grep in the chain hid the exit code); fixed in the next commit.
 - L11 (2026-10-22): stage C pushed master 3a24dd1..8a0beba; CI 39817569293 test+image+deploy success. Container freshness not verified (no public route changed in C); the user sees the selector in Resumen if the new version runs.
+- L12 (2026-10-22, user): "ahora en el portfolio dice que tengo 8k masomenos mas … En caja tengo 83.578,96 , creo que aca esta la diff". Found: SPY ratio 20→60 in cedears (fixed in DB with OK); ONs match broker; cash treated as cable inflated MEP view ~4.8k (fixed, commit above); app cash 86.597,42 vs broker 83.578,96 (3.018 data difference, user can adjust).
