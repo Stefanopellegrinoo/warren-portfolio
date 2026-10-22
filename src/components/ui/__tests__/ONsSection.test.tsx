@@ -28,10 +28,10 @@ describe('ONsSection nominal (VN) column', () => {
 
 describe('ONsSection average price (per 100 VN, in USD)', () => {
   it.each([
-    [98.5, '$98.50'],
-    [53, '$53.00'],
-    [5, '$5.00'], // distressed bond under 10 per 100 VN: must NOT become "500%"
-    [0.5, '$0.50'],
+    [98.5, 'US$ 98,50'],
+    [53, 'US$ 53,00'],
+    [5, 'US$ 5,00'], // distressed bond under 10 per 100 VN: must NOT become "500%"
+    [0.5, 'US$ 0,50'],
   ])('avg_cost %s renders as a USD price', (avg_cost, expected) => {
     const html = render(pos({ avg_cost }))
     expect(html).toContain(expected)

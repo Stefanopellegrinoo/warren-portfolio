@@ -288,7 +288,7 @@ export default function DashboardPage() {
               <div>
                 <p className="text-[10px] font-mono text-slate-500 uppercase">Variación</p>
                 <p className={`text-lg font-bold mt-0.5 ${(summary?.day_pnl_pct ?? 0) >= 0 ? 'text-emerald' : 'text-rose'}`}>
-                  {summary?.day_pnl_pct !== undefined ? `${(summary.day_pnl_pct * 100).toFixed(2)}%` : '—'}
+                  {formatPct(summary?.day_pnl_pct)}
                 </p>
               </div>
               <div className="text-right">

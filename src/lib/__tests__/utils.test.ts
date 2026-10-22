@@ -1,24 +1,59 @@
 import { describe, it, expect } from 'vitest'
-import { formatAge, PRICE_STALE_OPEN_GRACE_MS, formatPct, isMarketOpen, isPriceStale, priceHealthSummary, PRICE_STALE_OPEN_MS, PRICE_STALE_CLOSED_MS } from '../utils'
+import { formatAge, formatNumber, formatUSD, PRICE_STALE_OPEN_GRACE_MS, formatPct, isMarketOpen, isPriceStale, priceHealthSummary, PRICE_STALE_OPEN_MS, PRICE_STALE_CLOSED_MS } from '../utils'
 
-describe('formatPct (fraction in)', () => {
+describe('formatNumber (es-AR)', () => {
+  it('uses dot thousands and comma decimals', () => {
+    expect(formatNumber(39951.8)).toBe('39.951,80')
+    expect(formatNumber(4827, { decimals: 0 })).toBe('4.827')
+  })
+
+  it('always marks negatives with the minus sign U+2212', () => {
+    expect(formatNumber(-310.45)).toBe('−310,45')
+    expect(formatNumber(-310.45, { sign: true })).toBe('−310,45')
+  })
+
+  it('adds a plus only when asked and only for positives', () => {
+    expect(formatNumber(2529.02, { sign: true })).toBe('+2.529,02')
+    expect(formatNumber(2529.02)).toBe('2.529,02')
+    expect(formatNumber(0, { sign: true })).toBe('0,00')
+    expect(formatNumber(-0, { sign: true })).toBe('0,00')
+  })
+})
+
+describe('formatUSD (es-AR)', () => {
+  it('prefixes US$ and puts the minus before it', () => {
+    expect(formatUSD(39951.8)).toBe('US$ 39.951,80')
+    expect(formatUSD(-310.45)).toBe('−US$ 310,45')
+    expect(formatUSD(0)).toBe('US$ 0,00')
+  })
+
+  it('keeps small values exact in compact mode', () => {
+    expect(formatUSD(512.3, true)).toBe('US$ 512,30')
+  })
+
+  it('shortens large values in compact mode', () => {
+    expect(formatUSD(39951.8, true)).toMatch(/^US\$ 40/)
+  })
+})
+
+describe('formatPct (fraction in, es-AR)', () => {
   it('formats a fraction as a signed percent by default', () => {
-    expect(formatPct(0.1234)).toBe('+12.34%')
-    expect(formatPct(-0.05)).toBe('-5.00%')
+    expect(formatPct(0.1234)).toBe('+12,34 %')
+    expect(formatPct(-0.05)).toBe('−5,00 %')
   })
 
   it('treats the input as a fraction, not a percent', () => {
-    expect(formatPct(12.34)).toBe('+1234.00%')
+    expect(formatPct(12.34)).toBe('+1.234,00 %')
   })
 
   it('omits the plus sign with sign:false but keeps the minus', () => {
-    expect(formatPct(0.1234, { sign: false })).toBe('12.34%')
-    expect(formatPct(-0.05, { sign: false })).toBe('-5.00%')
+    expect(formatPct(0.1234, { sign: false })).toBe('12,34 %')
+    expect(formatPct(-0.05, { sign: false })).toBe('−5,00 %')
   })
 
   it('honours digits', () => {
-    expect(formatPct(0.1234, { digits: 1, sign: false })).toBe('12.3%')
-    expect(formatPct(0.55, { digits: 0, sign: false })).toBe('55%')
+    expect(formatPct(0.1234, { digits: 1, sign: false })).toBe('12,3 %')
+    expect(formatPct(0.55, { digits: 0, sign: false })).toBe('55 %')
   })
 
   it('renders an em dash for non-finite or missing values', () => {
@@ -27,10 +62,10 @@ describe('formatPct (fraction in)', () => {
     }
   })
 
-  it('renders zero and negative zero without a minus', () => {
-    expect(formatPct(-0, { sign: false })).toBe('0.00%')
-    expect(formatPct(0, { sign: false })).toBe('0.00%')
-    expect(formatPct(0)).toBe('+0.00%')
+  it('renders zero without any sign', () => {
+    expect(formatPct(-0, { sign: false })).toBe('0,00 %')
+    expect(formatPct(0, { sign: false })).toBe('0,00 %')
+    expect(formatPct(0)).toBe('0,00 %')
   })
 })
 

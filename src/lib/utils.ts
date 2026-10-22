@@ -5,26 +5,36 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function formatUSD(value: number, compact = false): string {
-  if (compact && Math.abs(value) >= 1000) {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency', currency: 'USD',
-      notation: 'compact', maximumFractionDigits: 1,
-    }).format(value)
-  }
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2,
-  }).format(value)
+const MINUS = '\u2212'
+
+// Intl may emit non-breaking spaces; normalize so output is predictable.
+const plainSpaces = (s: string) => s.replace(/[\u00a0\u202f]/g, ' ')
+
+/** es-AR number: 39.951,80. Negatives always use U+2212; `sign` adds "+" to positives. */
+export function formatNumber(value: number, { decimals = 2, sign = false }: { decimals?: number; sign?: boolean } = {}): string {
+  const body = plainSpaces(new Intl.NumberFormat('es-AR', {
+    minimumFractionDigits: decimals, maximumFractionDigits: decimals,
+  }).format(Math.abs(value)))
+  const isZero = Number(body.replace(/\./g, '').replace(',', '.')) === 0
+  if (isZero) return body
+  if (value < 0) return MINUS + body
+  return sign ? '+' + body : body
 }
 
-/** Formats a FRACTION (0.1234 -> "+12.34%"). Percent-valued inputs must be divided by 100 first. */
+export function formatUSD(value: number, compact = false): string {
+  const body = compact && Math.abs(value) >= 1000
+    ? plainSpaces(new Intl.NumberFormat('es-AR', { notation: 'compact', maximumFractionDigits: 1 }).format(Math.abs(value)))
+    : formatNumber(Math.abs(value))
+  return (formatNumber(value).startsWith(MINUS) ? MINUS : '') + 'US$ ' + body
+}
+
+/** Formats a FRACTION (0.1234 -> "+12,34 %"). Percent-valued inputs must be divided by 100 first. */
 export function formatPct(
   value: number | null | undefined,
   { digits = 2, sign = true }: { digits?: number; sign?: boolean } = {},
 ): string {
   if (value == null || !isFinite(value)) return '—'
-  const pct = value * 100
-  return `${sign && pct >= 0 ? '+' : ''}${pct.toFixed(digits)}%`
+  return `${formatNumber(value * 100, { decimals: digits, sign })} %`
 }
 
 export function formatDate(dateStr: string): string {
