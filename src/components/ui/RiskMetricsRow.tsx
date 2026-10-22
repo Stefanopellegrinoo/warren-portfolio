@@ -1,10 +1,8 @@
 'use client'
 
 import KpiCard, { type FigureTone } from '@/components/ui/KpiCard'
-import ProvenanceNote from '@/components/ui/ProvenanceNote'
 import { SectionHead } from '@/components/resumen/ui'
 import { formatNumber, formatPct } from '@/lib/utils'
-import type { SeriesProvenance } from '@/lib/series-provenance'
 
 /**
  * The risk metrics of the General tab, computed over the MEASURABLE base
@@ -27,7 +25,6 @@ export interface RiskMetricsData {
   maxDrawdown: number | null
   returnIntervals?: number
   drawdownIntervalsSkipped?: number
-  provenance?: SeriesProvenance
 }
 
 export const sharpeTone = (s: number): FigureTone => (s >= 1 ? 'ok' : s >= 0 ? 'warn' : 'danger')
@@ -50,7 +47,6 @@ export function SharpeMetric({ data }: { data: RiskMetricsData }) {
   return (
     <Metric label="Ratio de Sharpe" value={s == null ? null : formatNumber(s)} tone={s == null ? undefined : sharpeTone(s)}>
       Anualizado · {data.returnIntervals ?? 0} retornos diarios
-      <ProvenanceNote provenance={data.provenance} />
     </Metric>
   )
 }
@@ -60,7 +56,6 @@ export function VolatilityMetric({ data }: { data: RiskMetricsData }) {
   return (
     <Metric label="Volatilidad anual" value={v == null ? null : formatPct(v, { digits: 1, sign: false })}>
       Anualizada · {data.returnIntervals ?? 0} retornos diarios
-      <ProvenanceNote provenance={data.provenance} />
     </Metric>
   )
 }
@@ -70,7 +65,6 @@ export function DrawdownMetric({ data }: { data: RiskMetricsData }) {
   return (
     <Metric label="Caída máxima" value={d == null ? null : formatPct(d, { digits: 1, sign: false })} tone={d == null ? undefined : drawdownTone(d)}>
       Desde el pico más alto
-      <ProvenanceNote provenance={data.provenance} />
       {(data.drawdownIntervalsSkipped ?? 0) > 0 && (
         <span className="block text-warn">{data.drawdownIntervalsSkipped} intervalos omitidos</span>
       )}

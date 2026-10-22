@@ -1,18 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCachedRoute, cacheRoute } from '@/lib/redis'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
-import { snapshotUser, computeLiveSnapshotRow } from '@/lib/portfolio-snapshots'
-import { fetchSnapshotSeries } from '@/lib/snapshot-series'
+import { snapshotUser } from '@/lib/portfolio-snapshots'
+import { getDerivedSeries } from '@/lib/derived-series'
 import { argentinaDate } from '@/lib/utils'
 import { isUniverse, projectHistory, type ProjectedPoint } from '@/lib/asset-universe'
 
-// GET: the portfolio evolution series, read from portfolio_snapshots — the
-// same rows the max-drawdown statistic uses — plus a live intraday point for
-// today when the daily job hasn't written it yet. The old transaction-replay
-// implementation (activeTickers survivorship filter, per-ticker historical
-// quotes, || 0 price fallback) is gone: snapshots are the single source of
-// portfolio value, and they already include stocks + ONs + cash with missing
-// quotes marked at avg_cost.
+// GET: the portfolio evolution series, derived from the ledger core
+// (getDerivedSeries) — the same rows the statistics read. It starts at the
+// user's first ledger date and ends with today's row at live quotes: "today"
+// and every past day are one computation.
 export const dynamic = 'force-dynamic'
 
 // Cap to max 730 days (2 years) to prevent resource exhaustion
@@ -43,50 +40,23 @@ export async function GET(req: NextRequest) {
     }
     const universe = rawUniverse
 
-    // v3: points are projected per-universe via projectHistory. Without the
-    // bump, cached v2 entries serve the old total_value/pnl shape for 300s
-    // regardless of universe — the exact silent degradation this feature
-    // exists to prevent.
+    // v3: points are projected per-universe via projectHistory (invalidateUserCache
+    // SCANs history:v3:{userId}:*).
     const cacheKey = `history:v3:${user.id}:${daysParam}:${universe}`
     const cachedHistory = await getCachedRoute(cacheKey)
     if (cachedHistory) {
       return NextResponse.json(cachedHistory)
     }
 
-    // Snapshot dates are Argentine days (argentinaDate stamps the writers),
-    // so the window boundary must be computed in the same calendar.
+    // Derived rows are Argentine days (argentinaDate), so the window boundary
+    // is computed in the same calendar.
     const today = argentinaDate()
-    const snapshots = await fetchSnapshotSeries(supabase, user.id, {
-      fromDate: rangeStart(daysParam, today),
-    })
-
-    const data: ProjectedPoint[] = projectHistory(snapshots, universe)
-
-    // Live intraday point: only when today's snapshot is absent (the series is
-    // ascending, so today can only be the last row — but a universe whose
-    // today-row was dropped by projectHistory must still get the live point).
-    // A live-valuation failure degrades to the snapshot series alone — it
-    // never blanks the chart.
-    const hasToday = data.length > 0 && data[data.length - 1].snapshot_date === today
-    if (!hasToday) {
-      try {
-        const liveRow = await computeLiveSnapshotRow(supabase, user.id, today)
-        if (liveRow) {
-          // A measurement, not a reconstruction: computeLiveSnapshotRow
-          // values the portfolio from real current quotes.
-          const [livePoint] = projectHistory(
-            [{ ...liveRow, source: 'live' as const }],
-            universe
-          )
-          if (livePoint) data.push(livePoint)
-        }
-      } catch (err) {
-        console.error('[Portfolio History] Live point failed — serving snapshots only:', err)
-      }
-    }
+    const { rows, degraded } = await getDerivedSeries(supabase, user.id, { fromDate: rangeStart(daysParam, today) })
+    const data: ProjectedPoint[] = projectHistory(rows, universe)
 
     const responseData = { data }
-    await cacheRoute(cacheKey, responseData, 300)
+    // A degraded series (stale bars, a failed side read) is served but never pinned for 5 minutes.
+    if (!degraded) await cacheRoute(cacheKey, responseData, 300)
 
     return NextResponse.json(responseData)
   } catch (err) {

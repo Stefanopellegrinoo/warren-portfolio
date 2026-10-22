@@ -20,7 +20,8 @@ const derived = deriveHistory({
   movements: fixture.movements as any[],
   barsByTicker: new Map(Object.entries(fixture.bars as Record<string, DailyBar[]>)),
   onPricesByTicker: new Map(),
-  onMarks: new Map(),
+  schedules: new Map(),
+  overrides: [],
   today: TODAY,
   todayQuotes: new Map(),
 })

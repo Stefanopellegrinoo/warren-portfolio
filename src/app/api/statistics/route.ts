@@ -3,20 +3,18 @@ import { fetchQuotes } from '@/lib/yahoo-finance'
 import { getCachedRoute, cacheRoute } from '@/lib/redis'
 import { normalizeError } from '@/lib/errors'
 import type { Position } from '@/types'
-import { fetchSnapshotSeries } from '@/lib/snapshot-series'
+import { getDerivedSeries } from '@/lib/derived-series'
+import { ledgerFlows } from '@/lib/derive-history'
 import { fetchFlowTransactions } from '@/lib/flow-transactions'
 import { fetchExternalFlows, fetchIncomeMovements } from '@/lib/cash-flows'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { enrichPositionsForStats } from '@/lib/position-stats'
 import { computeTradeStats } from '@/lib/trade-stats'
-import { summarizeProvenance } from '@/lib/series-provenance'
 import { isBenchmarkId, fetchBenchmarkComparison, type BenchmarkComparison } from '@/lib/benchmark'
 import {
   isUniverse,
   UNIVERSES,
   computeUniverseRiskMetrics,
-  metricsRows,
-  projectHistory,
   computeUniverseTwr,
   type FlowTransaction,
   type IncomeMovement,
@@ -58,11 +56,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(cachedStats)
     }
 
-    // 1. Snapshots for drawdown and historical analysis — canonical read path
-    const validSnapshots = await fetchSnapshotSeries(supabase, user.id)
+    // 1. The derived series (ledger core + market data) for drawdown and historical analysis
+    const derived = await getDerivedSeries(supabase, user.id)
+    const rows = derived.rows
+    // The core's automatic ON payments: coupons as CUPON income, amortizations as ON sales.
+    const automatic = ledgerFlows(derived.income)
 
     // 1b. Net external cash flows, to keep deposits and withdrawals out of the
-    // drawdown. `snapshot.total_value` includes cash, so without this a
+    // drawdown. `total_value` includes cash, so without this a
     // withdrawal reads as a loss and a deposit inflates the peak.
     //
     // External flows and income both come from cash-flows.ts, which documents why they are two queries.
@@ -77,8 +78,8 @@ export async function GET(req: NextRequest) {
     let income: IncomeMovement[] = []
     if (universe !== 'total') {
       try {
-        flowTransactions = await fetchFlowTransactions(supabase, user.id)
-        income = await fetchIncomeMovements(supabase, user.id)
+        flowTransactions = [...(await fetchFlowTransactions(supabase, user.id)), ...automatic.transactions]
+        income = [...(await fetchIncomeMovements(supabase, user.id)), ...automatic.income]
       } catch (err) {
         console.error('[Statistics] flow inputs fetch failed:', normalizeError(err).message)
         return NextResponse.json({ error: 'Failed to fetch flow inputs' }, { status: 500 })
@@ -86,7 +87,7 @@ export async function GET(req: NextRequest) {
     }
 
     const risk = computeUniverseRiskMetrics(
-      validSnapshots,
+      rows,
       universe,
       { externalFlows, transactions: flowTransactions, income }
     )
@@ -97,7 +98,7 @@ export async function GET(req: NextRequest) {
     let benchmarkError = false
     if (benchmarkId) {
       try {
-        const { series } = computeUniverseTwr(validSnapshots, universe, {
+        const { series } = computeUniverseTwr(rows, universe, {
           externalFlows,
           transactions: flowTransactions,
           income,
@@ -191,17 +192,9 @@ export async function GET(req: NextRequest) {
       maxDrawdown: risk.maxDrawdown,
       // How much series the figure rests on. A drawdown built from 2 intervals
       // is not comparable to one built from 200, and skipped intervals mean
-      // snapshots the return series could not use.
+      // days the return series could not use.
       drawdownIntervals: risk.drawdownIntervals,
       drawdownIntervalsSkipped: risk.drawdownIntervalsSkipped,
-      // What the drawdown, Sharpe and volatility figures above are made of:
-      // how many days, and how many of them were reconstructed by the backfill
-      // rather than measured by the daily job — over the SAME rows the risk
-      // metrics used (for ons: measured only), so the provenance note
-      // describes the figures beside it.
-      provenance: summarizeProvenance(
-        projectHistory(metricsRows(validSnapshots, universe), universe)
-      ),
       // Closed-trade win rate — consistent with the W/L counts shown next to it.
       winRate: tradeStats.winRate,
       totalPortfolioValue,
@@ -238,8 +231,8 @@ export async function GET(req: NextRequest) {
       benchmarkError,
     }
 
-    // Do not pin a transient benchmark failure in the cache for 5 minutes.
-    if (!benchmarkError) await cacheRoute(cacheKey, responseData, 300)
+    // Do not pin a transient benchmark failure or a degraded series in the cache for 5 minutes.
+    if (!benchmarkError && !derived.degraded) await cacheRoute(cacheKey, responseData, 300)
 
     return NextResponse.json(responseData)
 
