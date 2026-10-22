@@ -36,7 +36,7 @@ Branch: `feat/multimoneda`. Delivery: ask-on-risk. Test runner: vitest. Design: 
 | A1 | S1 | inline | done | worker 1 min, dashboard 30 s, quote 15 s cached, candles 30 s; RED→GREEN worker-startup + quote cache |
 | A2 | S2, S3 | inline | done 6b4b208, migration 043 applied, deployed | `fx_rates` table (MEP/CCL daily from argentinadatos), backfill and daily ingest. Risk item 1 (new table; DB write needs OK) |
 | B1 | S3, S5 | delegated (context backstop) | done 65622c6, 5116b2f, a371405 (044 NOT applied) | migration 044 (additive nullable columns), `/api/fx` route, server-side derivation in `/api/transactions`, new CEDEAR form |
-| B2 | S4, S5, S6 | delegated (same writer, after B1) | done ac58c9a, 293a798, 5ea6c89; independent verifier running (items 1, 3) | reconstruction as a reviewed SQL/TS step (dry run first), review list in Operaciones. Risk item 1: changes stored rows; backup and user OK before applying |
+| B2 | S4, S5, S6 | delegated (same writer, after B1) | done ac58c9a, 293a798, 5ea6c89; independent verifier: no blockers, 6 advisories | reconstruction as a reviewed SQL/TS step (dry run first), review list in Operaciones. Risk item 1: changes stored rows; backup and user OK before applying |
 | C | S2 | tbd | todo | per-currency engines + selector |
 
 ## Log
@@ -48,3 +48,9 @@ Branch: `feat/multimoneda`. Delivery: ask-on-risk. Test runner: vitest. Design: 
 - L5 (2026-10-22, user): "Es que lo que pasa es que yo en Argentina compro CDRs, pero si vos te das cuenta en el sistema, cuando vos cargas una compra o una venta, ya tiene el cálculo de para pasarlo a acciones, que todas tienen con coma. Entonces nunca son CDRs, son siempre acciones. Yo traslado siempre acciones. O sea, no sé qué es lo mejor para hacer, esto decímelo vos, investigalo, pero yo siempre cambié, uso la cuenta ahí y lo migro a acciones. Fíjate igual."
 - L6: stage A deployed (CI 39771591478 green); fx_rates loaded at worker start: CCL 5042 days (2013-01-02..2026-10-22), MEP 2916 days (2018-10-29..2026-10-22).
 - L7: stage B built in 6 commits; suite 1936 PASS, tsc clean. Writer's decisions to surface: integer tolerance max(1e-6, ratio×5e-7) because quantity is numeric(18,6); old USD-CEDEAR commissions were stored in MEP as if CCL (pre-existing, not fixed). Live RPC checked: 1 overload, 10 args.
+- L8: independent verifier, no blockers.
+  - Live RPC body identical to 030 (whitespace-stripped md5).
+  - Old call paths: same data hash before and after 044.
+  - Backfill function all-or-nothing and service_role only.
+  - Real dry run, expected: 161 planned / 0 skipped; ACCION 124, CEDEAR 24, ON 13; CCL 124, MEP 33, ARS 4; needs_review 8 (DIS×2, TGS×2, PAM×2, VST loaded 6 days late, MSFT non-integer 297.9 CEDEARs). The CEDEAR round-trip is exact.
+  - Advisories: A1 load day is the UTC date; A2 apply 044 before deploying; A3 float noise in FX; A4/A5 FX edit edge cases; A6 old MEP commission (pre-existing, all real commissions are 0).
