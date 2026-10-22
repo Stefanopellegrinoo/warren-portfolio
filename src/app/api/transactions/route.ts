@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { processTransaction } from '@/lib/portfolio-engine'
 import { invalidateUserCache } from '@/lib/redis'
-import { validateRequest, validateQueryParams, validationErrorResponse } from '@/lib/api/validation'
-import { TransactionSchema, TransactionQuerySchema } from '@/lib/schemas/transaction'
+import { validateBody, validateQueryParams, validationErrorResponse } from '@/lib/api/validation'
+import { TransactionSchema, TransactionQuerySchema, CedearTradeSchema } from '@/lib/schemas/transaction'
 import { PaginatedResponse } from '@/lib/schemas/common'
 import { normalizeError } from '@/lib/errors'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
@@ -10,6 +10,7 @@ import { createServiceClient } from '@/lib/supabase-server'
 import { resolveTickerIdentity } from '@/lib/ticker-identity'
 import { getCataloguedTicker, upsertTickerIdentity } from '@/lib/ticker-catalog'
 import { retroactiveWarnings } from '@/lib/api/retroactive-warning'
+import { recordCedearTrade, TradeRecordError } from '@/lib/trade-record'
 
 export const dynamic = 'force-dynamic'
 
@@ -65,8 +66,14 @@ export async function POST(req: NextRequest) {
     if (isAuthFailure(authResult)) return authResult.error
     const { supabase, user } = authResult
 
-    // Validate request body
-    const { confirmTicker, ...body } = await validateRequest(TransactionSchema, req)
+    // A CEDEAR broker ticket (`tradeCurrency`) carries raw values; every other
+    // caller sends engine values and keeps the old schema.
+    const raw = await req.json()
+    const isTicket = raw && typeof raw === 'object' && 'tradeCurrency' in raw
+    const { confirmTicker, ...parsed } = isTicket ? validateBody(CedearTradeSchema, raw) : validateBody(TransactionSchema, raw)
+    // Derived before the identity gate so an unknown CEDEAR fails before the
+    // catalog is written.
+    const body = 'tradeCurrency' in parsed ? await recordCedearTrade(supabase, parsed) : parsed
 
     // Identity gate. ONs are exempt: Data912 prices them and Yahoo has no such
     // instrument, so resolution would fail for every legitimate ON.
@@ -123,6 +130,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(warnings.length ? { ...result, warnings } : result, { status: 201 })
   } catch (err: any) {
+    if (err instanceof TradeRecordError) {
+      return NextResponse.json({ error: err.message }, { status: err.status })
+    }
     // Handle validation errors
     if (err.status === 400) {
       return validationErrorResponse(err)

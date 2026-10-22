@@ -5,8 +5,11 @@ import type { ZodSchema } from 'zod'
  * Simple validation helper for route handlers
  */
 export async function validateRequest<T>(schema: ZodSchema<T>, request: Request): Promise<T> {
-  const body = await request.json()
-  
+  return validateBody(schema, await request.json())
+}
+
+/** Same as validateRequest, for a body already read (a route choosing between schemas). */
+export function validateBody<T>(schema: ZodSchema<T>, body: unknown): T {
   try {
     return schema.parse(body)
   } catch (error: any) {

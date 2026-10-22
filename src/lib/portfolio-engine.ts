@@ -5,6 +5,7 @@ import { processCashMovement, rebuildCashBalance } from './cash-engine'
 import { rebuildONPosition } from './on-engine'
 import { normalizeError } from './errors'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { tradeRecordRpcParams, type TradeRecord } from './trade-record'
 
 /**
  * SECURITY: Explicitly validate userId to prevent data corruption.
@@ -77,7 +78,7 @@ export function calculateRunningAvgCost(
 export async function processTransaction(
   supabase: SupabaseClient,
   userId: string,
-  input: TransactionInput,
+  input: TransactionInput & { tradeRecord?: TradeRecord },
 ): Promise<{ transaction: Transaction; position: Position | null; closedTrade: ClosedTrade | null }> {
   assertUserId(userId)
 
@@ -105,6 +106,9 @@ export async function processTransaction(
       p_asset_type: (input as any).assetType ?? 'ACCION',
       p_moneda: (input as any).moneda ?? 'USD',
       p_user_id: userId,
+      // Only callers with a broker ticket send these (migration 044); every
+      // other caller keeps the exact pre-044 call.
+      ...(input.tradeRecord ? tradeRecordRpcParams(input.tradeRecord) : {}),
     })
 
     if (!rpcErr) { rpcData = data; break }

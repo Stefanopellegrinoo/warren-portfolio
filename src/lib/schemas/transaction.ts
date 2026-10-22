@@ -36,6 +36,29 @@ export const TransactionSchema = z.object({
   }
 })
 
+// Schema for a CEDEAR trade as the broker ticket shows it (POST /api/transactions
+// with `tradeCurrency`). The server derives the engine quantity and price from
+// these raw values and the trade-date FX (src/lib/trade-record.ts).
+// fxMep / fxCcl are sent only when the user edited the pre-filled reference rate.
+export const CedearTradeSchema = z.object({
+  date: DateSchema,
+  ticker: TickerSchema,
+  operation: z.enum(['COMPRA', 'VENTA', 'DIVIDENDO'], {
+    message: 'Operation must be COMPRA, VENTA, or DIVIDENDO',
+  }),
+  assetType: z.literal('CEDEAR'),
+  tradeCurrency: z.enum(['ARS', 'MEP', 'CCL']),
+  tradeQuantity: PositiveNumberSchema.max(10_000_000, { message: 'Quantity cannot exceed 10,000,000' }),
+  tradePrice: PositiveNumberSchema.max(1_000_000_000, { message: 'Price cannot exceed 1,000,000,000' }),
+  tradeCommission: z.number().min(0).optional().default(0),
+  fxMep: PositiveNumberSchema.optional(),
+  fxCcl: PositiveNumberSchema.optional(),
+  notes: z.string().optional(),
+  confirmTicker: z.boolean().optional(),
+})
+
+export type CedearTradeInput = z.infer<typeof CedearTradeSchema>
+
 // Schema for bulk import (POST /api/transactions/import with JSON body)
 export const TransactionImportSchema = z.object({
   transactions: z.array(TransactionSchema).min(1, {
