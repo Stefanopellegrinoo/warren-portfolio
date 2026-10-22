@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { X, Search, AlertCircle, ChevronLeft, ChevronRight, TrendingUp, Landmark, Banknote } from 'lucide-react'
+import { X, Search, ChevronLeft, ChevronRight, TrendingUp, Landmark, Banknote } from 'lucide-react'
 import { formatNumber, formatUSD } from '@/lib/utils'
 import type { Operation, TransactionInput, Cedear, Activo, ONOperation, CashMovementType } from '@/types'
 import { postTransaction } from '@/lib/api/post-transaction'
@@ -9,6 +9,7 @@ import type { PostTransactionResult } from '@/lib/api/post-transaction'
 import type { ResolveResult } from '@/lib/ticker-identity'
 import type { RetroactiveWarning } from '@/lib/api/retroactive-warning'
 import { fmtNum } from '@/lib/on-format'
+import { deriveCedearEngineValues, type TradeCurrency } from '@/lib/trade-record'
 
 export type PendingConfirmation = {
   resolution: ResolveResult
@@ -169,7 +170,7 @@ const ASSET_CLASSES: { id: AssetClass; label: string; desc: string; icon: React.
 
 const CLASS_NAMES: Record<AssetClass, string> = { ACCION: 'acciones', CEDEAR: 'CEDEAR', ON: 'ON', CASH: 'caja' }
 const CHOICE_LABELS: Record<string, string> = {
-  COMPRA: 'Compra', VENTA: 'Venta', DIVIDENDO: 'Dividendo', CUPON: 'Cupón', DEPOSITO: 'Depósito', RETIRO: 'Retiro', ARS: 'Pesos', USD: 'Dólares',
+  COMPRA: 'Compra', VENTA: 'Venta', DIVIDENDO: 'Dividendo', CUPON: 'Cupón', DEPOSITO: 'Depósito', RETIRO: 'Retiro', ARS: 'Pesos', MEP: 'Dólar MEP', CCL: 'Dólar cable',
 }
 
 // ─────────────────────────────────────────────────────────
@@ -251,6 +252,53 @@ function Total({ label, value, tone = '' }: { label: string; value: string; tone
   )
 }
 
+const linkBtnCls = 'inline-flex min-h-8 shrink-0 items-center rounded px-1 font-medium text-accent-ink hover:underline max-[819px]:min-h-11'
+
+/** The trade date's reference MEP / CCL, editable for the rate the broker actually used. */
+function FxLine({ fx, tradeDate, edit, onEdit, onChange, onReset }: {
+  fx: FxState; tradeDate: string; edit: { mep: number; ccl: number } | null
+  onEdit: () => void; onChange: (v: { mep: number; ccl: number }) => void; onReset: () => void
+}) {
+  if (edit) {
+    return (
+      <fieldset className="grid gap-2 border-t border-line pt-3">
+        <legend className="sr-only">Cotización del dólar</legend>
+        <div className={pairCls}>
+          <Field id="tx-fx-mep" label="Dólar MEP">
+            <input id="tx-fx-mep" type="number" inputMode="decimal" min="0" step="any" value={edit.mep || ''}
+              onChange={e => onChange({ ...edit, mep: parseFloat(e.target.value) || 0 })} className={fieldCls} />
+          </Field>
+          <Field id="tx-fx-ccl" label="Dólar cable (CCL)">
+            <input id="tx-fx-ccl" type="number" inputMode="decimal" min="0" step="any" value={edit.ccl || ''}
+              onChange={e => onChange({ ...edit, ccl: parseFloat(e.target.value) || 0 })} className={fieldCls} />
+          </Field>
+        </div>
+        <button type="button" onClick={onReset} className={`${linkBtnCls} justify-self-start text-[13px]`}>Usar la cotización de referencia</button>
+      </fieldset>
+    )
+  }
+  let text = 'Buscando la cotización del dólar…'
+  let used: string | undefined
+  if (fx.status === 'ok' && (fx.mep || fx.ccl)) {
+    used = (fx.ccl ?? fx.mep)!.date
+    text = [
+      fx.mep && `Dólar MEP del ${dayMonth(fx.mep.date)}: ${formatNumber(fx.mep.rate)}`,
+      fx.ccl && `CCL${fx.ccl.date !== fx.mep?.date ? ` del ${dayMonth(fx.ccl.date)}` : ''}: ${formatNumber(fx.ccl.rate)}`,
+    ].filter(Boolean).join(' · ')
+  } else if (fx.status !== 'loading') {
+    text = fx.status === 'error' ? 'No se pudo obtener la cotización del dólar.' : 'No hay cotización del dólar para esa fecha.'
+  }
+  return (
+    <div className="grid gap-1 border-t border-line pt-3 text-[13px]">
+      <div className="flex items-center justify-between gap-3">
+        <p className="tabular-nums text-ink-2" aria-live="polite">{text}</p>
+        <button type="button" onClick={onEdit} aria-label="Editar la cotización del dólar" className={linkBtnCls}>Editar</button>
+      </div>
+      {used && used !== tradeDate && <p className="text-ink-3">El {dayMonth(tradeDate)} no tiene cotización: se usa la del {dayMonth(used)}.</p>}
+    </div>
+  )
+}
+
 function FormError({ error }: { error: string }) {
   return error ? <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-[13px] text-danger">{error}</p> : null
 }
@@ -301,7 +349,7 @@ interface CedearFormData {
   ticker: string
   cantidad: number
   precio: number
-  moneda: 'ARS' | 'USD'
+  moneda: TradeCurrency
   comision: number
   notas: string
 }
@@ -323,12 +371,13 @@ interface CashFormData {
   description: string
 }
 
-interface DollarRates {
-  ccl: number
-  mep: number
-  loaded: boolean
-  error: boolean
-}
+type FxQuote = { rate: number; date: string } | null
+/** Reference MEP and CCL of the CEDEAR form's trade date (GET /api/fx). */
+type FxState = { status: 'loading' | 'missing' | 'error' } | { status: 'ok'; mep: FxQuote; ccl: FxQuote }
+
+const TRADE_CURRENCIES: readonly TradeCurrency[] = ['ARS', 'MEP', 'CCL']
+const IN_CURRENCY: Record<TradeCurrency, string> = { ARS: 'en pesos', MEP: 'en dólar MEP', CCL: 'en dólar cable' }
+const dayMonth = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`
 
 // ─────────────────────────────────────────────────────────
 // MAIN COMPONENT
@@ -369,13 +418,16 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
     ticker: initialData?.assetClass === 'CEDEAR' ? initialData.ticker : '',
     cantidad: initialData?.assetClass === 'CEDEAR' ? initialData.quantity : 0,
     precio: initialData?.assetClass === 'CEDEAR' ? initialData.price : 0,
-    moneda: 'ARS',
+    // A quick sell starts from the position, which is in USD-CCL.
+    moneda: initialData?.assetClass === 'CEDEAR' ? 'CCL' : 'ARS',
     comision: 0,
     notas: '',
   })
   const [cedearSearch, setCedearSearch] = useState(initialData?.assetClass === 'CEDEAR' ? initialData.ticker : '')
   const [showCedearDropdown, setShowCedearDropdown] = useState(false)
-  const [dollarRates, setDollarRates] = useState<DollarRates>({ ccl: 0, mep: 0, loaded: false, error: false })
+  const [fx, setFx] = useState<FxState>({ status: 'loading' })
+  // Rates the user typed over the reference ones; null = not editing.
+  const [fxEdit, setFxEdit] = useState<{ mep: number; ccl: number } | null>(null)
 
   // ── ON state ──
   const [onForm, setOnForm] = useState<ONFormData>({
@@ -447,28 +499,23 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
     fetchData()
   }, [initialData])
 
-  // ── Fetch dollar rates when CEDEAR is selected ──
+  // ── Reference FX of the CEDEAR trade date ──
   useEffect(() => {
-    if (assetClass === 'CEDEAR' && !dollarRates.loaded && !dollarRates.error) {
-      const fetchDollarRates = async () => {
-        try {
-          const res = await fetch('https://dolarapi.com/v1/dolares')
-          if (!res.ok) throw new Error('Failed to fetch')
-          const dolares = await res.json()
-          const cclData = dolares.find((d: { casa: string }) => d.casa === 'contadoconliqui')
-          const mepData = dolares.find((d: { casa: string }) => d.casa === 'bolsa')
-          if (cclData && mepData) {
-            setDollarRates({ ccl: cclData.venta, mep: mepData.venta, loaded: true, error: false })
-          } else {
-            setDollarRates(prev => ({ ...prev, error: true }))
-          }
-        } catch {
-          setDollarRates(prev => ({ ...prev, error: true }))
-        }
-      }
-      fetchDollarRates()
-    }
-  }, [assetClass, dollarRates.loaded, dollarRates.error])
+    if (assetClass !== 'CEDEAR' || !cedearForm.date) return
+    let cancelled = false
+    setFx({ status: 'loading' })
+    setFxEdit(null) // typed rates belonged to the previous date
+    fetch(`/api/fx?date=${cedearForm.date}`)
+      .then(async res => {
+        if (res.status === 404) return { status: 'missing' } as const
+        if (!res.ok) throw new Error(String(res.status))
+        const d = await res.json()
+        return { status: 'ok', mep: d.mep ?? null, ccl: d.ccl ?? null } as const
+      })
+      .catch(() => ({ status: 'error' }) as const)
+      .then(next => { if (!cancelled) setFx(next) })
+    return () => { cancelled = true }
+  }, [assetClass, cedearForm.date])
 
   // ── Search ONs when user types in ON search field ──
   useEffect(() => {
@@ -509,24 +556,23 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
     c.nombre.toLowerCase().includes(cedearSearch.toLowerCase())
   )
   const selectedCedear = cedears.find(c => c.ticker === cedearForm.ticker)
-  const cantidadAcciones = selectedCedear ? cedearForm.cantidad / selectedCedear.ratio : 0
-  let precioAccionUSD = 0
-  if (selectedCedear && dollarRates.loaded) {
-    if (cedearForm.moneda === 'ARS') {
-      precioAccionUSD = (cedearForm.precio * selectedCedear.ratio) / dollarRates.ccl
-    } else {
-      precioAccionUSD = (cedearForm.precio * dollarRates.mep * selectedCedear.ratio) / dollarRates.ccl
-    }
+  const refMep = fx.status === 'ok' ? fx.mep?.rate ?? null : null
+  const refCcl = fx.status === 'ok' ? fx.ccl?.rate ?? null : null
+  const fxMep = fxEdit ? fxEdit.mep || null : refMep
+  const fxCcl = fxEdit ? fxEdit.ccl || null : refCcl
+  // Preview only: the server derives the stored values with the same function.
+  let cedearEngine: { quantity: number; price: number; commission: number } | null = null
+  if (selectedCedear && cedearForm.cantidad > 0 && cedearForm.precio > 0) {
+    try {
+      cedearEngine = deriveCedearEngineValues({
+        tradeCurrency: cedearForm.moneda, tradeQuantity: cedearForm.cantidad, tradePrice: cedearForm.precio,
+        tradeCommission: cedearForm.comision, ratio: selectedCedear.ratio, fxMep, fxCcl,
+      })
+    } catch { /* the FX this currency needs is missing; the FX line says so */ }
   }
-
-  // ── Derived values for rendering ──
-  const commissionUSD = cedearForm.moneda === 'ARS' && dollarRates.loaded 
-    ? cedearForm.comision / dollarRates.ccl 
-    : cedearForm.comision
-
-  const totalUSD = stockOp === 'VENTA'
-    ? (cantidadAcciones * precioAccionUSD) - (commissionUSD || 0)
-    : (cantidadAcciones * precioAccionUSD) + (commissionUSD || 0)
+  const cedearTotal = cedearEngine
+    ? cedearEngine.quantity * cedearEngine.price + (stockOp === 'VENTA' ? -cedearEngine.commission : cedearEngine.commission)
+    : 0
 
   // ── Payload builders ──
   // Single source for each form's payload, read by BOTH the submit handler and
@@ -543,17 +589,20 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
     }
   }
 
+  /** The broker ticket as typed. FX goes only when the user changed it. */
   function buildCedearPayload(): Record<string, unknown> {
     return {
-      ticker: cedearForm.ticker,
-      quantity: cantidadAcciones,
-      price: precioAccionUSD,
-      moneda: cedearForm.moneda,
-      operation: stockOp,
       date: cedearForm.date,
-      commission: commissionUSD || 0,
-      notes: cedearForm.notas || '',
+      ticker: cedearForm.ticker,
+      operation: stockOp,
       assetType: 'CEDEAR',
+      tradeCurrency: cedearForm.moneda,
+      tradeQuantity: cedearForm.cantidad,
+      tradePrice: cedearForm.precio,
+      tradeCommission: cedearForm.comision || 0,
+      notes: cedearForm.notas || '',
+      ...(fxEdit && fxMep && fxMep !== refMep ? { fxMep } : {}),
+      ...(fxEdit && fxCcl && fxCcl !== refCcl ? { fxCcl } : {}),
     }
   }
 
@@ -628,6 +677,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
     if (!cedearForm.ticker) { setError('Seleccioná un CEDEAR'); return }
     if (cedearForm.cantidad <= 0) { setError('La cantidad debe ser mayor a 0'); return }
     if (cedearForm.precio <= 0) { setError('El precio debe ser mayor a 0'); return }
+    if (!cedearEngine) { setError('Falta la cotización del dólar para esa fecha. Cargala con Editar.'); return }
 
     setLoading(true)
     try {
@@ -860,20 +910,20 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
                 </div>
               </Field>
             </div>
+            <Choice name="tx-currency" legend="Moneda" options={TRADE_CURRENCIES} value={cedearForm.moneda} onChange={m => setCedearForm(f => ({ ...f, moneda: m }))} />
             <div className={pairCls}>
               <Field id="tx-quantity" label="Cantidad de CEDEARs"
-                hint={selectedCedear && cedearForm.cantidad > 0 && <p className="text-[13px] text-ink-3 tabular-nums">Equivale a {formatNumber(cantidadAcciones, { decimals: 4 })} acciones</p>}>
+                hint={cedearEngine && <p className="text-[13px] text-ink-3 tabular-nums">Equivale a {formatNumber(cedearEngine.quantity, { decimals: 4 })} acciones</p>}>
                 <input id="tx-quantity" type="number" inputMode="decimal" min="0" step="any" placeholder="10" value={cedearForm.cantidad || ''}
                   onChange={e => setCedearForm(f => ({ ...f, cantidad: parseFloat(e.target.value) || 0 }))} className={fieldCls} required />
               </Field>
-              <Field id="tx-price" label="Precio">
-                <input id="tx-price" type="number" inputMode="decimal" min="0" step="any" placeholder="190.70" value={cedearForm.precio || ''}
+              <Field id="tx-price" label={`Precio por CEDEAR ${IN_CURRENCY[cedearForm.moneda]}`}>
+                <input id="tx-price" type="number" inputMode="decimal" min="0" step="any" placeholder={cedearForm.moneda === 'ARS' ? '15000' : '10.50'} value={cedearForm.precio || ''}
                   onChange={e => setCedearForm(f => ({ ...f, precio: parseFloat(e.target.value) || 0 }))} className={fieldCls} required />
               </Field>
             </div>
-            <Choice name="tx-currency" legend="Moneda" options={['ARS', 'USD'] as const} value={cedearForm.moneda} onChange={m => setCedearForm(f => ({ ...f, moneda: m }))} />
             <div className={pairCls}>
-              <Field id="tx-commission" label="Comisión">
+              <Field id="tx-commission" label={`Comisión ${IN_CURRENCY[cedearForm.moneda]}`}>
                 <input id="tx-commission" type="number" inputMode="decimal" min="0" step="any" placeholder="0" value={cedearForm.comision || ''}
                   onChange={e => setCedearForm(f => ({ ...f, comision: parseFloat(e.target.value) || 0 }))} className={fieldCls} />
               </Field>
@@ -882,21 +932,17 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
                   onChange={e => setCedearForm(f => ({ ...f, notas: e.target.value }))} className={fieldCls} />
               </Field>
             </div>
-            {selectedCedear && dollarRates.loaded && cedearForm.cantidad > 0 && cedearForm.precio > 0 && (
+            <FxLine fx={fx} tradeDate={cedearForm.date} edit={fxEdit}
+              onEdit={() => setFxEdit({ mep: refMep ?? 0, ccl: refCcl ?? 0 })}
+              onChange={setFxEdit} onReset={() => setFxEdit(null)} />
+            {selectedCedear && cedearEngine && (
               <dl className="grid gap-1 border-t border-line pt-3 text-[13px]">
-                <div className="flex justify-between gap-3"><dt className="text-ink-3">Ratio</dt><dd className="tabular-nums">{qty(selectedCedear.ratio)}</dd></div>
-                <div className="flex justify-between gap-3"><dt className="text-ink-3">Dólar CCL</dt><dd className="tabular-nums">{formatNumber(dollarRates.ccl)}</dd></div>
-                <div className="flex justify-between gap-3"><dt className="text-ink-3">Precio por acción</dt><dd className="font-medium tabular-nums">{formatUSD(precioAccionUSD)}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-ink-3">Ratio</dt><dd className="tabular-nums">{qty(selectedCedear.ratio)} CEDEARs por acción</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-ink-3">Precio por acción en dólar cable</dt><dd className="font-medium tabular-nums">{formatUSD(cedearEngine.price)}</dd></div>
               </dl>
             )}
-            {cedearForm.cantidad > 0 && cedearForm.precio > 0 && (
-              <Total label={stockOp === 'VENTA' ? 'A recibir en la cartera' : 'Inversión en la cartera'} value={formatUSD(totalUSD)} />
-            )}
-            {dollarRates.error && (
-              <p role="alert" className="flex items-center gap-2 rounded-md bg-danger-soft px-3 py-2 text-[13px] text-danger">
-                <AlertCircle className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden="true" />
-                No se pudo obtener la cotización CCL/MEP.
-              </p>
+            {cedearEngine && (
+              <Total label={stockOp === 'VENTA' ? 'A recibir en la cartera' : 'Inversión en la cartera'} value={formatUSD(cedearTotal)} />
             )}
             {pendingConfirmation && (
               <TickerConfirmation pending={pendingConfirmation} loading={loading}
