@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { useRouter } from 'next/navigation'
-import { TrendingUp, Mail, Lock, Eye, EyeOff } from 'lucide-react'
+import { Mail, Lock, Eye, EyeOff } from 'lucide-react'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -38,79 +38,66 @@ export default function LoginPage() {
     }
   }
 
+  const field =
+    'h-10 w-full rounded border border-line-strong bg-surface pl-9 pr-3 text-sm text-ink placeholder:text-ink-3 focus:border-ring focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring max-[819px]:h-11'
+
   return (
-    <div className="min-h-screen flex items-center justify-center relative overflow-hidden">
-      {/* Background grid */}
-      <div className="absolute inset-0 bg-grid-pattern opacity-30" />
-      {/* Glow orbs */}
-      <div className="absolute top-1/4 left-1/3 w-96 h-96 bg-amber/5 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-1/4 right-1/3 w-64 h-64 bg-sky/5 rounded-full blur-3xl pointer-events-none" />
+    <main className="grid min-h-dvh place-items-center bg-canvas px-4 text-ink">
+      <div className="w-full max-w-sm">
+        <p className="mb-8 text-center font-serif text-2xl">Warren</p>
 
-      <div className="relative w-full max-w-sm animate-slide-up">
-        {/* Logo */}
-        <div className="flex flex-col items-center mb-8">
-          <div className="w-12 h-12 rounded-2xl bg-amber flex items-center justify-center mb-4 glow-amber">
-            <TrendingUp className="w-6 h-6 text-bg-900" strokeWidth={2.5} />
-          </div>
-          <h1 className="font-display font-800 text-2xl text-white tracking-tight">WARREN</h1>
-          <p className="text-slate-500 font-mono text-xs mt-1">PORTFOLIO TRACKER</p>
-        </div>
-
-        {/* Card */}
-        <div className="glass rounded-2xl p-6 border border-white/10">
-          <h2 className="font-display font-700 text-white text-lg mb-1">
-            {mode === 'login' ? 'Bienvenido' : 'Crear cuenta'}
-          </h2>
-          <p className="text-slate-500 font-mono text-xs mb-6">
-            {mode === 'login' ? 'Ingresá tus credenciales' : 'Completá los datos para registrarte'}
+        <div className="rounded-md border border-line bg-surface p-6">
+          <h1 className="font-serif text-xl">{mode === 'login' ? 'Ingresar' : 'Crear cuenta'}</h1>
+          <p className="mb-6 mt-1 text-sm text-ink-2">
+            {mode === 'login' ? 'Ingresá con tu email y contraseña.' : 'Completá los datos para registrarte.'}
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Email</label>
+              <label htmlFor="login-email" className="mb-1.5 block text-sm font-medium">Email</label>
               <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600" />
-                <input type="email" value={email} onChange={e => setEmail(e.target.value)}
-                  placeholder="warren@portfolio.com"
-                  className="input-field w-full pl-9" required />
+                <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-3" aria-hidden />
+                <input id="login-email" type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)}
+                  className={field} required />
               </div>
             </div>
 
             <div>
-              <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Contraseña</label>
+              <label htmlFor="login-password" className="mb-1.5 block text-sm font-medium">Contraseña</label>
               <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600" />
-                <input type={showPass ? 'text' : 'password'} value={password}
+                <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-3" aria-hidden />
+                <input id="login-password" type={showPass ? 'text' : 'password'} value={password}
+                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                   onChange={e => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="input-field w-full pl-9 pr-9" required />
+                  className={`${field} pr-11`} required />
                 <button type="button" onClick={() => setShowPass(s => !s)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-400">
-                  {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  aria-label={showPass ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                  className="absolute right-1 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded text-ink-3 hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
+                  {showPass ? <EyeOff className="h-4 w-4" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
                 </button>
               </div>
             </div>
 
             {error && (
-              <p className="text-rose text-xs font-mono bg-rose/10 rounded-lg px-3 py-2 border border-rose/20">{error}</p>
+              <p role="alert" className="rounded bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>
             )}
             {success && (
-              <p className="text-emerald text-xs font-mono bg-emerald/10 rounded-lg px-3 py-2 border border-emerald/20">{success}</p>
+              <p role="status" className="rounded bg-ok-soft px-3 py-2 text-sm text-ok">{success}</p>
             )}
 
             <button type="submit" disabled={loading}
-              className="btn-primary w-full py-2.5 flex items-center justify-center gap-2">
-              {loading && <div className="w-4 h-4 border-2 border-bg-900/30 border-t-bg-900 rounded-full animate-spin" />}
+              className="flex h-10 w-full items-center justify-center gap-2 rounded bg-primary text-sm font-medium text-primary-on hover:bg-primary-hover disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring max-[819px]:h-11">
+              {loading && <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent motion-reduce:animate-none" aria-hidden />}
               {mode === 'login' ? 'Ingresar' : 'Crear cuenta'}
             </button>
           </form>
 
-          <button onClick={() => { setMode(m => m === 'login' ? 'signup' : 'login'); setError(''); setSuccess('') }}
-            className="w-full text-center text-xs text-slate-500 hover:text-slate-300 font-mono mt-4 transition-colors">
+          <button type="button" onClick={() => { setMode(m => m === 'login' ? 'signup' : 'login'); setError(''); setSuccess('') }}
+            className="mt-4 w-full rounded py-2 text-center text-sm text-accent-ink hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
             {mode === 'login' ? '¿No tenés cuenta? Registrate' : '¿Ya tenés cuenta? Ingresá'}
           </button>
         </div>
       </div>
-    </div>
+    </main>
   )
 }

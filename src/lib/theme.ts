@@ -2,9 +2,11 @@ export type ThemePref = 'light' | 'dark' | 'system'
 
 export const THEME_STORAGE_KEY = 'warren-theme'
 
-// Screens already rebuilt on the new design system. Every other page keeps the old
-// dark-only styling, so it is forced to the dark theme until it is redesigned.
-export const REDESIGNED_PATHS: readonly string[] = ['/dashboard', '/trading']
+// Screens on the new design system follow the user's theme; any other path is
+// forced to dark. Since 2026-10-22 every page of the app is on the new system.
+export const REDESIGNED_PATHS: readonly string[] = [
+  '/dashboard', '/trading', '/history', '/statistics', '/ons', '/strategies', '/cashflow', '/auth',
+]
 
 export function isRedesigned(pathname: string): boolean {
   return REDESIGNED_PATHS.some(p => pathname === p || pathname.startsWith(p + '/'))

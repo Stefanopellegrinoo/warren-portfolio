@@ -15,10 +15,16 @@ describe('parseThemePref', () => {
 })
 
 describe('isRedesigned', () => {
+  it('covers every page of the app and the login', () => {
+    for (const p of ['/dashboard', '/trading', '/history', '/statistics', '/ons/mi-cartera', '/strategies/1', '/cashflow', '/auth/login']) {
+      expect(isRedesigned(p), p).toBe(true)
+    }
+  })
+
   it('matches redesigned routes and their subpaths only', () => {
     expect(isRedesigned('/dashboard')).toBe(true)
     expect(isRedesigned('/dashboard/x')).toBe(true)
-    expect(isRedesigned('/history')).toBe(false)
+    expect(isRedesigned('/not-a-page')).toBe(false)
     expect(isRedesigned('/dashboardx')).toBe(false)
   })
 
@@ -36,8 +42,8 @@ describe('resolveTheme', () => {
   })
 
   it('forces dark on pages that still use the old style', () => {
-    expect(resolveTheme('light', '/history')).toBe('dark')
-    expect(resolveTheme('system', '/ons/mi-cartera')).toBe('dark')
+    expect(resolveTheme('light', '/not-a-page')).toBe('dark')
+    expect(resolveTheme('system', '/not-a-page/x')).toBe('dark')
   })
 })
 

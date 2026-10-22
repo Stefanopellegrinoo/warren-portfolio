@@ -36,7 +36,7 @@ describe('AppShell', () => {
   })
 
   it('disables the theme choice on pages that still use the old style', () => {
-    expect(render('/history')).toContain('Esta página todavía usa el estilo anterior')
+    expect(render('/not-a-page')).toContain('Esta página todavía usa el estilo anterior')
     expect(render('/dashboard')).not.toContain('Esta página todavía usa el estilo anterior')
   })
 
