@@ -10,7 +10,9 @@
  * - COMPRA adds qty × price + commission to the cost. VENTA keeps the average,
  *   removes qty × average from the cost, and realizes proceeds = qty × price − commission.
  * - Selling more than held sells what was held and is reported as an issue.
- * - A holding below DUST is closed; the next buy starts a new cost and first-bought date.
+ * - A holding below DUST, or below RESIDUE of the most it held since it opened (CEDEAR
+ *   conversion rounding: 114.67 bought, 2 × 57.333333 sold), is closed; the next buy starts
+ *   a new cost and first-bought date.
  * - Routes by asset_type ('ON' vs everything else), never by ticker suffix.
  * - ON payments (odd/tasks/nucleo-ledger.md T3.1) come from the bond schedule, per 100
  *   original VN: the holder at the close of the business day before the payment date is
@@ -26,6 +28,7 @@ import { addBusinessDays } from './ar-calendar'
 import type { FlowRow } from './on-flow-history'
 
 const DUST = 0.0001
+const RESIDUE = 1e-4
 
 export interface LedgerTrade {
   ticker: string
@@ -55,6 +58,8 @@ export interface Holding {
   costBasis: number
   firstBought: string
 }
+
+const peaks = new WeakMap<Holding, number>()
 
 export interface Realized {
   ticker: string
@@ -197,6 +202,7 @@ export function ledgerAt(trades: LedgerTrade[], movements: LedgerMovement[], dat
       next.costBasis += qty * t.price + commission
       next.quantity += qty
       next.avgCost = next.costBasis / next.quantity
+      peaks.set(next, Math.max(peaks.get(next) ?? 0, next.quantity))
       open.set(ticker, next)
     } else if (t.operation === 'VENTA') {
       const held = h?.quantity ?? 0
@@ -208,7 +214,7 @@ export function ledgerAt(trades: LedgerTrade[], movements: LedgerMovement[], dat
       realized.push({ ticker, assetType, date: day, quantity: sold, invested, proceeds, pnl: proceeds - invested })
       h.quantity -= sold
       h.costBasis -= invested
-      if (h.quantity < DUST) open.delete(ticker)
+      if (h.quantity < Math.max(DUST, (peaks.get(h) ?? 0) * RESIDUE)) open.delete(ticker)
     }
   }
 

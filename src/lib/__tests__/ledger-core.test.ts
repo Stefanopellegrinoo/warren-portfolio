@@ -32,6 +32,20 @@ describe('ledgerAt: holdings and running average cost', () => {
     expect(s.holdings).toEqual([{ ticker: 'KO', assetType: 'STOCK', quantity: 1, avgCost: 70, costBasis: 70, firstBought: '2026-03-01' }])
   })
 
+  it('a rounding residue from CEDEAR conversion closes the holding; a real small holding does not', () => {
+    // 114.67 underlying bought, sold as 2 × 57.333333: 0.0033 left is conversion rounding, not a position.
+    const residue = ledgerAt([
+      tx('VIST', 'COMPRA', 114.67, 43.64, '2025-07-22'),
+      tx('VIST', 'VENTA', -57.333333, 73.49, '2026-03-27'),
+      tx('VIST', 'VENTA', -57.333333, 64.85, '2026-04-09'),
+    ], [], '2026-04-30')
+    expect(residue.holdings).toEqual([])
+    expect(residue.realized).toHaveLength(2)
+    // One AMZN CEDEAR at ratio 144 is 0.0069 underlying shares, and it is a holding.
+    const small = ledgerAt([tx('AMZN', 'COMPRA', 1 / 144, 200, '2026-01-02')], [], '2026-01-31')
+    expect(small.holdings.map(h => h.ticker)).toEqual(['AMZN'])
+  })
+
   it('same day without insertion order: the buy goes first, never a phantom open position', () => {
     const s = ledgerAt([
       tx('KO', 'VENTA', -2, 60, '2026-01-02', { created_at: null }),
