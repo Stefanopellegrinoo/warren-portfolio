@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import type { Quote } from '@/types'
-import { buildCurrencyViews, localSymbol, replayLedger, valuePosition, type Amounts, type LedgerTrade } from '../multicurrency'
+import { buildCurrencyViews, localSymbol, ledgerInCurrencies, valuePosition, type Amounts, type LedgerTrade } from '../multicurrency'
 import { fxLookupFrom } from '../trade-record-backfill'
 
 const TODAY = { mep: 1500, ccl: 1600 }
@@ -37,7 +37,7 @@ const quote = (ticker: string, price: number, changePercent: number): Quote => (
 
 describe('cost per lot, from the trade record', () => {
   it('ARS trade: trade_price × trade_quantity plus commission, MEP and CCL with the trade FX', () => {
-    const ledger = replayLedger([
+    const ledger = ledgerInCurrencies([
       trade({
         ticker: 'AAPL', date: '2026-05-04', operation: 'COMPRA', asset_type: 'CEDEAR',
         quantity: 0.5, price: 320, commission: 0.4,
@@ -49,13 +49,12 @@ describe('cost per lot, from the trade record', () => {
     expect(aapl.quantity).toBe(0.5)
     expectAmounts(aapl.cost, { ARS: 200500, MEP: 200.5, CCL: 160.4 })
     expectAmounts(aapl.realized, ZERO)
-    expectAmounts(aapl.income, ZERO)
     expect(aapl.costEstimated).toBe(false)
     expect([...ledger.keys()]).toEqual(['AAPL'])
   })
 
   it('MEP trade: trade_price × trade_quantity plus commission, times fx_mep', () => {
-    const ledger = replayLedger([
+    const ledger = ledgerInCurrencies([
       trade({
         ticker: 'YM34D', date: '2026-05-04', operation: 'COMPRA', asset_type: 'ON',
         quantity: 100, price: 109, commission: 10,
@@ -67,18 +66,16 @@ describe('cost per lot, from the trade record', () => {
     expect(on.quantity).toBe(100)
     expectAmounts(on.cost, { ARS: 10_910_000, MEP: 10_910, CCL: 8728 })
     expectAmounts(on.realized, ZERO)
-    expectAmounts(on.income, ZERO)
     expect(on.costEstimated).toBe(false)
   })
 
   it('CCL / reconstructed trade: engine price × |quantity| plus commission, times fx_ccl', () => {
-    const ledger = replayLedger([ccl('MSFT', '2026-05-04', 'COMPRA', 2, 400, 1000, 1250, 1)], noFx, TODAY)
+    const ledger = ledgerInCurrencies([ccl('MSFT', '2026-05-04', 'COMPRA', 2, 400, 1000, 1250, 1)], noFx, TODAY)
 
     const msft = ledger.get('MSFT')!
     expect(msft.quantity).toBe(2)
     expectAmounts(msft.cost, { ARS: 1_001_250, MEP: 1001.25, CCL: 801 })
     expectAmounts(msft.realized, ZERO)
-    expectAmounts(msft.income, ZERO)
     expect(msft.costEstimated).toBe(false)
   })
 
@@ -87,7 +84,7 @@ describe('cost per lot, from the trade record', () => {
       { date: '2026-05-01', kind: 'mep', buy: 990, sell: 1010 },   // 1000
       { date: '2026-05-01', kind: 'ccl', buy: 1240, sell: 1260 },  // 1250
     ])
-    const ledger = replayLedger([
+    const ledger = ledgerInCurrencies([
       trade({ ticker: 'YM34D', date: '2026-05-04', operation: 'COMPRA', asset_type: 'ON', quantity: 10, price: 100, commission: 0 }),
       trade({ ticker: 'KO', date: '2026-05-04', operation: 'COMPRA', quantity: 1, price: 60, commission: 0 }),
       // Before any reference FX: today's FX, flagged.
@@ -112,7 +109,7 @@ describe('average cost per currency (Cocos semantics)', () => {
   ]
 
   it('a sale leaves the average unchanged', () => {
-    const msft = replayLedger(history, noFx, TODAY).get('MSFT')!
+    const msft = ledgerInCurrencies(history, noFx, TODAY).get('MSFT')!
     expect(msft.quantity).toBe(3)
     // Average before the sale: ARS 625.000, MEP 562,5, CCL 450 per share.
     expectAmounts(msft.cost, { ARS: 1_875_000, MEP: 1687.5, CCL: 1350 })
@@ -120,7 +117,7 @@ describe('average cost per currency (Cocos semantics)', () => {
   })
 
   it('a full close resets the average', () => {
-    const ko = replayLedger([
+    const ko = ledgerInCurrencies([
       ccl('KO', '2026-01-05', 'COMPRA', 1, 400, 1000, 1250),
       ccl('KO', '2026-02-05', 'VENTA', 1, 500, 1000, 1250),
       ccl('KO', '2026-03-05', 'COMPRA', 1, 300, 1600, 2000),
@@ -133,18 +130,17 @@ describe('average cost per currency (Cocos semantics)', () => {
 
 describe('realized result per currency', () => {
   it('converts the sale proceeds with the FX of the sale', () => {
-    const msft = replayLedger([
+    const msft = ledgerInCurrencies([
       ccl('MSFT', '2026-01-05', 'COMPRA', 2, 400, 1000, 1250),
       ccl('MSFT', '2026-02-05', 'COMPRA', 2, 500, 1200, 1500),
       ccl('MSFT', '2026-03-05', 'VENTA', 1, 600, 1600, 2000, 5),
     ], noFx, TODAY).get('MSFT')!
     // Proceeds (600 − 5) × 2000 = 1.190.000 ARS; average released 625.000 / 562,5 / 450.
     expectAmounts(msft.realized, { ARS: 565_000, MEP: 743.75 - 562.5, CCL: 595 - 450 })
-    expectAmounts(msft.income, ZERO)
   })
 
-  it('converts dividends and coupons with the FX of their date', () => {
-    const ledger = replayLedger([
+  it('dividends and coupons are income, converted with the FX of their date, not a sale result', () => {
+    const ledger = ledgerInCurrencies([
       ccl('KO', '2026-04-01', 'DIVIDENDO', 1, 10, 1000, 1250),
       trade({
         ticker: 'YM34D', date: '2026-04-02', operation: 'CUPON', asset_type: 'ON', quantity: 50, price: 1,

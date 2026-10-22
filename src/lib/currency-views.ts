@@ -1,5 +1,5 @@
 /**
- * Loads what buildCurrencyViews needs for a user: their ledger, today's FX, the
+ * Loads what buildCurrencyViews needs for a user: their ledger and ON payments, today's FX, the
  * CEDEAR ratios and the cached peso-line prices. Used by the worker's summary
  * cache and by /api/positions when it has to compute the summary itself.
  *
@@ -12,6 +12,8 @@ import { fetchQuotes } from './yahoo-finance'
 import { localPriceKey } from './data912-client'
 import { buildCurrencyViews, localSymbol, type CurrencyViews, type EnginePosition, type LedgerTrade } from './multicurrency'
 import { fxLookupFrom } from './trade-record-backfill'
+import { loadOverrides, onTickersOf } from './ledger-now'
+import { loadSchedules } from './on-schedules'
 import { argentinaDate } from './utils'
 
 const LEDGER_COLUMNS =
@@ -101,6 +103,13 @@ export async function currencyViewsFor(
     return q ? [[s, q] as const] : []
   }))
 
+  // The automatic ON payments the core applies to cost and cash (odd/tasks/nucleo-ledger.md T3.1).
+  const today = argentinaDate()
+  const [overrides, schedules] = await Promise.all([
+    loadOverrides(supabase, userId),
+    loadSchedules(supabase, onTickersOf(trades.map(t => ({ ...t, created_at: t.created_at ?? null }))), today),
+  ])
+
   return buildCurrencyViews({
     positions: valued.positions,
     onPositions: valued.onPositions,
@@ -110,5 +119,6 @@ export async function currencyViewsFor(
     local,
     fx: ctx.fx,
     fxAt: fxLookupFrom(fxRows),
+    payments: { schedules, overrides, today },
   })
 }
