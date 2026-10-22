@@ -145,6 +145,14 @@ describe('GET /api/portfolio-history — universe parameter', () => {
     expect(stocks.data.at(-1)).toEqual({ snapshot_date: TODAY, value: 615, invested: 500 })
   })
 
+  it('treats the retired measurable universe as the whole portfolio (old clients and cached URLs)', async () => {
+    mockGetDerivedSeries.mockResolvedValue(series([row(daysAgo(1))]))
+    const res = await GET(request('days=90&universe=measurable'))
+    expect(res.status).toBe(200)
+    expect((await res.json()).data).toEqual([{ snapshot_date: daysAgo(1), value: 1000, invested: 900 }])
+    expect(mockGetCachedRoute).toHaveBeenCalledWith('history:v3:u1:90:total')
+  })
+
   it('rejects an unknown universe with 400', async () => {
     const res = await GET(request('universe=everything'))
     expect(res.status).toBe(400)

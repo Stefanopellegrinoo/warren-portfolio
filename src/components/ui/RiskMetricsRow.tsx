@@ -5,13 +5,9 @@ import { SectionHead } from '@/components/resumen/ui'
 import { formatNumber, formatPct } from '@/lib/utils'
 
 /**
- * The risk metrics of the General tab, computed over the MEASURABLE base
- * (stocks + cash) while the chart above it draws the FULL portfolio. That
- * scope difference is deliberate (design A2): the chart answers "how much do
- * I have?" and every peso counts; the metrics answer "how much risk am I
- * running?" and only what can be measured honestly counts. The scope line
- * below the figures is what turns that from a contradiction into two questions
- * answered correctly — it is not decoration.
+ * The risk metrics of the whole-portfolio tab: stocks, ONs and cash, the same
+ * universe the chart above it draws (S9 of odd/tasks/nucleo-ledger.md). The
+ * scope line below the figures says so.
  *
  * A null metric is rendered as "Sin datos suficientes", never as 0: below the
  * A3 interval thresholds the API returns null precisely because a number
@@ -84,7 +80,7 @@ export default function RiskMetricsRow({ data }: { data: RiskMetricsData | null 
         <VolatilityMetric data={data} />
         <DrawdownMetric data={data} />
       </dl>
-      <p className="mt-4 text-[13px] text-ink-3">Calculado sobre acciones y caja. Las ONs quedan afuera porque no tienen historia.</p>
+      <p className="mt-4 text-[13px] text-ink-3">Calculado sobre toda la cartera: acciones, ONs y caja.</p>
     </section>
   )
 }

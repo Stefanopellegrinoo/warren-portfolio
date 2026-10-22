@@ -12,7 +12,7 @@ import { enrichPositionsForStats } from '@/lib/position-stats'
 import { computeTradeStats } from '@/lib/trade-stats'
 import { isBenchmarkId, fetchBenchmarkComparison, type BenchmarkComparison } from '@/lib/benchmark'
 import {
-  isUniverse,
+  parseUniverse,
   UNIVERSES,
   computeUniverseRiskMetrics,
   computeUniverseTwr,
@@ -28,8 +28,9 @@ export async function GET(req: NextRequest) {
     if (isAuthFailure(authResult)) return authResult.error
     const { supabase, user } = authResult
 
-    const rawUniverse = req.nextUrl.searchParams.get('universe') ?? 'measurable'
-    if (!isUniverse(rawUniverse)) {
+    // Default and the retired `measurable`: the whole portfolio (S9).
+    const universe = parseUniverse(req.nextUrl.searchParams.get('universe'))
+    if (!universe) {
       return NextResponse.json(
         // Bounded message: never echo unbounded user input back, and name the
         // allowed values so a caller can fix the request from the response.
@@ -37,7 +38,6 @@ export async function GET(req: NextRequest) {
         { status: 400 }
       )
     }
-    const universe = rawUniverse
 
     // Optional benchmark. The value reaches a Yahoo symbol lookup, so it is
     // matched against the whitelist — never forwarded.
@@ -70,10 +70,8 @@ export async function GET(req: NextRequest) {
     const externalFlows = await fetchExternalFlows(supabase, user.id)
 
     // Every universe except `total` has a boundary a trade or an income
-    // payment can cross: stocks and ons see their own trades and coupons, and
-    // `measurable` (stocks + cash) sees ON trades and CUPON/DIVIDENDO, which
-    // move value into or out of cash. Only `total` contains every class, so
-    // only `total` can skip these fetches.
+    // payment can cross: stocks and ons see their own trades and payments.
+    // Only `total` contains every class, so only `total` can skip these fetches.
     let flowTransactions: FlowTransaction[] = []
     let income: IncomeMovement[] = []
     if (universe !== 'total') {

@@ -4,7 +4,7 @@ import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { snapshotUser } from '@/lib/portfolio-snapshots'
 import { getDerivedSeries } from '@/lib/derived-series'
 import { argentinaDate } from '@/lib/utils'
-import { isUniverse, projectHistory, type ProjectedPoint } from '@/lib/asset-universe'
+import { parseUniverse, projectHistory, type ProjectedPoint } from '@/lib/asset-universe'
 
 // GET: the portfolio evolution series, derived from the ledger core
 // (getDerivedSeries) — the same rows the statistics read. It starts at the
@@ -34,11 +34,10 @@ export async function GET(req: NextRequest) {
     const daysParam =
       rawDays === 'all' ? 'all' : String(Math.max(1, Math.min(parseInt(rawDays) || 90, MAX_DAYS)))
 
-    const rawUniverse = searchParams.get('universe') ?? 'total'
-    if (!isUniverse(rawUniverse)) {
+    const universe = parseUniverse(searchParams.get('universe'))
+    if (!universe) {
       return NextResponse.json({ error: 'Invalid universe' }, { status: 400 })
     }
-    const universe = rawUniverse
 
     // v3: points are projected per-universe via projectHistory (invalidateUserCache
     // SCANs history:v3:{userId}:*).

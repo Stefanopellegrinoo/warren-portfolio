@@ -6,11 +6,8 @@
  * This exists for the same reason snapshot-series.ts does. PostgREST caps a
  * response at 1000 rows, and a truncated FLOW list is worse than a truncated
  * series: every buy or sell whose flow went missing stops being a transfer
- * and becomes a market move of its full notional. On the `measurable`
- * universe — the default of /api/statistics and the General tab's headline —
- * a dropped ON purchase reproduces exactly the fabricated ~10% loss the
- * ON-boundary fix removed. There is no error and no missing chart; the number
- * is simply wrong.
+ * and becomes a market move of its full notional in the stocks or ons
+ * universe. There is no error and no missing chart; the number is simply wrong.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { normalizeError } from './errors'
