@@ -80,7 +80,8 @@ describe('ensureRedisAndScheduleJobs', () => {
     // Assert
     expect(result).toEqual({ ok: true })
     expect(mockScheduleRepeatingPriceJob).toHaveBeenCalledTimes(1)
-    expect(mockScheduleRepeatingPriceJob).toHaveBeenCalledWith(5)
+    // Prices refresh every minute during market hours (was 5).
+    expect(mockScheduleRepeatingPriceJob).toHaveBeenCalledWith(1)
     expect(mockScheduleSignalsEvaluationJobs).toHaveBeenCalledTimes(1)
   })
 

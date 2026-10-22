@@ -41,7 +41,7 @@ export async function ensureRedisAndScheduleJobs(): Promise<StartupResult> {
   const ready = await ensureRedisConnected()
   if (!ready) return { ok: false, reason: 'redis-unreachable' }
   try {
-    await scheduleRepeatingPriceJob(5)
+    await scheduleRepeatingPriceJob(1)
     await scheduleDailySnapshotJob()
     await scheduleTickerAuditJob()
     await scheduleOnTermsIngestJob()

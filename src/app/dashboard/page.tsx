@@ -18,7 +18,9 @@ import { buildHoldings, distribution, reviewItems } from '@/lib/resumen/holdings
 import type { Position, ONPosition, PortfolioSummary } from '@/types'
 import { isMarketOpen } from '@/lib/utils'
 
-const REFRESH_INTERVAL_SEC = 300
+// The worker refreshes prices every minute; polling every 30 s shows them
+// at most a minute and a half old.
+const REFRESH_INTERVAL_SEC = 30
 
 type AssetClass = 'ACCION' | 'CEDEAR' | 'ON'
 interface QuickSell { assetClass: AssetClass; ticker: string; quantity: number; price: number }

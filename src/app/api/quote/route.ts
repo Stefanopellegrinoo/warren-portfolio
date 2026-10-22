@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getMarketDataProvider, MarketDataError } from '@/lib/market-data'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
+import { cached } from '@/lib/cache'
+
+// The chart, the watchlist and the top bar poll this every 15–30 s; a short
+// cache keeps them on one Yahoo call per ticker.
+const QUOTE_TTL = 15
 
 // Map MarketDataError codes to HTTP status codes
 function errorToStatus(err: MarketDataError): number {
@@ -34,7 +39,7 @@ export async function GET(req: NextRequest) {
   }
   const settled = await Promise.allSettled(
     tickers.map(async (ticker) => {
-      const q = await provider.getQuote(ticker)
+      const q = await cached(`quote:${ticker}`, QUOTE_TTL, () => provider.getQuote(ticker))
       return {
         ticker: q.ticker,
         price: q.price,

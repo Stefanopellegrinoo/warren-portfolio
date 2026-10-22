@@ -8,7 +8,7 @@ import { klinesInterval, toChartTime } from "@/lib/chart/timeframes";
 import { barsToUpdate } from "@/lib/chart/live-bars";
 import type { Candle, Timeframe } from "@/lib/binance/types";
 
-const POLL_MS = 60_000;
+const POLL_MS = 30_000;
 
 /** reset: draw every bar again; update: series.update() these bars in order. */
 export type CandleChange = { kind: "reset" } | { kind: "update"; bars: Candle[] };
@@ -42,7 +42,7 @@ function withBar(candles: Candle[], c: Candle): Candle[] {
 
 /**
  * Candles for one symbol and timeframe, kept live: Binance through its kline
- * stream, Yahoo by re-polling /api/klines every minute (cached 60 s on the
+ * stream, Yahoo by re-polling /api/klines every 30 s (cached 30 s on the
  * server), so new bars appear only when the source really has them.
  */
 export function useCandles(symbol: string, timeframe: Timeframe) {

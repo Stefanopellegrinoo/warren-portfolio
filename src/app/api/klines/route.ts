@@ -13,9 +13,9 @@ const DEFAULT_DAYS: Record<CandleInterval, number | null> = {
   '1w': null,
   '1mo': null,
 }
-// The chart re-polls every minute for its live bars, so every interval
+// The chart re-polls every 30 s for its live bars, so every interval
 // shares one short TTL.
-const CANDLES_TTL = 60
+const CANDLES_TTL = 30
 
 function isInterval(v: string): v is CandleInterval {
   return v in DEFAULT_DAYS

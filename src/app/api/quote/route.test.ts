@@ -20,6 +20,12 @@ vi.mock('@/lib/market-data', () => ({
 // ── Mock auth ────────────────────────────────────────────────────────────────
 const mockRequireUser = vi.fn()
 const mockIsAuthFailure = vi.fn()
+// Pass-through cache that records key and TTL.
+const mockCached = vi.fn(async (_key: string, _ttl: number, fetcher: () => Promise<unknown>) => fetcher())
+vi.mock('@/lib/cache', () => ({
+  cached: (key: string, ttl: number, fetcher: () => Promise<unknown>) => mockCached(key, ttl, fetcher),
+}))
+
 vi.mock('@/lib/api-auth', () => ({
   requireUser: mockRequireUser,
   isAuthFailure: mockIsAuthFailure,
@@ -46,6 +52,15 @@ describe('GET /api/quote', () => {
     providerFactoryThrows = false
     mockRequireUser.mockResolvedValue({ user: { id: 'user-1' }, supabase: {} })
     mockIsAuthFailure.mockReturnValue(false)
+  })
+
+  it('caches each ticker for 15 s so several pollers share one Yahoo call', async () => {
+    const { GET } = await import('./route')
+    mockGetQuote.mockResolvedValue(fakeQuote)
+
+    await GET(makeRequest({ tickers: 'aapl,MSFT' }))
+
+    expect(mockCached.mock.calls.map((c) => c.slice(0, 2))).toEqual([['quote:AAPL', 15], ['quote:MSFT', 15]])
   })
 
   it('calls provider.getQuote with the requested ticker', async () => {

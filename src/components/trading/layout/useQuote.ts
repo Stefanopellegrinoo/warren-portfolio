@@ -11,7 +11,7 @@ export interface Quote {
 }
 
 const BINANCE_POLL_MS = 5_000;
-const YAHOO_POLL_MS = 60_000;
+const YAHOO_POLL_MS = 15_000; // /api/quote is cached 15 s on the server
 
 async function load(symbol: string): Promise<Quote | null> {
   if (getProviderForSymbol(symbol) === "binance") {

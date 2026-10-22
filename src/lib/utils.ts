@@ -78,7 +78,7 @@ export function isMarketOpen(now: Date = new Date()): boolean {
   return false
 }
 
-/** 6 missed 5-minute refresh cycles while the market is open. */
+/** 30 missed 1-minute refresh cycles while the market is open. */
 export const PRICE_STALE_OPEN_MS = 30 * 60_000
 /**
  * After the open, the first refresh cycle needs a moment: a price from the
