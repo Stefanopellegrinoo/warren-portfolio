@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { rebuildPosition } from '@/lib/portfolio-engine'
 import { invalidateUserCache } from '@/lib/redis'
 import { UUIDSchema } from '@/lib/schemas/common'
-import { validateRequest, validationErrorResponse } from '@/lib/api/validation'
+import { validateBody, validationErrorResponse } from '@/lib/api/validation'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { normalizeError } from '@/lib/errors'
 import { buildCashMovementForTransaction, signedQuantity } from '@/lib/transaction-cash'
+import { recordCedearTrade, TradeRecordError } from '@/lib/trade-record'
+import { CedearTradeSchema } from '@/lib/schemas/transaction'
 
 export const dynamic = 'force-dynamic'
 
@@ -110,27 +112,48 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       return NextResponse.json({ error: 'Transaction not found or unauthorized' }, { status: 404 })
     }
 
-    // 2. Validate the update payload based on asset type
-    let validatedBody
-    if (originalTx.asset_type === 'ON') {
-      const { ONTransactionSchema } = await import('@/lib/schemas/on')
-      validatedBody = await validateRequest(ONTransactionSchema, req)
+    // 2. Validate the update payload. A CEDEAR broker ticket (`tradeCurrency`)
+    //    is re-derived on the server like a new one and replaces the trade
+    //    record, which also settles a pending review. Otherwise by asset type.
+    const raw = await req.json()
+    let fields: Record<string, unknown>
+    if (raw && typeof raw === 'object' && 'tradeCurrency' in raw) {
+      const t = await recordCedearTrade(supabase, validateBody(CedearTradeSchema, { ...raw, ticker: originalTx.ticker }))
+      const r = t.tradeRecord
+      fields = {
+        date: t.date,
+        operation: t.operation,
+        quantity: signedQuantity(t.operation, t.quantity),
+        price: t.price,
+        commission: t.commission ?? 0,
+        notes: t.notes || null,
+        trade_currency: r.tradeCurrency, trade_quantity: r.tradeQuantity, trade_price: r.tradePrice,
+        trade_commission: r.tradeCommission, cedear_ratio: r.cedearRatio, fx_mep: r.fxMep, fx_ccl: r.fxCcl,
+        fx_date: r.fxDate, fx_source: r.fxSource, needs_review: false, review_note: null,
+      }
     } else {
-      const { TransactionSchema } = await import('@/lib/schemas/transaction')
-      validatedBody = await validateRequest(TransactionSchema, req)
-    }
-
-    // 3. Update the transaction — VENTA keeps the RPC's -ABS(qty) convention
-    const { data: updated, error: updateErr } = await supabase
-      .from('transactions')
-      .update({
+      let validatedBody
+      if (originalTx.asset_type === 'ON') {
+        const { ONTransactionSchema } = await import('@/lib/schemas/on')
+        validatedBody = validateBody(ONTransactionSchema, raw)
+      } else {
+        const { TransactionSchema } = await import('@/lib/schemas/transaction')
+        validatedBody = validateBody(TransactionSchema, raw)
+      }
+      fields = {
         date: validatedBody.date,
         operation: validatedBody.operation,
         quantity: signedQuantity(validatedBody.operation, validatedBody.quantity),
         price: validatedBody.price,
         commission: validatedBody.commission || 0,
         notes: validatedBody.notes || null,
-      })
+      }
+    }
+
+    // 3. Update the transaction — VENTA keeps the RPC's -ABS(qty) convention
+    const { data: updated, error: updateErr } = await supabase
+      .from('transactions')
+      .update(fields)
       .eq('id', params.id)
       .select()
       .single()
@@ -183,6 +206,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
     return NextResponse.json({ success: true, data: updated }, { status: 200 })
   } catch (err: any) {
+    if (err instanceof TradeRecordError) {
+      return NextResponse.json({ error: err.message }, { status: err.status })
+    }
     // Handle validation errors
     if (err.status === 400) {
       return validationErrorResponse(err)
