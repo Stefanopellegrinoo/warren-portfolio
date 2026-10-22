@@ -93,10 +93,29 @@ describe('reconcileLedger', () => {
     const c = fakeClient(base())
     await reconcileLedger(c, USER, '2026-02-01')
     const tables = new Set(c.calls.map((x: any) => x.table))
-    expect(tables).toEqual(new Set(['transactions', 'cash_movements', 'positions', 'on_positions', 'cash_balance']))
+    expect(tables).toEqual(new Set(['transactions', 'cash_movements', 'positions', 'on_positions', 'cash_balance', 'closed_trades', 'on_closed_trades']))
     for (const call of c.calls) expect(call.eqs).toContainEqual(['user_id', USER])
     const tx = c.calls.find((x: any) => x.table === 'transactions')
     expect(tx.columns).toContain('created_at')
+  })
+
+  it('compares realized P&L per ticker against the stored closed trades', async () => {
+    const t = base()
+    t.transactions = [...t.transactions, { ...buy('AAA', 4, 8), operation: 'VENTA', quantity: -4, created_at: '2026-01-06T12:00:00Z', date: '2026-01-06' }]
+    t.cash_movements = [...t.cash_movements, { type: 'VENTA', amount: 32, date: '2026-01-06' }]
+    t.positions = [{ ticker: 'AAA', quantity: 6, total_invested: 30 }]
+    t.cash_balance = [{ balance: 1000 - 50 - 200 + 32 }]
+    t.closed_trades = [{ ticker: 'AAA', invested: 20, proceeds: 32 }]
+    expect(await reconcileLedger(fakeClient(t), USER, '2026-02-01')).toEqual({ ok: true, reasons: [] })
+    t.closed_trades = [{ ticker: 'AAA', invested: 20, proceeds: 40 }]
+    expect((await reconcileLedger(fakeClient(t), USER, '2026-02-01')).reasons).toEqual(['realized AAA: 12.00 replayed vs 20.00 stored'])
+  })
+
+  it('reports an oversell in the ledger instead of passing it silently', async () => {
+    const t = base()
+    t.transactions = [...t.transactions, { ...buy('AAA', 12, 8), operation: 'VENTA', quantity: -12, created_at: '2026-01-06T12:00:00Z', date: '2026-01-06' }]
+    const { reasons } = await reconcileLedger(fakeClient(t), USER, '2026-02-01')
+    expect(reasons).toContain('oversell AAA on 2026-01-06: sold 12, held 10')
   })
 
   it('counts future-dated rows the stored state already includes (default cutoff)', async () => {

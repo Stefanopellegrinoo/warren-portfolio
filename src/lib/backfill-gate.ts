@@ -138,3 +138,30 @@ export function reconcileUser(replayed: ReplayState, stored: StoredState): GateR
 
   return { ok: reasons.length === 0, reasons }
 }
+
+/**
+ * Realized P&L per ticker: the core's sales against the stored closed trades. A
+ * ticker sold on one side only, or summing differently beyond the invested
+ * tolerance, is a mismatch.
+ */
+export function compareRealized(
+  core: Array<{ ticker: string; pnl: number }>,
+  stored: Array<{ ticker: string; invested: number; proceeds: number }>,
+  reasons: string[]
+) {
+  const sum = (rows: Array<{ ticker: string; pnl: number }>) => {
+    const m = new Map<string, number>()
+    for (const r of rows) {
+      const t = String(r.ticker).toUpperCase().trim()
+      m.set(t, (m.get(t) ?? 0) + r.pnl)
+    }
+    return m
+  }
+  const a = sum(core)
+  const b = sum(stored.map(r => ({ ticker: r.ticker, pnl: Number(r.proceeds) - Number(r.invested) })))
+  for (const t of new Set([...a.keys(), ...b.keys()])) {
+    const x = a.get(t) ?? 0
+    const y = b.get(t) ?? 0
+    if (Math.abs(x - y) > INVESTED_TOLERANCE) reasons.push(`realized ${t}: ${x.toFixed(2)} replayed vs ${y.toFixed(2)} stored`)
+  }
+}
