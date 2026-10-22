@@ -4,9 +4,9 @@ import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { Menu, X, LogOut, Search } from 'lucide-react'
-import { cn, formatNumber } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase-client'
-import { NAV_ITEMS, PERSONAL_ITEMS, activeHref, topHoldings, type NavItem } from './nav'
+import { NAV_ITEMS, PERSONAL_ITEMS, activeHref, type NavItem } from './nav'
 import ThemeSwitch from './ThemeSwitch'
 import AssetSearch from './AssetSearch'
 
@@ -26,8 +26,6 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
   )
 }
 
-interface Holding { ticker: string; weightPct: number; href: string }
-
 export default function AppShell({ children, pathnameForTest }: { children: React.ReactNode; pathnameForTest?: string }) {
   const routerPath = usePathname()
   const pathname = pathnameForTest ?? routerPath ?? ''
@@ -35,9 +33,7 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
   // The menu belongs to the page it was opened on, so navigating closes it.
   const [openOn, setOpenOn] = useState<string | null>(null)
   const open = openOn === pathname
-  const [holdings, setHoldings] = useState<Holding[]>([])
   const [heldTickers, setHeldTickers] = useState<string[]>([])
-  const [holdingCount, setHoldingCount] = useState(0)
   const [searchOpen, setSearchOpen] = useState(false)
   const openBtn = useRef<HTMLButtonElement>(null)
   const closeBtn = useRef<HTMLButtonElement>(null)
@@ -48,14 +44,11 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
       .then(r => (r.ok ? r.json() : null))
       .then(d => {
         if (cancelled || !d) return
-        const stocks: { ticker: string; market_value?: number }[] = d.positions ?? []
-        const ons: { ticker: string; market_value?: number }[] = d.onPositions ?? []
-        setHoldings(topHoldings([...stocks, ...ons.map(o => ({ ...o, isOn: true }))], d.summary?.total_market_value ?? 0))
-        setHoldingCount(stocks.length + ons.length)
+        const stocks: { ticker: string }[] = d.positions ?? []
         // The search opens the stock chart, so it only offers stocks and CEDEARs.
         setHeldTickers(stocks.map(p => p.ticker))
       })
-      .catch(() => { /* the shortcut list is optional; the page shows its own errors */ })
+      .catch(() => { /* the search suggestions are optional; the page shows its own errors */ })
     return () => { cancelled = true }
   }, [])
 
@@ -157,27 +150,6 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
             ))}
           </ul>
         </nav>
-
-        {holdings.length > 0 && (
-          <nav aria-labelledby="h-mis-activos">
-            <h2 id="h-mis-activos" className={sectionTitle}>Mis activos</h2>
-            <ul className="grid gap-px">
-              {holdings.map(h => (
-                <li key={h.ticker}>
-                  <Link href={h.href} className={linkBase}>
-                    <span className="flex-1 pl-6">{h.ticker}</span>
-                    <span className="text-xs text-ink-3">{formatNumber(h.weightPct, { decimals: 1 })} %</span>
-                  </Link>
-                </li>
-              ))}
-              {holdingCount > holdings.length && (
-                <li>
-                  <Link href="/dashboard#tenencias" className={linkBase}><span className="pl-6">Ver los {holdingCount}</span></Link>
-                </li>
-              )}
-            </ul>
-          </nav>
-        )}
 
         <nav aria-labelledby="h-personal">
           <h2 id="h-personal" className={sectionTitle}>Personal</h2>
