@@ -8,6 +8,7 @@ import { postTransaction } from '@/lib/api/post-transaction'
 import type { PostTransactionResult } from '@/lib/api/post-transaction'
 import type { ResolveResult } from '@/lib/ticker-identity'
 import type { RetroactiveWarning } from '@/lib/api/retroactive-warning'
+import { fmtNum } from '@/lib/on-format'
 
 export type PendingConfirmation = {
   resolution: ResolveResult
@@ -1030,8 +1031,8 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
             {initialData && (
               <div className="bg-bg-700/50 border border-white/5 rounded-xl p-3 flex items-center justify-between">
                 <div>
-                  <p className="text-[10px] font-mono text-slate-500 uppercase tracking-tighter">Nominales Actuales</p>
-                  <p className="text-sm font-mono font-600 text-white">{initialData.quantity.toLocaleString()} nominales</p>
+                  <p className="text-[10px] font-mono text-slate-500 uppercase tracking-tighter">VN actuales</p>
+                  <p className="text-sm font-mono font-600 text-white">{fmtNum(initialData.quantity * 100, 0)} VN{/* ON ledger quantity = VN / 100 */}</p>
                 </div>
                 <div className="text-right">
                   <p className="text-[10px] font-mono text-slate-500 uppercase tracking-tighter">Precio Mercado</p>

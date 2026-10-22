@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import PriceAge from './PriceAge'
+import { fmtNum } from '@/lib/on-format'
 import { formatUSD, formatPct, cn, priceHealthSummary } from '@/lib/utils'
 import type { ONPosition } from '@/types'
 import { TrendingUp, TrendingDown, Minus, ChevronUp, ChevronDown, Landmark, DollarSign } from 'lucide-react'
@@ -20,7 +21,7 @@ type SortDir = 'asc' | 'desc'
 const COLUMNS: { label: string; key: SortKey | 'actions' }[] = [
   { label: 'TICKER',      key: 'ticker' },
   { label: 'PRECIO',      key: 'current_price' },
-  { label: 'NOMINALES',   key: 'quantity' },
+  { label: 'VN',          key: 'quantity' },
   { label: 'PRECIO PROM', key: 'avg_cost' },
   { label: 'INVERTIDO',   key: 'total_invested' },
   { label: 'VALOR HOY',   key: 'market_value' },
@@ -192,9 +193,9 @@ export default function ONsSection({ positions, loading, summary, onSell }: Prop
                     {pos.current_price ? <>{formatUSD(pos.current_price)}<PriceAge asOf={pos.price_as_of} /></> : <span className="text-slate-600">—</span>}
                   </td>
 
-                  {/* Nominales */}
+                  {/* VN: the ledger stores quantity = VN / 100 (Warren convention) */}
                   <td className="px-3 py-3 font-mono text-xs text-slate-400">
-                    {pos.quantity.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                    {fmtNum(pos.quantity * 100, 0)}
                   </td>
 
                   {/* Precio promedio */}
