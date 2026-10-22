@@ -484,7 +484,8 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
             if (found && found.ratio) {
               setCedearForm(prev => ({
                 ...prev,
-                cantidad: initialData.quantity * found.ratio,
+                // Shares are stored to 6 decimals: 42.307692 × 26 must read 1100, not 1099.99999.
+                cantidad: Math.round(initialData.quantity * found.ratio * 1e4) / 1e4,
                 // Price is a bit trickier because of currency, but as a baseline 
                 // we show the price per CEDEAR in USD if they switch to USD
                 precio: initialData.price / found.ratio
@@ -886,7 +887,11 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
         {!retroWarning && step === 2 && assetClass === 'CEDEAR' && (
           <form onSubmit={handleSubmitCedear} className="grid gap-4">
             <Choice name="tx-op" legend="Operación" options={filteredStockOps} value={stockOp} onChange={setStockOp} />
-            {initialData && <Holding held={`${qty(initialData.quantity)} CEDEARs`} price={initialData.price} />}
+            {initialData && (() => {
+              // The position is stored in underlying shares; the broker counts CEDEARs.
+              const ratio = Number(cedears.find(c => c.ticker === initialData.ticker)?.ratio) || 1
+              return <Holding held={`${qty(Math.round(initialData.quantity * ratio * 1e4) / 1e4)} CEDEARs`} price={initialData.price} />
+            })()}
             <div className={pairCls}>
               <Field id="tx-date" label="Fecha">
                 <input id="tx-date" type="date" value={cedearForm.date} onChange={e => setCedearForm(f => ({ ...f, date: e.target.value }))} className={fieldCls} required />

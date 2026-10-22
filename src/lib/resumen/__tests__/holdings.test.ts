@@ -24,6 +24,16 @@ describe('buildHoldings', () => {
     expect(byTicker.YMCJO).toMatchObject({ kind: 'on', quantityLabel: 'VN 1.500', href: '/ons/mi-cartera', name: null })
   })
 
+  it('shows the CEDEAR count the broker shows (underlying shares × ratio), rounding float noise', () => {
+    const vst = { ...positions[0], ticker: 'VST', quantity: 42.307692 }
+    const [row] = buildHoldings({ ...input, positions: [vst], onPositions: [], cedearTickers: ['VST'], cedearRatios: { VST: 26 } })
+    expect(row.quantityLabel).toBe('1.100 CEDEARs')
+    // Per CEDEAR, like the broker, so quantity × price is still the value.
+    expect(row.quantity).toBe(1100)
+    expect(row.price).toBeCloseTo(vst.current_price! / 26, 6)
+    expect(row.avgCost).toBeCloseTo(vst.avg_cost / 26, 6)
+  })
+
   it('keeps quantity, price, average cost and invested for the table view', () => {
     const duk = buildHoldings({ ...input, positions: [{ ...pos('DUK', 40, 4827, 1027, 0.27, -0.005), avg_cost: 95, total_invested: 3800 }] })[0]
     expect(duk).toMatchObject({ quantity: 40, price: 120.675, avgCost: 95, invested: 3800 })

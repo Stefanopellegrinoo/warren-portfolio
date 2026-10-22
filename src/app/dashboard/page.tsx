@@ -49,6 +49,7 @@ export default function DashboardPage() {
   const [data, setData] = useState<PositionsPayload | null>(null)
   const [loadError, setLoadError] = useState(false)
   const [cedears, setCedears] = useState<string[]>([])
+  const [cedearRatios, setCedearRatios] = useState<Record<string, number>>({})
   const [names, setNames] = useState<Record<string, string>>({})
   const [reconciliation, setReconciliation] = useState<ReconciliationResult | null>(null)
   const [showAddTx, setShowAddTx] = useState(false)
@@ -94,7 +95,10 @@ export default function DashboardPage() {
 
   // Lookups that never change during a visit: CEDEAR list (sale asset class) and company names.
   useEffect(() => {
-    fetch('/api/cedears').then(r => (r.ok ? r.json() : [])).then((list: { ticker: string }[]) => setCedears(list.map(c => c.ticker))).catch(() => {})
+    fetch('/api/cedears').then(r => (r.ok ? r.json() : [])).then((list: { ticker: string; ratio: number | string }[]) => {
+      setCedears(list.map(c => c.ticker))
+      setCedearRatios(Object.fromEntries(list.map(c => [c.ticker, Number(c.ratio)])))
+    }).catch(() => {})
     fetch('/api/activos').then(r => (r.ok ? r.json() : [])).then((list: { ticker: string; nombre: string }[]) => {
       setNames(Object.fromEntries(list.filter(a => a.nombre && a.nombre.trim().toUpperCase() !== a.ticker.toUpperCase()).map(a => [a.ticker, a.nombre])))
     }).catch(() => {})
@@ -138,7 +142,7 @@ export default function DashboardPage() {
   const views = data ? viewsOf(data) : null
   const rows = summary
     ? buildHoldings({
-        positions: data?.positions ?? [], onPositions: data?.onPositions ?? [], cedearTickers: cedears, names,
+        positions: data?.positions ?? [], onPositions: data?.onPositions ?? [], cedearTickers: cedears, cedearRatios, names,
         total: views ? views.totals.value[currency] : summary.total_market_value, views, currency,
       })
     : []
