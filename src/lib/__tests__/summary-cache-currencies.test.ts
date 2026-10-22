@@ -17,6 +17,10 @@ const mockRedis = {
 }
 vi.mock('ioredis', () => ({ default: class { constructor() { Object.assign(this, mockRedis) } } }))
 vi.mock('@/lib/supabase-server', () => ({ createServiceClient: vi.fn(), createServerClientInstance: vi.fn() }))
+// Today's dollar is live (odd/tasks/nucleo-ledger.md T1.2); fx_rates only serves trade dates.
+const liveDollar = vi.fn(async (kind: string): Promise<unknown> =>
+  ({ rate: kind === 'mep' ? 1500 : 1600, asOf: '2026-10-21T20:00:00.000Z', source: 'live' }))
+vi.mock('../currency', () => ({ getDollarInfo: (kind: string) => liveDollar(kind) }))
 
 const local = new Map<string, Quote>([['local:AAPL', { ticker: 'AAPL', price: 28_420, change: 0, changePercent: 0.0121, previousClose: 28_420 }]])
 vi.mock('../yahoo-finance', () => ({
@@ -139,8 +143,9 @@ describe('cacheUserSummaries with the currency views', () => {
     expect(ko.source).toBe('estimated')
   })
 
-  it('no reference FX for today: no views, the summary is unchanged', async () => {
-    vi.mocked(createServiceClient).mockReturnValue(db({ ...tables, fx_rates: [] }) as never)
+  it('no dollar for today: no views, the summary is unchanged', async () => {
+    vi.mocked(createServiceClient).mockReturnValue(db(tables) as never)
+    liveDollar.mockResolvedValueOnce(null).mockResolvedValueOnce(null)
 
     await cacheUserSummaries(stockQuotes, new Map())
 

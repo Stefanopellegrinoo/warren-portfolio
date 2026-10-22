@@ -92,7 +92,7 @@ export default function OnDetail({ analysis, history, asOf, stale, prices }: Pro
             <Tile label="Precio sucio" value={fmtNum(row.price)} source={`data912, ${lineLabel(row.priceLine, row.cclUsed)}${prices.fetchedAt ? ` · ${formatAge(prices.fetchedAt)}` : ''}`}>
               {row.priceLine === 'O' && row.cclUsed && (
                 <span>
-                  Precio implícito: línea O (pesos) ÷ CCL de ${fmtNum(row.cclUsed.rate)} (CCL al {fmtDate(row.cclUsed.asOf.slice(0, 10))}), mismo método que BYMA (CCL implícito de GGAL).
+                  Precio implícito: línea O (pesos) ÷ CCL de ${fmtNum(row.cclUsed.rate)} (CCL al {fmtDate(row.cclUsed.asOf.slice(0, 10))}).
                 </span>
               )}
               {row.lineFallback && row.priceLine !== 'O' && (

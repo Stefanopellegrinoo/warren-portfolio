@@ -11,6 +11,7 @@ Branch: `feat/ledger-core` (from `feat/dashboard-layout`). Delivery: ask-on-risk
 - S4 (coupons and amortizations): "la 1. Acordate portfolio profesional completo, hacemos las cosas bien." (option 1: automatic from the bond schedule, user can correct one) → past and future ON coupons and amortizations are generated from the payment schedule and the nominal held at the record date; the user can override one payment's amount or mark it not received.
 - S5 (scope): "Si quiero ahcerlo completo y bien hecho desde ya, cueste lo que cueste" and "Si hay que elimianr cosas lo hacemos, dejemos todo prolijo y bien hecho. PROFESIONAL" → one ledger core replaces every duplicated implementation; stored derived state and dead code are removed, not patched around.
 - S6 (all-in prices): "capaz si compre mas caro es por comisiones, impuiestos etc, y capaz por tipo de cambio o distinto dolar" → the market price used for valuation (source data) is separate from the price the user paid (ledger, may include fees); cost basis always comes from the ledger.
+- S7 (dollar): "No nos cuesta nada preguntar el valor cada vez que se pregunta por las acciones, ademas en argentina se re ve el valor del dolar, ahsta podriamos ponerlo com dato en el dashboard" → one dollar series: today live from dolarapi.com (1-minute cache), closed days from `fx_rates`; the GGAL-implied CCL is removed; the Resumen shows today's MEP and CCL.
 
 ## Design (approved 2026-10-22, "si")
 
@@ -19,7 +20,7 @@ Branch: `feat/ledger-core` (from `feat/dashboard-layout`). Delivery: ask-on-risk
 **Market data** (global, stored with `source`):
 - ON prices: `on_price_history`, backfilled on demand from Rava (`https://www.rava.com/perfil/descarga-historicos/<TICKER>`, raw closes per 100 original VN; `volumen=0` rows are no-trade days and are skipped). Nightly capture continues. BYMA `historical-series` is back-adjusted and must not be used for history.
 - Stock prices: Yahoo, as today (splits un-adjusted).
-- FX: one source, `fx_rates` (MEP, CCL). The GGAL-implied CCL is removed.
+- FX: one series (S7): today live from dolarapi.com, closed days from `fx_rates` (argentinadatos, same provider). The GGAL-implied CCL is removed.
 - ON schedules: one helper merging `on_flow_history` and `on_cashflows`.
 
 **Ledger core** (one pure module): one operation order, one running average cost, one sale validation (cannot sell more than held), shared by the write path. Replaces the five copies (SQL RPC 044, `calculateRunningAvgCost`, `rebuildClosedTrades`, `rebuildON*`, `multicurrency.replayLedger`).
@@ -39,7 +40,7 @@ Branch: `feat/ledger-core` (from `feat/dashboard-layout`). Delivery: ask-on-risk
 | ID | S# | Task | Route | Status | Commit |
 |---|---|---|---|---|---|
 | T1.1 | S2,S3 | Rava client + ON price backfill into `on_price_history` (`source='rava'`); the on-demand trigger is wired by the reads (T4.1) | inline | done | see L5 |
-| T1.2 | S5 | Single FX source: `fx_rates` everywhere, GGAL CCL removed | inline | pending | |
+| T1.2 | S5,S7 | One dollar series (live today + `fx_rates`), GGAL CCL removed, dollar in the Resumen header | inline | done | see L6 |
 | T1.3 | S4 | One schedule helper (flow history + future flows), duplicated flow builders removed | inline | pending | |
 | T2.1 | S5 | Pure ledger core: holdings, avg cost, realized, cash at any date | inline | pending | |
 | T2.2 | S5 | Gate: core vs current stored tables for every user, report diffs | inline | pending | |
@@ -60,4 +61,5 @@ Routes are inline by default; a writer is delegated only for parallel independen
 - L3 (2026-10-22, audit): five avg-cost implementations; four missing-price policies (drop in Resumen, avg_cost in history, avg_cost+invested tier in statistics, none in `/api/statistics/combined` where price 0 counts as value 0); two CCLs; bulk import RPC 036 types trade cash movements as RETIRO/DEPOSITO; `rebuildCashBalance` not paginated (1000-row cap); manual income through the cash form is likely rejected by the RPC; derived pipeline decided 2026-08-03 (engram #3274) and never wired.
 - L4 (2026-10-22, evidence): BYMA historical-series is back-adjusted by a per-line factor per payment (CAC5D 2025-02-21 = 53.014 vs ~45 neighbours; YM42D 2026-04-07 BYMA 102.147 vs user sale 105.32). Rava YM42D 2026-04-07 range 105.30–106.40 contains the sale; Rava 16–21/10 equals `on_price_history`. User ON trades have commission 0 and `trade_currency='MEP'`.
 - L5 (2026-10-22, T1.1): document approved ("esta bien"). `src/lib/rava-history.ts` parses Rava's CSV (traded days only, `volumen>0`) and inserts closes in [from, today) without overwriting existing rows. RED observed (module missing), GREEN 5/5; suite 2032 passed; type-check clean. Live parse (no DB write): YM42D, MGCRD, DNCBD, VSCXD equal `on_price_history` on 10/16 and 10/21; MGCRD 04-09 = 108.95 vs user buy 108.942. Coverage varies by bond: YM42D from 2025-12-02, VSCXD from 2026-04-10 (user bought 04-09 → purchase-price rule S3). Bonds older than Rava's window fall back to S3 as well.
-- Next: T1.2 single FX source.
+- L6 (2026-10-22, T1.2, user): "banca no entendi bien. No nos cuesta nada preguntar el valor cada vez que se pregunta por las acciones, ademas en argentina se re ve el valor del dolar, ahsta podriamos ponerlo com dato en el dashboard, capaz entendi mal" → proposed live dolarapi + `fx_rates` for closed days and the dollar in the Resumen; user: "msi". `src/lib/currency.ts` rewritten: `getDollarInfo(kind)` (1-min cache, 30-day last-known, null when nothing real), `getHistoricalDollar` reads `fx_rates` paginated and excludes today; `loadCurrencyContext` uses the live dollar for today; Resumen header shows "Dólar MEP $ … · CCL $ …". RED observed for currency (5/6), context (2/2), header (1); GREEN; suite 2032 passed; type-check clean. 11 widths 320–1920 without horizontal overflow (throwaway preview page, removed). Behavior change: `getHistoricalCCL` now throws on a read failure instead of returning an empty map; every caller already sits in a try or throws on empty.
+- Next: T1.3 one schedule helper.
