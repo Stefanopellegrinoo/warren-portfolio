@@ -29,6 +29,8 @@ function stubFetch() {
       return fx ? new Response(JSON.stringify(fx)) : new Response('{}', { status: 404 })
     }
     if (url === '/api/transactions') return new Response(JSON.stringify({ transaction: { id: 't' } }), { status: 201 })
+    if (url === '/api/on-positions' || url === '/api/cash') return new Response('{}', { status: 201 })
+    if (url.startsWith('/api/ons/search')) return new Response('[]')
     throw new Error(`unexpected fetch ${url}`)
   }))
   return calls
@@ -125,6 +127,90 @@ describe('AddTransactionModal — CEDEAR broker ticket', () => {
     const post = calls.find(c => c.url === '/api/transactions')!
     expect(post.body).toMatchObject({ tradeCurrency: 'ARS', fxCcl: 1650 })
     expect(post.body).not.toHaveProperty('fxMep')
+    unmount()
+  })
+})
+
+type Initial = React.ComponentProps<typeof AddTransactionModal>['initialData']
+async function openForm(choose: { initialData: Initial } | { option: string }) {
+  const calls = stubFetch()
+  const el = document.createElement('div')
+  document.body.appendChild(el)
+  const root = createRoot(el)
+  const initialData = 'initialData' in choose ? choose.initialData : undefined
+  await act(async () => { root.render(<AddTransactionModal onClose={() => {}} onSuccess={() => {}} initialData={initialData} />) })
+  await flush()
+  if ('option' in choose) { act(() => button(el, choose.option).click()); await flush() }
+  const submit = async () => {
+    await act(async () => { el.querySelector('form')!.requestSubmit() })
+    await flush()
+  }
+  return { el, calls, submit, unmount: () => act(() => root.unmount()) }
+}
+
+describe('AddTransactionModal — numbers typed the Argentine way', () => {
+  it('reads a CEDEAR peso price "28.080" as 28080 in the preview and the POST', async () => {
+    const { el, calls, unmount } = await openCedearForm()
+    setValue(byId(el, 'tx-quantity'), '20')
+    setValue(byId(el, 'tx-price'), '28.080')
+    setValue(byId(el, 'tx-commission'), '1.234,5')
+    // 28080 ARS × 20 / 1600 CCL = US$ 351 per share
+    expect(el.textContent).toContain('US$\u00a0351,00')
+    await act(async () => { el.querySelector('form')!.requestSubmit() })
+    await flush()
+    expect(calls.find(c => c.url === '/api/transactions')!.body).toMatchObject({
+      tradeCurrency: 'ARS', tradeQuantity: 20, tradePrice: 28080, tradeCommission: 1234.5,
+    })
+    unmount()
+  })
+
+  it('reads an edited CCL "1.650,5" as 1650.5', async () => {
+    const { el, calls, unmount } = await openCedearForm()
+    act(() => button(el, 'Editar').click())
+    expect(byId(el, 'tx-fx-ccl').value).toBe('1600')
+    setValue(byId(el, 'tx-fx-ccl'), '1.650,5')
+    setValue(byId(el, 'tx-quantity'), '40')
+    setValue(byId(el, 'tx-price'), '16000')
+    await act(async () => { el.querySelector('form')!.requestSubmit() })
+    await flush()
+    expect(calls.find(c => c.url === '/api/transactions')!.body).toMatchObject({ fxCcl: 1650.5 })
+    unmount()
+  })
+
+  it('stock quick sell: prefills the position, reads "1.234,5" and a plain "6.69"', async () => {
+    const { el, calls, submit, unmount } = await openForm({ initialData: { assetClass: 'ACCION', ticker: 'AAPL', quantity: 2.5, price: 190.7 } })
+    expect(byId(el, 'tx-quantity').value).toBe('2,5')
+    expect(byId(el, 'tx-price').value).toBe('190,7')
+    setValue(byId(el, 'tx-price'), '1.234,5')
+    setValue(byId(el, 'tx-commission'), '6.69')
+    await submit()
+    expect(calls.find(c => c.url === '/api/transactions')!.body).toMatchObject({ quantity: 2.5, price: 1234.5, commission: 6.69 })
+    unmount()
+  })
+
+  it('ON quick sell: reads "1.050,5" and a plain "10"', async () => {
+    const { el, calls, submit, unmount } = await openForm({ initialData: { assetClass: 'ON', ticker: 'AAA', quantity: 200, price: 98.5 } })
+    setValue(byId(el, 'tx-quantity'), '10')
+    setValue(byId(el, 'tx-price'), '1.050,5')
+    await submit()
+    expect(calls.find(c => c.url === '/api/on-positions')!.body).toMatchObject({ ticker: 'AAA', quantity: 10, price: 1050.5 })
+    unmount()
+  })
+
+  it('cash: reads "1.234,50" as 1234.5', async () => {
+    const { el, calls, submit, unmount } = await openForm({ option: 'Caja en dólares' })
+    setValue(byId(el, 'tx-amount'), '1.234,50')
+    expect(el.textContent).toContain('+US$\u00a01.234,50')
+    await submit()
+    expect(calls.find(c => c.url === '/api/cash')!.body).toMatchObject({ type: 'DEPOSITO', amount: 1234.5 })
+    unmount()
+  })
+
+  it('cash: a plain "10" still works', async () => {
+    const { el, calls, submit, unmount } = await openForm({ option: 'Caja en dólares' })
+    setValue(byId(el, 'tx-amount'), '10')
+    await submit()
+    expect(calls.find(c => c.url === '/api/cash')!.body).toMatchObject({ amount: 10 })
     unmount()
   })
 })

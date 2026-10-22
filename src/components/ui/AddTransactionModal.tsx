@@ -5,6 +5,7 @@ import { X, Search, ChevronLeft, ChevronRight, TrendingUp, Landmark, Banknote } 
 import { formatNumber, formatUSD } from '@/lib/utils'
 import type { Operation, TransactionInput, Cedear, Activo, ONOperation, CashMovementType } from '@/types'
 import { postTransaction } from '@/lib/api/post-transaction'
+import { EsNumberInput } from '@/components/ui/es-number-input'
 import type { PostTransactionResult } from '@/lib/api/post-transaction'
 import type { ResolveResult } from '@/lib/ticker-identity'
 import type { RetroactiveWarning } from '@/lib/api/retroactive-warning'
@@ -265,12 +266,12 @@ function FxLine({ fx, tradeDate, edit, onEdit, onChange, onReset }: {
         <legend className="sr-only">Cotización del dólar</legend>
         <div className={pairCls}>
           <Field id="tx-fx-mep" label="Dólar MEP">
-            <input id="tx-fx-mep" type="number" inputMode="decimal" min="0" step="any" value={edit.mep || ''}
-              onChange={e => onChange({ ...edit, mep: parseFloat(e.target.value) || 0 })} className={fieldCls} />
+            <EsNumberInput id="tx-fx-mep" placeholder="1.550,80" value={edit.mep || null}
+              onValue={n => onChange({ ...edit, mep: n ?? 0 })} className={fieldCls} />
           </Field>
           <Field id="tx-fx-ccl" label="Dólar cable (CCL)">
-            <input id="tx-fx-ccl" type="number" inputMode="decimal" min="0" step="any" value={edit.ccl || ''}
-              onChange={e => onChange({ ...edit, ccl: parseFloat(e.target.value) || 0 })} className={fieldCls} />
+            <EsNumberInput id="tx-fx-ccl" placeholder="1.636,55" value={edit.ccl || null}
+              onValue={n => onChange({ ...edit, ccl: n ?? 0 })} className={fieldCls} />
           </Field>
         </div>
         <button type="button" onClick={onReset} className={`${linkBtnCls} justify-self-start text-[13px]`}>Usar la cotización de referencia</button>
@@ -854,18 +855,18 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
             </div>
             <div className={pairCls}>
               <Field id="tx-quantity" label="Cantidad">
-                <input id="tx-quantity" type="number" inputMode="decimal" min="0" step="any" placeholder="10" value={form.quantity || ''}
-                  onChange={e => setForm(f => ({ ...f, quantity: parseFloat(e.target.value) || 0 }))} className={fieldCls} required />
+                <EsNumberInput id="tx-quantity" placeholder="10" value={form.quantity || null}
+                  onValue={n => setForm(f => ({ ...f, quantity: n ?? 0 }))} className={fieldCls} required />
               </Field>
               <Field id="tx-price" label="Precio en dólares">
-                <input id="tx-price" type="number" inputMode="decimal" min="0" step="any" placeholder="190.70" value={form.price || ''}
-                  onChange={e => setForm(f => ({ ...f, price: parseFloat(e.target.value) || 0 }))} className={fieldCls} required />
+                <EsNumberInput id="tx-price" placeholder="190,70" value={form.price || null}
+                  onValue={n => setForm(f => ({ ...f, price: n ?? 0 }))} className={fieldCls} required />
               </Field>
             </div>
             <div className={pairCls}>
               <Field id="tx-commission" label="Comisión">
-                <input id="tx-commission" type="number" inputMode="decimal" min="0" step="any" placeholder="0" value={form.commission || ''}
-                  onChange={e => setForm(f => ({ ...f, commission: parseFloat(e.target.value) || 0 }))} className={fieldCls} />
+                <EsNumberInput id="tx-commission" placeholder="0" value={form.commission || null}
+                  onValue={n => setForm(f => ({ ...f, commission: n ?? 0 }))} className={fieldCls} />
               </Field>
               <Field id="tx-notes" label="Notas">
                 <input id="tx-notes" type="text" placeholder="Opcional" value={form.notes ?? ''}
@@ -919,18 +920,18 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
             <div className={pairCls}>
               <Field id="tx-quantity" label="Cantidad de CEDEARs"
                 hint={cedearEngine && <p className="text-[13px] text-ink-3 tabular-nums">Equivale a {formatNumber(cedearEngine.quantity, { decimals: 4 })} acciones</p>}>
-                <input id="tx-quantity" type="number" inputMode="decimal" min="0" step="any" placeholder="10" value={cedearForm.cantidad || ''}
-                  onChange={e => setCedearForm(f => ({ ...f, cantidad: parseFloat(e.target.value) || 0 }))} className={fieldCls} required />
+                <EsNumberInput id="tx-quantity" placeholder="10" value={cedearForm.cantidad || null}
+                  onValue={n => setCedearForm(f => ({ ...f, cantidad: n ?? 0 }))} className={fieldCls} required />
               </Field>
               <Field id="tx-price" label={`Precio por CEDEAR ${IN_CURRENCY[cedearForm.moneda]}`}>
-                <input id="tx-price" type="number" inputMode="decimal" min="0" step="any" placeholder={cedearForm.moneda === 'ARS' ? '15000' : '10.50'} value={cedearForm.precio || ''}
-                  onChange={e => setCedearForm(f => ({ ...f, precio: parseFloat(e.target.value) || 0 }))} className={fieldCls} required />
+                <EsNumberInput id="tx-price" placeholder={cedearForm.moneda === 'ARS' ? '28.080,50' : '10,50'} value={cedearForm.precio || null}
+                  onValue={n => setCedearForm(f => ({ ...f, precio: n ?? 0 }))} className={fieldCls} required />
               </Field>
             </div>
             <div className={pairCls}>
               <Field id="tx-commission" label={`Comisión ${IN_CURRENCY[cedearForm.moneda]}`}>
-                <input id="tx-commission" type="number" inputMode="decimal" min="0" step="any" placeholder="0" value={cedearForm.comision || ''}
-                  onChange={e => setCedearForm(f => ({ ...f, comision: parseFloat(e.target.value) || 0 }))} className={fieldCls} />
+                <EsNumberInput id="tx-commission" placeholder="0" value={cedearForm.comision || null}
+                  onValue={n => setCedearForm(f => ({ ...f, comision: n ?? 0 }))} className={fieldCls} />
               </Field>
               <Field id="tx-notes" label="Notas">
                 <input id="tx-notes" type="text" placeholder="Opcional" value={cedearForm.notas}
@@ -993,19 +994,19 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
             </div>
             <div className={pairCls}>
               <Field id="tx-quantity" label={onForm.operation === 'CUPON' ? 'Monto del cupón en dólares' : 'Cantidad (nominales / 100)'}>
-                <input id="tx-quantity" type="number" inputMode="decimal" min="0" step="any" placeholder={onForm.operation === 'CUPON' ? '500' : '200'}
-                  value={onForm.quantity || ''} onChange={e => setOnForm(f => ({ ...f, quantity: parseFloat(e.target.value) || 0 }))} className={fieldCls} required />
+                <EsNumberInput id="tx-quantity" placeholder={onForm.operation === 'CUPON' ? '500' : '200'}
+                  value={onForm.quantity || null} onValue={n => setOnForm(f => ({ ...f, quantity: n ?? 0 }))} className={fieldCls} required />
               </Field>
               <Field id="tx-price" label={onForm.operation === 'CUPON' ? 'Precio unitario' : 'Precio (× 100)'}>
-                <input id="tx-price" type="number" inputMode="decimal" min="0" step="any" placeholder={onForm.operation === 'CUPON' ? '1' : '100'}
-                  value={onForm.price || ''} onChange={e => setOnForm(f => ({ ...f, price: parseFloat(e.target.value) || 0 }))} className={fieldCls} required />
+                <EsNumberInput id="tx-price" placeholder={onForm.operation === 'CUPON' ? '1' : '98,50'}
+                  value={onForm.price || null} onValue={n => setOnForm(f => ({ ...f, price: n ?? 0 }))} className={fieldCls} required />
               </Field>
             </div>
             {onForm.operation !== 'CUPON' && (
               <div className={pairCls}>
                 <Field id="tx-commission" label="Comisión">
-                  <input id="tx-commission" type="number" inputMode="decimal" min="0" step="any" placeholder="0" value={onForm.commission || ''}
-                    onChange={e => setOnForm(f => ({ ...f, commission: parseFloat(e.target.value) || 0 }))} className={fieldCls} />
+                  <EsNumberInput id="tx-commission" placeholder="0" value={onForm.commission || null}
+                    onValue={n => setOnForm(f => ({ ...f, commission: n ?? 0 }))} className={fieldCls} />
                 </Field>
                 <Field id="tx-notes" label="Notas">
                   <input id="tx-notes" type="text" placeholder="Opcional" value={onForm.notes}
@@ -1029,8 +1030,8 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
                 <input id="tx-date" type="date" value={cashForm.date} onChange={e => setCashForm(f => ({ ...f, date: e.target.value }))} className={fieldCls} required />
               </Field>
               <Field id="tx-amount" label="Monto en dólares">
-                <input id="tx-amount" type="number" inputMode="decimal" min="0" step="any" placeholder="1000" value={cashForm.amount || ''}
-                  onChange={e => setCashForm(f => ({ ...f, amount: parseFloat(e.target.value) || 0 }))} className={fieldCls} required />
+                <EsNumberInput id="tx-amount" placeholder="1.000,00" value={cashForm.amount || null}
+                  onValue={n => setCashForm(f => ({ ...f, amount: n ?? 0 }))} className={fieldCls} required />
               </Field>
             </div>
             <Field id="tx-description" label="Descripción">
