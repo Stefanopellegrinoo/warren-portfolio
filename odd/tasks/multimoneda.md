@@ -63,8 +63,8 @@ Branch: `feat/multimoneda`. Delivery: ask-on-risk. Test runner: vitest. Design: 
 | A2 | S2, S3 | inline | done 6b4b208, migration 043 applied, deployed | `fx_rates` table (MEP/CCL daily from argentinadatos), backfill and daily ingest. Risk item 1 (new table; DB write needs OK) |
 | B1 | S3, S5 | delegated (context backstop) | done 65622c6, 5116b2f, a371405 (044 NOT applied) | migration 044 (additive nullable columns), `/api/fx` route, server-side derivation in `/api/transactions`, new CEDEAR form |
 | B2 | S4, S5, S6 | delegated (same writer, after B1) | done ac58c9a, 293a798, 5ea6c89; independent verifier: no blockers, 6 advisories | reconstruction as a reviewed SQL/TS step (dry run first), review list in Operaciones. Risk item 1: changes stored rows; backup and user OK before applying |
-| C1 | S2 | delegated (context backstop) | todo | local peso prices in the worker + pure per-currency valuation/cost module with tests |
-| C2 | S2 | delegated (same writer, after C1) | todo | /api/positions exposes the three views; Resumen selector and figures |
+| C1 | S2 | delegated (context backstop) | done 3262be8 | local peso prices in the worker + pure per-currency valuation/cost module with tests |
+| C2 | S2 | delegated (same writer, after C1) | done 0aea2ab, c8aac7b; parent fixes b30b98b + test | /api/positions exposes the three views; Resumen selector and figures |
 
 ## Log
 
@@ -87,3 +87,7 @@ Branch: `feat/multimoneda`. Delivery: ask-on-risk. Test runner: vitest. Design: 
   - Live body is identical to the verified file (comment/whitespace-stripped md5 d773443d…).
   - Backfill applied: 161 rows in one transaction; backup in trade-record-backup-2026-10-22T16-10-58-617Z.json (gitignored). DB check: 0 missing FX, 0 FX after trade date, 8 needs_review.
   - Stage B pushed: master bd1f385..3a24dd1.
+- L10 (2026-10-22): stage C built.
+  - Suite 1984 PASS. Browser check at 320/375/1440 × light/dark passes.
+  - Real holdings: all 14 are CEDEARs with a data912 peso price (none estimated).
+  - Parent fixed the wrapping of long peso amounts. Note: b30b98b was committed while one test failed (the grep in the chain hid the exit code); fixed in the next commit.
