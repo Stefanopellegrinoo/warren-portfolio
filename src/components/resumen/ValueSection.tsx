@@ -14,14 +14,14 @@ export default function ValueSection({ figures: f, notes = [] }: { figures: Head
           {f.prefix} {formatNumber(f.total)}
         </strong>
         <span className={`font-medium tabular-nums ${tone(f.dayPnl)}`}>
-          {formatNumber(f.dayPnl, { sign: true })} ({formatPct(f.dayPnlPct)}) <span className="font-normal text-ink-3">{f.dayLabel}</span>
+          {formatNumber(f.dayPnl, { sign: true })} <span className="whitespace-nowrap">({formatPct(f.dayPnlPct)})</span> <span className="font-normal text-ink-3">{f.dayLabel}</span>
         </span>
       </div>
       <dl className={`grid grid-cols-3 gap-4 pb-5 pt-3 max-[819px]:grid-cols-2 ${notes.length ? '' : 'border-b border-line'}`}>
         <div>
           <dt className="text-[13px] text-ink-3">Resultado abierto</dt>
           <dd className={`text-base font-medium tabular-nums ${tone(f.openPnl)}`}>
-            {formatNumber(f.openPnl, { sign: true })}<small className="ml-1 text-[13px] font-normal">{formatPct(f.openPnlPct)}</small>
+            {formatNumber(f.openPnl, { sign: true })}<small className="ml-1 whitespace-nowrap text-[13px] font-normal">{formatPct(f.openPnlPct)}</small>
           </dd>
         </div>
         <div>

@@ -30,7 +30,9 @@ function Holding({ r }: { r: HoldingRow }) {
         <b className="block font-medium">{r.value === null ? '—' : formatNumber(r.value)}</b>
         {r.pnl !== null && (
           <small className={`text-[13px] ${r.pnl >= 0 ? 'text-ok' : 'text-danger'}`}>
-            {formatNumber(r.pnl, { decimals: 0, sign: true })} ({formatPct(r.pnlPct, { digits: 1 })})
+            {/* Each part stays whole: peso amounts are long and used to break "%)" onto its own line. */}
+            <span className="whitespace-nowrap">{formatNumber(r.pnl, { decimals: 0, sign: true })}</span>{' '}
+            <span className="whitespace-nowrap">({formatPct(r.pnlPct, { digits: 1 })})</span>
           </small>
         )}
         {r.estimated && r.value !== null && <small className="block text-[13px] text-ink-3">estimado</small>}
