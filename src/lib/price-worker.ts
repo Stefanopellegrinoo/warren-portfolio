@@ -14,7 +14,7 @@
 import { Worker } from 'bullmq'
 import { PRICE_QUEUE_NAME, PRICE_REPEAT_JOB_NAME, SNAPSHOT_JOB_NAME, TICKER_AUDIT_JOB_NAME, ON_TERMS_JOB_NAME, FX_RATES_JOB_NAME } from './queue'
 import { fetchQuotesFromYahoo, cachePrice, fetchQuotes } from './yahoo-finance'
-import { fetchData912Prices } from './data912-client'
+import { fetchData912Prices, refreshLocalPrices } from './data912-client'
 import { createServiceClient } from './supabase-server'
 import { getRedis } from './redis'
 import { cacheUserSummaries } from './summary-cache'
@@ -195,6 +195,19 @@ export async function evaluatePriceAlerts(
     const direction = alert.operator === 'crosses_above' ? '↑' : '↓'
     const msg = `🔔 Alerta disparada: ${alert.ticker} ${direction} ${alert.value}\nPrecio actual: ${currentPrice}`
     await sendTelegram(msg)
+  }
+}
+
+/**
+ * Peso-line prices for the Pesos / MEP / Cable views. A data912 failure must
+ * never fail the price cycle: it is logged and the last-known prices stay.
+ */
+async function refreshPesoPrices(tickers: string[]): Promise<void> {
+  try {
+    const n = await refreshLocalPrices(tickers)
+    console.log(`[Worker] data912 peso prices: ${n} cached`)
+  } catch (err) {
+    console.error('[Worker] data912 peso prices failed, last-known prices kept:', err)
   }
 }
 
@@ -394,6 +407,9 @@ const worker = new Worker(
       }
     }
 
+    // 3b. PESO-LINE PRICES (data912) — the periodic cycle only
+    if (job.name === PRICE_REPEAT_JOB_NAME && tickers.length > 0) await refreshPesoPrices(tickers)
+
     const missing = [...tickers, ...onTickers].filter(t => !allPrices.has(t))
     if (missing.length > 0) {
       console.warn(`[Worker] No price (fresh or LKP) available for: ${missing.join(', ')}`)
@@ -491,6 +507,8 @@ async function main() {
         console.error('[Worker] Data912 fetch failed on startup:', err)
       }
     }
+
+    if (tickers.length) await refreshPesoPrices(tickers)
 
     // Log tickers that have no price at all (neither LKP nor fresh)
     const missing = [...tickers, ...onTickers].filter(t => !allPrices.has(t))

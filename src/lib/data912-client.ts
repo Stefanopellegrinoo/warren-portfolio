@@ -10,6 +10,7 @@
 import type { Quote } from '@/types'
 import { fetchQuotes, cachePrice } from './yahoo-finance'
 import { createServiceClient } from './supabase-server'
+import { localSymbol } from './multicurrency'
 
 export interface Data912RawQuote {
   symbol: string
@@ -172,6 +173,73 @@ export async function getAvailableCorporateBonds(): Promise<string[]> {
     console.error('[Data912] Failed to fetch available bonds:', error)
     return []
   }
+}
+
+// ── Peso-line prices (CEDEARs and local shares) ─────────────────────────────
+
+const LOCAL_FEEDS = {
+  cedears: 'https://data912.com/live/arg_cedears',
+  stocks: 'https://data912.com/live/arg_stocks',
+} as const
+const LOCAL_FETCH_TIMEOUT_MS = 10_000
+
+/**
+ * Last-known-price name of a peso-line price. It goes through the same helpers
+ * as every other price (cachePrice / fetchQuotes), so in Redis it is
+ * `price:local:{SYMBOL}`.
+ */
+export const localPriceKey = (symbol: string) => `local:${symbol}`
+
+async function fetchLocalFeed(url: string, fetchFn: typeof fetch): Promise<Data912RawQuote[]> {
+  const res = await fetchFn(url, {
+    signal: AbortSignal.timeout(LOCAL_FETCH_TIMEOUT_MS),
+    headers: { 'Accept': 'application/json', 'User-Agent': 'Warren Portfolio/1.0' },
+  })
+  if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`)
+  const rows = await res.json()
+  if (!Array.isArray(rows)) throw new Error(`${url}: non-array response`)
+  return rows
+}
+
+/**
+ * Caches the peso-line close (`c`) and day change of the held tickers: one GET
+ * per feed. A CEDEAR is looked up by its own ticker in the CEDEAR feed, a
+ * `BCBA:` share by its symbol in the stocks feed. Never throws: a failed feed is
+ * logged and its symbols keep their last-known price. Returns how many prices
+ * were cached.
+ */
+export async function refreshLocalPrices(tickers: string[], fetchFn: typeof fetch = fetch): Promise<number> {
+  const wanted = { cedears: new Set<string>(), stocks: new Set<string>() }
+  for (const t of tickers) {
+    const isShare = t.trim().toUpperCase().startsWith('BCBA:')
+    wanted[isShare ? 'stocks' : 'cedears'].add(localSymbol(t))
+  }
+  const kinds = (Object.keys(wanted) as (keyof typeof wanted)[]).filter(k => wanted[k].size > 0)
+  if (kinds.length === 0) return 0
+
+  const feeds = await Promise.allSettled(kinds.map(k => fetchLocalFeed(LOCAL_FEEDS[k], fetchFn)))
+  const updatedAt = new Date().toISOString()
+  let cached = 0
+
+  for (let i = 0; i < kinds.length; i++) {
+    const feed = feeds[i]
+    if (feed.status === 'rejected') {
+      console.error(`[Data912] ${kinds[i]} peso prices failed, last-known prices kept:`, feed.reason)
+      continue
+    }
+    for (const r of feed.value) {
+      const price = Number(r.c)
+      if (!wanted[kinds[i]].has(r.symbol) || !(price > 0)) continue
+      // FRACTION convention (0.005 = 0.5%), as every LKP writer.
+      const changePercent = Number(r.pct_change) / 100 || 0
+      const previousClose = price / (1 + changePercent)
+      await cachePrice(localPriceKey(r.symbol), {
+        ticker: r.symbol, price, change: price - previousClose, changePercent, previousClose, updatedAt,
+      })
+      cached++
+    }
+  }
+  return cached
 }
 
 /**
