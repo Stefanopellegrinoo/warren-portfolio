@@ -1,9 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { Chip, SectionHead } from "@/components/resumen/ui";
+import { formatNumber } from "@/lib/utils";
+import { ErrorNotice, SkeletonRows, ghostButton, iconButton } from "./ui";
 
-interface PriceAlert {
+export interface PriceAlert {
   id: string;
   ticker: string;
   type: string;
@@ -15,134 +20,124 @@ interface PriceAlert {
   triggered_at: string | null;
 }
 
+const price = (v: number) => formatNumber(v, { decimals: Math.abs(v) < 1 ? 4 : 2 });
+
 function formatCondition(operator: string, value: number): string {
-  if (operator === "crosses_above") return `cruza ${value.toFixed(2)} ↑`;
-  if (operator === "crosses_below") return `baja ${value.toFixed(2)} ↓`;
-  return `${operator} ${value.toFixed(2)}`;
+  if (operator === "crosses_above") return `Supera ${price(value)}`;
+  if (operator === "crosses_below") return `Baja de ${price(value)}`;
+  return `${operator} ${price(value)}`;
+}
+
+const when = (iso: string) =>
+  new Date(iso).toLocaleString("es-AR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+
+export function AlertsList({ alerts, busyId, onDelete, onRearm }: {
+  alerts: PriceAlert[];
+  busyId: string | null;
+  onDelete: (id: string) => void;
+  onRearm: (id: string) => void;
+}) {
+  return (
+    <ul>
+      {alerts.map((a) => {
+        const triggered = a.status === "triggered";
+        const busy = busyId === a.id;
+        return (
+          <li key={a.id} className="grid min-h-[56px] grid-cols-[96px_minmax(0,1fr)_auto_auto] items-center gap-x-4 gap-y-1 border-b border-line py-2 last:border-b-0 max-[819px]:grid-cols-[minmax(0,1fr)_auto]">
+            <Link href={`/trading?symbol=${encodeURIComponent(a.ticker)}`} className="font-semibold hover:text-accent-ink max-[819px]:inline-flex max-[819px]:min-h-11 max-[819px]:items-center">
+              {a.ticker}
+            </Link>
+            <span className="min-w-0 tabular-nums max-[819px]:order-3">
+              {formatCondition(a.operator, a.value)}
+              {triggered && a.triggered_at && (
+                <small className="ml-2 text-[13px] text-ink-3">el {when(a.triggered_at)}</small>
+              )}
+            </span>
+            <Chip tone={triggered ? "neutral" : "ok"} className="justify-self-start max-[819px]:order-2 max-[819px]:justify-self-end">
+              {triggered ? "Disparada" : "Activa"}
+            </Chip>
+            <span className="flex items-center justify-end gap-1 max-[819px]:order-4">
+              {triggered && (
+                <button type="button" onClick={() => onRearm(a.id)} disabled={busy} aria-busy={busy} aria-label={`Reactivar la alerta de ${a.ticker}`} className={ghostButton}>
+                  Reactivar
+                </button>
+              )}
+              <button type="button" onClick={() => onDelete(a.id)} disabled={busy} aria-busy={busy} aria-label={`Eliminar la alerta de ${a.ticker}`} title="Eliminar" className={`${iconButton} hover:text-danger`}>
+                <Trash2 className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+              </button>
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 export function PriceAlertsTab() {
-  const [alerts, setAlerts] = useState<PriceAlert[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [alerts, setAlerts] = useState<PriceAlert[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function loadAlerts() {
-      try {
-        const res = await fetch("/api/price-alerts");
-        if (!res.ok) return;
-        const body = await res.json();
-        setAlerts(body.alerts ?? []);
-      } catch {
-        // silent
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadAlerts();
+  const load = useCallback(() => {
+    setLoadError(false);
+    fetch("/api/price-alerts")
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+      .then((body) => setAlerts(body.alerts ?? []))
+      .catch(() => setLoadError(true));
   }, []);
 
+  useEffect(() => { load(); }, [load]);
+
   async function handleDelete(id: string) {
-    setDeletingId(id);
+    setBusyId(id);
     try {
       const res = await fetch(`/api/price-alerts/${id}`, { method: "DELETE" });
       if (!res.ok && res.status !== 204) throw new Error("failed");
-      setAlerts((prev) => prev.filter((a) => a.id !== id));
+      setAlerts((prev) => (prev ?? []).filter((a) => a.id !== id));
       toast.success("Alerta eliminada");
     } catch {
       toast.error("No se pudo eliminar la alerta");
     } finally {
-      setDeletingId(null);
+      setBusyId(null);
     }
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <div className="w-6 h-6 rounded-full border-2 border-amber border-t-transparent animate-spin" />
-      </div>
-    );
+  async function handleRearm(id: string) {
+    setBusyId(id);
+    try {
+      const res = await fetch(`/api/price-alerts/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "active" }),
+      });
+      if (!res.ok) throw new Error("failed");
+      const body = (await res.json()) as { alert: PriceAlert };
+      setAlerts((prev) => (prev ?? []).map((a) => (a.id === id ? { ...a, ...body.alert } : a)));
+      toast.success("Alerta reactivada");
+    } catch {
+      toast.error("No se pudo reactivar la alerta");
+    } finally {
+      setBusyId(null);
+    }
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="bg-[#0d1829]/70 backdrop-blur-md border border-white/[0.06] rounded-2xl overflow-hidden">
-        {alerts.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 gap-2">
-            <p className="text-slate-500 font-mono text-xs">
-              No hay alertas activas · Se crean desde el gráfico
-            </p>
-          </div>
-        ) : (
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-white/[0.06]">
-                <th className="text-left text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500 px-3 py-3">
-                  Ticker
-                </th>
-                <th className="text-left text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500 px-3 py-3">
-                  Tipo
-                </th>
-                <th className="text-left text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500 px-3 py-3">
-                  Condición
-                </th>
-                <th className="text-left text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500 px-3 py-3">
-                  Estado
-                </th>
-                <th className="px-3 py-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {alerts.map((alert) => (
-                <tr
-                  key={alert.id}
-                  className={`border-b border-white/[0.04] last:border-0 ${
-                    alert.status === "triggered" ? "opacity-40" : ""
-                  }`}
-                >
-                  <td className="px-3 py-2.5 text-xs font-mono text-slate-400">
-                    <span className="bg-amber/10 text-amber border border-amber/20 font-mono text-[10px] font-bold px-2 py-0.5 rounded-full">
-                      {alert.ticker}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 text-xs font-mono text-slate-400">
-                    <span className="bg-white/[0.06] text-slate-400 border border-white/[0.08] font-mono text-[10px] px-2 py-0.5 rounded-full">
-                      {alert.type}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 text-xs font-mono text-white/65">
-                    {formatCondition(alert.operator, alert.value)}
-                  </td>
-                  <td className="px-3 py-2.5 text-xs font-mono">
-                    {alert.status === "active" ? (
-                      <span className="tag-positive">activa</span>
-                    ) : (
-                      <span className="tag-neutral">disparada</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5 text-right">
-                    <button
-                      onClick={() => handleDelete(alert.id)}
-                      disabled={deletingId === alert.id}
-                      className="text-white/20 hover:text-rose-500 text-base bg-transparent border-none transition-colors disabled:opacity-50"
-                      title="Eliminar alerta"
-                    >
-                      {deletingId === alert.id ? (
-                        <span className="w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin inline-block" />
-                      ) : (
-                        "×"
-                      )}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-      <p className="text-slate-500/50 text-[10px] font-mono text-right mt-2">
-        Las alertas se crean desde el gráfico · Se auto-desactivan al dispararse
+    <section aria-labelledby="h-alertas">
+      <SectionHead id="h-alertas" title="Alertas de precio" count={alerts?.length} />
+      {loadError && <div className="pt-3"><ErrorNotice onRetry={load}>No se pudieron cargar las alertas.</ErrorNotice></div>}
+      {!loadError && alerts === null && <SkeletonRows label="Cargando alertas" rows={3} />}
+      {alerts !== null && alerts.length === 0 && (
+        <p className="py-6 text-ink-2">
+          Todavía no creaste alertas. Se crean desde{" "}
+          <Link href="/trading" className="font-medium text-accent-ink underline underline-offset-2">Gráficos</Link>.
+        </p>
+      )}
+      {alerts !== null && alerts.length > 0 && (
+        <AlertsList alerts={alerts} busyId={busyId} onDelete={handleDelete} onRearm={handleRearm} />
+      )}
+      <p className="mt-4 text-[13px] text-ink-3">
+        Las alertas se crean desde Gráficos. Al dispararse dejan de vigilar el precio hasta que las reactivás.
       </p>
-    </div>
+    </section>
   );
 }

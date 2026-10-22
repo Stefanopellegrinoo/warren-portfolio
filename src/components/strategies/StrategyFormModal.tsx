@@ -3,17 +3,13 @@
 import { useState, useEffect, KeyboardEvent } from 'react'
 import { X } from 'lucide-react'
 import { toast } from 'sonner'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
+import { Dialog } from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
+import { DialogActions, StrategyDialog, field, ghostButton, label, primaryButton } from './ui'
 import type { Strategy } from '@/types'
 
 const TIMEFRAMES = ['1d', '1w'] as const
+const TIMEFRAME_LABELS: Record<string, string> = { '1d': 'Diario (1d)', '1w': 'Semanal (1w)' }
 
 interface StrategyFormModalProps {
   open: boolean
@@ -118,126 +114,108 @@ export function StrategyFormModal({
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!loading) onOpenChange(o) }}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>
-            {isEdit ? 'Editar estrategia' : 'Nueva estrategia'}
-          </DialogTitle>
-        </DialogHeader>
-
-        <div className="flex flex-col gap-4 py-1">
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-slate-400 font-mono">Nombre *</label>
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Ej: Momentum + RSI"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-slate-400 font-mono">Filosofía *</label>
-            <textarea
-              className="input-field min-h-[120px] resize-y text-sm"
-              value={philosophy}
-              onChange={(e) => setPhilosophy(e.target.value)}
-              placeholder="Reglas, checklist, por qué..."
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-slate-400 font-mono">
-              Tickers <span className="text-slate-500">(Enter o coma para agregar)</span>
-            </label>
-            <div className="flex flex-wrap gap-1.5 min-h-[32px] rounded-lg border border-input bg-transparent px-2.5 py-1.5">
-              {tickers.map((ticker) => (
-                <span
-                  key={ticker}
-                  className="bg-amber/20 text-amber rounded px-2 py-0.5 flex items-center gap-1 text-sm font-mono"
-                >
-                  {ticker}
-                  <button
-                    type="button"
-                    onClick={() => removeTicker(ticker)}
-                    className="hover:text-white transition-colors"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </span>
-              ))}
+      <StrategyDialog title={isEdit ? 'Editar estrategia' : 'Nueva estrategia'}>
+        <form onSubmit={(e) => { e.preventDefault(); if (!isDisabled) handleSubmit() }}>
+          <div className="grid gap-4 px-5 py-5">
+            <div className="grid gap-2">
+              <label htmlFor="strategy-name" className={label}>Nombre</label>
               <input
-                className="flex-1 min-w-[80px] bg-transparent outline-none text-sm placeholder:text-muted-foreground"
+                id="strategy-name"
+                required
+                className={field}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Ej.: Momentum con RSI"
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <label htmlFor="strategy-philosophy" className={label}>Filosofía</label>
+              <textarea
+                id="strategy-philosophy"
+                required
+                className={cn(field, 'min-h-[120px] resize-y py-2 leading-relaxed max-[819px]:min-h-[120px]')}
+                value={philosophy}
+                onChange={(e) => setPhilosophy(e.target.value)}
+                placeholder="Reglas, checklist, por qué la seguís"
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <label htmlFor="strategy-ticker" className={label}>
+                Tickers <span className="font-normal text-ink-3">(Enter o coma para agregar)</span>
+              </label>
+              {tickers.length > 0 && (
+                <ul aria-label="Tickers agregados" className="flex flex-wrap gap-1.5">
+                  {tickers.map((ticker) => (
+                    <li key={ticker} className="inline-flex h-7 items-center gap-1 rounded border border-line bg-surface-2 pl-2 text-[13px] font-medium max-[819px]:h-11">
+                      {ticker}
+                      <button
+                        type="button"
+                        onClick={() => removeTicker(ticker)}
+                        aria-label={`Quitar ${ticker}`}
+                        className="grid h-7 w-7 place-items-center rounded text-ink-3 hover:bg-hover hover:text-ink max-[819px]:h-11 max-[819px]:w-11"
+                      >
+                        <X className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <input
+                id="strategy-ticker"
+                className={field}
                 value={tickerInput}
                 onChange={(e) => setTickerInput(e.target.value)}
                 onKeyDown={handleTickerKeyDown}
                 onBlur={() => { if (tickerInput.trim()) addTicker(tickerInput) }}
-                placeholder={tickers.length === 0 ? 'AAPL, MSFT...' : ''}
+                placeholder={tickers.length === 0 ? 'AAPL, MSFT' : ''}
+                autoCapitalize="characters"
               />
             </div>
-          </div>
 
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-slate-400 font-mono">Timeframes</label>
-            <div className="flex gap-2">
-              {TIMEFRAMES.map((tf) => (
-                <button
-                  key={tf}
-                  type="button"
-                  onClick={() => toggleTimeframe(tf)}
-                  className={
-                    timeframes.includes(tf)
-                      ? 'bg-amber/20 border border-amber text-amber rounded px-3 py-1 text-sm font-mono transition-colors'
-                      : 'border border-tv-border text-slate-400 rounded px-3 py-1 text-sm font-mono transition-colors hover:border-slate-500'
-                  }
-                >
-                  {tf}
-                </button>
-              ))}
-            </div>
-          </div>
+            <fieldset className="grid gap-2">
+              <legend className={`${label} mb-2`}>Timeframes</legend>
+              <div className="flex flex-wrap gap-4">
+                {TIMEFRAMES.map((tf) => (
+                  <label key={tf} className="inline-flex min-h-9 cursor-pointer items-center gap-2 text-sm max-[819px]:min-h-11">
+                    <input
+                      type="checkbox"
+                      checked={timeframes.includes(tf)}
+                      onChange={() => toggleTimeframe(tf)}
+                      className="h-4 w-4 cursor-pointer accent-[var(--accent)]"
+                    />
+                    {TIMEFRAME_LABELS[tf]}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
 
-          {isEdit && (
-            <div className="flex items-center gap-2">
-              <input
-                id="active-toggle"
-                type="checkbox"
-                checked={active}
-                onChange={(e) => setActive(e.target.checked)}
-                className="w-4 h-4 accent-amber cursor-pointer"
-              />
-              <label htmlFor="active-toggle" className="text-sm text-slate-300 cursor-pointer">
+            {isEdit && (
+              <label className="inline-flex min-h-9 cursor-pointer items-center gap-2 text-sm max-[819px]:min-h-11">
+                <input
+                  type="checkbox"
+                  checked={active}
+                  onChange={(e) => setActive(e.target.checked)}
+                  className="h-4 w-4 cursor-pointer accent-[var(--accent)]"
+                />
                 Estrategia activa
               </label>
-            </div>
-          )}
-
-          {error && (
-            <p className="text-xs text-red-400 font-mono">{error}</p>
-          )}
-        </div>
-
-        <DialogFooter>
-          <button
-            type="button"
-            className="btn-ghost text-xs"
-            onClick={() => onOpenChange(false)}
-            disabled={loading}
-          >
-            Cancelar
-          </button>
-          <button
-            type="button"
-            className="btn-primary text-xs inline-flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={handleSubmit}
-            disabled={isDisabled}
-          >
-            {loading && (
-              <span className="w-3.5 h-3.5 rounded-full border-2 border-current border-t-transparent animate-spin" />
             )}
-            Guardar
-          </button>
-        </DialogFooter>
-      </DialogContent>
+
+            {error && <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-[13px] text-danger">{error}</p>}
+          </div>
+
+          <DialogActions>
+            <button type="button" className={ghostButton} onClick={() => onOpenChange(false)} disabled={loading}>
+              Cancelar
+            </button>
+            <button type="submit" className={primaryButton} disabled={isDisabled} aria-busy={loading}>
+              {loading ? 'Guardando…' : 'Guardar'}
+            </button>
+          </DialogActions>
+        </form>
+      </StrategyDialog>
     </Dialog>
   )
 }

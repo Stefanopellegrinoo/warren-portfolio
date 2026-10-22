@@ -1,11 +1,14 @@
 'use client'
 
 import { useState, useEffect, useCallback, Suspense } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
-import { Plus, BookOpen } from 'lucide-react'
+import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
+import { ChevronRight, Plus } from 'lucide-react'
 import type { StrategyWithSetups, StrategiesListResponse } from '@/types'
 import { StrategyFormModal } from '@/components/strategies/StrategyFormModal'
 import { PriceAlertsTab } from '@/components/strategies/PriceAlertsTab'
+import { Chip, SectionHead } from '@/components/resumen/ui'
+import { ErrorNotice, SkeletonRows, page, pageTitle, primaryButton, tabClass } from '@/components/strategies/ui'
 
 export default function StrategiesPage() {
   return (
@@ -16,9 +19,8 @@ export default function StrategiesPage() {
 }
 
 function StrategiesContent() {
-  const router = useRouter()
   const searchParams = useSearchParams()
-  const activeTab = (searchParams.get('tab') === 'alertas' ? 'alertas' : 'estrategias') as 'estrategias' | 'alertas'
+  const activeTab = searchParams.get('tab') === 'alertas' ? 'alertas' : 'estrategias'
 
   const [strategies, setStrategies] = useState<StrategyWithSetups[]>([])
   const [loading, setLoading] = useState(true)
@@ -34,7 +36,7 @@ function StrategiesContent() {
       const data: StrategiesListResponse = await res.json()
       setStrategies(data.strategies)
     } catch {
-      setError('No se pudieron cargar las estrategias')
+      setError('No se pudieron cargar las estrategias.')
     } finally {
       setLoading(false)
     }
@@ -42,114 +44,56 @@ function StrategiesContent() {
 
   useEffect(() => { loadStrategies() }, [loadStrategies])
 
-  function setTab(tab: 'estrategias' | 'alertas') {
-    const params = new URLSearchParams(searchParams.toString())
-    if (tab === 'alertas') {
-      params.set('tab', 'alertas')
-    } else {
-      params.delete('tab')
-    }
-    router.push(`/strategies?${params.toString()}`)
-  }
-
   return (
-    <div className="min-h-screen p-6">
-      <div className="max-w-[1550px] mx-auto">
-
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 animate-fade-in">
-          <div>
-            <h1 className="font-display font-800 text-2xl md:text-3xl text-white tracking-tight">
-              Estrategias
-            </h1>
-            <p className="text-slate-400 font-mono text-sm mt-1">
-              Gestioná tus estrategias e indicadores
-            </p>
-          </div>
-          {activeTab === 'estrategias' && (
-            <button
-              className="btn-primary inline-flex items-center gap-2 text-xs"
-              onClick={() => setShowModal(true)}
-            >
-              <Plus className="w-4 h-4" />
-              Nueva estrategia
-            </button>
-          )}
+    <div className={page}>
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className={pageTitle}>Estrategias y alertas</h1>
+          <p className="mt-1 text-ink-3">Tus estrategias con sus setups de indicadores, y las alertas de precio que creaste en Gráficos.</p>
         </div>
-
-        {/* Tab strip */}
-        <div className="flex gap-0 mb-6 border-b border-white/[0.08]">
-          {(['estrategias', 'alertas'] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setTab(tab)}
-              className={`px-4 py-2 text-xs font-mono border-b-2 transition-colors ${
-                activeTab === tab
-                  ? 'border-amber text-amber'
-                  : 'border-transparent text-slate-500 hover:text-slate-300'
-              }`}
-            >
-              {tab === 'estrategias' ? 'Estrategias' : 'Alertas'}
-            </button>
-          ))}
-        </div>
-
-        {/* Estrategias tab */}
         {activeTab === 'estrategias' && (
-          <>
-            {loading && (
-              <div className="flex items-center justify-center py-24">
-                <div className="w-8 h-8 rounded-full border-2 border-amber border-t-transparent animate-spin" />
-              </div>
-            )}
-
-            {!loading && error && (
-              <div className="flex flex-col items-center justify-center py-24 gap-4">
-                <p className="text-slate-400 font-mono text-sm">{error}</p>
-                <button onClick={loadStrategies} className="btn-ghost text-xs">
-                  Reintentar
-                </button>
-              </div>
-            )}
-
-            {!loading && !error && strategies.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-24 gap-4 animate-fade-in">
-                <div className="w-14 h-14 rounded-2xl bg-amber/10 flex items-center justify-center">
-                  <BookOpen className="w-7 h-7 text-amber" />
-                </div>
-                <div className="text-center">
-                  <p className="text-white font-display font-600 text-lg">Sin estrategias todavía</p>
-                  <p className="text-slate-400 font-mono text-sm mt-1">Creá tu primera estrategia para empezar a trackear setups</p>
-                </div>
-                <button
-                  className="btn-primary inline-flex items-center gap-2 text-xs"
-                  onClick={() => setShowModal(true)}
-                >
-                  <Plus className="w-4 h-4" />
-                  Crear primera estrategia
-                </button>
-              </div>
-            )}
-
-            {!loading && !error && strategies.length > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-fade-in">
-                {strategies.map((strategy) => (
-                  <StrategyCard
-                    key={strategy.id}
-                    strategy={strategy}
-                    onViewDetail={() => router.push(`/strategies/${strategy.id}`)}
-                  />
-                ))}
-              </div>
-            )}
-          </>
+          <button type="button" className={`${primaryButton} max-[819px]:w-full`} onClick={() => setShowModal(true)}>
+            <Plus className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+            Nueva estrategia
+          </button>
         )}
-
-        {/* Alertas tab */}
-        {activeTab === 'alertas' && (
-          <PriceAlertsTab />
-        )}
-
       </div>
+
+      <nav aria-label="Secciones" className="mb-8 flex gap-6 border-b border-line">
+        <Link href="/strategies" aria-current={activeTab === 'estrategias' ? 'page' : undefined} className={tabClass(activeTab === 'estrategias')}>
+          Estrategias
+        </Link>
+        <Link href="/strategies?tab=alertas" aria-current={activeTab === 'alertas' ? 'page' : undefined} className={tabClass(activeTab === 'alertas')}>
+          Alertas
+        </Link>
+      </nav>
+
+      {activeTab === 'estrategias' && (
+        <section aria-labelledby="h-estrategias">
+          <SectionHead id="h-estrategias" title="Estrategias" count={loading || error ? undefined : strategies.length} />
+
+          {loading && <SkeletonRows label="Cargando estrategias" />}
+
+          {!loading && error && <div className="pt-3"><ErrorNotice onRetry={loadStrategies}>{error}</ErrorNotice></div>}
+
+          {!loading && !error && strategies.length === 0 && (
+            <div className="grid justify-items-start gap-3 py-8">
+              <p className="text-ink-2">Todavía no tenés estrategias. Creá la primera para empezar a seguir setups.</p>
+              <button type="button" className={primaryButton} onClick={() => setShowModal(true)}>
+                Crear primera estrategia
+              </button>
+            </div>
+          )}
+
+          {!loading && !error && strategies.length > 0 && (
+            <ul>
+              {strategies.map((strategy) => <StrategyRow key={strategy.id} strategy={strategy} />)}
+            </ul>
+          )}
+        </section>
+      )}
+
+      {activeTab === 'alertas' && <PriceAlertsTab />}
 
       <StrategyFormModal
         open={showModal}
@@ -164,62 +108,27 @@ function StrategiesContent() {
   )
 }
 
-function StrategyCard({
-  strategy,
-  onViewDetail,
-}: {
-  strategy: StrategyWithSetups
-  onViewDetail: () => void
-}) {
-  const activeSetups = strategy.indicator_setups.filter((s) => s.active)
+function StrategyRow({ strategy }: { strategy: StrategyWithSetups }) {
+  const activeSetups = strategy.indicator_setups.filter((s) => s.active).length
+  const meta = [
+    `${activeSetups} ${activeSetups === 1 ? 'setup activo' : 'setups activos'}`,
+    strategy.timeframes.length > 0 ? strategy.timeframes.join(', ') : null,
+    strategy.tickers.length > 0 ? strategy.tickers.join(', ') : null,
+  ].filter(Boolean).join(' · ')
 
   return (
-    <div className="kpi-card rounded-2xl p-5 flex flex-col gap-4">
-      <div className="flex items-start justify-between gap-2">
-        <h2 className="font-display font-700 text-white text-base leading-snug">{strategy.name}</h2>
-        <span
-          className={
-            strategy.active
-              ? 'tag-positive shrink-0 text-[11px]'
-              : 'tag-neutral shrink-0 text-[11px]'
-          }
-        >
-          {strategy.active ? 'Activa' : 'Inactiva'}
+    <li className="border-b border-line last:border-b-0">
+      <Link
+        href={`/strategies/${strategy.id}`}
+        className="grid min-h-[60px] grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 py-3 hover:bg-hover"
+      >
+        <span className="min-w-0">
+          <span className="block font-semibold">{strategy.name}</span>
+          <small className="block truncate text-[13px] text-ink-3">{meta}</small>
         </span>
-      </div>
-
-      <div className="flex flex-wrap gap-1.5">
-        <span className="px-2 py-0.5 rounded-full bg-amber/10 text-amber text-[11px] font-mono border border-amber/20">
-          {activeSetups.length} {activeSetups.length === 1 ? 'setup' : 'setups'}
-        </span>
-        {strategy.timeframes.map((tf) => (
-          <span
-            key={tf}
-            className="px-2 py-0.5 rounded-full bg-white/[0.06] text-slate-300 text-[11px] font-mono border border-white/[0.08]"
-          >
-            {tf}
-          </span>
-        ))}
-      </div>
-
-      {strategy.tickers.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {strategy.tickers.map((ticker) => (
-            <span
-              key={ticker}
-              className="px-2 py-0.5 rounded-full bg-bg-800 text-slate-400 text-[11px] font-mono border border-white/[0.06]"
-            >
-              {ticker}
-            </span>
-          ))}
-        </div>
-      )}
-
-      <div className="mt-auto pt-3 border-t border-white/[0.05]">
-        <button onClick={onViewDetail} className="btn-ghost w-full justify-center text-xs">
-          Ver detalle
-        </button>
-      </div>
-    </div>
+        <Chip tone={strategy.active ? 'ok' : 'neutral'}>{strategy.active ? 'Activa' : 'Inactiva'}</Chip>
+        <ChevronRight className="h-4 w-4 text-ink-3" strokeWidth={1.5} aria-hidden="true" />
+      </Link>
+    </li>
   )
 }

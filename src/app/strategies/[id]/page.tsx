@@ -1,13 +1,16 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { useRouter, useParams } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Plus, Pencil, Trash2, ChevronRight } from 'lucide-react'
+import { ArrowLeft, Plus, Pencil, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { StrategyWithSetups, IndicatorSetup, IndicatorParam } from '@/types'
 import { StrategyFormModal } from '@/components/strategies/StrategyFormModal'
 import { SetupFormModal } from '@/components/strategies/SetupFormModal'
+import { Chip, SectionHead } from '@/components/resumen/ui'
+import { ErrorNotice, SkeletonRows, ghostButton, iconButton, page, pageTitle, primaryButton, secondaryButton, textLink } from '@/components/strategies/ui'
+import { formatNumber } from '@/lib/utils'
 
 function indicatorLabel(ind: IndicatorParam): string {
   switch (ind.type) {
@@ -20,14 +23,13 @@ function indicatorLabel(ind: IndicatorParam): string {
     case 'Bollinger':
       return `BB ${ind.period ?? ''}`
     case 'Volume':
-      return 'Volume'
+      return 'Volumen'
     default:
       return ind.type
   }
 }
 
 export default function StrategyDetailPage() {
-  const router = useRouter()
   const params = useParams<{ id: string }>()
   const strategyId = params.id
 
@@ -41,7 +43,6 @@ export default function StrategyDetailPage() {
   const [editingSetup, setEditingSetup] = useState<IndicatorSetup | undefined>(undefined)
   const [deletingSetupId, setDeletingSetupId] = useState<string | null>(null)
   const [togglingSetupId, setTogglingSetupId] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<'setups'>('setups')
 
   const loadStrategy = useCallback(async () => {
     try {
@@ -56,7 +57,7 @@ export default function StrategyDetailPage() {
       const data = await res.json() as { strategy: StrategyWithSetups }
       setStrategy(data.strategy)
     } catch {
-      setError('No se pudo cargar la estrategia')
+      setError('No se pudo cargar la estrategia.')
     } finally {
       setLoading(false)
     }
@@ -141,187 +142,100 @@ export default function StrategyDetailPage() {
     })
   }
 
+  const back = (
+    <Link href="/strategies" className={`${textLink} mb-2`}>
+      <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
+      Estrategias
+    </Link>
+  )
+
   if (loading) {
-    return (
-      <div className="min-h-screen p-6 flex items-center justify-center">
-        <div className="w-8 h-8 rounded-full border-2 border-amber border-t-transparent animate-spin" />
-      </div>
-    )
+    return <div className={page}>{back}<SkeletonRows label="Cargando la estrategia" /></div>
   }
 
   if (notFound) {
     return (
-      <div className="min-h-screen p-6 flex flex-col items-center justify-center gap-4">
-        <p className="text-slate-300 font-display font-600 text-lg">Estrategia no encontrada</p>
-        <Link href="/strategies" className="btn-ghost text-xs inline-flex items-center gap-1.5">
-          <ArrowLeft className="w-3.5 h-3.5" />
-          Volver a estrategias
-        </Link>
+      <div className={page}>
+        {back}
+        <h1 className={pageTitle}>Estrategia no encontrada</h1>
+        <p className="mt-1 text-ink-3">Puede que se haya eliminado. Volvé al listado para elegir otra.</p>
       </div>
     )
   }
 
   if (error) {
-    return (
-      <div className="min-h-screen p-6 flex flex-col items-center justify-center gap-4">
-        <p className="text-slate-400 font-mono text-sm">{error}</p>
-        <button onClick={loadStrategy} className="btn-ghost text-xs">
-          Reintentar
-        </button>
-      </div>
-    )
+    return <div className={page}>{back}<ErrorNotice onRetry={loadStrategy}>{error}</ErrorNotice></div>
   }
 
   if (!strategy) return null
 
-  return (
-    <div className="min-h-screen p-6">
-      <div className="max-w-[1550px] mx-auto">
+  const meta = [
+    strategy.timeframes.length > 0 ? `Timeframes ${strategy.timeframes.join(', ')}` : null,
+    strategy.tickers.length > 0 ? strategy.tickers.join(', ') : 'Sin tickers',
+  ].filter(Boolean).join(' · ')
 
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8 animate-fade-in">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => router.back()}
-              className="btn-ghost p-1.5 rounded-lg"
-              aria-label="Volver"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </button>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="font-display font-800 text-2xl md:text-3xl text-white tracking-tight">
-                  {strategy.name}
-                </h1>
-                <span
-                  className={
-                    strategy.active
-                      ? 'tag-positive text-[11px]'
-                      : 'tag-neutral text-[11px]'
-                  }
-                >
-                  {strategy.active ? 'Activa' : 'Inactiva'}
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-1.5 mt-1.5">
-                {strategy.timeframes.map((tf) => (
-                  <span
-                    key={tf}
-                    className="px-2 py-0.5 rounded-full bg-white/[0.06] text-slate-300 text-[11px] font-mono border border-white/[0.08]"
-                  >
-                    {tf}
-                  </span>
-                ))}
-                {strategy.tickers.map((ticker) => (
-                  <span
-                    key={ticker}
-                    className="px-2 py-0.5 rounded-full bg-bg-800 text-slate-400 text-[11px] font-mono border border-white/[0.06]"
-                  >
-                    {ticker}
-                  </span>
-                ))}
-              </div>
-            </div>
+  return (
+    <div className={page}>
+      {back}
+      <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className={`${pageTitle} min-w-0 break-words`}>{strategy.name}</h1>
+            <Chip tone={strategy.active ? 'ok' : 'neutral'}>{strategy.active ? 'Activa' : 'Inactiva'}</Chip>
           </div>
-          <button
-            className="btn-ghost inline-flex items-center gap-1.5 text-xs shrink-0"
-            onClick={() => setShowEditStrategy(true)}
-          >
-            <Pencil className="w-3.5 h-3.5" />
-            Editar estrategia
+          <p className="mt-1 text-ink-3">{meta}</p>
+        </div>
+        <div className="flex gap-2 max-[819px]:w-full">
+          <Link href={`/strategies/${strategy.id}/performance`} className={`${secondaryButton} max-[819px]:flex-1`}>
+            Ver rendimiento
+          </Link>
+          <button type="button" className={`${secondaryButton} max-[819px]:flex-1`} onClick={() => setShowEditStrategy(true)}>
+            <Pencil className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+            Editar
           </button>
         </div>
+      </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] items-start gap-10 max-[1080px]:grid-cols-[minmax(0,1fr)]">
+        <section aria-labelledby="h-filosofia">
+          <SectionHead id="h-filosofia" title="Filosofía" />
+          <p className="whitespace-pre-wrap break-words pt-3 leading-relaxed text-ink-2">{strategy.philosophy}</p>
+        </section>
 
-          {/* Left column: Philosophy + Performance */}
-          <div className="flex flex-col gap-6">
-
-            {/* Philosophy */}
-            <section className="glass rounded-2xl p-5 border border-white/[0.08]">
-              <h2 className="font-display font-700 text-white text-sm mb-3">Filosofía</h2>
-              <pre className="text-slate-300 text-sm font-mono whitespace-pre-wrap leading-relaxed">
-                {strategy.philosophy}
-              </pre>
-            </section>
-
-            {/* Performance link */}
-            <Link href={`/strategies/${strategy.id}/performance`}>
-              <section className="glass rounded-2xl p-5 border border-white/[0.08] hover:border-amber/30 transition-colors cursor-pointer group">
-                <div className="flex items-center justify-between mb-1">
-                  <h2 className="font-display font-700 text-white text-sm">Performance</h2>
-                  <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-amber transition-colors" />
-                </div>
-                <p className="text-slate-500 text-[11px]">Ver comparación de setups →</p>
-              </section>
-            </Link>
-
-          </div>
-
-          {/* Right column: Setups / Alertas tabs */}
-          <div className="lg:col-span-2">
-
-            {/* Tab strip */}
-            <div className="flex gap-0 mb-4 border-b border-white/[0.08]">
-              <button
-                onClick={() => setActiveTab('setups')}
-                className="px-4 py-2 text-xs font-mono border-b-2 border-amber text-amber"
-              >
-                Setups
+        <section aria-labelledby="h-setups">
+          <SectionHead
+            id="h-setups"
+            title="Setups"
+            count={strategy.indicator_setups.length}
+            action={
+              <button type="button" className={textLink} onClick={openNewSetup}>
+                <Plus className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
+                Nuevo setup
               </button>
+            }
+          />
+
+          {strategy.indicator_setups.length === 0 ? (
+            <div className="grid justify-items-start gap-3 py-6">
+              <p className="text-ink-2">Esta estrategia todavía no tiene setups.</p>
+              <button type="button" className={primaryButton} onClick={openNewSetup}>Crear el primer setup</button>
             </div>
-
-            {/* Setups tab */}
-            {activeTab === 'setups' && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="font-display font-700 text-white text-sm">
-                    Setups
-                    <span className="ml-2 text-slate-500 font-mono text-xs">
-                      ({strategy.indicator_setups.length})
-                    </span>
-                  </h2>
-                  <button
-                    className="btn-primary inline-flex items-center gap-1.5 text-xs"
-                    onClick={openNewSetup}
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Nuevo setup
-                  </button>
-                </div>
-
-                {strategy.indicator_setups.length === 0 ? (
-                  <div className="glass rounded-2xl p-8 border border-white/[0.08] flex flex-col items-center gap-3">
-                    <p className="text-slate-400 font-mono text-sm">Sin setups todavía</p>
-                    <button
-                      className="btn-primary inline-flex items-center gap-1.5 text-xs"
-                      onClick={openNewSetup}
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      Crear primer setup
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-3">
-                    {strategy.indicator_setups.map((setup) => (
-                      <SetupRow
-                        key={setup.id}
-                        setup={setup}
-                        togglingId={togglingSetupId}
-                        deletingId={deletingSetupId}
-                        onToggle={toggleSetupActive}
-                        onEdit={openEditSetup}
-                        onDelete={deleteSetup}
-                      />
-                    ))}
-                  </div>
-                )}
-              </section>
-            )}
-
-          </div>
-
-        </div>
+          ) : (
+            <ul>
+              {strategy.indicator_setups.map((setup) => (
+                <SetupRow
+                  key={setup.id}
+                  setup={setup}
+                  togglingId={togglingSetupId}
+                  deletingId={deletingSetupId}
+                  onToggle={toggleSetupActive}
+                  onEdit={openEditSetup}
+                  onDelete={deleteSetup}
+                />
+              ))}
+            </ul>
+          )}
+        </section>
       </div>
 
       <StrategyFormModal
@@ -359,90 +273,49 @@ function SetupRow({
 }) {
   const isToggling = togglingId === setup.id
   const isDeleting = deletingId === setup.id
+  const { indicators, stopLoss, takeProfit } = setup.config
+  const risk = [
+    stopLoss !== undefined ? `Stop loss ${formatNumber(stopLoss, { decimals: 1 })} %` : null,
+    takeProfit !== undefined ? `Take profit ${formatNumber(takeProfit, { decimals: 1 })} %` : null,
+  ].filter(Boolean).join(' · ')
 
   return (
-    <div className="glass rounded-xl p-4 border border-white/[0.08] flex flex-col sm:flex-row sm:items-center gap-3">
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="font-display font-600 text-white text-sm truncate">{setup.name}</span>
-          <span
-            className={
-              setup.active
-                ? 'tag-positive text-[10px] shrink-0'
-                : 'tag-neutral text-[10px] shrink-0'
-            }
-          >
-            {setup.active ? 'activo' : 'inactivo'}
-          </span>
+    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 border-b border-line py-3 last:border-b-0 max-[819px]:grid-cols-[minmax(0,1fr)]">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="min-w-0 break-words font-semibold">{setup.name}</span>
+          <Chip tone={setup.active ? 'ok' : 'neutral'}>{setup.active ? 'Activo' : 'Inactivo'}</Chip>
         </div>
-
-        {setup.config.indicators.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {setup.config.indicators.map((ind, i) => (
-              <span
-                key={i}
-                className="px-2 py-0.5 rounded-full bg-amber/10 text-amber text-[11px] font-mono border border-amber/20"
-              >
-                {indicatorLabel(ind)}
-              </span>
-            ))}
-          </div>
-        )}
-
-        {(setup.config.stopLoss !== undefined || setup.config.takeProfit !== undefined) && (
-          <div className="flex gap-3 mt-2">
-            {setup.config.stopLoss !== undefined && (
-              <span className="text-[11px] font-mono text-slate-500">
-                SL {setup.config.stopLoss}%
-              </span>
-            )}
-            {setup.config.takeProfit !== undefined && (
-              <span className="text-[11px] font-mono text-slate-500">
-                TP {setup.config.takeProfit}%
-              </span>
-            )}
-          </div>
-        )}
+        {indicators.length > 0 && <p className="mt-0.5 text-[13px] text-ink-2">{indicators.map(indicatorLabel).join(' · ')}</p>}
+        {risk && <p className="text-[13px] text-ink-3">{risk}</p>}
       </div>
 
-      <div className="flex items-center gap-2 shrink-0">
-        {/* Toggle active */}
+      <div className="flex items-center gap-1 max-[819px]:-ml-3">
         <button
-          className={`btn-ghost text-xs px-2.5 py-1 ${isToggling ? 'opacity-50 cursor-not-allowed' : ''}`}
-          onClick={() => !isToggling && onToggle(setup)}
+          type="button"
+          className={ghostButton}
+          onClick={() => onToggle(setup)}
           disabled={isToggling}
-          title={setup.active ? 'Desactivar' : 'Activar'}
+          aria-busy={isToggling}
+          aria-label={`${setup.active ? 'Desactivar' : 'Activar'} ${setup.name}`}
         >
-          {isToggling ? (
-            <span className="w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin inline-block" />
-          ) : (
-            <span className="text-[11px]">{setup.active ? 'Desactivar' : 'Activar'}</span>
-          )}
+          {setup.active ? 'Desactivar' : 'Activar'}
         </button>
-
-        {/* Edit */}
-        <button
-          className="btn-ghost p-1.5"
-          onClick={() => onEdit(setup)}
-          title="Editar setup"
-        >
-          <Pencil className="w-3.5 h-3.5" />
+        <button type="button" className={iconButton} onClick={() => onEdit(setup)} aria-label={`Editar ${setup.name}`} title="Editar">
+          <Pencil className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
         </button>
-
-        {/* Delete */}
         <button
-          className={`btn-ghost p-1.5 text-red-400 hover:text-red-300 ${isDeleting ? 'opacity-50 cursor-not-allowed' : ''}`}
-          onClick={() => !isDeleting && onDelete(setup.id)}
+          type="button"
+          className={`${iconButton} hover:text-danger`}
+          onClick={() => onDelete(setup.id)}
           disabled={isDeleting}
-          title="Eliminar setup"
+          aria-busy={isDeleting}
+          aria-label={`Eliminar ${setup.name}`}
+          title="Eliminar"
         >
-          {isDeleting ? (
-            <span className="w-3.5 h-3.5 rounded-full border-2 border-current border-t-transparent animate-spin inline-block" />
-          ) : (
-            <Trash2 className="w-3.5 h-3.5" />
-          )}
+          <Trash2 className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
         </button>
       </div>
-    </div>
+    </li>
   )
 }

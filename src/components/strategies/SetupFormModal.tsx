@@ -1,23 +1,11 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { X, Plus } from 'lucide-react'
+import { Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { Dialog } from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
+import { DialogActions, StrategyDialog, field, ghostButton, iconButton, label, primaryButton, textLink } from './ui'
 import type {
   IndicatorSetup,
   IndicatorParam,
@@ -42,12 +30,12 @@ interface ConditionRuleWithId extends ConditionRule {
 const INDICATOR_TYPES: IndicatorType[] = ['EMA', 'RSI', 'MACD', 'Bollinger', 'Volume']
 
 const OPERATORS: { value: IndicatorOperator; label: string }[] = [
-  { value: 'crosses_above', label: 'cruza arriba' },
-  { value: 'crosses_below', label: 'cruza abajo' },
-  { value: 'gt', label: '>' },
-  { value: 'lt', label: '<' },
-  { value: 'gte', label: '>=' },
-  { value: 'lte', label: '<=' },
+  { value: 'crosses_above', label: 'Cruza hacia arriba' },
+  { value: 'crosses_below', label: 'Cruza hacia abajo' },
+  { value: 'gt', label: 'Mayor que (>)' },
+  { value: 'lt', label: 'Menor que (<)' },
+  { value: 'gte', label: 'Mayor o igual (≥)' },
+  { value: 'lte', label: 'Menor o igual (≤)' },
 ]
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -69,151 +57,120 @@ function defaultCondition(): ConditionRule {
 
 // ─── sub-components ──────────────────────────────────────────────────────────
 
+const small = cn(field, 'w-24')
+const rowClass = 'grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3 border-b border-line py-3 last:border-b-0'
+
+/** A labelled control inside a row; the id ties the label to its input. */
+function Cell({ id, text, children }: { id: string; text: string; children: React.ReactNode }) {
+  return (
+    <div className="grid gap-1">
+      <label htmlFor={id} className="text-[13px] text-ink-2">{text}</label>
+      {children}
+    </div>
+  )
+}
+
+function NumberInput({ id, value, onChange, min, wide }: { id: string; value: number | undefined; onChange: (v: string) => void; min?: number; wide?: boolean }) {
+  return <input id={id} type="number" inputMode="numeric" className={wide ? cn(field, 'w-28') : small} value={value ?? ''} min={min} onChange={(e) => onChange(e.target.value)} />
+}
+
+function TypeSelect({ id, value, onChange }: { id: string; value: string; onChange: (v: IndicatorType) => void }) {
+  return (
+    <select id={id} className={cn(field, 'w-32')} value={value} onChange={(e) => onChange(e.target.value as IndicatorType)}>
+      {INDICATOR_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+    </select>
+  )
+}
+
+function RemoveButton({ text, onClick }: { text: string; onClick: () => void }) {
+  return (
+    <button type="button" className={`${iconButton} hover:text-danger`} onClick={onClick} aria-label={text} title={text}>
+      <Trash2 className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+    </button>
+  )
+}
+
 function IndicatorRow({
   ind,
+  index,
   onChange,
   onRemove,
 }: {
   ind: IndicatorParamWithId
+  index: number
   onChange: (updated: IndicatorParamWithId) => void
   onRemove: () => void
 }) {
+  const id = (k: string) => `ind-${ind._id}-${k}`
   return (
-    <div className="flex flex-wrap items-end gap-2 rounded-lg border border-white/[0.08] bg-white/[0.03] p-3">
-      <div className="flex flex-col gap-1">
-        <label className="text-[10px] text-slate-500 font-mono">Tipo</label>
-        <Select
-          value={ind.type}
-          onValueChange={(v) => onChange({
-            ...defaultIndicator(v as IndicatorType),
-            _id: ind._id,
-          })}
-        >
-          <SelectTrigger size="sm" className="w-32">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {INDICATOR_TYPES.map((t) => (
-              <SelectItem key={t} value={t}>{t}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+    <li className={rowClass}>
+      <div className="flex flex-wrap items-end gap-3">
+      <Cell id={id('type')} text="Tipo">
+        <TypeSelect id={id('type')} value={ind.type} onChange={(v) => onChange({ ...defaultIndicator(v), _id: ind._id })} />
+      </Cell>
 
-      {/* EMA / RSI / Bollinger — period */}
       {(ind.type === 'EMA' || ind.type === 'RSI' || ind.type === 'Bollinger') && (
-        <div className="flex flex-col gap-1">
-          <label className="text-[10px] text-slate-500 font-mono">Período</label>
-          <Input
-            type="number"
-            className="w-20 h-7 text-xs"
-            value={ind.period ?? ''}
-            min={1}
-            onChange={(e) => onChange({ ...ind, period: parseInt(e.target.value) || undefined })}
-          />
-        </div>
+        <Cell id={id('period')} text="Período">
+          <NumberInput id={id('period')} value={ind.period} min={1} onChange={(v) => onChange({ ...ind, period: parseInt(v) || undefined })} />
+        </Cell>
       )}
 
-      {/* MACD */}
       {ind.type === 'MACD' && (
         <>
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] text-slate-500 font-mono">Fast</label>
-            <Input
-              type="number"
-              className="w-16 h-7 text-xs"
-              value={ind.fast ?? ''}
-              min={1}
-              onChange={(e) => onChange({ ...ind, fast: parseInt(e.target.value) || undefined })}
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] text-slate-500 font-mono">Slow</label>
-            <Input
-              type="number"
-              className="w-16 h-7 text-xs"
-              value={ind.slow ?? ''}
-              min={1}
-              onChange={(e) => onChange({ ...ind, slow: parseInt(e.target.value) || undefined })}
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] text-slate-500 font-mono">Signal</label>
-            <Input
-              type="number"
-              className="w-16 h-7 text-xs"
-              value={ind.signal ?? ''}
-              min={1}
-              onChange={(e) => onChange({ ...ind, signal: parseInt(e.target.value) || undefined })}
-            />
-          </div>
+          <Cell id={id('fast')} text="Rápida">
+            <NumberInput id={id('fast')} value={ind.fast} min={1} onChange={(v) => onChange({ ...ind, fast: parseInt(v) || undefined })} />
+          </Cell>
+          <Cell id={id('slow')} text="Lenta">
+            <NumberInput id={id('slow')} value={ind.slow} min={1} onChange={(v) => onChange({ ...ind, slow: parseInt(v) || undefined })} />
+          </Cell>
+          <Cell id={id('signal')} text="Señal">
+            <NumberInput id={id('signal')} value={ind.signal} min={1} onChange={(v) => onChange({ ...ind, signal: parseInt(v) || undefined })} />
+          </Cell>
         </>
       )}
 
-      <button
-        type="button"
-        className="btn-ghost p-1.5 text-red-400 hover:text-red-300 ml-auto"
-        onClick={onRemove}
-        title="Eliminar indicador"
-      >
-        <X className="w-3.5 h-3.5" />
-      </button>
-    </div>
+      </div>
+      <RemoveButton text={`Quitar el indicador ${index + 1}`} onClick={onRemove} />
+    </li>
   )
 }
 
 function ConditionRow({
   rule,
+  index,
+  side,
   onChange,
   onRemove,
 }: {
   rule: ConditionRuleWithId
+  index: number
+  side: string
   onChange: (updated: ConditionRuleWithId) => void
   onRemove: () => void
 }) {
   const useTarget = rule.operator === 'crosses_above' || rule.operator === 'crosses_below'
+  const id = (k: string) => `cond-${rule._id}-${k}`
 
   return (
-    <div className="flex flex-wrap items-end gap-2 rounded-lg border border-white/[0.08] bg-white/[0.03] p-3">
-      {/* Indicator source */}
-      <div className="flex flex-col gap-1">
-        <label className="text-[10px] text-slate-500 font-mono">Indicador</label>
-        <Select
-          value={rule.indicator}
-          onValueChange={(v) => onChange({ ...rule, indicator: v as IndicatorType })}
-        >
-          <SelectTrigger size="sm" className="w-28">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {INDICATOR_TYPES.map((t) => (
-              <SelectItem key={t} value={t}>{t}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+    <li className={rowClass}>
+      <div className="flex flex-wrap items-end gap-3">
+      <Cell id={id('indicator')} text="Indicador">
+        <TypeSelect id={id('indicator')} value={rule.indicator} onChange={(v) => onChange({ ...rule, indicator: v })} />
+      </Cell>
 
-      {/* Period for source indicator */}
       {rule.indicator !== 'Volume' && (
-        <div className="flex flex-col gap-1">
-          <label className="text-[10px] text-slate-500 font-mono">Período</label>
-          <Input
-            type="number"
-            className="w-16 h-7 text-xs"
-            value={rule.period ?? ''}
-            min={1}
-            onChange={(e) => onChange({ ...rule, period: parseInt(e.target.value) || undefined })}
-          />
-        </div>
+        <Cell id={id('period')} text="Período">
+          <NumberInput id={id('period')} value={rule.period} min={1} onChange={(v) => onChange({ ...rule, period: parseInt(v) || undefined })} />
+        </Cell>
       )}
 
-      {/* Operator */}
-      <div className="flex flex-col gap-1">
-        <label className="text-[10px] text-slate-500 font-mono">Operador</label>
-        <Select
+      <Cell id={id('operator')} text="Operador">
+        <select
+          id={id('operator')}
+          className={cn(field, 'w-48')}
           value={rule.operator}
-          onValueChange={(v) => {
-            const op = v as IndicatorOperator
+          onChange={(e) => {
+            const op = e.target.value as IndicatorOperator
             const isCross = op === 'crosses_above' || op === 'crosses_below'
             onChange({
               ...rule,
@@ -224,75 +181,57 @@ function ConditionRow({
             })
           }}
         >
-          <SelectTrigger size="sm" className="w-36">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {OPERATORS.map((op) => (
-              <SelectItem key={op.value} value={op.value}>{op.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+          {OPERATORS.map((op) => <option key={op.value} value={op.value}>{op.label}</option>)}
+        </select>
+      </Cell>
 
-      {/* Target indicator (crosses) */}
       {useTarget ? (
         <>
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] text-slate-500 font-mono">Target</label>
-            <Select
-              value={rule.target ?? 'EMA'}
-              onValueChange={(v) => onChange({ ...rule, target: v as IndicatorType })}
-            >
-              <SelectTrigger size="sm" className="w-28">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {INDICATOR_TYPES.map((t) => (
-                  <SelectItem key={t} value={t}>{t}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <Cell id={id('target')} text="Contra">
+            <TypeSelect id={id('target')} value={rule.target ?? 'EMA'} onChange={(v) => onChange({ ...rule, target: v })} />
+          </Cell>
           {rule.target !== 'Volume' && (
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] text-slate-500 font-mono">Período target</label>
-              <Input
-                type="number"
-                className="w-20 h-7 text-xs"
-                value={rule.targetPeriod ?? ''}
-                min={1}
-                onChange={(e) =>
-                  onChange({ ...rule, targetPeriod: parseInt(e.target.value) || undefined })
-                }
-              />
-            </div>
+            <Cell id={id('target-period')} text="Período">
+              <NumberInput id={id('target-period')} value={rule.targetPeriod} min={1} onChange={(v) => onChange({ ...rule, targetPeriod: parseInt(v) || undefined })} />
+            </Cell>
           )}
         </>
       ) : (
-        /* Numeric value (gt / lt / gte / lte) */
-        <div className="flex flex-col gap-1">
-          <label className="text-[10px] text-slate-500 font-mono">Valor</label>
-          <Input
-            type="number"
-            className="w-20 h-7 text-xs"
-            value={rule.value ?? ''}
-            onChange={(e) =>
-              onChange({ ...rule, value: parseFloat(e.target.value) || undefined })
-            }
-          />
-        </div>
+        <Cell id={id('value')} text="Valor">
+          <NumberInput id={id('value')} wide value={rule.value} onChange={(v) => onChange({ ...rule, value: parseFloat(v) || undefined })} />
+        </Cell>
       )}
 
-      <button
-        type="button"
-        className="btn-ghost p-1.5 text-red-400 hover:text-red-300 ml-auto"
-        onClick={onRemove}
-        title="Eliminar condición"
-      >
-        <X className="w-3.5 h-3.5" />
-      </button>
-    </div>
+      </div>
+      <RemoveButton text={`Quitar la condición de ${side} ${index + 1}`} onClick={onRemove} />
+    </li>
+  )
+}
+
+/** One block of the form: a heading, its rows and the add action. */
+function Group({ id, title, hint, empty, onAdd, addText, children }: {
+  id: string
+  title: string
+  hint?: string
+  empty: string | null
+  onAdd: () => void
+  addText: string
+  children: React.ReactNode
+}) {
+  return (
+    <section aria-labelledby={id} className="grid gap-1">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line pb-2">
+        <h3 id={id} className="text-sm font-semibold">
+          {title}
+          {hint && <span className="ml-1 font-normal text-ink-3">{hint}</span>}
+        </h3>
+        <button type="button" className={textLink} onClick={onAdd}>
+          <Plus className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
+          {addText}
+        </button>
+      </div>
+      {empty ? <p className="py-2 text-[13px] text-ink-3">{empty}</p> : <ul>{children}</ul>}
+    </section>
   )
 }
 
@@ -460,170 +399,75 @@ export function SetupFormModal({
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!loading) onOpenChange(o) }}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>
-            {isEdit ? 'Editar setup' : 'Nuevo setup'}
-          </DialogTitle>
-        </DialogHeader>
-
-        <div className="flex flex-col gap-5 py-1">
-
-          {/* Name */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-slate-400 font-mono">Nombre *</label>
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Ej: EMA Cross + RSI Filter"
-            />
-          </div>
-
-          {/* Indicators */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <label className="text-xs text-slate-400 font-mono">
-                Indicadores *
-              </label>
-              <button
-                type="button"
-                className="btn-ghost inline-flex items-center gap-1 text-xs py-0.5 px-2"
-                onClick={addIndicator}
-              >
-                <Plus className="w-3 h-3" />
-                Agregar indicador
-              </button>
+      <StrategyDialog title={isEdit ? 'Editar setup' : 'Nuevo setup'} width={720}>
+        <form onSubmit={(e) => { e.preventDefault(); if (!isDisabled) handleSubmit() }}>
+          <div className="grid gap-6 px-5 py-5">
+            <div className="grid gap-2">
+              <label htmlFor="setup-name" className={label}>Nombre</label>
+              <input id="setup-name" required className={field} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej.: Cruce de EMA con filtro RSI" />
             </div>
 
-            {indicators.length === 0 && (
-              <p className="text-xs text-slate-600 font-mono py-2">
-                Sin indicadores. Agregá al menos uno.
-              </p>
-            )}
+            <Group
+              id="setup-indicators"
+              title="Indicadores"
+              hint="(al menos uno)"
+              empty={indicators.length === 0 ? 'Sin indicadores. Agregá al menos uno.' : null}
+              onAdd={addIndicator}
+              addText="Agregar indicador"
+            >
+              {indicators.map((ind, i) => (
+                <IndicatorRow key={ind._id} ind={ind} index={i} onChange={(updated) => updateIndicator(i, updated)} onRemove={() => removeIndicator(i)} />
+              ))}
+            </Group>
 
-            {indicators.map((ind, i) => (
-              <IndicatorRow
-                key={ind._id}
-                ind={ind}
-                onChange={(updated) => updateIndicator(i, updated)}
-                onRemove={() => removeIndicator(i)}
-              />
-            ))}
-          </div>
+            <Group
+              id="setup-buy"
+              title="Condiciones de compra"
+              empty={buyConditions.length === 0 ? 'Sin condiciones de compra.' : null}
+              onAdd={addBuyCondition}
+              addText="Agregar condición"
+            >
+              {buyConditions.map((rule, i) => (
+                <ConditionRow key={rule._id} rule={rule} index={i} side="compra" onChange={(updated) => updateBuyCondition(i, updated)} onRemove={() => removeBuyCondition(i)} />
+              ))}
+            </Group>
 
-          {/* Buy Conditions */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <label className="text-xs text-slate-400 font-mono">
-                Condiciones BUY
-              </label>
-              <button
-                type="button"
-                className="btn-ghost inline-flex items-center gap-1 text-xs py-0.5 px-2"
-                onClick={addBuyCondition}
-              >
-                <Plus className="w-3 h-3" />
-                Agregar condición BUY
-              </button>
+            <Group
+              id="setup-sell"
+              title="Condiciones de venta"
+              empty={sellConditions.length === 0 ? 'Sin condiciones de venta.' : null}
+              onAdd={addSellCondition}
+              addText="Agregar condición"
+            >
+              {sellConditions.map((rule, i) => (
+                <ConditionRow key={rule._id} rule={rule} index={i} side="venta" onChange={(updated) => updateSellCondition(i, updated)} onRemove={() => removeSellCondition(i)} />
+              ))}
+            </Group>
+
+            <div className="grid grid-cols-2 gap-4 max-[479px]:grid-cols-1">
+              <div className="grid gap-2">
+                <label htmlFor="setup-sl" className={label}>Stop loss <span className="font-normal text-ink-3">(%)</span></label>
+                <input id="setup-sl" type="number" inputMode="decimal" className={field} value={stopLoss} min={0} step={0.1} placeholder="Ej.: 3" onChange={(e) => setStopLoss(e.target.value)} />
+              </div>
+              <div className="grid gap-2">
+                <label htmlFor="setup-tp" className={label}>Take profit <span className="font-normal text-ink-3">(%)</span></label>
+                <input id="setup-tp" type="number" inputMode="decimal" className={field} value={takeProfit} min={0} step={0.1} placeholder="Ej.: 9" onChange={(e) => setTakeProfit(e.target.value)} />
+              </div>
             </div>
 
-            {buyConditions.length === 0 && (
-              <p className="text-xs text-slate-600 font-mono py-1">Sin condiciones de compra.</p>
-            )}
-
-            {buyConditions.map((rule, i) => (
-              <ConditionRow
-                key={rule._id}
-                rule={rule}
-                onChange={(updated) => updateBuyCondition(i, updated)}
-                onRemove={() => removeBuyCondition(i)}
-              />
-            ))}
+            {error && <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-[13px] text-danger">{error}</p>}
           </div>
 
-          {/* Sell Conditions */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <label className="text-xs text-slate-400 font-mono">
-                Condiciones SELL
-              </label>
-              <button
-                type="button"
-                className="btn-ghost inline-flex items-center gap-1 text-xs py-0.5 px-2"
-                onClick={addSellCondition}
-              >
-                <Plus className="w-3 h-3" />
-                Agregar condición SELL
-              </button>
-            </div>
-
-            {sellConditions.length === 0 && (
-              <p className="text-xs text-slate-600 font-mono py-1">Sin condiciones de venta.</p>
-            )}
-
-            {sellConditions.map((rule, i) => (
-              <ConditionRow
-                key={rule._id}
-                rule={rule}
-                onChange={(updated) => updateSellCondition(i, updated)}
-                onRemove={() => removeSellCondition(i)}
-              />
-            ))}
-          </div>
-
-          {/* Risk params */}
-          <div className="flex gap-4">
-            <div className="flex flex-col gap-1.5 flex-1">
-              <label className="text-xs text-slate-400 font-mono">Stop Loss %</label>
-              <Input
-                type="number"
-                value={stopLoss}
-                min={0}
-                step={0.1}
-                placeholder="Ej: 3"
-                onChange={(e) => setStopLoss(e.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5 flex-1">
-              <label className="text-xs text-slate-400 font-mono">Take Profit %</label>
-              <Input
-                type="number"
-                value={takeProfit}
-                min={0}
-                step={0.1}
-                placeholder="Ej: 9"
-                onChange={(e) => setTakeProfit(e.target.value)}
-              />
-            </div>
-          </div>
-
-          {error && (
-            <p className="text-xs text-red-400 font-mono">{error}</p>
-          )}
-        </div>
-
-        <DialogFooter>
-          <button
-            type="button"
-            className="btn-ghost text-xs"
-            onClick={() => onOpenChange(false)}
-            disabled={loading}
-          >
-            Cancelar
-          </button>
-          <button
-            type="button"
-            className="btn-primary text-xs inline-flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={handleSubmit}
-            disabled={isDisabled}
-          >
-            {loading && (
-              <span className="w-3.5 h-3.5 rounded-full border-2 border-current border-t-transparent animate-spin" />
-            )}
-            Guardar
-          </button>
-        </DialogFooter>
-      </DialogContent>
+          <DialogActions>
+            <button type="button" className={ghostButton} onClick={() => onOpenChange(false)} disabled={loading}>
+              Cancelar
+            </button>
+            <button type="submit" className={primaryButton} disabled={isDisabled} aria-busy={loading}>
+              {loading ? 'Guardando…' : 'Guardar'}
+            </button>
+          </DialogActions>
+        </form>
+      </StrategyDialog>
     </Dialog>
   )
 }

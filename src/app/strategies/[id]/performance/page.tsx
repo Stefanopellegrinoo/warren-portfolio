@@ -5,6 +5,9 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { getSetupColor } from '@/lib/setup-color'
+import { Chip } from '@/components/resumen/ui'
+import { ErrorNotice, Segmented, SkeletonRows, field, page, pageTitle, tabClass, textLink } from '@/components/strategies/ui'
+import { cn, formatNumber } from '@/lib/utils'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -95,7 +98,7 @@ function formatTime(dateStr: string): string {
   const date = new Date(dateStr)
   const hh = String(date.getHours()).padStart(2, '0')
   const min = String(date.getMinutes()).padStart(2, '0')
-  return `${hh}:${min}hs`
+  return `${hh}:${min} h`
 }
 
 function getDayKey(dateStr: string): string {
@@ -105,44 +108,32 @@ function getDayKey(dateStr: string): string {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function HitRateCell({ value }: { value: number | null }) {
-  if (value === null) return <span className="text-slate-500">—</span>
-  const pct = value * 100
-  const color = pct >= 60 ? 'text-tv-green' : pct < 40 ? 'text-tv-red' : 'text-white'
-  return <span className={color}>{pct.toFixed(1)}%</span>
+const signColor = (n: number | null) => (n === null ? 'text-ink-3' : n > 0 ? 'text-ok' : n < 0 ? 'text-danger' : '')
+const money = (n: number) => `US$ ${formatNumber(n)}`
+const day = (iso: string) => new Date(iso).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+const th = 'py-2 pr-4 font-medium last:pr-0'
+const td = 'py-2.5 pr-4 last:pr-0'
+
+/** Percent value in points (12.5 = 12,5 %), with sign; dash when missing. */
+function Pct({ value, digits = 1, sign = true }: { value: number | null; digits?: number; sign?: boolean }) {
+  if (value === null) return <span className="text-ink-3">—</span>
+  return <span className={sign ? signColor(value) : ''}>{formatNumber(value, { decimals: digits, sign })} %</span>
 }
 
-function ReturnCell({ value }: { value: number | null }) {
-  if (value === null) return <span className="text-slate-500">—</span>
-  const color = value >= 0 ? 'text-tv-green' : 'text-tv-red'
-  const prefix = value >= 0 ? '+' : ''
-  return <span className={color}>{prefix}{value.toFixed(1)}%</span>
-}
-
-function PillSelector<T extends string>({
-  options,
-  value,
-  onChange,
-}: {
-  options: { label: string; value: T }[]
-  value: T
-  onChange: (v: T) => void
-}) {
+function SetupName({ id, name }: { id: string; name: string }) {
   return (
-    <div className="flex gap-1">
-      {options.map((opt) => (
-        <button
-          key={opt.value}
-          onClick={() => onChange(opt.value)}
-          className={`px-2.5 py-1 rounded-full text-[11px] font-mono border transition-colors ${
-            value === opt.value
-              ? 'bg-amber/20 text-amber border-amber/40'
-              : 'bg-white/[0.04] text-slate-400 border-white/[0.08] hover:border-white/20'
-          }`}
-        >
-          {opt.label}
-        </button>
-      ))}
+    <span className="inline-flex min-w-0 items-center gap-2">
+      <span className="h-2.5 w-2.5 flex-none rounded-full" style={{ backgroundColor: getSetupColor(id) }} aria-hidden="true" />
+      <span className="min-w-0 break-words">{name}</span>
+    </span>
+  )
+}
+
+function Empty({ title, hint }: { title: string; hint?: string }) {
+  return (
+    <div className="py-6">
+      <p className="text-ink-2">{title}</p>
+      {hint && <p className="mt-1 text-[13px] text-ink-3">{hint}</p>}
     </div>
   )
 }
@@ -159,67 +150,43 @@ function ComparisonTab({
   const allEmpty = setups.every((s) => s.total_trades === 0)
 
   if (allEmpty) {
-    return (
-      <div className="glass rounded-2xl p-8 border border-white/[0.08] flex flex-col items-center gap-2 text-center">
-        <p className="text-slate-300 font-display font-600 text-sm">Sin datos de paper trading todavía.</p>
-        <p className="text-slate-500 font-mono text-xs">El motor de señales genera datos automáticamente 3 veces por día.</p>
-      </div>
-    )
+    return <Empty title="Todavía no hay datos de paper trading." hint="El motor de señales los genera automáticamente tres veces por día." />
   }
 
   return (
-    <div className="glass rounded-2xl border border-white/[0.08] overflow-x-auto">
-      <table className="w-full text-sm">
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[820px] border-collapse text-sm tabular-nums">
+        <caption className="sr-only">Comparación de setups</caption>
         <thead>
-          <tr>
-            <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-left px-5 pt-4">Setup</th>
-            <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-left px-3 pt-4">Estado</th>
-            <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-right px-3 pt-4">P. Trades</th>
-            <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-right px-3 pt-4">Rentables</th>
-            <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-right px-3 pt-4">Hit Rate</th>
-            <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-right px-3 pt-4">Retorno Avg</th>
-            <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-right px-3 pt-4">Duración Avg</th>
-            <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-right px-5 pt-4">Abiertos</th>
+          <tr className="border-b border-line-strong text-left text-[13px] text-ink-3">
+            <th scope="col" className={th}>Setup</th>
+            <th scope="col" className={th}>Estado</th>
+            <th scope="col" className={`${th} text-right`}>Operaciones</th>
+            <th scope="col" className={`${th} text-right`}>Ganadoras</th>
+            <th scope="col" className={`${th} text-right`}>Acierto</th>
+            <th scope="col" className={`${th} text-right`}>Retorno prom.</th>
+            <th scope="col" className={`${th} text-right`}>Duración prom.</th>
+            <th scope="col" className={`${th} text-right`}>Abiertas</th>
           </tr>
         </thead>
         <tbody>
           {setups.map((setup) => (
-            <tr key={setup.setup_id}>
-              <td className="py-3 border-t border-white/[0.06] px-5">
-                <div className="flex items-center gap-2">
-                  <span
-                    className="w-3 h-3 rounded-full shrink-0"
-                    style={{ backgroundColor: getSetupColor(setup.setup_id) }}
-                  />
-                  <span className="text-white text-sm">{setup.setup_name}</span>
-                  {setup.setup_id === bestSetupId && (
-                    <span className="tag-positive text-[10px] shrink-0">★ Mejor</span>
-                  )}
-                </div>
-              </td>
-              <td className="py-3 border-t border-white/[0.06] px-3">
-                <span className={setup.active ? 'tag-positive text-[10px]' : 'tag-neutral text-[10px]'}>
-                  {setup.active ? 'Activo' : 'Inactivo'}
+            <tr key={setup.setup_id} className="border-b border-line last:border-b-0 hover:bg-hover">
+              <th scope="row" className={`${td} text-left font-medium`}>
+                <span className="flex flex-wrap items-center gap-2">
+                  <SetupName id={setup.setup_id} name={setup.setup_name} />
+                  {setup.setup_id === bestSetupId && <Chip tone="ok">Mejor</Chip>}
                 </span>
+              </th>
+              <td className={td}><Chip tone={setup.active ? 'ok' : 'neutral'}>{setup.active ? 'Activo' : 'Inactivo'}</Chip></td>
+              <td className={`${td} text-right`}>{setup.total_trades}</td>
+              <td className={`${td} text-right`}>{setup.profitable_trades}</td>
+              <td className={`${td} text-right`}><Pct value={setup.hit_rate === null ? null : setup.hit_rate * 100} sign={false} /></td>
+              <td className={`${td} text-right`}><Pct value={setup.avg_return_pct} /></td>
+              <td className={`${td} text-right`}>
+                {setup.avg_duration_days !== null ? `${setup.avg_duration_days.toFixed(0)} días` : <span className="text-ink-3">—</span>}
               </td>
-              <td className="py-3 border-t border-white/[0.06] px-3 text-right text-white font-mono">
-                {setup.total_trades}
-              </td>
-              <td className="py-3 border-t border-white/[0.06] px-3 text-right text-white font-mono">
-                {setup.profitable_trades}
-              </td>
-              <td className="py-3 border-t border-white/[0.06] px-3 text-right font-mono">
-                <HitRateCell value={setup.hit_rate} />
-              </td>
-              <td className="py-3 border-t border-white/[0.06] px-3 text-right font-mono">
-                <ReturnCell value={setup.avg_return_pct} />
-              </td>
-              <td className="py-3 border-t border-white/[0.06] px-3 text-right font-mono text-white">
-                {setup.avg_duration_days !== null ? `${setup.avg_duration_days.toFixed(0)}d` : <span className="text-slate-500">—</span>}
-              </td>
-              <td className="py-3 border-t border-white/[0.06] px-5 text-right font-mono text-white">
-                {setup.open_trades}
-              </td>
+              <td className={`${td} text-right`}>{setup.open_trades}</td>
             </tr>
           ))}
         </tbody>
@@ -231,21 +198,9 @@ function ComparisonTab({
 // ─── Tab: Signals ─────────────────────────────────────────────────────────────
 
 function SignalsTab({ signals, loading }: { signals: Signal[]; loading: boolean }) {
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <div className="w-8 h-8 rounded-full border-2 border-amber border-t-transparent animate-spin" />
-      </div>
-    )
-  }
+  if (loading) return <SkeletonRows label="Cargando señales" rows={3} />
 
-  if (signals.length === 0) {
-    return (
-      <div className="glass rounded-2xl p-8 border border-white/[0.08] flex items-center justify-center">
-        <p className="text-slate-500 font-mono text-sm">No hay señales para los filtros seleccionados.</p>
-      </div>
-    )
-  }
+  if (signals.length === 0) return <Empty title="No hay señales para los filtros elegidos." />
 
   // Group by day
   const groups = new Map<string, { heading: string; signals: Signal[] }>()
@@ -258,119 +213,78 @@ function SignalsTab({ signals, loading }: { signals: Signal[]; loading: boolean 
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      {Array.from(groups.values()).map((group) => (
-        <div key={group.heading}>
-          <p className="text-slate-500 text-[11px] font-mono uppercase tracking-wider mb-3">{group.heading}</p>
-          <div className="flex flex-col gap-2">
-            {group.signals.map((signal) => (
-              <SignalCard key={signal.id} signal={signal} />
-            ))}
-          </div>
-        </div>
+    <div className="grid gap-6">
+      {Array.from(groups.entries()).map(([key, group]) => (
+        <section key={key} aria-label={group.heading}>
+          <h3 className="border-b border-line pb-2 text-[13px] font-medium text-ink-2">{group.heading}</h3>
+          <ul>
+            {group.signals.map((signal) => <SignalRow key={signal.id} signal={signal} />)}
+          </ul>
+        </section>
       ))}
     </div>
   )
 }
 
-function SignalCard({ signal }: { signal: Signal }) {
-  const color = getSetupColor(signal.setup_id)
+function SignalRow({ signal }: { signal: Signal }) {
   const isBuy = signal.type === 'BUY'
   const metaEntries = signal.metadata ? Object.entries(signal.metadata) : []
 
   return (
-    <div className="glass rounded-xl p-4 border border-white/[0.08]">
-      <div className="flex items-center gap-3 flex-wrap">
-        <span
-          className="w-2.5 h-2.5 rounded-full shrink-0"
-          style={{ backgroundColor: color }}
-        />
-        <span className="text-white text-sm font-display font-600">{signal.setup_name}</span>
-        <span
-          className={`px-2 py-0.5 rounded-full text-[11px] font-mono border ${
-            isBuy
-              ? 'bg-tv-green/10 text-tv-green border-tv-green/30'
-              : 'bg-tv-red/10 text-tv-red border-tv-red/30'
-          }`}
-        >
-          {signal.type}
+    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-b border-line py-2.5 last:border-b-0">
+      <span className="min-w-0">
+        <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="font-medium"><SetupName id={signal.setup_id} name={signal.setup_name} /></span>
+          <Chip tone={isBuy ? 'ok' : 'danger'}>{isBuy ? 'Compra' : 'Venta'}</Chip>
+          <span className="font-semibold">{signal.ticker}</span>
         </span>
-        <span className="text-slate-300 text-sm font-mono">{signal.ticker}</span>
-      </div>
-
-      <div className="mt-2 flex items-center gap-2 flex-wrap">
-        <span className="text-white font-mono text-sm">${signal.price.toFixed(2)}</span>
-        <span className="text-slate-500 text-[11px]">·</span>
-        <span className="text-slate-400 text-[11px] font-mono">{signal.timeframe}</span>
-        <span className="text-slate-500 text-[11px]">·</span>
-        <span className="text-slate-400 text-[11px] font-mono">{formatTime(signal.fired_at)}</span>
-      </div>
-
-      {metaEntries.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {metaEntries.map(([k, v]) => (
-            <span
-              key={k}
-              className="text-slate-500 text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.06]"
-            >
-              {k}: {String(v)}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
+        {metaEntries.length > 0 && (
+          <small className="mt-0.5 block break-words text-[13px] text-ink-3">
+            {metaEntries.map(([k, v]) => `${k}: ${String(v)}`).join(' · ')}
+          </small>
+        )}
+      </span>
+      <span className="text-right tabular-nums">
+        <span className="block font-medium">{money(signal.price)}</span>
+        <small className="block text-[13px] text-ink-3">{signal.timeframe} · {formatTime(signal.fired_at)}</small>
+      </span>
+    </li>
   )
 }
 
 // ─── Tab: Paper Trades ───────────────────────────────────────────────────────
 
-function PnlPctCell({ value }: { value: number | null }) {
-  if (value === null) return <span className="text-slate-500">—</span>
-  const color = value >= 0 ? 'text-tv-green' : 'text-tv-red'
-  const prefix = value >= 0 ? '+' : ''
-  return <span className={color}>{prefix}{value.toFixed(2)}%</span>
+const CLOSE_REASONS: Record<string, { label: string; tone: 'ok' | 'danger' | 'neutral' }> = {
+  SIGNAL: { label: 'Señal', tone: 'neutral' },
+  STOP_LOSS: { label: 'Stop loss', tone: 'danger' },
+  TAKE_PROFIT: { label: 'Take profit', tone: 'ok' },
 }
 
 function CloseReasonBadge({ value }: { value: 'SIGNAL' | 'STOP_LOSS' | 'TAKE_PROFIT' | null }) {
-  if (!value) return <span className="text-slate-500">—</span>
-  const map: Record<string, { label: string; className: string }> = {
-    SIGNAL: { label: 'Signal', className: 'tag-neutral' },
-    STOP_LOSS: { label: 'Stop Loss', className: 'bg-tv-red/10 text-tv-red border border-tv-red/30 px-2 py-0.5 rounded-full text-[10px] font-mono' },
-    TAKE_PROFIT: { label: 'Take Profit', className: 'tag-positive' },
-  }
-  const { label, className } = map[value] ?? { label: value, className: 'tag-neutral' }
-  return <span className={`${className} text-[10px]`}>{label}</span>
+  if (!value) return <span className="text-ink-3">—</span>
+  const { label, tone } = CLOSE_REASONS[value] ?? { label: value, tone: 'neutral' as const }
+  return <Chip tone={tone}>{label}</Chip>
 }
 
 function PaperTradesTab({
   trades,
   loading,
   error,
+  onRetry,
   setups,
 }: {
   trades: PaperTrade[]
   loading: boolean
   error: boolean
+  onRetry: () => void
   setups: Array<{ id: string; name: string; active: boolean }>
 }) {
   const [setupFilter, setSetupFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<'all' | 'OPEN' | 'CLOSED'>('all')
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <div className="w-8 h-8 rounded-full border-2 border-amber border-t-transparent animate-spin" />
-      </div>
-    )
-  }
+  if (loading) return <SkeletonRows label="Cargando paper trades" rows={3} />
 
-  if (error) {
-    return (
-      <div className="glass rounded-2xl p-8 border border-white/[0.08] flex items-center justify-center">
-        <p className="text-tv-red font-mono text-sm">Error al cargar paper trades.</p>
-      </div>
-    )
-  }
+  if (error) return <div className="pt-3"><ErrorNotice onRetry={onRetry}>No se pudieron cargar los paper trades.</ErrorNotice></div>
 
   const filtered = trades.filter((t) => {
     if (setupFilter !== 'all' && t.setup_id !== setupFilter) return false
@@ -379,31 +293,26 @@ function PaperTradesTab({
   })
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-4">
+    <div className="grid gap-4">
+      <div className="flex flex-wrap items-end gap-4">
         {setups.length > 0 && (
-          <div className="flex items-center gap-2">
-            <span className="text-slate-500 text-[11px] font-mono uppercase tracking-wider">Setup</span>
-            <select
-              value={setupFilter}
-              onChange={(e) => setSetupFilter(e.target.value)}
-              className="bg-white/[0.04] border border-white/[0.08] rounded-lg text-slate-300 text-[11px] font-mono px-2.5 py-1 focus:outline-none focus:border-amber/40"
-            >
+          <div className="grid gap-1">
+            <label htmlFor="trades-setup" className="text-[13px] text-ink-2">Setup</label>
+            <select id="trades-setup" value={setupFilter} onChange={(e) => setSetupFilter(e.target.value)} className={cn(field, 'w-auto min-w-40 max-w-full')}>
               <option value="all">Todos</option>
-              {setups.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
+              {setups.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </div>
         )}
-        <div className="flex items-center gap-2">
-          <span className="text-slate-500 text-[11px] font-mono uppercase tracking-wider">Estado</span>
-          <PillSelector
+        <div className="grid gap-1">
+          <span className="text-[13px] text-ink-2" aria-hidden="true">Estado</span>
+          <Segmented
+            name="trades-status"
+            legend="Estado"
             options={[
               { label: 'Todos', value: 'all' as const },
-              { label: 'Abierto', value: 'OPEN' as const },
-              { label: 'Cerrado', value: 'CLOSED' as const },
+              { label: 'Abiertos', value: 'OPEN' as const },
+              { label: 'Cerrados', value: 'CLOSED' as const },
             ]}
             value={statusFilter}
             onChange={setStatusFilter}
@@ -412,64 +321,36 @@ function PaperTradesTab({
       </div>
 
       {filtered.length === 0 ? (
-        <div className="glass rounded-2xl p-8 border border-white/[0.08] flex flex-col items-center gap-2 text-center">
-          <p className="text-slate-300 font-display font-600 text-sm">Sin paper trades para los filtros seleccionados.</p>
-          <p className="text-slate-500 font-mono text-xs">Los paper trades se generan automáticamente cuando las señales se abren y cierran.</p>
-        </div>
+        <Empty title="No hay paper trades para los filtros elegidos." hint="Se generan automáticamente cuando las señales abren y cierran posiciones." />
       ) : (
-        <div className="glass rounded-2xl border border-white/[0.08] overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[920px] border-collapse text-sm tabular-nums">
+            <caption className="sr-only">Paper trades</caption>
             <thead>
-              <tr>
-                <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-left px-5 pt-4">Setup</th>
-                <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-left px-3 pt-4">Ticker</th>
-                <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-left px-3 pt-4">Estado</th>
-                <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-right px-3 pt-4">Apertura</th>
-                <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-right px-3 pt-4">Cierre</th>
-                <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-right px-3 pt-4">Precio entrada</th>
-                <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-right px-3 pt-4">Precio salida</th>
-                <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-right px-3 pt-4">P&amp;L %</th>
-                <th className="text-slate-400 text-[11px] uppercase tracking-wider pb-2 text-right px-5 pt-4">Razón cierre</th>
+              <tr className="border-b border-line-strong text-left text-[13px] text-ink-3">
+                <th scope="col" className={th}>Setup</th>
+                <th scope="col" className={th}>Ticker</th>
+                <th scope="col" className={th}>Estado</th>
+                <th scope="col" className={`${th} text-right`}>Apertura</th>
+                <th scope="col" className={`${th} text-right`}>Cierre</th>
+                <th scope="col" className={`${th} text-right`}>Precio de entrada</th>
+                <th scope="col" className={`${th} text-right`}>Precio de salida</th>
+                <th scope="col" className={`${th} text-right`}>Resultado</th>
+                <th scope="col" className={`${th} text-right`}>Motivo de cierre</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((trade) => (
-                <tr key={trade.id}>
-                  <td className="py-3 border-t border-white/[0.06] px-5">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="w-2.5 h-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: getSetupColor(trade.setup_id) }}
-                      />
-                      <span className="text-white text-sm">{trade.setup_name}</span>
-                    </div>
-                  </td>
-                  <td className="py-3 border-t border-white/[0.06] px-3 font-mono text-slate-300">
-                    {trade.ticker}
-                  </td>
-                  <td className="py-3 border-t border-white/[0.06] px-3">
-                    <span className={trade.status === 'OPEN' ? 'tag-positive text-[10px]' : 'tag-neutral text-[10px]'}>
-                      {trade.status === 'OPEN' ? 'Abierto' : 'Cerrado'}
-                    </span>
-                  </td>
-                  <td className="py-3 border-t border-white/[0.06] px-3 text-right font-mono text-slate-300 text-[11px]">
-                    {new Date(trade.open_at).toLocaleDateString('es-AR')}
-                  </td>
-                  <td className="py-3 border-t border-white/[0.06] px-3 text-right font-mono text-slate-300 text-[11px]">
-                    {trade.close_at ? new Date(trade.close_at).toLocaleDateString('es-AR') : <span className="text-slate-500">—</span>}
-                  </td>
-                  <td className="py-3 border-t border-white/[0.06] px-3 text-right font-mono text-white">
-                    ${trade.open_price.toFixed(2)}
-                  </td>
-                  <td className="py-3 border-t border-white/[0.06] px-3 text-right font-mono text-white">
-                    {trade.close_price !== null ? `$${trade.close_price.toFixed(2)}` : <span className="text-slate-500">—</span>}
-                  </td>
-                  <td className="py-3 border-t border-white/[0.06] px-3 text-right font-mono">
-                    <PnlPctCell value={trade.pnl_pct} />
-                  </td>
-                  <td className="py-3 border-t border-white/[0.06] px-5 text-right">
-                    <CloseReasonBadge value={trade.close_reason} />
-                  </td>
+                <tr key={trade.id} className="border-b border-line last:border-b-0 hover:bg-hover">
+                  <th scope="row" className={`${td} text-left font-medium`}><SetupName id={trade.setup_id} name={trade.setup_name} /></th>
+                  <td className={`${td} font-semibold`}>{trade.ticker}</td>
+                  <td className={td}><Chip tone={trade.status === 'OPEN' ? 'ok' : 'neutral'}>{trade.status === 'OPEN' ? 'Abierto' : 'Cerrado'}</Chip></td>
+                  <td className={`${td} text-right`}>{day(trade.open_at)}</td>
+                  <td className={`${td} text-right`}>{trade.close_at ? day(trade.close_at) : <span className="text-ink-3">—</span>}</td>
+                  <td className={`${td} text-right`}>{money(trade.open_price)}</td>
+                  <td className={`${td} text-right`}>{trade.close_price !== null ? money(trade.close_price) : <span className="text-ink-3">—</span>}</td>
+                  <td className={`${td} text-right font-medium`}><Pct value={trade.pnl_pct} digits={2} /></td>
+                  <td className={`${td} text-right`}><CloseReasonBadge value={trade.close_reason} /></td>
                 </tr>
               ))}
             </tbody>
@@ -487,16 +368,22 @@ type SignalType = 'all' | 'BUY' | 'SELL'
 type Tab = 'comparison' | 'signals' | 'paper-trades'
 
 const PERIOD_OPTIONS: { label: string; value: Period }[] = [
-  { label: '7d', value: '7d' },
-  { label: '30d', value: '30d' },
-  { label: '90d', value: '90d' },
-  { label: '1y', value: '1y' },
+  { label: '7 días', value: '7d' },
+  { label: '30 días', value: '30d' },
+  { label: '90 días', value: '90d' },
+  { label: '1 año', value: '1y' },
 ]
 
 const TYPE_OPTIONS: { label: string; value: SignalType }[] = [
-  { label: 'Todos', value: 'all' },
-  { label: 'BUY', value: 'BUY' },
-  { label: 'SELL', value: 'SELL' },
+  { label: 'Todas', value: 'all' },
+  { label: 'Compra', value: 'BUY' },
+  { label: 'Venta', value: 'SELL' },
+]
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'comparison', label: 'Comparación' },
+  { id: 'signals', label: 'Señales' },
+  { id: 'paper-trades', label: 'Paper trades' },
 ]
 
 export default function PerformancePage() {
@@ -586,120 +473,91 @@ export default function PerformancePage() {
 
   const isLoading = loadingStrategy || loadingPerformance
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen p-6 flex items-center justify-center">
-        <div className="w-8 h-8 rounded-full border-2 border-amber border-t-transparent animate-spin" />
-      </div>
-    )
+  // Arrow keys move between tabs, as the tab pattern expects.
+  function onTabKey(e: React.KeyboardEvent) {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+    e.preventDefault()
+    const i = TABS.findIndex((t) => t.id === activeTab)
+    const next = TABS[(i + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length]
+    setActiveTab(next.id)
+    document.getElementById(`tab-${next.id}`)?.focus()
   }
 
   return (
-    <div className="min-h-screen p-6">
-      <div className="max-w-[1550px] mx-auto">
+    <div className={page}>
+      <Link href={`/strategies/${strategyId}`} className={`${textLink} mb-2`}>
+        <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
+        {strategy?.name ?? 'Estrategia'}
+      </Link>
+      <div className="mb-6">
+        <h1 className={pageTitle}>Rendimiento de los setups</h1>
+        <p className="mt-1 text-ink-3">Resultados de paper trading y señales que generó cada setup de la estrategia.</p>
+      </div>
 
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-6 animate-fade-in">
-          <Link
-            href={`/strategies/${strategyId}`}
-            className="btn-ghost p-1.5 rounded-lg inline-flex items-center"
-            aria-label="Volver"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </Link>
-          <div>
-            <h1 className="font-display font-800 text-2xl md:text-3xl text-white tracking-tight">
-              Performance
-            </h1>
-            {strategy && (
-              <p className="text-slate-400 text-sm mt-0.5">{strategy.name}</p>
+      {isLoading ? <SkeletonRows label="Cargando el rendimiento" /> : (
+        <>
+          <div role="tablist" aria-label="Vistas" onKeyDown={onTabKey} className="mb-6 flex gap-6 overflow-x-auto border-b border-line">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                id={`tab-${t.id}`}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === t.id}
+                aria-controls={`panel-${t.id}`}
+                tabIndex={activeTab === t.id ? 0 : -1}
+                onClick={() => setActiveTab(t.id)}
+                className={`${tabClass(activeTab === t.id)} whitespace-nowrap`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          <div role="tabpanel" id={`panel-${activeTab}`} aria-labelledby={`tab-${activeTab}`}>
+            {activeTab === 'comparison' && (
+              performance
+                ? <ComparisonTab setups={performance.setups} bestSetupId={performance.best_setup_id} />
+                : <ErrorNotice onRetry={loadPerformance}>No se pudo cargar la comparación.</ErrorNotice>
+            )}
+
+            {activeTab === 'signals' && (
+              <div className="grid gap-4">
+                <div className="flex flex-wrap items-end gap-4">
+                  {strategy && strategy.tickers.length > 0 && (
+                    <div className="grid gap-1">
+                      <label htmlFor="signals-ticker" className="text-[13px] text-ink-2">Ticker</label>
+                      <select id="signals-ticker" value={ticker} onChange={(e) => setTicker(e.target.value)} className={cn(field, 'w-auto min-w-32')}>
+                        <option value="all">Todos</option>
+                        {strategy.tickers.map((t) => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  <div className="grid gap-1">
+                    <span className="text-[13px] text-ink-2" aria-hidden="true">Tipo</span>
+                    <Segmented name="signals-type" legend="Tipo de señal" options={TYPE_OPTIONS} value={signalType} onChange={setSignalType} />
+                  </div>
+                  <div className="grid gap-1">
+                    <span className="text-[13px] text-ink-2" aria-hidden="true">Período</span>
+                    <Segmented name="signals-period" legend="Período" options={PERIOD_OPTIONS} value={period} onChange={setPeriod} />
+                  </div>
+                </div>
+                <SignalsTab signals={signals} loading={loadingSignals} />
+              </div>
+            )}
+
+            {activeTab === 'paper-trades' && (
+              <PaperTradesTab
+                trades={paperTrades}
+                loading={loadingPaperTrades}
+                error={errorPaperTrades}
+                onRetry={loadPaperTrades}
+                setups={strategy?.indicator_setups ?? []}
+              />
             )}
           </div>
-        </div>
-
-        {/* Filters */}
-        <div className="glass rounded-2xl p-4 border border-white/[0.08] mb-6 flex flex-wrap items-center gap-4">
-          {strategy && strategy.tickers.length > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-slate-500 text-[11px] font-mono uppercase tracking-wider">Ticker</span>
-              <select
-                value={ticker}
-                onChange={(e) => setTicker(e.target.value)}
-                className="bg-white/[0.04] border border-white/[0.08] rounded-lg text-slate-300 text-[11px] font-mono px-2.5 py-1 focus:outline-none focus:border-amber/40"
-              >
-                <option value="all">Todos</option>
-                {strategy.tickers.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          <div className="flex items-center gap-2">
-            <span className="text-slate-500 text-[11px] font-mono uppercase tracking-wider">Tipo</span>
-            <PillSelector options={TYPE_OPTIONS} value={signalType} onChange={setSignalType} />
-          </div>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex gap-6 border-b border-white/[0.08] mb-6">
-          <button
-            onClick={() => setActiveTab('comparison')}
-            className={`pb-3 text-sm font-display font-600 transition-colors ${
-              activeTab === 'comparison'
-                ? 'text-white border-b-2 border-tv-green -mb-px'
-                : 'text-slate-400 hover:text-slate-300'
-            }`}
-          >
-            Comparación
-          </button>
-          <button
-            onClick={() => setActiveTab('signals')}
-            className={`pb-3 text-sm font-display font-600 transition-colors ${
-              activeTab === 'signals'
-                ? 'text-white border-b-2 border-tv-green -mb-px'
-                : 'text-slate-400 hover:text-slate-300'
-            }`}
-          >
-            Señales
-          </button>
-          <button
-            onClick={() => setActiveTab('paper-trades')}
-            className={`pb-3 text-sm font-display font-600 transition-colors ${
-              activeTab === 'paper-trades'
-                ? 'text-white border-b-2 border-tv-green -mb-px'
-                : 'text-slate-400 hover:text-slate-300'
-            }`}
-          >
-            Paper Trades
-          </button>
-        </div>
-
-        {/* Tab Content */}
-        {activeTab === 'comparison' && performance && (
-          <ComparisonTab setups={performance.setups} bestSetupId={performance.best_setup_id} />
-        )}
-
-        {activeTab === 'signals' && (
-          <div className="flex flex-col gap-4">
-            <div className="flex items-center gap-2">
-              <span className="text-slate-500 text-[11px] font-mono uppercase tracking-wider">Período</span>
-              <PillSelector options={PERIOD_OPTIONS} value={period} onChange={setPeriod} />
-            </div>
-            <SignalsTab signals={signals} loading={loadingSignals} />
-          </div>
-        )}
-
-        {activeTab === 'paper-trades' && (
-          <PaperTradesTab
-            trades={paperTrades}
-            loading={loadingPaperTrades}
-            error={errorPaperTrades}
-            setups={strategy?.indicator_setups ?? []}
-          />
-        )}
-
-      </div>
+        </>
+      )}
     </div>
   )
 }
