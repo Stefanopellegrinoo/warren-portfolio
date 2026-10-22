@@ -52,6 +52,18 @@ export interface Transaction {
   asset_type: AssetType
   moneda: Moneda
   created_at: string
+  // Trade record (migration 044); absent or null on rows without one.
+  trade_currency?: 'ARS' | 'MEP' | 'CCL' | null
+  trade_quantity?: number | null
+  trade_price?: number | null
+  trade_commission?: number | null
+  cedear_ratio?: number | null
+  fx_mep?: number | null
+  fx_ccl?: number | null
+  fx_date?: string | null
+  fx_source?: 'reference' | 'user' | 'reconstructed' | null
+  needs_review?: boolean
+  review_note?: string | null
 }
 
 export interface Position {

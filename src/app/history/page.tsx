@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Fragment } from 'react'
 import { Trash2 } from 'lucide-react'
 import { formatDate, formatNumber, formatPct, formatUSD } from '@/lib/utils'
 import type { ClosedTrade, Transaction } from '@/types'
+import { ReviewFix } from './review-fix'
 
 type ClosedSortKey = 'ticker' | 'open_date' | 'close_date' | 'days_held' | 'avg_cost' | 'close_price' | 'quantity' | 'invested' | 'proceeds' | 'pnl' | 'pnl_pct'
 type AllSortKey = 'date' | 'ticker' | 'operation' | 'quantity' | 'price' | 'commission' | 'created_at'
@@ -95,6 +96,19 @@ function LoadError({ onRetry }: { onRetry: () => void }) {
   )
 }
 
+/** A trade whose record is uncertain: the chip, why, and the way to fix it when there is one. */
+function ReviewNote({ note, onFix }: { note: string | null | undefined; onFix?: () => void }) {
+  return (
+    <>
+      <span className="ml-1.5 inline-flex items-center rounded bg-warn-soft px-1.5 py-0.5 align-middle text-xs font-medium text-warn">Revisar</span>
+      <span className="mt-0.5 block max-w-[52ch] whitespace-normal text-[13px] font-normal text-ink-3">
+        {note}
+        {onFix && <>{' '}<button type="button" onClick={onFix} className="inline-flex min-h-8 items-center font-medium text-accent-ink hover:underline">Corregir</button></>}
+      </span>
+    </>
+  )
+}
+
 const field = 'min-h-9 w-64 rounded-md border border-line-strong bg-surface px-3 text-ink placeholder:text-ink-3 hover:border-ink-3 focus-visible:border-accent focus-visible:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_28%,transparent)] focus-visible:outline-none max-[819px]:min-h-11 max-[819px]:w-full'
 // Tables need the width; below this the same rows read as a list.
 const TABLE_ONLY = 'max-[1079px]:hidden'
@@ -114,6 +128,8 @@ export default function HistoryPage() {
   const [allError, setAllError] = useState(false)
   const [allFilter, setAllFilter] = useState('')
   const [allSort, setAllSort] = useState<Sort<AllSortKey>>({ key: 'date', dir: 'desc' })
+  const [reviewOnly, setReviewOnly] = useState(false)
+  const [fixingId, setFixingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
@@ -152,6 +168,14 @@ export default function HistoryPage() {
     else fetchAllTransactions()
   }, [activeTab, fetchClosedTrades, fetchAllTransactions])
 
+  async function handleFixed() {
+    setFixingId(null)
+    await fetchAllTransactions()
+    window.dispatchEvent(new CustomEvent('portfolio-needs-refresh'))
+  }
+  // Only a trade with a CEDEAR ratio can be re-derived from a broker ticket.
+  const fixOf = (t: Transaction) => (t.cedear_ratio ? () => setFixingId(id => (id === t.id ? null : t.id)) : undefined)
+
   async function handleDelete(t: Transaction) {
     if (!confirm('¿Estás seguro que querés borrar esta operación? Esto recalculará toda la posición desde cero.')) return
 
@@ -176,10 +200,11 @@ export default function HistoryPage() {
     closedSort, ['ticker'], ['open_date', 'close_date'], t => symbolOf(t.ticker).toLowerCase(),
   )
   const allSorted = sortRows(
-    allTx.filter(t => !allFilter || t.ticker.toLowerCase().includes(allFilter.toLowerCase())),
+    allTx.filter(t => (!allFilter || t.ticker.toLowerCase().includes(allFilter.toLowerCase())) && (!reviewOnly || t.needs_review)),
     allSort, ['ticker', 'operation'], ['date', 'created_at'], (t, k) => String(t[k as 'ticker' | 'operation'] ?? '').toLowerCase(),
   )
 
+  const reviewCount = allTx.filter(t => t.needs_review).length
   const totalPnl = closedTrades.reduce((s, t) => s + t.pnl, 0)
   const totalInvested = closedTrades.reduce((s, t) => s + t.invested, 0)
   const winRate = closedTrades.length > 0 ? closedTrades.filter(t => t.pnl > 0).length / closedTrades.length : 0
@@ -207,6 +232,16 @@ export default function HistoryPage() {
             </label>
           ))}
         </fieldset>
+        {activeTab === 'all' && reviewCount > 0 && (
+          <button
+            type="button"
+            aria-pressed={reviewOnly}
+            onClick={() => setReviewOnly(v => !v)}
+            className="inline-flex min-h-9 items-center rounded-md border border-line-strong px-3 text-[13px] font-medium text-ink-2 hover:bg-hover aria-pressed:border-warn aria-pressed:bg-warn-soft aria-pressed:text-warn max-[819px]:min-h-11"
+          >
+            Para revisar ({reviewCount})
+          </button>
+        )}
         <div className="grid gap-1.5 max-[819px]:w-full">
           <label htmlFor="history-filter" className="text-[13px] font-medium">Filtrar por activo</label>
           <input id="history-filter" type="search" placeholder="Ticker" value={filter} onChange={e => setFilter(e.target.value)} className={field} />
@@ -303,7 +338,7 @@ export default function HistoryPage() {
         <section aria-labelledby="h-all">
           <h2 id="h-all" className="sr-only">Todas las operaciones</h2>
           {allLoading ? <Skeleton /> : allError ? <LoadError onRetry={fetchAllTransactions} /> : allSorted.length === 0 ? (
-            <p className="py-6 text-[13px] text-ink-3">{allFilter ? 'Ninguna operación coincide con el filtro.' : 'Todavía no cargaste operaciones.'}</p>
+            <p className="py-6 text-[13px] text-ink-3">{allFilter || reviewOnly ? 'Ninguna operación coincide con el filtro.' : 'Todavía no cargaste operaciones.'}</p>
           ) : (
             <>
               <div className={`overflow-x-auto pt-3 ${TABLE_ONLY}`}>
@@ -317,9 +352,13 @@ export default function HistoryPage() {
                   </thead>
                   <tbody>
                     {allSorted.map(t => (
-                      <tr key={t.id} className="border-b border-line last:border-b-0 hover:bg-hover">
-                        <td className="whitespace-nowrap py-2 pr-3 text-ink-2">{formatDate(t.date)}</td>
-                        <th scope="row" className="py-2 pr-3 text-left font-semibold">{symbolOf(t.ticker)}</th>
+                      <Fragment key={t.id}>
+                      <tr className="border-b border-line last:border-b-0 hover:bg-hover">
+                        <td className="whitespace-nowrap py-2 pr-3 align-top text-ink-2">{formatDate(t.date)}</td>
+                        <th scope="row" className="py-2 pr-3 text-left font-semibold">
+                          {symbolOf(t.ticker)}
+                          {t.needs_review && <ReviewNote note={t.review_note} onFix={fixOf(t)} />}
+                        </th>
                         <td className="py-2 pr-3">{OPERATION_LABELS[t.operation] ?? t.operation}</td>
                         <td className="py-2 pr-3 text-right">{qty(t.quantity, true)}</td>
                         <td className="py-2 pr-3 text-right">{formatNumber(t.price)}</td>
@@ -338,6 +377,14 @@ export default function HistoryPage() {
                           </button>
                         </td>
                       </tr>
+                      {fixingId === t.id && (
+                        <tr className="border-b border-line">
+                          <td colSpan={ALL_COLUMNS.length + 1} className="py-3">
+                            <ReviewFix tx={t} view="table" onSaved={handleFixed} onCancel={() => setFixingId(null)} />
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>
@@ -345,12 +392,13 @@ export default function HistoryPage() {
 
               <ul className={LIST_ONLY}>
                 {allSorted.map(t => (
-                  <li key={t.id} className="grid min-h-[52px] grid-cols-[56px_minmax(0,1fr)_auto_auto] items-center gap-3 border-b border-line py-2 last:border-b-0 max-[819px]:grid-cols-[48px_minmax(0,1fr)_auto_auto]">
+                  <Fragment key={t.id}>
+                  <li className="grid min-h-[52px] grid-cols-[56px_minmax(0,1fr)_auto_auto] items-center gap-3 border-b border-line py-2 last:border-b-0 max-[819px]:grid-cols-[48px_minmax(0,1fr)_auto_auto]">
                     <time dateTime={t.date} className="text-[13px] font-medium tabular-nums">
                       {shortDay(t.date)}<small className="block text-xs font-normal text-ink-3">{t.date.slice(0, 4)}</small>
                     </time>
                     <span className="min-w-0">
-                      <span className="block font-semibold">{symbolOf(t.ticker)}</span>
+                      <span className="block font-semibold">{symbolOf(t.ticker)}{t.needs_review && <ReviewNote note={t.review_note} onFix={fixOf(t)} />}</span>
                       <span className="block truncate text-[13px] text-ink-3 tabular-nums">{OPERATION_LABELS[t.operation] ?? t.operation} a {formatNumber(t.price)}</span>
                     </span>
                     <span className="font-medium tabular-nums">{qty(t.quantity, true)}</span>
@@ -364,6 +412,12 @@ export default function HistoryPage() {
                       <Trash2 className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
                     </button>
                   </li>
+                  {fixingId === t.id && (
+                    <li className="border-b border-line py-3">
+                      <ReviewFix tx={t} view="list" onSaved={handleFixed} onCancel={() => setFixingId(null)} />
+                    </li>
+                  )}
+                  </Fragment>
                 ))}
               </ul>
             </>

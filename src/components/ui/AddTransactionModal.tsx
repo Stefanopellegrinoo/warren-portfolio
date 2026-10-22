@@ -176,10 +176,10 @@ const CHOICE_LABELS: Record<string, string> = {
 // ─────────────────────────────────────────────────────────
 // Presentational pieces (same tokens as the Resumen dialogs)
 // ─────────────────────────────────────────────────────────
-const fieldCls = 'min-h-11 w-full rounded-md border border-line-strong bg-surface px-3 text-ink placeholder:text-ink-3 hover:border-ink-3 focus-visible:border-accent focus-visible:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_28%,transparent)] focus-visible:outline-none'
+export const fieldCls = 'min-h-11 w-full rounded-md border border-line-strong bg-surface px-3 text-ink placeholder:text-ink-3 hover:border-ink-3 focus-visible:border-accent focus-visible:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_28%,transparent)] focus-visible:outline-none'
 const pairCls = 'grid grid-cols-2 gap-3 max-[419px]:grid-cols-1'
-const primaryCls = 'inline-flex min-h-11 items-center justify-center rounded-md bg-primary px-4 font-medium text-primary-on hover:bg-primary-hover disabled:opacity-70'
-const secondaryCls = 'inline-flex min-h-11 items-center justify-center rounded-md px-4 font-medium text-ink-2 hover:bg-hover hover:text-ink'
+export const primaryCls = 'inline-flex min-h-11 items-center justify-center rounded-md bg-primary px-4 font-medium text-primary-on hover:bg-primary-hover disabled:opacity-70'
+export const secondaryCls = 'inline-flex min-h-11 items-center justify-center rounded-md px-4 font-medium text-ink-2 hover:bg-hover hover:text-ink'
 const iconBtnCls = 'grid h-9 w-9 shrink-0 place-items-center rounded-md text-ink-3 hover:bg-hover hover:text-ink max-[819px]:h-11 max-[819px]:w-11'
 const listCls = 'absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-line bg-surface shadow-pop'
 const optionCls = 'flex min-h-11 w-full items-center gap-2 border-b border-line px-3 text-left text-[13px] last:border-b-0 hover:bg-hover focus-visible:outline-offset-[-2px]'
@@ -188,7 +188,7 @@ const MINUS = '−'
 /** Quantities keep their own decimals (up to 6). */
 const qty = (n: number) => formatNumber(n, { decimals: Math.min(6, (String(n).split('.')[1] ?? '').length) })
 
-function Field({ id, label, hint, children }: { id: string; label: string; hint?: React.ReactNode; children: React.ReactNode }) {
+export function Field({ id, label, hint, children }: { id: string; label: string; hint?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="grid content-start gap-1.5">
       <label htmlFor={id} className="text-[13px] font-medium">{label}</label>
@@ -198,7 +198,7 @@ function Field({ id, label, hint, children }: { id: string; label: string; hint?
   )
 }
 
-function Choice<T extends string>({ name, legend, options, value, onChange }: {
+export function Choice<T extends string>({ name, legend, options, value, onChange }: {
   name: string; legend: string; options: readonly T[]; value: T; onChange: (v: T) => void
 }) {
   return (
@@ -299,7 +299,7 @@ function FxLine({ fx, tradeDate, edit, onEdit, onChange, onReset }: {
   )
 }
 
-function FormError({ error }: { error: string }) {
+export function FormError({ error }: { error: string }) {
   return error ? <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-[13px] text-danger">{error}</p> : null
 }
 
@@ -375,8 +375,8 @@ type FxQuote = { rate: number; date: string } | null
 /** Reference MEP and CCL of the CEDEAR form's trade date (GET /api/fx). */
 type FxState = { status: 'loading' | 'missing' | 'error' } | { status: 'ok'; mep: FxQuote; ccl: FxQuote }
 
-const TRADE_CURRENCIES: readonly TradeCurrency[] = ['ARS', 'MEP', 'CCL']
-const IN_CURRENCY: Record<TradeCurrency, string> = { ARS: 'en pesos', MEP: 'en dólar MEP', CCL: 'en dólar cable' }
+export const TRADE_CURRENCIES: readonly TradeCurrency[] = ['ARS', 'MEP', 'CCL']
+export const IN_CURRENCY: Record<TradeCurrency, string> = { ARS: 'en pesos', MEP: 'en dólar MEP', CCL: 'en dólar cable' }
 const dayMonth = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`
 
 // ─────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import HistoryPage from '../page'
-import type { ClosedTrade } from '@/types'
+import type { ClosedTrade, Transaction } from '@/types'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -47,6 +47,73 @@ describe('HistoryPage', () => {
     expect(el.textContent).toContain('−50,50')
     expect(el.textContent).toContain('+13,3 %')
     expect(el.textContent).toContain('US$ 149,50') // total realized
+    unmount()
+  })
+})
+
+describe('HistoryPage — trades to review', () => {
+  const tx = (over: Partial<Transaction>): Transaction => ({
+    id: 'x1', user_id: 'u', date: '2026-03-02', ticker: 'AAPL', operation: 'COMPRA', quantity: 2, price: 200, commission: 0, total: 400,
+    avg_cost_after: null, notes: null, asset_type: 'CEDEAR', moneda: 'ARS', created_at: '2026-03-16T14:00:00+00:00', ...over,
+  })
+  const rows = [
+    tx({ id: 'ok', ticker: 'KO' }),
+    tx({ id: 'ced', needs_review: true, review_note: 'Cargada 14 días después de la fecha de operación.', cedear_ratio: 20, trade_currency: 'ARS', trade_quantity: 40, trade_price: 15999.987, trade_commission: 0 }),
+    tx({ id: 'dis', ticker: 'DIS', asset_type: 'ACCION', needs_review: true, review_note: 'DIS no figura como CEDEAR.', cedear_ratio: null, trade_currency: 'CCL' }),
+  ]
+
+  async function mountAll() {
+    const calls: { url: string; init?: RequestInit }[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init })
+      if (url.startsWith('/api/transactions?')) return new Response(JSON.stringify({ data: rows }))
+      if (url.startsWith('/api/transactions/')) return new Response(JSON.stringify({ success: true }))
+      return new Response(JSON.stringify({ data: [] }))
+    }))
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<HistoryPage />) })
+    await act(async () => { (el.querySelector('input[value="all"]') as HTMLInputElement).click() })
+    await act(async () => {})
+    return { el, calls, unmount: () => act(() => root.unmount()) }
+  }
+  const tableRows = (el: HTMLElement) => [...el.querySelectorAll('tbody tr')].map(r => r.textContent ?? '')
+
+  it('marks the rows to review with a chip and their note', async () => {
+    const { el, unmount } = await mountAll()
+    const [ko, ced] = ['KO', 'AAPL'].map(t => tableRows(el).find(r => r.includes(t))!)
+    expect(ced).toContain('Revisar')
+    expect(ced).toContain('Cargada 14 días después de la fecha de operación.')
+    expect(ko).not.toContain('Revisar')
+    unmount()
+  })
+
+  it('filters to the rows to review', async () => {
+    const { el, unmount } = await mountAll()
+    const toggle = [...el.querySelectorAll('button')].find(b => b.textContent === 'Para revisar (2)')!
+    expect(toggle.getAttribute('aria-pressed')).toBe('false')
+    await act(async () => { toggle.click() })
+    expect(tableRows(el).some(r => r.includes('KO'))).toBe(false)
+    expect(tableRows(el).filter(r => r.includes('Revisar'))).toHaveLength(2)
+    unmount()
+  })
+
+  it('corrects a CEDEAR from its ticket through PATCH, and offers no correction where no ticket can be derived', async () => {
+    const { el, calls, unmount } = await mountAll()
+    const fixButtons = [...el.querySelectorAll('table button')].filter(b => b.textContent === 'Corregir')
+    expect(fixButtons).toHaveLength(1) // AAPL only; DIS has no ratio
+    await act(async () => { (fixButtons[0] as HTMLButtonElement).click() })
+    const form = el.querySelector('table form') as HTMLFormElement
+    expect((form.querySelector('input[id^="fix-price"]') as HTMLInputElement).value).toBe('15999.99')
+    await act(async () => { form.requestSubmit() })
+    await act(async () => {})
+    const patch = calls.find(c => c.init?.method === 'PATCH')!
+    expect(patch.url).toBe('/api/transactions/ced')
+    expect(JSON.parse(String(patch.init!.body))).toEqual({
+      date: '2026-03-02', ticker: 'AAPL', operation: 'COMPRA', assetType: 'CEDEAR',
+      tradeCurrency: 'ARS', tradeQuantity: 40, tradePrice: 15999.99, tradeCommission: 0, notes: '',
+    })
     unmount()
   })
 })
