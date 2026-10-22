@@ -86,7 +86,7 @@ function ToolButton({
 			aria-pressed={active}
 			onClick={onClick}
 			className={cn(
-				"grid h-9 w-9 shrink-0 place-items-center rounded text-ink-2 hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring max-[819px]:h-11 max-[819px]:w-11",
+				"grid h-8 w-8 shrink-0 place-items-center rounded text-ink-2 hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring max-[819px]:h-11 max-[819px]:w-11",
 				active && "bg-accent-soft text-accent-ink hover:bg-accent-soft hover:text-accent-ink",
 			)}
 		>
@@ -135,7 +135,7 @@ export function DrawingTools({
 			role="toolbar"
 			aria-label="Herramientas de dibujo"
 			aria-orientation="vertical"
-			className="flex shrink-0 flex-col items-center gap-1 overflow-y-auto border-r border-line bg-surface px-1 py-2 max-[819px]:flex-row max-[819px]:overflow-x-auto max-[819px]:overflow-y-hidden max-[819px]:border-b max-[819px]:border-r-0 max-[819px]:px-2 max-[819px]:py-1"
+			className="flex shrink-0 flex-col items-center gap-0.5 overflow-y-auto border-r border-line bg-surface px-1 py-2 max-[819px]:flex-row max-[819px]:overflow-x-auto max-[819px]:overflow-y-hidden max-[819px]:border-b max-[819px]:border-r-0 max-[819px]:px-2 max-[819px]:py-1"
 		>
 			<ToolButton label="Cursor" icon={MousePointer2} active={tool === null && !alertMode} onClick={() => arm(null)} />
 			{GROUPS.map((group, i) => (

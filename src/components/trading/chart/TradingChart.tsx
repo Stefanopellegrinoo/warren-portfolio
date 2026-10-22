@@ -34,6 +34,7 @@ const TZ = "America/Argentina/Buenos_Aires";
 const INTRADAY: Timeframe[] = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h"];
 const VISIBLE_BARS = 160;
 const DRAG_THRESHOLD_PX = 3;
+const LEGEND_OPEN_MAX = 3;
 
 const priceText = (p: number) => formatNumber(p, { decimals: Math.abs(p) < 1 ? 4 : 2 });
 const asTime = (t: number) => t as UTCTimestamp;
@@ -144,8 +145,6 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 	const [textEdit, setTextEdit] = useState<{ drawing: Drawing; x: number; y: number } | null>(null);
 	const [legendOpen, setLegendOpen] = useState(true);
 
-	// Phones start with the indicator list folded: it would cover the candles.
-	useEffect(() => setLegendOpen(!window.matchMedia("(max-width: 819px)").matches), []);
 
 	const theme = useChartTheme();
 	const intraday = INTRADAY.includes(timeframe);
@@ -156,6 +155,10 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 	const removeIndicator = useChartStore((s) => s.removeIndicator);
 	const setSettingsTarget = useChartStore((s) => s.setSettingsTarget);
 	const enabled = useMemo(() => INDICATOR_ORDER.filter((k) => indicators[k]), [indicators]);
+
+	// The indicator list starts folded on phones, or when it is long enough to cover the candles.
+	const legendLong = enabled.length > LEGEND_OPEN_MAX;
+	useEffect(() => setLegendOpen(!legendLong && !window.matchMedia("(max-width: 819px)").matches), [legendLong]);
 
 	const data = useCandles(symbol, timeframe);
 	const last = data.candles.at(-1) ?? null;
