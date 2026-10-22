@@ -15,7 +15,7 @@ Branch: `feat/multimoneda`. Delivery: ask-on-risk. Test runner: vitest. Design: 
 | ID | Specs | Route | Status | Evidence |
 |---|---|---|---|---|
 | A1 | S1 | inline | done | worker 1 min, dashboard 30 s, quote 15 s cached, candles 30 s; RED→GREEN worker-startup + quote cache |
-| A2 | S2, S3 | inline | todo | `fx_rates` table (MEP/CCL daily from argentinadatos), backfill and daily ingest. Risk item 1 (new table; DB write needs OK) |
+| A2 | S2, S3 | inline | done 6b4b208 (migration 043 NOT applied) | `fx_rates` table (MEP/CCL daily from argentinadatos), backfill and daily ingest. Risk item 1 (new table; DB write needs OK) |
 | B | S3, S4 | tbd | todo | faithful trade record + form + reconstruction |
 | C | S2 | tbd | todo | per-currency engines + selector |
 
