@@ -25,10 +25,6 @@ const MAX_MATCHES = 8
 const EMPTY: ItemFieldValues = { mode: 'usd', amount: '', price: '' }
 const LABEL = 'text-[11px] font-mono uppercase tracking-widest text-slate-400'
 
-// TODO(stage 6): "Comparar con mi cartera real" needs the real ON holdings as a read-only view
-// (positions by ISIN, residual VN after amortizations); it is not cheap with today's code, so it
-// ships with the real-portfolio stage and reuses analyzePortfolio on those holdings.
-
 function ItemRow({ item, row, view, onChanged, onError }: { item: SavedItem; row?: OnListRow; view: View; onChanged: () => Promise<void>; onError: (m: string) => void }) {
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
