@@ -8,11 +8,12 @@ describe('ReconciliationBanner', () => {
     expect(renderToStaticMarkup(<ReconciliationBanner result={{ ok: true, reasons: [] }} />)).toBe('')
   })
 
-  it('shows an amber banner with the reasons inside <details>', () => {
+  it('shows a warning banner with the reasons inside <details>', () => {
     const html = renderToStaticMarkup(
       <ReconciliationBanner result={{ ok: false, reasons: ['cash: 1.00 replayed vs 2.00 stored', 'ON ZZZ: quantity 1 replayed vs 2 stored'] }} />
     )
-    expect(html).toContain('bg-amber')
+    expect(html).toContain('bg-warn-soft')
+    expect(html).not.toMatch(/font-mono|animate-/)
     expect(html).toContain('<details')
     expect(html).toContain('2 diferencias')
     expect(html).toContain('Efectivo: tu historial da 1.00, lo guardado es 2.00')

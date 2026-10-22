@@ -23,17 +23,17 @@ export function reasonToSpanish(reason: string): string {
   return `No se pudo comparar: ${reason}`
 }
 
-/** Amber notice when the stored portfolio disagrees with its own ledger. Null/ok renders nothing. */
+/** Warning notice when the stored portfolio disagrees with its own ledger. Null/ok renders nothing. */
 export default function ReconciliationBanner({ result }: { result: ReconciliationResult | null }) {
   if (!result || result.ok) return null
   const n = result.reasons.length
   return (
-    <div className="mb-6 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-amber animate-fade-in">
+    <div className="mb-8 rounded-md bg-warn-soft px-4 py-3 text-warn">
       <details>
-        <summary className="cursor-pointer text-xs font-mono">
-          Los saldos guardados no coinciden con tu historial de operaciones: {n} diferencia{n === 1 ? '' : 's'} (ver detalle)
+        <summary className="min-h-6 cursor-pointer text-sm">
+          Los saldos guardados no coinciden con tu historial de operaciones: {n} diferencia{n === 1 ? '' : 's'} <span className="font-medium underline underline-offset-2">(ver detalle)</span>
         </summary>
-        <ul className="mt-2 space-y-1 text-[11px] font-mono text-slate-300">
+        <ul className="mt-3 list-disc space-y-1 pl-5 text-[13px]">
           {result.reasons.map(r => <li key={r}>{reasonToSpanish(r)}</li>)}
         </ul>
       </details>

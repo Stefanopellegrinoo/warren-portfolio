@@ -7,7 +7,7 @@ export default function UnpricedNotice({ count, tickers }: { count?: number; tic
     ? `1 posición sin precio${list} — no está incluida en el total`
     : `${n} posiciones sin precio${list} — no están incluidas en el total`
   return (
-    <div role="status" className="mb-6 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-amber text-xs font-mono animate-fade-in">
+    <div role="status" className="mb-8 rounded-md bg-warn-soft px-4 py-3 text-sm text-warn">
       {text}
     </div>
   )

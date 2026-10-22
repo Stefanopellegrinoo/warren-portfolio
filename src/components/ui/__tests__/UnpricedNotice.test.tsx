@@ -12,6 +12,7 @@ describe('UnpricedNotice', () => {
   it('names the count and tickers in text, role=status, pluralised', () => {
     const many = renderToStaticMarkup(<UnpricedNotice count={2} tickers={['AAA', 'BBB']} />)
     expect(many).toContain('role="status"')
+    expect(many).toContain('bg-warn-soft')
     expect(many).toContain('2 posiciones sin precio (AAA, BBB) — no están incluidas en el total')
     const one = renderToStaticMarkup(<UnpricedNotice count={1} tickers={['AAA']} />)
     expect(one).toContain('1 posición sin precio (AAA) — no está incluida en el total')
