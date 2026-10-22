@@ -149,6 +149,7 @@ export default function DashboardPage() {
   const total = summary ? (views ? views.totals.value[currency] : summary.total_market_value) : 0
   const cash = summary ? (views ? views.totals.cash[currency] : summary.cash.balance) : 0
   const isEmpty = !!summary && rows.length === 0 && summary.cash.balance === 0
+  const figures = summary ? headline(summary, views, currency) : null
   const quotedAt = data?.lastRefresh ? new Date(data.lastRefresh) : null
 
   return (
@@ -186,7 +187,7 @@ export default function DashboardPage() {
 
       {summary && !isEmpty && (
         <div className="grid gap-8">
-          <ValueSection figures={headline(summary, views, currency)} />
+          <ValueSection figures={figures!} />
 
           {/* Phone: every holding, then the rest.
               Wide screens: holdings take the main column and the rest sits beside them. */}
@@ -218,7 +219,7 @@ export default function DashboardPage() {
               <ValueChart />
             </section>
 
-            <div className="min-w-0 [grid-area:dist]"><DistributionList items={distribution(summary, views, currency, rows)} /></div>
+            <div className="min-w-0 [grid-area:dist]"><DistributionList items={distribution(summary, views, currency, rows)} prefix={figures!.prefix} /></div>
             <div className="min-w-0 [grid-area:moves]"><MovementsList refreshKey={movementsKey} onChanged={fetchPositions} /></div>
           </div>
         </div>
