@@ -20,6 +20,9 @@ export async function GET(req: NextRequest) {
       .select('*', { count: 'exact' })
       .eq('user_id', user.id)
       .order('date', { ascending: false })
+      // Same-day rows (and the backfill shares one created_at) need a unique tiebreak, or pages repeat and skip rows.
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
       .range(offset, offset + limit - 1)
 
     if (type) query = query.eq('type', type)
