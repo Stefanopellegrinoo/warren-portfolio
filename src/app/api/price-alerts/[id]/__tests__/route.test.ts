@@ -211,6 +211,50 @@ describe('PATCH /api/price-alerts/[id]', () => {
     expect(body.error).toBeDefined()
   })
 
+  it('re-arms a triggered alert: status active clears triggered_at, with the moved value and operator', async () => {
+    const rearmed = { id: ALERT_ID, status: 'active', triggered_at: null, value: 210, operator: 'crosses_below' }
+    const chain = makeChain({ data: rearmed, error: null })
+    mockFrom.mockImplementation(chain.from)
+
+    const { PATCH } = await import('../route')
+    const res = await PATCH(
+      makePatchRequest(ALERT_ID, { status: 'active', value: 210, operator: 'crosses_below' }),
+      { params: { id: ALERT_ID } }
+    )
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ alert: rearmed })
+    const update = chain.from.mock.results[0].value.update
+    expect(update).toHaveBeenCalledWith({ status: 'active', triggered_at: null, value: 210, operator: 'crosses_below' })
+    const eqAlertId = update.mock.results[0].value.eq
+    expect(eqAlertId).toHaveBeenCalledWith('id', ALERT_ID)
+    expect(eqAlertId.mock.results[0].value.eq).toHaveBeenCalledWith('user_id', 'user-1')
+    expect(mockInvalidateUserCache).toHaveBeenCalledWith('user-1')
+  })
+
+  it('returns 400 when status is anything other than active', async () => {
+    const chain = makeChain({ data: null, error: null })
+    mockFrom.mockImplementation(chain.from)
+
+    const { PATCH } = await import('../route')
+    const res = await PATCH(makePatchRequest(ALERT_ID, { status: 'triggered' }), { params: { id: ALERT_ID } })
+
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/status/)
+    expect(chain.from).not.toHaveBeenCalled()
+  })
+
+  it('updates only the given fields when status is not sent', async () => {
+    const chain = makeChain({ data: { id: ALERT_ID, name: 'Renamed' }, error: null })
+    mockFrom.mockImplementation(chain.from)
+
+    const { PATCH } = await import('../route')
+    const res = await PATCH(makePatchRequest(ALERT_ID, { name: 'Renamed' }), { params: { id: ALERT_ID } })
+
+    expect(res.status).toBe(200)
+    expect(chain.from.mock.results[0].value.update).toHaveBeenCalledWith({ name: 'Renamed' })
+  })
+
   it('returns 400 when operator is invalid', async () => {
     const { PATCH } = await import('../route')
     const res = await PATCH(

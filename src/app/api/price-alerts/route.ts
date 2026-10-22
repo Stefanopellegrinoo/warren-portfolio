@@ -1,17 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 
-export async function GET(_req: NextRequest) {
+export async function GET(req: NextRequest) {
   const auth = await requireUser()
   if (isAuthFailure(auth)) return auth.error
 
   const { supabase, user } = auth
+  // Optional: the chart asks for one ticker; the strategies tab lists them all
+  const ticker = req.nextUrl.searchParams.get('ticker')
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('price_alerts')
     .select('*')
     .eq('user_id', user.id)
-    .order('created_at', { ascending: false })
+  if (ticker) query = query.eq('ticker', ticker)
+
+  const { data, error } = await query.order('created_at', { ascending: false })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 

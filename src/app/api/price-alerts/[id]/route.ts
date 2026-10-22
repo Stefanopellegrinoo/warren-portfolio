@@ -21,7 +21,12 @@ export async function PATCH(
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const { name, operator, value, channel } = (body ?? {}) as Record<string, unknown>
+  const { name, operator, value, channel, status } = (body ?? {}) as Record<string, unknown>
+
+  // Only re-arming is allowed: the worker owns the 'triggered' transition
+  if (status !== undefined && status !== 'active') {
+    return NextResponse.json({ error: 'status can only be set to active' }, { status: 400 })
+  }
 
   if (operator !== undefined && !VALID_OPERATORS.includes(operator as typeof VALID_OPERATORS[number])) {
     return NextResponse.json(
@@ -39,6 +44,10 @@ export async function PATCH(
   if (operator !== undefined) patch.operator = operator
   if (value !== undefined) patch.value = value
   if (channel !== undefined) patch.channel = channel
+  if (status === 'active') {
+    patch.status = 'active'
+    patch.triggered_at = null
+  }
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: 'No updatable fields provided' }, { status: 400 })

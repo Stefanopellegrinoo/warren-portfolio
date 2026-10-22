@@ -16,8 +16,8 @@ const mockSupabase = { from: mockFrom }
 const fakeUser = { id: 'user-1' }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function makeGetRequest() {
-  return new NextRequest('http://localhost/api/price-alerts', { method: 'GET' })
+function makeGetRequest(query = '') {
+  return new NextRequest(`http://localhost/api/price-alerts${query}`, { method: 'GET' })
 }
 
 function makePostRequest(body: unknown) {
@@ -90,6 +90,38 @@ describe('GET /api/price-alerts', () => {
     expect(body.alerts).toHaveLength(1)
     expect(body.alerts[0].id).toBe('alert-1')
     expect(body.alerts[0].ticker).toBe('AAPL')
+  })
+
+  it('filters by ticker when ?ticker= is given', async () => {
+    const eq = vi.fn().mockReturnThis()
+    mockFrom.mockReturnValue({
+      select: vi.fn().mockReturnThis(),
+      eq,
+      order: vi.fn().mockResolvedValue({ data: [fakeAlert], error: null }),
+    })
+
+    const { GET } = await import('../route')
+    const res = await GET(makeGetRequest('?ticker=AAPL'))
+    expect(res.status).toBe(200)
+    expect(eq).toHaveBeenCalledWith('user_id', 'user-1')
+    expect(eq).toHaveBeenCalledWith('ticker', 'AAPL')
+    const body = await res.json()
+    expect(body.alerts).toEqual([fakeAlert])
+  })
+
+  it('lists every ticker of the user when no ticker is given', async () => {
+    const eq = vi.fn().mockReturnThis()
+    mockFrom.mockReturnValue({
+      select: vi.fn().mockReturnThis(),
+      eq,
+      order: vi.fn().mockResolvedValue({ data: [fakeAlert], error: null }),
+    })
+
+    const { GET } = await import('../route')
+    const res = await GET(makeGetRequest())
+    expect(res.status).toBe(200)
+    expect(eq).toHaveBeenCalledTimes(1)
+    expect(eq).toHaveBeenCalledWith('user_id', 'user-1')
   })
 
   it('returns 500 when Supabase returns an error', async () => {

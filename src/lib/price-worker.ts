@@ -67,6 +67,27 @@ async function getAllTickers(): Promise<string[]> {
 }
 
 /**
+ * Fetch the distinct tickers that have an active price alert, held or not
+ */
+async function getActiveAlertTickers(): Promise<string[]> {
+  const supabase = getSupabase()
+  if (!supabase) return []
+
+  const { data, error } = await supabase
+    .from('price_alerts')
+    .select('ticker')
+    .eq('status', 'active')
+    .eq('type', 'price')
+
+  if (error) {
+    console.error('[Worker] Error fetching alert tickers:', error)
+    return []
+  }
+
+  return Array.from(new Set((data || []).map((a: any) => a.ticker) as string[]))
+}
+
+/**
  * Fetch all ON tickers from the ons table (ones users are trading)
  */
 async function getAllONTickers(): Promise<string[]> {
@@ -120,10 +141,16 @@ async function updateONPricesInDatabase(prices: Map<string, any>): Promise<void>
 
 /**
  * Evaluate all active price alerts against the latest fetched prices.
+ * Fires only on a real cross: the previous price (the LKP before this update)
+ * on one side of the line and the current price on or past it. A ticker with
+ * no previous price never fires.
  * Uses createServiceClient (RLS bypass) since this runs in the worker.
  * On trigger: marks the alert as 'triggered' and sends a Telegram message.
  */
-export async function evaluatePriceAlerts(prices: Record<string, number>): Promise<void> {
+export async function evaluatePriceAlerts(
+  prices: Record<string, number>,
+  previousPrices: Record<string, number>
+): Promise<void> {
   const supabase = getSupabase()
   if (!supabase) return
 
@@ -144,11 +171,13 @@ export async function evaluatePriceAlerts(prices: Record<string, number>): Promi
 
   for (const alert of alerts ?? []) {
     const currentPrice = prices[alert.ticker]
-    if (currentPrice === undefined) continue
+    const previousPrice = previousPrices[alert.ticker]
+    if (currentPrice === undefined || previousPrice === undefined) continue
 
+    const value = Number(alert.value)
     const fired =
-      (alert.operator === 'crosses_above' && currentPrice >= alert.value) ||
-      (alert.operator === 'crosses_below' && currentPrice <= alert.value)
+      (alert.operator === 'crosses_above' && previousPrice < value && currentPrice >= value) ||
+      (alert.operator === 'crosses_below' && previousPrice > value && currentPrice <= value)
 
     if (!fired) continue
 
@@ -166,6 +195,14 @@ export async function evaluatePriceAlerts(prices: Record<string, number>): Promi
     const msg = `🔔 Alerta disparada: ${alert.ticker} ${direction} ${alert.value}\nPrecio actual: ${currentPrice}`
     await sendTelegram(msg)
   }
+}
+
+function toPriceRecord(quotes: Map<string, any>): Record<string, number> {
+  const record: Record<string, number> = {}
+  quotes.forEach((quote, ticker) => {
+    if (quote?.price !== undefined) record[ticker] = quote.price
+  })
+  return record
 }
 
 async function getUserTickers(userId: string): Promise<{ stock: string[]; on: string[] }> {
@@ -274,9 +311,17 @@ const worker = new Worker(
         return
       }
       
-      const [allTickers, allONTickers] = await Promise.all([getAllTickers(), getAllONTickers()])
-      tickers = allTickers
+      const [allTickers, allONTickers, alertTickers] = await Promise.all([
+        getAllTickers(), getAllONTickers(), getActiveAlertTickers(),
+      ])
       onTickers = allONTickers
+      // Alert tickers need a price even when nobody holds them. ONs among them
+      // are already fetched from Data912 via the catalog, so they stay off Yahoo.
+      const onCatalog = new Set(allONTickers.map(t => t.toUpperCase().trim()))
+      tickers = Array.from(new Set([
+        ...allTickers,
+        ...alertTickers.filter(t => !onCatalog.has(t.toUpperCase().trim())),
+      ]))
       
       if (!tickers.length && !onTickers.length) {
         console.log('[Worker] No positions found — skipping')
@@ -300,6 +345,8 @@ const worker = new Worker(
     // This ensures we have a baseline for both stocks and ONs
     const allPrices = await fetchQuotes([...tickers, ...onTickers])
     console.log(`[Worker] Loaded ${allPrices.size} quotes from Redis cache (LKP)`)
+    // The LKP before this update is the "previous" side of an alert cross
+    const previousPrices = toPriceRecord(allPrices)
 
     // 2. FETCH FRESH STOCK QUOTES (Yahoo)
     let freshYahooPrices = new Map<string, any>()
@@ -347,13 +394,7 @@ const worker = new Worker(
     console.log(`[Worker] Done — ${freshYahooPrices.size + freshONPrices.size} fresh, ${allPrices.size - (freshYahooPrices.size + freshONPrices.size)} from LKP, ${missing.length} missing`)
 
     // 4. EVALUATE PRICE ALERTS
-    const pricesRecord: Record<string, number> = {}
-    allPrices.forEach((quote, ticker) => {
-      if (quote?.price !== undefined) {
-        pricesRecord[ticker] = quote.price
-      }
-    })
-    await evaluatePriceAlerts(pricesRecord).catch(e =>
+    await evaluatePriceAlerts(toPriceRecord(allPrices), previousPrices).catch(e =>
       console.error('[Worker] evaluatePriceAlerts failed:', e)
     )
 
