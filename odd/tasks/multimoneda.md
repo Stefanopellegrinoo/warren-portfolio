@@ -91,3 +91,4 @@ Branch: `feat/multimoneda`. Delivery: ask-on-risk. Test runner: vitest. Design: 
   - Suite 1984 PASS. Browser check at 320/375/1440 × light/dark passes.
   - Real holdings: all 14 are CEDEARs with a data912 peso price (none estimated).
   - Parent fixed the wrapping of long peso amounts. Note: b30b98b was committed while one test failed (the grep in the chain hid the exit code); fixed in the next commit.
+- L11 (2026-10-22): stage C pushed master 3a24dd1..8a0beba; CI 39817569293 test+image+deploy success. Container freshness not verified (no public route changed in C); the user sees the selector in Resumen if the new version runs.
