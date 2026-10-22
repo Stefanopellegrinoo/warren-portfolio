@@ -21,6 +21,11 @@ describe('isRedesigned', () => {
     expect(isRedesigned('/history')).toBe(false)
     expect(isRedesigned('/dashboardx')).toBe(false)
   })
+
+  it('includes the trading chart, so it follows the chosen theme', () => {
+    expect(isRedesigned('/trading')).toBe(true)
+    expect(resolveTheme('light', '/trading')).toBe('light')
+  })
 })
 
 describe('resolveTheme', () => {

@@ -1,17 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
-import type { Position, PortfolioSummary } from "@/types";
+import { useEffect, useState } from "react";
+import type { Position } from "@/types";
 import { getPortfolio, getCedearRatios } from "@/lib/warren/positions";
 import { useChartStore } from "@/lib/store/chart-store";
-import { cn } from "@/lib/utils";
-
-interface QuoteResult {
-  ticker: string;
-  price: number | null;
-  change_pct: number | null;
-  change: number;
-}
+import { Chip, SectionHead, toneOf, linkButton } from "@/components/resumen/ui";
+import { formatNumber, formatPct, formatUSD } from "@/lib/utils";
 
 // ── Pure utility exports (exported for unit testing) ──────────────────────────
 
@@ -49,260 +43,75 @@ export function calcDayPnLPct(
   return (dayPnL / base) * 100;
 }
 
-type LoadState = "idle" | "loading" | "error";
+type LoadState = "loading" | "idle" | "error";
 
-const POLL_INTERVAL_MS = 60_000;
+const signedUSD = (n: number) => (n > 0 ? "+" : "") + formatUSD(n);
+const qtyText = (n: number) => formatNumber(n, { decimals: Number.isInteger(n) ? 0 : 4 });
 
-function formatUSDCompact(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
-}
-
-export function PnLSidebar() {
-  const setSymbol = useChartStore((s) => s.setSymbol);
-
+/** The user's position in the chart's symbol. Prices come from the page's single quote poll. */
+export function PnLSidebar({ price }: { price: number | null }) {
+  const symbol = useChartStore((s) => s.symbol);
   const [positions, setPositions] = useState<Position[]>([]);
-  const [cashBalance, setCashBalance] = useState<number | null>(null);
-  const [prices, setPrices] = useState<Map<string, number>>(new Map());
-  const [changes, setChanges] = useState<Map<string, number>>(new Map());
   const [ratios, setRatios] = useState<Map<string, number>>(new Map());
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [reloadKey, setReloadKey] = useState(0);
-  const tickersRef = useRef<string[]>([]);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | undefined>();
-
-  const loadPositions = useCallback(async () => {
-    try {
-      const data = await getPortfolio();
-      const loaded = data.positions ?? [];
-      setPositions(loaded);
-      tickersRef.current = loaded.map((p) => p.ticker);
-      setCashBalance(data.summary?.cash?.balance ?? null);
-      setLoadState("idle");
-      return loaded;
-    } catch {
-      setLoadState("error");
-      return [];
-    }
-  }, []);
-
-  const fetchPrices = useCallback(async (tickers: string[]) => {
-    if (tickers.length === 0) return;
-    try {
-      const query = tickers.join(",");
-      const res = await fetch(`/api/quote?tickers=${encodeURIComponent(query)}`);
-      if (!res.ok) return;
-      const data = (await res.json()) as QuoteResult[];
-      if (!Array.isArray(data)) return;
-      setPrices((prev) => {
-        const next = new Map(prev);
-        data.forEach((q) => {
-          if (q.price !== null) next.set(q.ticker, q.price);
-        });
-        return next;
-      });
-      setChanges((prev) => {
-        const next = new Map(prev);
-        data.forEach((q) => {
-          if (q.price === null) return; // unavailable: keep the last change
-          next.set(q.ticker, q.change ?? 0);
-        });
-        return next;
-      });
-    } catch {
-      // silently keep previous prices — don't break the component
-    }
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
+    setLoadState("loading");
+    Promise.all([getPortfolio(), getCedearRatios().catch(() => new Map<string, number>())])
+      .then(([data, r]) => {
+        if (cancelled) return;
+        setPositions(data.positions ?? []);
+        setRatios(r);
+        setLoadState("idle");
+      })
+      .catch(() => { if (!cancelled) setLoadState("error"); });
+    return () => { cancelled = true; };
+  }, [reloadKey]);
 
-    async function init() {
-      const [fetchedPositions] = await Promise.all([
-        loadPositions(),
-        getCedearRatios().then((r) => {
-          if (!cancelled) setRatios(r);
-        }).catch(() => {}),
-      ]);
-
-      if (cancelled) return;
-
-      await fetchPrices(fetchedPositions.map((p) => p.ticker));
-
-      if (!cancelled) {
-        intervalRef.current = setInterval(() => {
-          fetchPrices(tickersRef.current);
-        }, POLL_INTERVAL_MS);
-      }
-    }
-
-    void init().catch((err) => console.error("[PnLSidebar] init failed:", err));
-
-    return () => {
-      cancelled = true;
-      if (intervalRef.current !== undefined) clearInterval(intervalRef.current);
-    };
-  }, [loadPositions, fetchPrices, reloadKey]);
-
-  if (loadState === "loading") {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="h-5 w-5 animate-spin rounded-full border-2 border-tv-green/30 border-t-tv-green" />
-      </div>
-    );
-  }
-
-  if (loadState === "error") {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-4">
-        <p className="text-center text-xs text-tv-text-muted">Error al cargar posiciones</p>
-        <button
-          onClick={() => setReloadKey((k) => k + 1)}
-          className="rounded px-3 py-1.5 text-xs text-tv-text-muted hover:bg-tv-panel-hover hover:text-tv-text"
-        >
-          Reintentar
-        </button>
-      </div>
-    );
-  }
-
-  const totalPortfolio = positions.reduce((acc, pos) => {
-    const livePrice = prices.get(pos.ticker);
-    const price = livePrice ?? pos.current_price ?? 0;
-    return acc + price * pos.quantity;
-  }, 0);
-
-  const dayPnL = calcDayPnL(positions, changes);
-  const hasDayPnL = hasDayData(changes);
-  const dayPnLPct = calcDayPnLPct(dayPnL, totalPortfolio);
+  const pos = positions.find((p) => p.ticker === symbol);
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="border-b border-tv-border px-3 py-2">
-        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-tv-text-muted">
-          P&amp;L Portfolio
-        </h2>
-      </div>
-
-      <div className="flex-1 overflow-y-auto">
-        {positions.length === 0 ? (
-          <div className="p-4 text-center text-xs text-tv-text-muted">
-            Sin posiciones abiertas
-          </div>
-        ) : (
-          <div className="flex flex-col divide-y divide-tv-border">
-            {positions.map((pos) => {
-              const livePrice = prices.get(pos.ticker) ?? pos.current_price ?? null;
-              const ratio = ratios.get(pos.ticker) ?? 1;
-              const displayQty = ratio > 1 ? pos.quantity / ratio : pos.quantity;
-              const isCedear = ratio > 1;
-
-              const pnlUSD =
-                livePrice !== null
-                  ? (livePrice - pos.avg_cost) * pos.quantity
-                  : null;
-              const pnlPct =
-                livePrice !== null && pos.avg_cost > 0
-                  ? ((livePrice - pos.avg_cost) / pos.avg_cost) * 100
-                  : null;
-
-              const isPositive = pnlUSD !== null && pnlUSD > 0;
-              const isNegative = pnlUSD !== null && pnlUSD < 0;
-
-              return (
-                <div
-                  key={pos.id}
-                  className="cursor-pointer px-3 py-2.5 hover:bg-tv-panel-hover"
-                  onClick={() => { setSymbol(pos.ticker); }}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-amber-400 underline-offset-2 hover:underline">
-                      {pos.ticker}
-                    </span>
-                    <span className="text-[10px] text-tv-text-muted">
-                      {isCedear
-                        ? `${displayQty.toFixed(0)} CEDEARs`
-                        : `qty: ${pos.quantity}`}
-                    </span>
-                  </div>
-
-                  <div className="mt-1 flex items-center justify-between text-[10px] text-tv-text-muted">
-                    <span>Entry: {formatUSDCompact(pos.avg_cost)}</span>
-                    <span>
-                      Now:{" "}
-                      {livePrice !== null ? formatUSDCompact(livePrice) : "—"}
-                    </span>
-                  </div>
-
-                  <div className="mt-1 flex items-center justify-between">
-                    <span
-                      className={cn(
-                        "text-[11px] font-semibold tabular-nums",
-                        isPositive && "text-tv-green",
-                        isNegative && "text-tv-red",
-                        !isPositive && !isNegative && "text-tv-text-muted",
-                      )}
-                    >
-                      {pnlUSD !== null
-                        ? `${pnlUSD >= 0 ? "+" : ""}${formatUSDCompact(pnlUSD)}`
-                        : "—"}
-                    </span>
-                    <span
-                      className={cn(
-                        "text-[10px] tabular-nums",
-                        isPositive && "text-tv-green",
-                        isNegative && "text-tv-red",
-                        !isPositive && !isNegative && "text-tv-text-muted",
-                      )}
-                    >
-                      {pnlPct !== null
-                        ? `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%`
-                        : "—"}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      <div className="border-t border-tv-border px-3 py-2.5">
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-tv-text-muted">Total</span>
-          <span className="font-semibold tabular-nums text-tv-text">
-            {formatUSDCompact(totalPortfolio)}
-          </span>
+    <section aria-labelledby="h-posicion" className="border-t border-line px-4 pb-4 pt-3">
+      <SectionHead id="h-posicion" title="Tu posición" />
+      {loadState === "loading" && <p role="status" className="pt-3 text-[13px] text-ink-3">Cargando…</p>}
+      {loadState === "error" && (
+        <div role="alert" className="flex flex-wrap items-center gap-x-3 pt-3 text-[13px]">
+          <span className="text-danger">No se pudieron cargar tus posiciones</span>
+          <button type="button" onClick={() => setReloadKey((k) => k + 1)} className={linkButton}>Reintentar</button>
         </div>
-        {hasDayPnL && (
-          <div className="mt-1 flex items-center justify-between text-xs">
-            <span className="text-tv-text-muted">Day</span>
-            <span
-              className={cn(
-                "tabular-nums font-semibold",
-                dayPnL > 0 ? "text-tv-green" : dayPnL < 0 ? "text-tv-red" : "text-tv-text-muted"
-              )}
-            >
-              {dayPnL >= 0 ? "+" : ""}
-              {formatUSDCompact(dayPnL)}
-              {dayPnLPct !== null &&
-                ` (${dayPnLPct >= 0 ? "+" : ""}${dayPnLPct.toFixed(2)}%)`}
-            </span>
-          </div>
-        )}
-        {cashBalance !== null && (
-          <div className="mt-1 flex items-center justify-between text-xs">
-            <span className="text-tv-text-muted">Cash</span>
-            <span className="tabular-nums text-tv-text-muted">
-              {formatUSDCompact(cashBalance)}
-            </span>
-          </div>
-        )}
+      )}
+      {loadState === "idle" && !pos && <p className="pt-3 text-[13px] text-ink-3">No tenés {symbol} en tu cartera.</p>}
+      {loadState === "idle" && pos && <PositionRows pos={pos} ratio={ratios.get(pos.ticker) ?? 1} price={price ?? pos.current_price ?? null} />}
+    </section>
+  );
+}
+
+function PositionRows({ pos, ratio, price }: { pos: Position; ratio: number; price: number | null }) {
+  const pnl = price !== null ? (price - pos.avg_cost) * pos.quantity : null;
+  const pnlPct = price !== null && pos.avg_cost > 0 ? (price - pos.avg_cost) / pos.avg_cost : null;
+  const rows: [string, React.ReactNode][] = [
+    ["Cantidad", ratio > 1 ? `${formatNumber(pos.quantity / ratio, { decimals: 0 })} CEDEARs` : qtyText(pos.quantity)],
+    ["Costo promedio", formatUSD(pos.avg_cost)],
+    ["Precio", price !== null ? formatUSD(price) : "—"],
+  ];
+
+  return (
+    <dl className="text-[13px] tabular-nums">
+      {rows.map(([label, value]) => (
+        <div key={label} className="flex items-baseline justify-between gap-3 border-b border-line py-2">
+          <dt className="text-ink-3">{label}</dt>
+          <dd className="text-ink">{value}</dd>
+        </div>
+      ))}
+      <div className="flex items-center justify-between gap-3 pt-2">
+        <dt className="text-ink-3">Resultado</dt>
+        <dd className="flex items-center gap-2">
+          <span className="font-medium text-ink">{pnl !== null ? signedUSD(pnl) : "—"}</span>
+          {pnlPct !== null && <Chip tone={toneOf(pnlPct)}>{formatPct(pnlPct)}</Chip>}
+        </dd>
       </div>
-    </div>
+    </dl>
   );
 }

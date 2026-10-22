@@ -1,64 +1,27 @@
 "use client";
 
-import { useState } from "react";
 import { Watchlist } from "@/components/trading/watchlist/Watchlist";
 import { PnLSidebar } from "@/components/trading/sidebar/PnLSidebar";
-import { useResizable } from "@/hooks/useResizable";
 import { cn } from "@/lib/utils";
 
-// ── Component ──────────────────────────────────────────────────────────────────
+interface RightSidebarProps {
+  /** Live price of the chart's symbol, shared with the top bar. */
+  price: number | null;
+  onSelectSymbol?: (ticker: string) => void;
+  className?: string;
+}
 
-type Tab = "pnl" | "watch";
-
-const TABS: { id: Tab; label: string }[] = [
-  { id: "pnl", label: "P&L" },
-  { id: "watch", label: "Watch" },
-];
-
-export function RightSidebar() {
-  const [activeTab, setActiveTab] = useState<Tab>("pnl");
-  const { width, handleProps } = useResizable({
-    min: 192,
-    max: 600,
-    default: 256,
-    storageKey: "warren:sidebar-width",
-    side: "right",
-  });
-
+/** Watchlist, then the position in the chart's symbol. Full width when it replaces the chart on narrow screens. */
+export function RightSidebar({ price, onSelectSymbol, className }: RightSidebarProps) {
   return (
-    <div className="flex flex-row h-full">
-      {/* drag handle — 12px hit area, 1px visual */}
-      <div
-        className="w-3 cursor-col-resize self-stretch flex-shrink-0 group z-10"
-        {...handleProps}
-      >
-        <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent group-hover:bg-tv-border transition-colors" />
+    <aside
+      aria-label="Lista y posición"
+      className={cn("flex min-h-0 w-[280px] flex-none flex-col border-l border-line bg-canvas max-[1099px]:w-full max-[1099px]:border-l-0", className)}
+    >
+      <div className="min-h-0 flex-1">
+        <Watchlist onSelectSymbol={onSelectSymbol} />
       </div>
-      <aside
-        className="flex flex-col border-l border-tv-border bg-tv-panel flex-shrink-0 relative"
-        style={{ width }}
-      >
-        <div className="flex border-b border-tv-border">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={cn(
-                "flex-1 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider transition-colors",
-                activeTab === tab.id
-                  ? "border-b-2 border-tv-green text-tv-text"
-                  : "text-tv-text-muted hover:text-tv-text",
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="min-h-0 flex-1">
-          {activeTab === "pnl" ? <PnLSidebar /> : <Watchlist />}
-        </div>
-      </aside>
-    </div>
+      <PnLSidebar price={price} />
+    </aside>
   );
 }

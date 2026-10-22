@@ -4,7 +4,7 @@ export const THEME_STORAGE_KEY = 'warren-theme'
 
 // Screens already rebuilt on the new design system. Every other page keeps the old
 // dark-only styling, so it is forced to the dark theme until it is redesigned.
-export const REDESIGNED_PATHS: readonly string[] = ['/dashboard']
+export const REDESIGNED_PATHS: readonly string[] = ['/dashboard', '/trading']
 
 export function isRedesigned(pathname: string): boolean {
   return REDESIGNED_PATHS.some(p => pathname === p || pathname.startsWith(p + '/'))

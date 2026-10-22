@@ -2,16 +2,14 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Header } from "@/components/trading/layout/Header";
+import { Header, type View } from "@/components/trading/layout/Header";
 import { RightSidebar } from "@/components/trading/layout/RightSidebar";
-import { BottomPanel } from "@/components/trading/layout/BottomPanel";
+import { useQuote } from "@/components/trading/layout/useQuote";
 import { TradingChart } from "@/components/trading/chart/TradingChart";
 import { IndicatorSettingsDialog } from "@/components/trading/chart/IndicatorSettingsDialog";
-import { Watchlist } from "@/components/trading/watchlist/Watchlist";
 import { useChartStore } from "@/lib/store/chart-store";
 import { getProviderForSymbol } from "@/lib/market-data/resolver";
 import { coerceTimeframe } from "@/lib/chart/timeframes";
-import { TrendingUp, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // Opens the chart on ?symbol=X (links from the summary and the asset search).
@@ -27,76 +25,32 @@ function SymbolFromQuery() {
 export default function TradingPage() {
   const symbol = useChartStore((s) => s.symbol);
   const timeframe = coerceTimeframe(useChartStore((s) => s.timeframe), getProviderForSymbol(symbol));
-  const setSymbol = useChartStore((s) => s.setSymbol);
-  const [mobileView, setMobileView] = useState<'chart' | 'watchlist'>('chart');
-
-  const handleMobileSymbolSelect = (ticker: string) => {
-    setSymbol(ticker);
-    setMobileView('chart');
-  };
+  const quote = useQuote(symbol);
+  // Below 1100 px the chart and the list share the screen through the Gráfico / Lista switch.
+  const [view, setView] = useState<View>("chart");
 
   return (
-    <>
+    <div className="flex h-dvh flex-col max-[819px]:h-[calc(100dvh-3.5rem)]">
       <Suspense fallback={null}>
         <SymbolFromQuery />
       </Suspense>
+      <h1 className="sr-only">Gráficos</h1>
 
-      {/* Main Container: Full screen, no desktop margins */}
-      <div className="flex h-[100dvh] flex-col w-full">
-        <Header onSymbolSelect={() => setMobileView('chart')} />
-        
-        {/* Mobile View Switcher (Tabs at top) */}
-        <div className="flex h-10 border-b border-tv-border bg-tv-panel md:hidden">
-          <button
-            onClick={() => setMobileView('chart')}
-            className={cn(
-              "flex flex-1 items-center justify-center gap-1.5 text-xs font-semibold uppercase tracking-wider transition-colors",
-              mobileView === 'chart' ? "text-tv-green border-b-2 border-tv-green" : "text-tv-text-muted"
-            )}
-          >
-            <TrendingUp className="h-3.5 w-3.5" />
-            Gráfico
-          </button>
-          <button
-            onClick={() => setMobileView('watchlist')}
-            className={cn(
-              "flex flex-1 items-center justify-center gap-1.5 text-xs font-semibold uppercase tracking-wider transition-colors",
-              mobileView === 'watchlist' ? "text-tv-green border-b-2 border-tv-green" : "text-tv-text-muted"
-            )}
-          >
-            <Star className="h-3.5 w-3.5" />
-            Watchlist
-          </button>
+      <Header view={view} onViewChange={setView} quote={quote} />
+
+      <div className="flex min-h-0 flex-1">
+        {/* One chart instance: the list view only hides it, it never mounts twice. */}
+        <div data-pane="chart" className={cn("flex min-h-0 min-w-0 flex-1 flex-col", view === "list" && "max-[1099px]:hidden")}>
+          <TradingChart symbol={symbol} timeframe={timeframe} />
         </div>
-
-        {/* Content Area */}
-        <main className="min-h-0 flex-1 overflow-hidden">
-          <div className="flex h-full w-full">
-            {/* One chart instance: on phones the watchlist tab hides it, it never mounts twice. */}
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <div className={cn("flex min-h-0 flex-1 flex-col", mobileView === 'watchlist' && "max-md:hidden")}>
-                <TradingChart symbol={symbol} timeframe={timeframe} />
-              </div>
-              {mobileView === 'watchlist' && (
-                <div className="min-h-0 flex-1 overflow-y-auto bg-tv-bg md:hidden">
-                  <Watchlist onSelectSymbol={handleMobileSymbolSelect} />
-                </div>
-              )}
-            </div>
-
-            {/* Desktop Right Sidebar */}
-            <div className="hidden md:block flex-shrink-0">
-              <RightSidebar />
-            </div>
-          </div>
-        </main>
-
-        {/* Desktop Bottom Components */}
-        <div className="hidden md:block">
-          <BottomPanel />
-        </div>
-        <IndicatorSettingsDialog />
+        <RightSidebar
+          price={quote?.price ?? null}
+          onSelectSymbol={() => setView("chart")}
+          className={cn(view === "chart" && "max-[1099px]:hidden")}
+        />
       </div>
-    </>
+
+      <IndicatorSettingsDialog />
+    </div>
   );
 }

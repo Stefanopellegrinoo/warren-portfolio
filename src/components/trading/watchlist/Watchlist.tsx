@@ -6,9 +6,9 @@ import { fetchTickers24h } from "@/lib/binance/rest";
 import { getBinanceWS } from "@/lib/binance/ws";
 import { useChartStore } from "@/lib/store/chart-store";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { formatPrice } from "@/lib/format";
-import { formatPct } from "@/lib/utils";
-import { cn } from "@/lib/utils";
+import { cn, formatPct } from "@/lib/utils";
+import { Chip, toneOf } from "@/components/resumen/ui";
+import { iconButton, priceText } from "@/components/trading/ui";
 import { getProviderForSymbol } from "@/lib/market-data/resolver";
 import { addSymbolToCurrentWatchlist } from "@/lib/warren/watchlist";
 import { WatchlistSelector } from "./WatchlistSelector";
@@ -155,113 +155,81 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
   };
 
   return (
-    <div className="flex h-full flex-col bg-tv-bg">
-      <WatchlistSelector />
-
-      <div className="flex items-center justify-between px-3 py-2">
-        <h2 className="text-[10px] font-bold uppercase tracking-widest text-tv-text-dim">
-          {loading ? "Sincronizando..." : "Símbolos"}
-        </h2>
+    <div className="flex h-full flex-col">
+      <div className="flex items-center gap-1 border-b border-line px-2 py-1.5">
+        <WatchlistSelector />
         <button
+          type="button"
+          aria-label="Agregar símbolo"
+          title="Agregar símbolo"
           onClick={() => openSymbolDialog(true, addSymbolToCurrentWatchlist)}
-          className="rounded p-1 text-tv-text-muted hover:bg-tv-panel-hover hover:text-tv-text transition-colors"
+          className={iconButton}
         >
-          <Plus className="h-3.5 w-3.5" />
+          <Plus className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
         </button>
       </div>
 
-      <div className="grid grid-cols-[1fr_auto_auto] gap-2 px-3 py-1 text-[9px] font-bold uppercase tracking-widest text-tv-text-dim/60 border-b border-tv-border/40">
-        <span>Tícker</span>
+      <div aria-hidden="true" className="grid grid-cols-[minmax(0,1fr)_auto_76px] gap-2 border-b border-line py-1.5 pl-4 pr-10 text-xs text-ink-3">
+        <span>Símbolo</span>
         <span className="text-right">Precio</span>
-        <span className="text-right">Cambio</span>
+        <span className="text-right">Var. día</span>
       </div>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         {loading && currentList.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-10 gap-3">
-            <Loader2 className="h-5 w-5 text-tv-blue animate-spin" />
-            <span className="text-[10px] text-tv-text-dim uppercase tracking-widest">Cargando lista...</span>
-          </div>
+          <p role="status" className="flex items-center gap-2 px-4 py-6 text-[13px] text-ink-3">
+            <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+            Cargando lista…
+          </p>
         ) : (
-          <div className="flex flex-col">
+          <ul aria-label="Símbolos de la lista">
             {currentList.map((s) => {
               const row = rows[s];
               const isActive = s === symbol;
               const f = flash[s];
-              const provider = getProviderForSymbol(s);
+              const isCrypto = getProviderForSymbol(s) === "binance";
 
               return (
-                <div
-                  key={s}
-                  onClick={() => { setSymbol(s); onSelectSymbol?.(s); }}
-                  className={cn(
-                    "group grid cursor-pointer grid-cols-[1fr_auto_auto] items-center gap-2 px-3 py-2 text-xs transition-all duration-200",
-                    "hover:bg-tv-panel-hover border-l-2 border-transparent",
-                    isActive && "bg-tv-blue/5 border-tv-blue",
-                  )}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className={cn(
-                      "font-semibold tracking-tight transition-colors",
-                      isActive ? "text-tv-blue" : "text-tv-text"
-                    )}>
-                      {provider === 'binance' ? s.replace("USDT", "") : s}
+                <li key={s} className={cn("group relative flex items-center border-b border-line hover:bg-hover", isActive && "bg-hover")}>
+                  {isActive && <span aria-hidden="true" className="absolute inset-y-1.5 left-0 w-0.5 rounded bg-accent" />}
+                  <button
+                    type="button"
+                    aria-current={isActive || undefined}
+                    onClick={() => { setSymbol(s); onSelectSymbol?.(s); }}
+                    className="grid min-h-10 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto_76px] items-center gap-2 py-1.5 pl-4 text-left text-[13px] tabular-nums focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring max-[819px]:min-h-11"
+                  >
+                    <span className={cn("truncate text-ink", isActive && "font-semibold")}>
+                      {isCrypto ? s.replace("USDT", "") : s}
+                      {isCrypto && <span className="ml-1 text-xs text-ink-3">USDT</span>}
                     </span>
-                    {provider === 'binance' && (
-                      <span className="text-[9px] text-tv-text-dim font-bold opacity-50">USDT</span>
-                    )}
-                    {provider === 'yahoo' && (
-                      <span className="text-[8px] text-amber-500 font-bold px-1 rounded border border-amber-500/20 bg-amber-500/5">STK</span>
-                    )}
-                  </div>
-
-                  <span className={cn(
-                    "text-right tabular-nums font-medium transition-colors duration-300",
-                    f === "up" && "text-tv-green",
-                    f === "down" && "text-tv-red",
-                    !f && (isActive ? "text-tv-text" : "text-tv-text/90"),
-                  )}>
-                    {row ? formatPrice(row.price) : "—"}
-                  </span>
-
-                  <div className="flex items-center justify-end gap-1.5 w-[64px]">
                     <span className={cn(
-                      "tabular-nums text-[11px] font-bold px-1.5 py-0.5 rounded-sm min-w-[50px] text-right",
-                      row
-                        ? row.pct >= 0
-                          ? "text-tv-green bg-tv-green/10"
-                          : "text-tv-red bg-tv-red/10"
-                        : "text-tv-text-muted",
+                      "text-right transition-colors duration-300 motion-reduce:transition-none",
+                      f === "up" ? "text-ok" : f === "down" ? "text-danger" : "text-ink",
                     )}>
-                      {row ? formatPct(row.pct / 100) : "—"}
+                      {row ? priceText(row.price) : "—"}
                     </span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleRemove(s);
-                      }}
-                      className="invisible opacity-0 group-hover:opacity-100 group-hover:visible transition-all rounded p-0.5 text-tv-text-dim hover:bg-tv-red/20 hover:text-tv-red"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                </div>
+                    <span className="flex justify-end">
+                      {row ? <Chip tone={toneOf(row.pct)}>{formatPct(row.pct / 100)}</Chip> : <span className="text-ink-3">—</span>}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Quitar ${s} de la lista`}
+                    title="Quitar de la lista"
+                    onClick={() => handleRemove(s)}
+                    className="mx-1 grid h-8 w-8 flex-none place-items-center rounded-md text-ink-3 opacity-0 hover:bg-danger-soft hover:text-danger focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring group-hover:opacity-100 max-[819px]:h-11 max-[819px]:w-11 max-[819px]:opacity-100"
+                  >
+                    <X className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+                  </button>
+                </li>
               );
             })}
-
-            {currentList.length === 0 && !loading && (
-              <div className="flex flex-col items-center justify-center py-20 px-6 text-center">
-                <div className="w-12 h-12 rounded-full bg-tv-panel flex items-center justify-center mb-4">
-                  <Plus className="h-6 w-6 text-tv-text-dim" />
-                </div>
-                <p className="text-[11px] text-tv-text-dim uppercase tracking-wider font-bold mb-1">
-                  Lista vacía
-                </p>
-                <p className="text-[10px] text-tv-text-muted leading-relaxed">
-                  Agregá símbolos usando el botón + arriba a la derecha.
-                </p>
-              </div>
-            )}
+          </ul>
+        )}
+        {currentList.length === 0 && !loading && (
+          <div className="px-4 py-6 text-[13px]">
+            <p className="text-ink-2">La lista está vacía.</p>
+            <p className="mt-1 text-ink-3">Agregá símbolos con el botón + de arriba.</p>
           </div>
         )}
       </ScrollArea>
