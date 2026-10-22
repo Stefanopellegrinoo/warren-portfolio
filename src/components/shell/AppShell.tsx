@@ -87,7 +87,7 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
   }
 
   return (
-    <div className="grid min-h-dvh grid-cols-[minmax(0,1fr)] bg-canvas text-ink min-[820px]:grid-cols-[264px_minmax(0,1fr)]">
+    <div className="grid min-h-dvh grid-cols-[minmax(0,1fr)] max-[819px]:content-start bg-canvas text-ink min-[820px]:grid-cols-[264px_minmax(0,1fr)]">
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[60] focus:rounded-md focus:bg-surface focus:px-3 focus:py-2 focus:shadow-pop">
         Saltar al contenido
       </a>
