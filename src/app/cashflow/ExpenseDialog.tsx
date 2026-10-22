@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { EsNumberInput } from '@/components/ui/es-number-input'
 
 const CATEGORIES = [
   'Alquiler', 'Servicios', 'Supermercado', 'Transporte', 'Salud',
@@ -11,7 +12,7 @@ const CATEGORIES = [
 
 const field = 'min-h-11 w-full rounded-md border border-line-strong bg-surface px-3 text-ink hover:border-ink-3 focus-visible:border-accent focus-visible:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_28%,transparent)] focus-visible:outline-none'
 const label = 'text-[13px] font-medium'
-const blank = () => ({ date: new Date().toISOString().split('T')[0], category: 'Supermercado', description: '', amount_usd: '', status: 'PAGADO' })
+const blank = () => ({ date: new Date().toISOString().split('T')[0], category: 'Supermercado', description: '', amount_usd: null as number | null, status: 'PAGADO' })
 
 export default function ExpenseDialog({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null)
@@ -39,7 +40,7 @@ export default function ExpenseDialog({ open, onClose, onSaved }: { open: boolea
       const res = await fetch('/api/cashflow', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, amount_usd: parseFloat(form.amount_usd) }),
+        body: JSON.stringify(form),
       })
       if (!res.ok) {
         const d = await res.json().catch(() => null)
@@ -71,7 +72,7 @@ export default function ExpenseDialog({ open, onClose, onSaved }: { open: boolea
           </div>
           <div className="grid gap-2">
             <label htmlFor="expense-amount" className={label}>Monto en dólares</label>
-            <input id="expense-amount" type="number" inputMode="decimal" step="any" min="0.01" required value={form.amount_usd} onChange={set('amount_usd')}
+            <EsNumberInput id="expense-amount" placeholder="1.234,50" min="0.01" required value={form.amount_usd} onValue={n => setForm(f => ({ ...f, amount_usd: n }))}
               className={field} aria-invalid={!!error} aria-describedby={error ? 'expense-error' : undefined} />
           </div>
           <div className="grid gap-2">

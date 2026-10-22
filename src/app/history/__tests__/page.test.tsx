@@ -105,7 +105,7 @@ describe('HistoryPage — trades to review', () => {
     expect(fixButtons).toHaveLength(1) // AAPL only; DIS has no ratio
     await act(async () => { (fixButtons[0] as HTMLButtonElement).click() })
     const form = el.querySelector('table form') as HTMLFormElement
-    expect((form.querySelector('input[id^="fix-price"]') as HTMLInputElement).value).toBe('15999.99')
+    expect((form.querySelector('input[id^="fix-price"]') as HTMLInputElement).value).toBe('15999,99')
     await act(async () => { form.requestSubmit() })
     await act(async () => {})
     const patch = calls.find(c => c.init?.method === 'PATCH')!
@@ -114,6 +114,40 @@ describe('HistoryPage — trades to review', () => {
       date: '2026-03-02', ticker: 'AAPL', operation: 'COMPRA', assetType: 'CEDEAR',
       tradeCurrency: 'ARS', tradeQuantity: 40, tradePrice: 15999.99, tradeCommission: 0, notes: '',
     })
+    unmount()
+  })
+
+  async function openFix() {
+    const { el, calls, unmount } = await mountAll()
+    const fix = [...el.querySelectorAll('table button')].find(b => b.textContent === 'Corregir') as HTMLButtonElement
+    await act(async () => { fix.click() })
+    const form = el.querySelector('table form') as HTMLFormElement
+    const field = (name: string) => form.querySelector(`input[id^="fix-${name}"]`) as HTMLInputElement
+    const type = (name: string, value: string) => act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field(name), value)
+      field(name).dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    const patched = async () => {
+      await act(async () => { form.requestSubmit() })
+      await act(async () => {})
+      return JSON.parse(String(calls.find(c => c.init?.method === 'PATCH')!.init!.body))
+    }
+    return { type, patched, unmount }
+  }
+
+  it('reads a correction typed the Argentine way: "28.080" is 28080', async () => {
+    const { type, patched, unmount } = await openFix()
+    type('price', '28.080')
+    type('commission', '1.234,5')
+    expect(await patched()).toMatchObject({ tradeQuantity: 40, tradePrice: 28080, tradeCommission: 1234.5 })
+    unmount()
+  })
+
+  it('still reads a plain correction: "10" and "6.69"', async () => {
+    const { type, patched, unmount } = await openFix()
+    type('qty', '10')
+    type('price', '6.69')
+    expect(await patched()).toMatchObject({ tradeQuantity: 10, tradePrice: 6.69 })
     unmount()
   })
 })

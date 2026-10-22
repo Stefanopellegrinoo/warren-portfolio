@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { formatDate } from '@/lib/utils'
 import type { Transaction } from '@/types'
 import type { TradeCurrency } from '@/lib/trade-record'
+import { EsNumberInput } from '@/components/ui/es-number-input'
 import { Choice, Field, FormError, IN_CURRENCY, TRADE_CURRENCIES, fieldCls, primaryCls, secondaryCls } from '@/components/ui/AddTransactionModal'
 
 const cents = (n: number | null | undefined) => (n ? Math.round(n * 100) / 100 : 0)
@@ -57,16 +58,16 @@ export function ReviewFix({ tx, view, onSaved, onCancel }: { tx: Transaction; vi
       <Choice name={id('currency')} legend="Moneda" options={TRADE_CURRENCIES} value={currency} onChange={setCurrency} />
       <div className="grid grid-cols-3 gap-3 max-[819px]:grid-cols-1">
         <Field id={id('qty')} label="Cantidad de CEDEARs">
-          <input id={id('qty')} type="number" inputMode="decimal" min="0" step="any" value={count || ''}
-            onChange={e => setCount(parseFloat(e.target.value) || 0)} className={fieldCls} required />
+          <EsNumberInput id={id('qty')} placeholder="40" value={count || null}
+            onValue={n => setCount(n ?? 0)} className={fieldCls} required />
         </Field>
         <Field id={id('price')} label={`Precio por CEDEAR ${IN_CURRENCY[currency]}`}>
-          <input id={id('price')} type="number" inputMode="decimal" min="0" step="any" value={price || ''}
-            onChange={e => setPrice(parseFloat(e.target.value) || 0)} className={fieldCls} required />
+          <EsNumberInput id={id('price')} placeholder={currency === 'ARS' ? '28.080,50' : '10,50'} value={price || null}
+            onValue={n => setPrice(n ?? 0)} className={fieldCls} required />
         </Field>
         <Field id={id('commission')} label={`Comisión ${IN_CURRENCY[currency]}`}>
-          <input id={id('commission')} type="number" inputMode="decimal" min="0" step="any" value={commission || ''}
-            onChange={e => setCommission(parseFloat(e.target.value) || 0)} className={fieldCls} />
+          <EsNumberInput id={id('commission')} placeholder="0" value={commission || null}
+            onValue={n => setCommission(n ?? 0)} className={fieldCls} />
         </Field>
       </div>
       <FormError error={error} />
