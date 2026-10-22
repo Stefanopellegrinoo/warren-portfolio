@@ -8,6 +8,7 @@ vi.mock('../redis', () => ({
 }))
 
 const mockScheduleRepeatingPriceJob = vi.fn()
+const mockScheduleFxRatesIngestJob = vi.fn()
 const mockScheduleDailySnapshotJob = vi.fn()
 const mockScheduleTickerAuditJob = vi.fn()
 const mockScheduleOnTermsIngestJob = vi.fn()
@@ -16,6 +17,7 @@ vi.mock('../queue', () => ({
   scheduleDailySnapshotJob: (...args: unknown[]) => mockScheduleDailySnapshotJob(...args),
   scheduleTickerAuditJob: (...args: unknown[]) => mockScheduleTickerAuditJob(...args),
   scheduleOnTermsIngestJob: (...args: unknown[]) => mockScheduleOnTermsIngestJob(...args),
+  scheduleFxRatesIngestJob: (...args: unknown[]) => mockScheduleFxRatesIngestJob(...args),
 }))
 
 const mockScheduleSignalsEvaluationJobs = vi.fn()
@@ -34,6 +36,7 @@ describe('ensureRedisAndScheduleJobs', () => {
     vi.clearAllMocks()
     mockEnsureRedisConnected.mockResolvedValue(true)
     mockScheduleRepeatingPriceJob.mockResolvedValue(undefined)
+    mockScheduleFxRatesIngestJob.mockResolvedValue(undefined)
     mockScheduleDailySnapshotJob.mockResolvedValue(undefined)
     mockScheduleTickerAuditJob.mockResolvedValue(undefined)
     mockScheduleOnTermsIngestJob.mockResolvedValue(undefined)
@@ -82,6 +85,7 @@ describe('ensureRedisAndScheduleJobs', () => {
     expect(mockScheduleRepeatingPriceJob).toHaveBeenCalledTimes(1)
     // Prices refresh every minute during market hours (was 5).
     expect(mockScheduleRepeatingPriceJob).toHaveBeenCalledWith(1)
+    expect(mockScheduleFxRatesIngestJob).toHaveBeenCalledTimes(1)
     expect(mockScheduleSignalsEvaluationJobs).toHaveBeenCalledTimes(1)
   })
 

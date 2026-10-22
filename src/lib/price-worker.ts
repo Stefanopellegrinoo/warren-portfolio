@@ -12,7 +12,7 @@
  */
 
 import { Worker } from 'bullmq'
-import { PRICE_QUEUE_NAME, PRICE_REPEAT_JOB_NAME, SNAPSHOT_JOB_NAME, TICKER_AUDIT_JOB_NAME, ON_TERMS_JOB_NAME } from './queue'
+import { PRICE_QUEUE_NAME, PRICE_REPEAT_JOB_NAME, SNAPSHOT_JOB_NAME, TICKER_AUDIT_JOB_NAME, ON_TERMS_JOB_NAME, FX_RATES_JOB_NAME } from './queue'
 import { fetchQuotesFromYahoo, cachePrice, fetchQuotes } from './yahoo-finance'
 import { fetchData912Prices } from './data912-client'
 import { createServiceClient } from './supabase-server'
@@ -28,6 +28,7 @@ import { alertJobFailure, beat, recordRefresh } from './job-health'
 import { ensureRedisAndScheduleJobs, resolveStartupOutcome } from './worker-startup'
 import { auditTickerIdentities } from './ticker-audit'
 import { ingestOnTerms } from './on-terms-ingest'
+import { ingestFxRates } from './fx-rates'
 
 const REDIS_URL = process.env.REDIS_URL
 
@@ -281,6 +282,13 @@ const worker = new Worker(
       // the DB keeps last-good because the RPC never ran.
       const s = await ingestOnTerms(createServiceClient())
       console.log(`[Worker] ON terms ${s.asOf}: ${s.ons} ONs, ${s.skipped} skipped, ${s.checks} checks (${s.flagged} flagged), ${s.sov} sov`)
+      return
+    }
+
+    if (job.name === FX_RATES_JOB_NAME) {
+      // Failures propagate to the 'failed' handler; the table keeps last-good rows.
+      const n = await ingestFxRates(createServiceClient())
+      console.log(`[Worker] FX rates: ${n.mep} MEP days, ${n.ccl} CCL days`)
       return
     }
 
