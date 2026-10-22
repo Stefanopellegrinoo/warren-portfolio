@@ -3,11 +3,12 @@
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { Menu, X, LogOut } from 'lucide-react'
+import { Menu, X, LogOut, Search } from 'lucide-react'
 import { cn, formatNumber } from '@/lib/utils'
 import { createClient } from '@/lib/supabase-client'
 import { NAV_ITEMS, PERSONAL_ITEMS, activeHref, topHoldings, type NavItem } from './nav'
 import ThemeSwitch from './ThemeSwitch'
+import AssetSearch from './AssetSearch'
 
 const linkBase =
   'relative flex min-h-8 items-center gap-2 rounded-md px-2 text-ink-2 hover:bg-hover hover:text-ink max-[819px]:min-h-11'
@@ -36,7 +37,9 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
   const [openOn, setOpenOn] = useState<string | null>(null)
   const open = openOn === pathname
   const [holdings, setHoldings] = useState<Holding[]>([])
-  const [holdingCount, setHoldingCount] = useState(0)
+  const [heldTickers, setHeldTickers] = useState<string[]>([])
+  const holdingCount = heldTickers.length
+  const [searchOpen, setSearchOpen] = useState(false)
   const openBtn = useRef<HTMLButtonElement>(null)
   const closeBtn = useRef<HTMLButtonElement>(null)
 
@@ -48,10 +51,18 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
         if (cancelled || !d) return
         const positions = [...(d.positions ?? []), ...(d.onPositions ?? [])]
         setHoldings(topHoldings(positions, d.summary?.total_market_value ?? 0))
-        setHoldingCount(positions.length)
+        setHeldTickers(positions.map((p: { ticker: string }) => p.ticker))
       })
       .catch(() => { /* the shortcut list is optional; the page shows its own errors */ })
     return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setSearchOpen(true) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
   }, [])
 
   useEffect(() => {
@@ -126,6 +137,17 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
           </button>
         </div>
 
+        <button
+          type="button"
+          onClick={() => setSearchOpen(true)}
+          aria-keyshortcuts="Control+K"
+          className="flex min-h-[34px] w-full items-center gap-2 rounded-md border border-line bg-surface pl-3 pr-2 text-left text-ink-3 hover:border-line-strong max-[819px]:min-h-11"
+        >
+          <Search className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+          <span className="flex-1">Buscar activo</span>
+          <kbd className="rounded border border-line bg-canvas px-1.5 py-0.5 font-mono text-xs text-ink-3">Ctrl K</kbd>
+        </button>
+
         <nav aria-label="Vistas">
           <ul className="grid gap-px">
             {NAV_ITEMS.map(item => (
@@ -176,6 +198,8 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
           </button>
         </div>
       </aside>
+
+      <AssetSearch open={searchOpen} onClose={() => setSearchOpen(false)} held={heldTickers} />
 
       <main id="main" className="min-w-0">
         {children}
