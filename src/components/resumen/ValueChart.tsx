@@ -16,12 +16,16 @@ export default function ValueChart() {
   const [active, setActive] = useState<number | null>(null)
   const wrap = useRef<HTMLDivElement>(null)
 
+  // Each request carries its own range; a late answer for an older range is dropped.
+  const latest = useRef<RangeId>(range)
+
   const fetchHistory = useCallback((r: RangeId) => {
+    latest.current = r
     const days = RANGES.find(x => x.id === r)!.days
     fetch(`/api/portfolio-history?days=${days}&universe=measurable`)
       .then(res => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
-      .then((d: { data?: HistoryPoint[] }) => setLoad({ status: 'ready', points: d.data ?? [] }))
-      .catch(() => setLoad({ status: 'error' }))
+      .then((d: { data?: HistoryPoint[] }) => { if (latest.current === r) setLoad({ status: 'ready', points: d.data ?? [] }) })
+      .catch(() => { if (latest.current === r) setLoad({ status: 'error' }) })
   }, [])
 
   useEffect(() => { fetchHistory(range) }, [range, fetchHistory])

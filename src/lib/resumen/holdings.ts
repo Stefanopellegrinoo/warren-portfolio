@@ -16,9 +16,13 @@ export interface HoldingRow {
   pnl: number | null
   pnlPct: number | null
   href: string
+  quantity: number
+  price: number | null
+  avgCost: number
+  invested: number
 }
 
-export interface ReviewItem { ticker: string; name: string | null; tone: 'danger' | 'warn'; chip: string; why: string }
+export interface ReviewItem { ticker: string; name: string | null; tone: 'danger' | 'warn'; chip: string; why: string; href: string }
 
 /** Accumulated loss that puts a position in "Para revisar". */
 export const LOSS_THRESHOLD = -0.30
@@ -48,6 +52,10 @@ function toRow(p: Position | ONPosition, kind: HoldingKind, names: Record<string
     pnl: value === null ? null : num(p.pnl),
     pnlPct: value === null ? null : num(p.pnl_pct),
     href: kind === 'on' ? '/ons/mi-cartera' : `/trading?symbol=${encodeURIComponent(p.ticker)}`,
+    quantity: p.quantity,
+    price: value === null ? null : num(p.current_price),
+    avgCost: p.avg_cost,
+    invested: p.total_invested,
   }
 }
 
@@ -76,6 +84,7 @@ export function reviewItems(rows: HoldingRow[]): ReviewItem[] {
       tone: 'danger',
       chip: formatPct(r.pnlPct, { digits: 1 }),
       why: `Pierde ${formatNumber(Math.abs(r.pnl ?? 0), { decimals: 0 })} desde la compra`,
+      href: r.href,
     }))
 
   const listed = new Set(losses.map(l => l.ticker))
@@ -90,6 +99,7 @@ export function reviewItems(rows: HoldingRow[]): ReviewItem[] {
     tone: 'warn',
     chip: `${formatPct(worstDay.dayChangePct, { digits: 1 })} hoy`,
     why: 'La mayor caída del día en tu cartera',
+    href: worstDay.href,
   }]
 }
 

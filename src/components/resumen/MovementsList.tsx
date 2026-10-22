@@ -11,6 +11,7 @@ const LABELS: Record<string, string> = {
 }
 const INFLOWS = new Set(['DEPOSITO', 'CUPON', 'DIVIDENDO', 'VENTA'])
 const SHOWN = 4
+// /history lists transactions, not cash movements, so the full list lives here.
 
 const day = (iso: string) => new Date(iso.slice(0, 10) + 'T12:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })
 
@@ -18,6 +19,7 @@ export default function MovementsList({ refreshKey, onChanged }: { refreshKey: n
   const [movements, setMovements] = useState<CashMovement[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(false)
 
   const load = useCallback(() => {
     fetch('/api/cash/movements')
@@ -46,15 +48,22 @@ export default function MovementsList({ refreshKey, onChanged }: { refreshKey: n
     }
   }
 
-  const recent = (movements ?? []).slice(0, SHOWN)
+  const all = movements ?? []
+  const recent = expanded ? all : all.slice(0, SHOWN)
+  const toggle = all.length > SHOWN && (
+    <button type="button" onClick={() => setExpanded(e => !e)} aria-expanded={expanded} aria-controls="movements-list"
+      className="inline-flex min-h-6 items-center text-[13px] font-medium text-accent-ink hover:underline hover:underline-offset-2 max-[819px]:min-h-11">
+      {expanded ? 'Ver menos' : `Ver todos (${all.length})`}
+    </button>
+  )
 
   return (
     <section aria-labelledby="h-movimientos">
-      <SectionHead id="h-movimientos" title="Últimos movimientos" action={{ href: '/history', label: 'Ver todos' }} />
+      <SectionHead id="h-movimientos" title="Últimos movimientos" action={toggle || undefined} />
       {error && <p role="alert" className="mt-3 rounded-md bg-danger-soft px-3 py-2 text-[13px] text-danger">{error}</p>}
       {movements === null && <span role="status" aria-label="Cargando movimientos" className="mt-3 block h-24 animate-pulse rounded bg-surface-2" />}
       {movements !== null && recent.length === 0 && <p className="py-4 text-[13px] text-ink-3">Todavía no hay movimientos de caja.</p>}
-      <ul>
+      <ul id="movements-list">
         {recent.map(m => {
           const inflow = INFLOWS.has(m.type)
           const amount = inflow ? Math.abs(m.amount) : -Math.abs(m.amount)

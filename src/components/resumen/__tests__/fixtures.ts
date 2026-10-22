@@ -2,7 +2,8 @@ import type { HoldingRow } from '@/lib/resumen/holdings'
 
 export const row = (over: Partial<HoldingRow>): HoldingRow => ({
   ticker: 'DUK', name: 'Duke Energy', kind: 'stock', quantityLabel: '40 acciones', weightPct: 12.08,
-  dayChangePct: -0.005, value: 4827, pnl: 1027, pnlPct: 0.27, href: '/trading?symbol=DUK', ...over,
+  dayChangePct: -0.005, value: 4827, pnl: 1027, pnlPct: 0.27, href: '/trading?symbol=DUK',
+  quantity: 40, price: 120.675, avgCost: 95, invested: 3800, ...over,
 })
 
 export const rows: HoldingRow[] = [

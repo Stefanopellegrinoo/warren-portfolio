@@ -24,6 +24,11 @@ describe('buildHoldings', () => {
     expect(byTicker.YMCJO).toMatchObject({ kind: 'on', quantityLabel: 'VN 1.500', href: '/ons/mi-cartera', name: null })
   })
 
+  it('keeps quantity, price, average cost and invested for the table view', () => {
+    const duk = buildHoldings({ ...input, positions: [{ ...pos('DUK', 40, 4827, 1027, 0.27, -0.005), avg_cost: 95, total_invested: 3800 }] })[0]
+    expect(duk).toMatchObject({ quantity: 40, price: 120.675, avgCost: 95, invested: 3800 })
+  })
+
   it('uses the singular for one unit', () => {
     expect(buildHoldings({ ...input, positions: [pos('DUK', 1, 120, 0, 0, 0)], onPositions: [] })[0].quantityLabel).toBe('1 acción')
   })
@@ -52,9 +57,9 @@ describe('reviewItems', () => {
 
   it('lists heavy accumulated losses, worst first, then the biggest drop of the day', () => {
     expect(reviewItems(rows)).toEqual([
-      { ticker: 'SLB', name: null, tone: 'danger', chip: '−48,9 %', why: 'Pierde 489 desde la compra' },
-      { ticker: 'AAL', name: null, tone: 'danger', chip: '−37,1 %', why: 'Pierde 360 desde la compra' },
-      { ticker: 'T', name: 'AT&T', tone: 'warn', chip: '−6,4 % hoy', why: 'La mayor caída del día en tu cartera' },
+      { ticker: 'SLB', name: null, tone: 'danger', chip: '−48,9 %', why: 'Pierde 489 desde la compra', href: '/trading?symbol=SLB' },
+      { ticker: 'AAL', name: null, tone: 'danger', chip: '−37,1 %', why: 'Pierde 360 desde la compra', href: '/trading?symbol=AAL' },
+      { ticker: 'T', name: 'AT&T', tone: 'warn', chip: '−6,4 % hoy', why: 'La mayor caída del día en tu cartera', href: '/trading?symbol=T' },
     ])
   })
 
@@ -66,6 +71,11 @@ describe('reviewItems', () => {
   it('does not repeat a position already listed for its loss', () => {
     const worstDay = rows.map((r): HoldingRow => (r.ticker === 'SLB' ? { ...r, dayChangePct: -0.1 } : r))
     expect(reviewItems(worstDay).map(i => i.ticker)).toEqual(['SLB', 'AAL'])
+  })
+
+  it('sends a bond to the ON portfolio, never to the stock chart', () => {
+    const badOn = buildHoldings({ ...input, onPositions: [{ ...onPositions[0], pnl: -600, pnl_pct: -0.4 }] })
+    expect(reviewItems(badOn).find(i => i.ticker === 'YMCJO')?.href).toBe('/ons/mi-cartera')
   })
 
   it('is empty when nothing stands out', () => {

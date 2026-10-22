@@ -5,10 +5,15 @@ import { useState } from 'react'
 import type { HoldingRow } from '@/lib/resumen/holdings'
 import { formatNumber, formatPct } from '@/lib/utils'
 
-type SortKey = 'ticker' | 'value' | 'dayChangePct' | 'pnl' | 'pnlPct' | 'weightPct'
+type SortKey = 'ticker' | 'quantity' | 'price' | 'avgCost' | 'invested' | 'value' | 'dayChangePct' | 'pnl' | 'pnlPct' | 'weightPct'
 
+// Same columns as the old positions table, restyled.
 const COLUMNS: { key: SortKey; label: string; numeric: boolean }[] = [
   { key: 'ticker', label: 'Activo', numeric: false },
+  { key: 'quantity', label: 'Cantidad', numeric: true },
+  { key: 'price', label: 'Precio', numeric: true },
+  { key: 'avgCost', label: 'Costo prom.', numeric: true },
+  { key: 'invested', label: 'Invertido', numeric: true },
   { key: 'value', label: 'Valor', numeric: true },
   { key: 'dayChangePct', label: 'Hoy', numeric: true },
   { key: 'pnl', label: 'Resultado', numeric: true },
@@ -35,7 +40,7 @@ export default function HoldingsTable({ rows, onSell }: { rows: HoldingRow[]; on
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[560px] border-collapse text-sm tabular-nums">
+      <table className="w-full min-w-[920px] border-collapse text-sm tabular-nums">
         <caption className="sr-only">Tenencias. Ordená con los botones del encabezado.</caption>
         <thead>
           <tr className="border-b border-line-strong text-[13px] text-ink-3">
@@ -60,6 +65,10 @@ export default function HoldingsTable({ rows, onSell }: { rows: HoldingRow[]; on
                 <Link href={r.href} className="font-semibold hover:text-accent-ink">{r.ticker}</Link>
                 {r.name && <span className="ml-2 text-ink-3">{r.name}</span>}
               </th>
+              <td className="py-2.5 pr-3 text-right">{r.kind === 'on' ? r.quantityLabel : formatNumber(r.quantity, { decimals: Number.isInteger(r.quantity) ? 0 : 2 })}</td>
+              <td className="py-2.5 pr-3 text-right">{r.price === null ? '—' : formatNumber(r.price)}</td>
+              <td className="py-2.5 pr-3 text-right">{formatNumber(r.avgCost)}</td>
+              <td className="py-2.5 pr-3 text-right">{formatNumber(r.invested)}</td>
               <td className="py-2.5 pr-3 text-right">{r.value === null ? '—' : formatNumber(r.value)}</td>
               <td className={`py-2.5 pr-3 text-right ${signColor(r.dayChangePct)}`}>{r.dayChangePct === null ? 'Sin precio' : formatPct(r.dayChangePct, { digits: 1 })}</td>
               <td className={`py-2.5 pr-3 text-right ${signColor(r.pnl)}`}>{r.pnl === null ? '—' : formatNumber(r.pnl, { sign: true })}</td>

@@ -24,13 +24,18 @@ export function activeHref(pathname: string): string | null {
 }
 
 export function topHoldings(
-  positions: { ticker: string; market_value?: number }[],
+  positions: { ticker: string; market_value?: number; isOn?: boolean }[],
   total: number,
   n = 5,
-): { ticker: string; weightPct: number }[] {
+): { ticker: string; weightPct: number; href: string }[] {
   return positions
-    .filter((p): p is { ticker: string; market_value: number } => typeof p.market_value === 'number' && isFinite(p.market_value))
+    .filter((p): p is { ticker: string; market_value: number; isOn?: boolean } => typeof p.market_value === 'number' && isFinite(p.market_value))
     .sort((a, b) => b.market_value - a.market_value)
     .slice(0, n)
-    .map(p => ({ ticker: p.ticker, weightPct: total > 0 ? (p.market_value / total) * 100 : 0 }))
+    .map(p => ({
+      ticker: p.ticker,
+      weightPct: total > 0 ? (p.market_value / total) * 100 : 0,
+      // Bonds have no stock chart: they open the ON portfolio.
+      href: p.isOn ? '/ons/mi-cartera' : `/trading?symbol=${encodeURIComponent(p.ticker)}`,
+    }))
 }

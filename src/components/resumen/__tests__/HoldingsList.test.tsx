@@ -62,6 +62,12 @@ describe('HoldingsTable', () => {
     expect(html).toContain('aria-sort="descending"')
   })
 
+  it('keeps the columns of the old positions table', () => {
+    for (const h of ['Cantidad', 'Precio', 'Costo prom.', 'Invertido', 'Valor', 'Hoy', 'Resultado', 'Peso']) expect(html).toContain(`>${h}<`)
+    expect(html).toContain('95,00')
+    expect(html).toContain('3.800,00')
+  })
+
   it('names each sell button after its ticker', () => {
     expect(html).toContain('aria-label="Vender DUK"')
     expect(html).toContain('aria-label="Vender AAL"')

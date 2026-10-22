@@ -35,7 +35,12 @@ describe('activeHref', () => {
 describe('topHoldings', () => {
   it('sorts by value, computes weight and drops unpriced positions', () => {
     expect(topHoldings([{ ticker: 'A', market_value: 10 }, { ticker: 'B', market_value: 30 }, { ticker: 'C' }], 40, 5))
-      .toEqual([{ ticker: 'B', weightPct: 75 }, { ticker: 'A', weightPct: 25 }])
+      .toMatchObject([{ ticker: 'B', weightPct: 75 }, { ticker: 'A', weightPct: 25 }])
+  })
+
+  it('links stocks to their chart and bonds to the ON portfolio', () => {
+    const list = topHoldings([{ ticker: 'DUK', market_value: 10 }, { ticker: 'YMCJO', market_value: 5, isOn: true }], 15)
+    expect(list.map(h => h.href)).toEqual(['/trading?symbol=DUK', '/ons/mi-cartera'])
   })
 
   it('caps the list at n', () => {
@@ -45,6 +50,6 @@ describe('topHoldings', () => {
 
   it('handles an empty portfolio without NaN', () => {
     expect(topHoldings([], 0)).toEqual([])
-    expect(topHoldings([{ ticker: 'A', market_value: 5 }], 0)).toEqual([{ ticker: 'A', weightPct: 0 }])
+    expect(topHoldings([{ ticker: 'A', market_value: 5 }], 0)).toMatchObject([{ ticker: 'A', weightPct: 0 }])
   })
 })
