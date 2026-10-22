@@ -209,4 +209,5 @@ export async function invalidateUserCache(userId: string): Promise<void> {
   }
 }
 
-export default { getRedis, isRedisReady, ensureRedisConnected, getRedisConnectionOpts, cacheRoute, getCachedRoute, invalidateUserCache }
+const redis = { getRedis, isRedisReady, ensureRedisConnected, getRedisConnectionOpts, cacheRoute, getCachedRoute, invalidateUserCache }
+export default redis

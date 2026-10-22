@@ -31,7 +31,7 @@ const bodySchema = z.discriminatedUnion("type", [
   z.object({ ...baseFields, type: z.literal("channel"),        points: z.array(pointSchema).length(3) }),
 ])
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 function rowToDrawing(r: any): ChartDrawing {
   return {
     id: r.id,

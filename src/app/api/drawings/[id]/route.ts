@@ -18,7 +18,7 @@ const patchSchema = z
     message: "nothing to update",
   })
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 function rowToDrawing(r: any): ChartDrawing {
   return {
     id: r.id,

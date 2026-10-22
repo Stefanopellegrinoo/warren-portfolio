@@ -27,7 +27,7 @@ function fakeSupabase(...pages: Array<{ data: unknown; error: unknown }>) {
   }
 
   const from = vi.fn(() => ({ select: vi.fn(() => build()) }))
-  return { supabase: { from } as any, from, calls } // eslint-disable-line @typescript-eslint/no-explicit-any
+  return { supabase: { from } as any, from, calls }  
 }
 
 // Base year picked deliberately far in the past so "now" (real wall-clock
