@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildHoldings, reviewItems, distribution, type HoldingRow } from '../holdings'
+import { buildHoldings, distribution, type HoldingRow } from '../holdings'
 import type { Position, ONPosition, PortfolioSummary } from '@/types'
 
 const base = { id: 'x', user_id: 'u', avg_cost: 0, total_invested: 0, first_bought: null, last_updated: '', version: 1 }
@@ -62,37 +62,6 @@ describe('buildHoldings', () => {
   })
 })
 
-describe('reviewItems', () => {
-  const rows = buildHoldings(input)
-
-  it('lists heavy accumulated losses, worst first, then the biggest drop of the day', () => {
-    expect(reviewItems(rows)).toEqual([
-      { ticker: 'SLB', name: null, tone: 'danger', chip: '−48,9 %', why: 'Pierde 489 desde la compra', href: '/trading?symbol=SLB' },
-      { ticker: 'AAL', name: null, tone: 'danger', chip: '−37,1 %', why: 'Pierde 360 desde la compra', href: '/trading?symbol=AAL' },
-      { ticker: 'T', name: 'AT&T', tone: 'warn', chip: '−6,4 % hoy', why: 'La mayor caída del día en tu cartera', href: '/trading?symbol=T' },
-    ])
-  })
-
-  it('ignores a daily drop smaller than 3 %', () => {
-    const calm = rows.map((r): HoldingRow => (r.ticker === 'T' ? { ...r, dayChangePct: -0.02 } : r))
-    expect(reviewItems(calm).map(i => i.ticker)).toEqual(['SLB', 'AAL'])
-  })
-
-  it('does not repeat a position already listed for its loss', () => {
-    const worstDay = rows.map((r): HoldingRow => (r.ticker === 'SLB' ? { ...r, dayChangePct: -0.1 } : r))
-    expect(reviewItems(worstDay).map(i => i.ticker)).toEqual(['SLB', 'AAL'])
-  })
-
-  it('sends a bond to the ON portfolio, never to the stock chart', () => {
-    const badOn = buildHoldings({ ...input, onPositions: [{ ...onPositions[0], pnl: -600, pnl_pct: -0.4 }] })
-    expect(reviewItems(badOn).find(i => i.ticker === 'YMCJO')?.href).toBe('/ons/mi-cartera')
-  })
-
-  it('is empty when nothing stands out', () => {
-    expect(reviewItems([])).toEqual([])
-  })
-})
-
 describe('distribution', () => {
   const summary = {
     total_market_value: 39951.8,
@@ -101,16 +70,24 @@ describe('distribution', () => {
     cash: { balance: 19050.95 },
   } as unknown as PortfolioSummary
 
-  it('splits the portfolio into the three asset classes', () => {
-    const d = distribution(summary)
-    expect(d.map(x => x.label)).toEqual(['Acciones y CEDEARs', 'Caja', 'Obligaciones negociables'])
-    expect(d[0].pct).toBeCloseTo(52.315, 3)
-    expect(d[1].pct).toBeCloseTo(47.685, 3)
+  it('splits the portfolio into stocks, CEDEARs, ONs and cash', () => {
+    const d = distribution(summary, null, undefined, [{ kind: 'cedear', value: 900.85 }, { kind: 'stock', value: 20000 }] as HoldingRow[])
+    expect(d.map(x => x.label)).toEqual(['Acciones', 'CEDEARs', 'Obligaciones negociables', 'Caja'])
+    expect(d[0].value).toBeCloseTo(20000, 6)
+    expect(d[1].value).toBeCloseTo(900.85, 6)
+    expect(d[0].pct + d[1].pct).toBeCloseTo(52.315, 3)
     expect(d[2]).toEqual({ label: 'Obligaciones negociables', pct: 0, value: 0 })
+    expect(d[3].pct).toBeCloseTo(47.685, 3)
+  })
+
+  it('counts a CEDEAR without a price as zero, leaving the rest in stocks', () => {
+    const d = distribution(summary, null, undefined, [{ kind: 'cedear', value: null }] as HoldingRow[])
+    expect(d[0].value).toBe(20900.85)
+    expect(d[1].value).toBe(0)
   })
 
   it('never returns NaN for an empty portfolio', () => {
     const empty = { total_market_value: 0, stocks: { market_value: 0 }, ons: { market_value: 0 }, cash: { balance: 0 } } as unknown as PortfolioSummary
-    expect(distribution(empty).map(x => x.pct)).toEqual([0, 0, 0])
+    expect(distribution(empty).map(x => x.pct)).toEqual([0, 0, 0, 0])
   })
 })

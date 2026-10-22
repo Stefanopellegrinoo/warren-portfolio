@@ -72,5 +72,9 @@ module.exports = {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // Switches on the width of the nearest `[container-type:inline-size]` ancestor, not the viewport:
+    // the holdings list is wide or narrow depending on the column it sits in.
+    ({ addVariant }) => addVariant('cq-wide', '@container (min-width: 640px)'),
+  ],
 }

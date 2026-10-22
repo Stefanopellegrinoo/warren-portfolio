@@ -127,3 +127,20 @@
 .glow-amber { box-shadow: 0 0 40px rgba(245, 158, 11, 0.08); }
 .glow-emerald { box-shadow: 0 0 40px rgba(16, 185, 129, 0.08); }
 .text-glow-amber { text-shadow: 0 0 20px rgba(245, 158, 11, 0.4); }
+
+/* Resumen: phone shows every holding, then the rest;
+   wide screens keep holdings in the main column with the rest beside them. */
+.resumen-grid { grid-template-areas: "holdings" "chart" "dist" "moves"; }
+@media (min-width: 820px) {
+  .resumen-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas: "holdings holdings" "chart chart" "dist moves";
+  }
+}
+@media (min-width: 1440px) {
+  .resumen-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+    grid-template-rows: auto 1fr auto;
+    grid-template-areas: "holdings dist" "holdings moves" "chart moves";
+  }
+}

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import type { Position, ONPosition, PortfolioSummary } from '@/types'
 import type { Amounts, CurrencyViews, PositionView } from '@/lib/multicurrency'
-import { CURRENCIES, currencyNotes, headline, readCurrency, saveCurrency, viewsOf } from '../currency'
+import { CURRENCIES, headline, readCurrency, saveCurrency, viewsOf } from '../currency'
 import { buildHoldings, distribution } from '../holdings'
 
 const a = (ARS: number, MEP: number, CCL: number): Amounts => ({ ARS, MEP, CCL })
@@ -95,14 +95,6 @@ describe('headline', () => {
     expect(headline(summary, views, 'CCL')).toMatchObject({ prefix: 'US$', total: 1525, dayPnl: 18.75, openPnl: 865, realized: 10, capital: 660 })
   })
 
-  it('notes: why the results differ, today FX, and what estimated means', () => {
-    expect(currencyNotes(null)).toEqual([])
-    expect(currencyNotes(views)).toEqual([
-      'Los resultados cambian según la moneda: cada operación se convierte con el dólar de su fecha y el valor actual con el de hoy (MEP $ 1.500,00, cable $ 1.600,00).',
-      'Estimado: sin precio en pesos, se usa el precio en dólares por el dólar cable de hoy.',
-    ])
-    expect(currencyNotes({ ...views, estimated: false })).toHaveLength(1)
-  })
 })
 
 describe('holdings and distribution in a currency', () => {
@@ -132,11 +124,14 @@ describe('holdings and distribution in a currency', () => {
   })
 
   it('distribution follows the currency', () => {
-    expect(distribution(summary, views, 'ARS')).toEqual([
-      { label: 'Acciones y CEDEARs', value: 780_000, pct: (780_000 / 2_440_000) * 100 },
-      { label: 'Caja', value: 160_000, pct: (160_000 / 2_440_000) * 100 },
+    const rows = buildHoldings({ ...input, total: views.totals.value.ARS, views, currency: 'ARS' })
+    const cedear = rows.find(r => r.ticker === 'AAPL')!.value!
+    expect(distribution(summary, views, 'ARS', rows)).toEqual([
+      { label: 'Acciones', value: 780_000 - cedear, pct: ((780_000 - cedear) / 2_440_000) * 100 },
+      { label: 'CEDEARs', value: cedear, pct: (cedear / 2_440_000) * 100 },
       { label: 'Obligaciones negociables', value: 1_500_000, pct: (1_500_000 / 2_440_000) * 100 },
+      { label: 'Caja', value: 160_000, pct: (160_000 / 2_440_000) * 100 },
     ])
-    expect(distribution(summary).map(d => d.value)).toEqual([600, 100, 900])
+    expect(distribution(summary).map(d => d.value)).toEqual([600, 0, 900, 100])
   })
 })

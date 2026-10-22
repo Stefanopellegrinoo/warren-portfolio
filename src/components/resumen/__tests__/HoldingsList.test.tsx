@@ -9,10 +9,23 @@ const noop = () => {}
 describe('HoldingsList', () => {
   const html = renderToStaticMarkup(<HoldingsList rows={rows} cash={19050.95} cashWeightPct={47.7} onAdjustCash={noop} />)
 
-  it('groups holdings into stocks, cash and ONs', () => {
-    expect(html).toContain('Acciones y CEDEARs')
-    expect(html).toContain('Caja')
-    expect(html).toContain('Obligaciones negociables')
+  it('groups holdings by asset type: stocks, CEDEARs, ONs, then cash', () => {
+    const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+    const order = ['Acciones 2', 'CEDEARs 1', 'Obligaciones negociables', 'Caja'].map(h => text.indexOf(h))
+    expect(order.every(i => i >= 0)).toBe(true)
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
+    expect(html).not.toContain('Acciones y CEDEARs')
+  })
+
+  it('lists each holding under its own type', () => {
+    const cedears = html.slice(html.indexOf('>CEDEARs'), html.indexOf('>Obligaciones negociables'))
+    expect(cedears).toContain('>AAL<')
+    expect(cedears).not.toContain('>DUK<')
+  })
+
+  it('omits a type group the portfolio does not hold', () => {
+    const onlyStocks = renderToStaticMarkup(<HoldingsList rows={[row({})]} cash={0} cashWeightPct={0} onAdjustCash={noop} />)
+    expect(onlyStocks).not.toContain('>CEDEARs')
   })
 
   it('links each ticker to its chart', () => {

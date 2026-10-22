@@ -1,6 +1,5 @@
 import type { PortfolioSummary } from '@/types'
 import type { Currency, CurrencyViews } from '@/lib/multicurrency'
-import { formatNumber } from '@/lib/utils'
 
 export const CURRENCIES: { id: Currency; label: string; prefix: string }[] = [
   { id: 'ARS', label: 'Pesos', prefix: '$' },
@@ -68,14 +67,4 @@ export function headline(summary: PortfolioSummary, views: CurrencyViews | null,
     realizedLabel: 'Realizado, con dividendos y cupones',
     capital: t.invested[currency] + t.cash[currency],
   }
-}
-
-export function currencyNotes(views: CurrencyViews | null): string[] {
-  if (!views) return []
-  const notes = [
-    'Los resultados cambian según la moneda: cada operación se convierte con el dólar de su fecha y el valor actual con el de hoy ' +
-      `(MEP $ ${formatNumber(views.fx.mep)}, cable $ ${formatNumber(views.fx.ccl)}).`,
-  ]
-  if (views.estimated) notes.push('Estimado: sin precio en pesos, se usa el precio en dólares por el dólar cable de hoy.')
-  return notes
 }

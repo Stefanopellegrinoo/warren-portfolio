@@ -9,13 +9,13 @@ import SummaryHeader from '@/components/resumen/SummaryHeader'
 import ValueSection from '@/components/resumen/ValueSection'
 import HoldingsList from '@/components/resumen/HoldingsList'
 import HoldingsTable from '@/components/resumen/HoldingsTable'
-import ReviewList from '@/components/resumen/ReviewList'
 import DistributionList from '@/components/resumen/DistributionList'
 import MovementsList from '@/components/resumen/MovementsList'
 import AdjustCashDialog from '@/components/resumen/AdjustCashDialog'
+import ValueChart from '@/components/resumen/ValueChart'
 import { SectionHead } from '@/components/resumen/ui'
-import { buildHoldings, distribution, reviewItems } from '@/lib/resumen/holdings'
-import { currencyNotes, DEFAULT_CURRENCY, headline, readCurrency, saveCurrency, viewsOf } from '@/lib/resumen/currency'
+import { buildHoldings, distribution } from '@/lib/resumen/holdings'
+import { DEFAULT_CURRENCY, headline, readCurrency, saveCurrency, viewsOf } from '@/lib/resumen/currency'
 import type { Currency, CurrencyViews } from '@/lib/multicurrency'
 import type { Position, ONPosition, PortfolioSummary } from '@/types'
 import { isMarketOpen } from '@/lib/utils'
@@ -152,7 +152,7 @@ export default function DashboardPage() {
   const quotedAt = data?.lastRefresh ? new Date(data.lastRefresh) : null
 
   return (
-    <div className="mx-auto w-full max-w-[1240px] px-10 pb-16 pt-8 max-[819px]:px-4 max-[819px]:pb-24 max-[819px]:pt-5">
+    <div className="mx-auto w-full max-w-[1680px] px-4 pb-24 pt-5 sm:px-6 min-[820px]:px-8 min-[820px]:pb-16 min-[820px]:pt-8 xl:px-10">
       <SummaryHeader
         marketOpen={marketOpen}
         autoRefresh={autoRefresh}
@@ -185,18 +185,20 @@ export default function DashboardPage() {
       )}
 
       {summary && !isEmpty && (
-        <div className="grid grid-cols-[minmax(0,3fr)_minmax(0,2fr)] items-start gap-10 max-[1080px]:grid-cols-[minmax(0,1fr)]">
-          <div className="grid min-w-0 gap-10">
-            <ValueSection figures={headline(summary, views, currency)} notes={currencyNotes(views)} />
+        <div className="grid gap-8">
+          <ValueSection figures={headline(summary, views, currency)} />
 
-            <section aria-labelledby="h-tenencias" id="tenencias" className="scroll-mt-20">
+          {/* Phone: every holding, then the rest.
+              Wide screens: holdings take the main column and the rest sits beside them. */}
+          <div className="resumen-grid grid items-start gap-x-10 gap-y-10">
+            <section aria-labelledby="h-tenencias" id="tenencias" className="min-w-0 scroll-mt-20 [grid-area:holdings]">
               <SectionHead
                 id="h-tenencias"
                 title="Tenencias"
                 count={rows.length + 1}
                 action={
                   <button type="button" onClick={() => setAsTable(t => !t)} className="inline-flex min-h-6 items-center text-[13px] font-medium text-accent-ink hover:underline hover:underline-offset-2 max-[819px]:min-h-11">
-                    {asTable ? 'Ver como lista' : 'Ver como tabla'}
+                    {asTable ? 'Ver como lista' : 'Ver todas las columnas'}
                   </button>
                 }
               />
@@ -210,12 +212,14 @@ export default function DashboardPage() {
                     onAdjustCash={() => setShowAdjust(true)}
                   />}
             </section>
-          </div>
 
-          <div className="grid min-w-0 gap-10">
-            <ReviewList items={reviewItems(rows)} />
-            <DistributionList items={distribution(summary, views, currency)} />
-            <MovementsList refreshKey={movementsKey} onChanged={fetchPositions} />
+            <section aria-labelledby="h-evolucion" className="min-w-0 [grid-area:chart]">
+              <SectionHead id="h-evolucion" title="Evolución" action={{ href: '/statistics', label: 'Rendimiento' }} />
+              <ValueChart />
+            </section>
+
+            <div className="min-w-0 [grid-area:dist]"><DistributionList items={distribution(summary, views, currency, rows)} /></div>
+            <div className="min-w-0 [grid-area:moves]"><MovementsList refreshKey={movementsKey} onChanged={fetchPositions} /></div>
           </div>
         </div>
       )}

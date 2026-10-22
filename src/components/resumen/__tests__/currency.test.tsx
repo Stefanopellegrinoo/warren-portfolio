@@ -30,8 +30,8 @@ describe('ValueSection figures', () => {
     realized: 12_500, realizedLabel: 'Realizado, con dividendos y cupones', capital: 960_000,
   }
 
-  it('shows every figure in the chosen currency with its label and notes', () => {
-    const html = renderToStaticMarkup(<ValueSection figures={figures} notes={['Nota uno.', 'Nota dos.']} />)
+  it('shows every figure in the chosen currency with its label', () => {
+    const html = renderToStaticMarkup(<ValueSection figures={figures} />)
     expect(html).toContain('$ 2.440.000,00')
     expect(html.replace(/<[^>]+>/g, '')).toContain('+30.000,00 (+3,75 %)')
     expect(html).toContain('hoy, por precio')
@@ -39,8 +39,7 @@ describe('ValueSection figures', () => {
     expect(html).toContain('Realizado, con dividendos y cupones')
     expect(html).toContain('+12.500,00')
     expect(html).toContain('960.000,00')
-    expect(html).toContain('Nota uno.')
-    expect(html).toContain('Nota dos.')
+    expect(html).not.toContain('Por qué los resultados cambian')
   })
 
   it('without views: the USD headline as before', () => {
@@ -57,7 +56,7 @@ describe('estimado labels and the cash note', () => {
   it('the list labels estimated values and explains the cash balance', () => {
     const html = renderToStaticMarkup(<HoldingsList rows={rows} cash={160_000} cashWeightPct={6.6} cashNote="Se registra en dólar MEP" onAdjustCash={noop} />)
     expect(html.match(/>estimado</g)).toHaveLength(1)
-    expect(html).toContain('6,6 % de la cartera. Se registra en dólar MEP')
+    expect(html.replace(/<[^>]+>/g, '')).toContain('6,6 % de la cartera. Se registra en dólar MEP')
     expect(html).toContain('160.000,00')
   })
 
