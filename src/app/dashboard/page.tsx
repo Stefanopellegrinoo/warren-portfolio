@@ -15,6 +15,8 @@ import MovementsList from '@/components/resumen/MovementsList'
 import AdjustCashDialog from '@/components/resumen/AdjustCashDialog'
 import { SectionHead } from '@/components/resumen/ui'
 import { buildHoldings, distribution, reviewItems } from '@/lib/resumen/holdings'
+import { currencyNotes, DEFAULT_CURRENCY, headline, readCurrency, saveCurrency, viewsOf } from '@/lib/resumen/currency'
+import type { Currency, CurrencyViews } from '@/lib/multicurrency'
 import type { Position, ONPosition, PortfolioSummary } from '@/types'
 import { isMarketOpen } from '@/lib/utils'
 
@@ -31,6 +33,8 @@ interface PositionsPayload {
   unpricedCount?: number
   unpricedTickers?: string[]
   lastRefresh?: string
+  /** Pesos / MEP / Cable views; absent in a summary cached before they existed. */
+  currencies?: CurrencyViews
 }
 
 function Skeleton() {
@@ -52,6 +56,7 @@ export default function DashboardPage() {
   const [showImport, setShowImport] = useState(false)
   const [showAdjust, setShowAdjust] = useState(false)
   const [asTable, setAsTable] = useState(false)
+  const [currency, setCurrency] = useState<Currency>(DEFAULT_CURRENCY)
   const [movementsKey, setMovementsKey] = useState(0)
   const [marketOpen, setMarketOpen] = useState(isMarketOpen())
   const [autoRefresh, setAutoRefresh] = useState(isMarketOpen())
@@ -79,6 +84,13 @@ export default function DashboardPage() {
   }, [fetchPositions])
 
   useEffect(() => { fetchPositions() }, [fetchPositions])
+  // Read after mount: the server render has no storage.
+  useEffect(() => { setCurrency(readCurrency()) }, [])
+
+  function chooseCurrency(c: Currency) {
+    setCurrency(c)
+    saveCurrency(c)
+  }
 
   // Lookups that never change during a visit: CEDEAR list (sale asset class) and company names.
   useEffect(() => {
@@ -123,9 +135,15 @@ export default function DashboardPage() {
   }
 
   const summary = data?.summary
+  const views = data ? viewsOf(data) : null
   const rows = summary
-    ? buildHoldings({ positions: data?.positions ?? [], onPositions: data?.onPositions ?? [], cedearTickers: cedears, names, total: summary.total_market_value })
+    ? buildHoldings({
+        positions: data?.positions ?? [], onPositions: data?.onPositions ?? [], cedearTickers: cedears, names,
+        total: views ? views.totals.value[currency] : summary.total_market_value, views, currency,
+      })
     : []
+  const total = summary ? (views ? views.totals.value[currency] : summary.total_market_value) : 0
+  const cash = summary ? (views ? views.totals.cash[currency] : summary.cash.balance) : 0
   const isEmpty = !!summary && rows.length === 0 && summary.cash.balance === 0
   const quotedAt = data?.lastRefresh ? new Date(data.lastRefresh) : null
 
@@ -138,6 +156,7 @@ export default function DashboardPage() {
         onToggleRefresh={() => setAutoRefresh(a => !a)}
         onImport={() => setShowImport(true)}
         onNew={() => { setQuickSell(null); setShowAddTx(true) }}
+        {...(views && { currency, onCurrency: chooseCurrency })}
       />
 
       <ReconciliationBanner result={reconciliation} />
@@ -164,7 +183,7 @@ export default function DashboardPage() {
       {summary && !isEmpty && (
         <div className="grid grid-cols-[minmax(0,3fr)_minmax(0,2fr)] items-start gap-10 max-[1080px]:grid-cols-[minmax(0,1fr)]">
           <div className="grid min-w-0 gap-10">
-            <ValueSection summary={summary} />
+            <ValueSection figures={headline(summary, views, currency)} notes={currencyNotes(views)} />
 
             <section aria-labelledby="h-tenencias" id="tenencias" className="scroll-mt-20">
               <SectionHead
@@ -181,8 +200,9 @@ export default function DashboardPage() {
                 ? <div className="pt-3"><HoldingsTable rows={rows} onSell={sell} /></div>
                 : <HoldingsList
                     rows={rows}
-                    cash={summary.cash.balance}
-                    cashWeightPct={summary.total_market_value > 0 ? (summary.cash.balance / summary.total_market_value) * 100 : 0}
+                    cash={cash}
+                    cashWeightPct={total > 0 ? (cash / total) * 100 : 0}
+                    cashNote={views && currency !== 'CCL' ? 'Se registra en dólar cable' : undefined}
                     onAdjustCash={() => setShowAdjust(true)}
                   />}
             </section>
@@ -190,7 +210,7 @@ export default function DashboardPage() {
 
           <div className="grid min-w-0 gap-10">
             <ReviewList items={reviewItems(rows)} />
-            <DistributionList items={distribution(summary)} />
+            <DistributionList items={distribution(summary, views, currency)} />
             <MovementsList refreshKey={movementsKey} onChanged={fetchPositions} />
           </div>
         </div>

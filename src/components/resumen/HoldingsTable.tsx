@@ -69,7 +69,10 @@ export default function HoldingsTable({ rows, onSell }: { rows: HoldingRow[]; on
               <td className="py-2.5 pr-3 text-right">{r.price === null ? '—' : formatNumber(r.price)}</td>
               <td className="py-2.5 pr-3 text-right">{formatNumber(r.avgCost)}</td>
               <td className="py-2.5 pr-3 text-right">{formatNumber(r.invested)}</td>
-              <td className="py-2.5 pr-3 text-right">{r.value === null ? '—' : formatNumber(r.value)}</td>
+              <td className="py-2.5 pr-3 text-right">
+                {r.value === null ? '—' : formatNumber(r.value)}
+                {r.estimated && r.value !== null && <span className="block text-[13px] text-ink-3">estimado</span>}
+              </td>
               <td className={`py-2.5 pr-3 text-right ${signColor(r.dayChangePct)}`}>{r.dayChangePct === null ? 'Sin precio' : formatPct(r.dayChangePct, { digits: 1 })}</td>
               <td className={`py-2.5 pr-3 text-right ${signColor(r.pnl)}`}>{r.pnl === null ? '—' : formatNumber(r.pnl, { sign: true })}</td>
               <td className={`py-2.5 pr-3 text-right ${signColor(r.pnlPct)}`}>{formatPct(r.pnlPct, { digits: 1 })}</td>

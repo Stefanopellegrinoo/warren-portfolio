@@ -1,6 +1,7 @@
 import type { Position, ONPosition, PortfolioSummary } from '@/types'
 import { formatNumber, formatPct } from '@/lib/utils'
 import { fmtVn } from '@/lib/on-format'
+import type { Currency, CurrencyViews } from '@/lib/multicurrency'
 
 export type HoldingKind = 'stock' | 'cedear' | 'on'
 
@@ -20,6 +21,8 @@ export interface HoldingRow {
   price: number | null
   avgCost: number
   invested: number
+  /** Valued with the estimated fallback (no peso price). */
+  estimated?: boolean
 }
 
 export interface ReviewItem { ticker: string; name: string | null; tone: 'danger' | 'warn'; chip: string; why: string; href: string }
@@ -39,37 +42,52 @@ function quantityLabel(kind: HoldingKind, quantity: number): string {
   return `${n} ${quantity === 1 ? 'acción' : 'acciones'}`
 }
 
-function toRow(p: Position | ONPosition, kind: HoldingKind, names: Record<string, string>, total: number): HoldingRow {
-  const value = num(p.market_value)
+function toRow(p: Position | ONPosition, kind: HoldingKind, names: Record<string, string>, total: number, inCurrency: InCurrency | null): HoldingRow {
+  const v = inCurrency?.views.positions[p.ticker]
+  const c = inCurrency?.currency
+  // One currency view, or the USD engine fields as they come.
+  const f = v && c
+    ? { value: v.value?.[c] ?? null, pnl: v.pnl?.[c] ?? null, pnlPct: v.pnlPct?.[c] ?? null, price: v.price?.[c] ?? null,
+        dayChangePct: v.dayChangePct, avgCost: v.avgCost[c], invested: v.cost[c], estimated: v.estimated }
+    : { value: num(p.market_value), pnl: num(p.pnl), pnlPct: num(p.pnl_pct), price: num(p.current_price),
+        dayChangePct: num(p.day_change_pct), avgCost: p.avg_cost, invested: p.total_invested, estimated: false }
+  const value = f.value
   return {
     ticker: p.ticker,
     name: kind === 'on' ? null : names[p.ticker] ?? null,
     kind,
     quantityLabel: quantityLabel(kind, p.quantity),
     weightPct: value !== null && total > 0 ? (value / total) * 100 : 0,
-    dayChangePct: value === null ? null : num(p.day_change_pct),
+    dayChangePct: value === null ? null : f.dayChangePct,
     value,
-    pnl: value === null ? null : num(p.pnl),
-    pnlPct: value === null ? null : num(p.pnl_pct),
+    pnl: value === null ? null : f.pnl,
+    pnlPct: value === null ? null : f.pnlPct,
     href: kind === 'on' ? '/ons/mi-cartera' : `/trading?symbol=${encodeURIComponent(p.ticker)}`,
     quantity: p.quantity,
-    price: value === null ? null : num(p.current_price),
-    avgCost: p.avg_cost,
-    invested: p.total_invested,
+    price: value === null ? null : f.price,
+    avgCost: f.avgCost,
+    invested: f.invested,
+    estimated: f.estimated,
   }
 }
+
+type InCurrency = { views: CurrencyViews; currency: Currency }
 
 export function buildHoldings(input: {
   positions: Position[]
   onPositions: ONPosition[]
   cedearTickers: string[]
   names: Record<string, string>
+  /** The portfolio total in the same unit as the rows, for the weights. */
   total: number
+  views?: CurrencyViews | null
+  currency?: Currency
 }): HoldingRow[] {
   const cedears = new Set(input.cedearTickers)
+  const inCurrency = input.views && input.currency ? { views: input.views, currency: input.currency } : null
   const rows = [
-    ...input.positions.map(p => toRow(p, cedears.has(p.ticker) ? 'cedear' : 'stock', input.names, input.total)),
-    ...input.onPositions.map(p => toRow(p, 'on', input.names, input.total)),
+    ...input.positions.map(p => toRow(p, cedears.has(p.ticker) ? 'cedear' : 'stock', input.names, input.total, inCurrency)),
+    ...input.onPositions.map(p => toRow(p, 'on', input.names, input.total, inCurrency)),
   ]
   return rows.sort((a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity))
 }
@@ -103,12 +121,18 @@ export function reviewItems(rows: HoldingRow[]): ReviewItem[] {
   }]
 }
 
-export function distribution(summary: PortfolioSummary): { label: string; pct: number; value: number }[] {
-  const total = summary.total_market_value
-  const pct = (v: number) => (total > 0 ? (v / total) * 100 : 0)
+export function distribution(
+  summary: PortfolioSummary,
+  views?: CurrencyViews | null,
+  currency?: Currency,
+): { label: string; pct: number; value: number }[] {
+  const t = views && currency
+    ? { total: views.totals.value[currency], stocks: views.totals.stocks[currency], cash: views.totals.cash[currency], ons: views.totals.ons[currency] }
+    : { total: summary.total_market_value, stocks: summary.stocks.market_value, cash: summary.cash.balance, ons: summary.ons.market_value }
+  const pct = (v: number) => (t.total > 0 ? (v / t.total) * 100 : 0)
   return [
-    { label: 'Acciones y CEDEARs', value: summary.stocks.market_value },
-    { label: 'Caja', value: summary.cash.balance },
-    { label: 'Obligaciones negociables', value: summary.ons.market_value },
+    { label: 'Acciones y CEDEARs', value: t.stocks },
+    { label: 'Caja', value: t.cash },
+    { label: 'Obligaciones negociables', value: t.ons },
   ].map(d => ({ label: d.label, pct: pct(d.value), value: d.value }))
 }

@@ -33,15 +33,18 @@ function Holding({ r }: { r: HoldingRow }) {
             {formatNumber(r.pnl, { decimals: 0, sign: true })} ({formatPct(r.pnlPct, { digits: 1 })})
           </small>
         )}
+        {r.estimated && r.value !== null && <small className="block text-[13px] text-ink-3">estimado</small>}
       </span>
     </li>
   )
 }
 
-export default function HoldingsList({ rows, cash, cashWeightPct, onAdjustCash }: {
+export default function HoldingsList({ rows, cash, cashWeightPct, cashNote, onAdjustCash }: {
   rows: HoldingRow[]
   cash: number
   cashWeightPct: number
+  /** Why the balance reads as it does in the chosen currency. */
+  cashNote?: string
   onAdjustCash: () => void
 }) {
   const stocks = rows.filter(r => r.kind !== 'on')
@@ -61,7 +64,7 @@ export default function HoldingsList({ rows, cash, cashWeightPct, onAdjustCash }
           <span className="font-semibold">USD</span>
           <span className="min-w-0">
             <span className="block font-medium">Dólares disponibles</span>
-            <span className="block text-[13px] text-ink-3">{formatNumber(cashWeightPct, { decimals: 1 })} % de la cartera</span>
+            <span className="block text-[13px] text-ink-3">{formatNumber(cashWeightPct, { decimals: 1 })} % de la cartera{cashNote && `. ${cashNote}`}</span>
           </span>
           <span className="text-right tabular-nums">
             <b className="block font-medium">{formatNumber(cash)}</b>

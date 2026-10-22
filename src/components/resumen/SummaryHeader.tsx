@@ -1,8 +1,30 @@
 import { Plus, Upload } from 'lucide-react'
+import type { Currency } from '@/lib/multicurrency'
+import { CURRENCIES } from '@/lib/resumen/currency'
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
-export default function SummaryHeader({ marketOpen, autoRefresh, countdown, onToggleRefresh, onImport, onNew }: {
+/** Pesos · Dólar MEP · Dólar cable, the same segmented radio group as the chart's period. */
+export function CurrencySelector({ value, onChange }: { value: Currency; onChange: (c: Currency) => void }) {
+  return (
+    <fieldset className="inline-flex gap-0.5 rounded-md border border-line bg-surface-2 p-0.5" aria-label="Moneda de los montos">
+      {CURRENCIES.map(c => (
+        <label
+          key={c.id}
+          className="relative inline-flex min-h-8 cursor-pointer items-center whitespace-nowrap rounded px-3 text-[13px] text-ink-2 has-[:checked]:bg-surface has-[:checked]:text-ink has-[:checked]:shadow-[0_0_0_1px_var(--line)] has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-ring max-[819px]:min-h-11 max-[819px]:px-2.5"
+        >
+          <input type="radio" name="resumen-currency" value={c.id} checked={value === c.id} onChange={() => onChange(c.id)} className="absolute inset-0 m-0 cursor-pointer opacity-0" />
+          {c.label}
+        </label>
+      ))}
+    </fieldset>
+  )
+}
+
+export default function SummaryHeader({ marketOpen, autoRefresh, countdown, onToggleRefresh, onImport, onNew, currency, onCurrency }: {
+  /** The selector shows only when the summary carries the three views. */
+  currency?: Currency
+  onCurrency?: (c: Currency) => void
   marketOpen: boolean
   autoRefresh: boolean
   countdown: number
@@ -27,6 +49,7 @@ export default function SummaryHeader({ marketOpen, autoRefresh, countdown, onTo
             </button>
           )}
         </p>
+        {currency && onCurrency && <div className="mt-3"><CurrencySelector value={currency} onChange={onCurrency} /></div>}
       </div>
       <div className="flex gap-2 max-[819px]:w-full">
         <button type="button" onClick={onImport} className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-line-strong px-4 font-medium hover:bg-hover max-[819px]:min-h-11 max-[819px]:flex-1">
