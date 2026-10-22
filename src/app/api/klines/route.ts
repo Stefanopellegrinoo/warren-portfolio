@@ -13,8 +13,9 @@ const DEFAULT_DAYS: Record<CandleInterval, number | null> = {
   '1w': null,
   '1mo': null,
 }
-const INTRADAY_TTL = 60
-const DAILY_TTL = 900
+// The chart re-polls every minute for its live bars, so every interval
+// shares one short TTL.
+const CANDLES_TTL = 60
 
 function isInterval(v: string): v is CandleInterval {
   return v in DEFAULT_DAYS
@@ -55,11 +56,9 @@ export async function GET(req: NextRequest) {
         return d
       })()
     : undefined
-  const ttl = interval === '15m' || interval === '1h' ? INTRADAY_TTL : DAILY_TTL
-
   try {
     const provider = getMarketDataProvider()
-    const candles = await cached(`klines:${ticker}:${interval}:${days ?? 'all'}`, ttl, () =>
+    const candles = await cached(`klines:${ticker}:${interval}:${days ?? 'all'}`, CANDLES_TTL, () =>
       provider.getCandles(ticker, interval, from)
     )
     return NextResponse.json(candles)

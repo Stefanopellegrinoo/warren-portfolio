@@ -3,8 +3,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Timeframe } from "@/lib/binance/types";
-import type { ChartDrawing, InProgressDrawing, DrawingStyle } from "@/lib/types/drawings";
-import { DEFAULT_STYLE } from "@/lib/types/drawings";
 
 export type IndicatorKey =
   | "ema20"
@@ -17,19 +15,6 @@ export type IndicatorKey =
   | "obv"
   | "stochastic"
   | "adx";
-
-export type DrawingTool =
-  | "cursor"
-  | "hline"
-  | "horizontal_ray"
-  | "measure"
-  | "eraser"
-  | "trendline"
-  | "fibonacci"
-  | "ray"
-  | "channel"
-  | "price_range"
-  | "arrow";
 
 export interface IndicatorConfig {
   ema20: number;
@@ -93,23 +78,11 @@ interface ChartState {
   watchlist: string[];
   activeWatchlistId: string | null;
   showPortfolioOverlay: boolean;
-  magnetMode: boolean;
-  /** Persisted custom style per tool type */
-  toolStyles: Record<string, DrawingStyle>;
 
-  tool: DrawingTool;
   symbolDialogOpen: boolean;
-  drawings: ChartDrawing[];
-  inProgressDrawing: InProgressDrawing | null;
   symbolDialogOnSelect: ((s: string) => void) | null;
   settingsTarget: IndicatorKey | null;
 
-  addDrawing: (d: ChartDrawing) => void;
-  updateDrawing: (id: string, patch: Partial<Pick<ChartDrawing, "points" | "style">>) => void;
-  removeDrawing: (id: string) => void;
-  clearDrawings: () => void;
-  replaceDrawings: (drawings: ChartDrawing[]) => void;
-  setInProgressDrawing: (d: InProgressDrawing | null) => void;
   setSymbol: (s: string) => void;
   setTimeframe: (t: Timeframe) => void;
   toggleIndicator: (key: IndicatorKey) => void;
@@ -118,13 +91,10 @@ interface ChartState {
   setConfig: (patch: Partial<IndicatorConfig>) => void;
   addToWatchlist: (s: string) => void;
   removeFromWatchlist: (s: string) => void;
-  setTool: (t: DrawingTool) => void;
   setSymbolDialogOpen: (v: boolean, onSelect?: (s: string) => void) => void;
   setSettingsTarget: (k: IndicatorKey | null) => void;
   togglePortfolioOverlay: () => void;
   setActiveWatchlistId: (id: string | null) => void;
-  setMagnetMode: (active: boolean) => void;
-  updateToolStyle: (tool: string, style: Partial<DrawingStyle>) => void;
   watchlistRefreshTick: number;
   bumpWatchlistRefresh: () => void;
 }
@@ -133,7 +103,7 @@ export const useChartStore = create<ChartState>()(
   persist(
     (set) => ({
       symbol: "SPY",
-      timeframe: "1w" as Timeframe,
+      timeframe: "1d" as Timeframe,
       indicators: {
         ema20: true,
         ema50: true,
@@ -162,31 +132,11 @@ export const useChartStore = create<ChartState>()(
       watchlist: DEFAULT_WATCHLIST,
       activeWatchlistId: null,
       showPortfolioOverlay: true,
-      magnetMode: true,
-      toolStyles: {},
-      tool: "cursor",
       symbolDialogOpen: false,
       symbolDialogOnSelect: null,
       settingsTarget: null,
       watchlistRefreshTick: 0,
-      drawings: [],
-      inProgressDrawing: null,
 
-      addDrawing: (d) =>
-        set((state) => ({ drawings: [...state.drawings, d] })),
-      updateDrawing: (id, patch) =>
-        set((state) => ({
-          drawings: state.drawings.map((d) =>
-            d.id === id ? { ...d, ...patch } : d,
-          ),
-        })),
-      removeDrawing: (id) =>
-        set((state) => ({
-          drawings: state.drawings.filter((d) => d.id !== id),
-        })),
-      clearDrawings: () => set({ drawings: [] }),
-      replaceDrawings: (drawings) => set({ drawings }),
-      setInProgressDrawing: (inProgressDrawing) => set({ inProgressDrawing }),
       setSymbol: (symbol) => set({ symbol }),
       setTimeframe: (timeframe) => set({ timeframe }),
       toggleIndicator: (key) =>
@@ -215,21 +165,12 @@ export const useChartStore = create<ChartState>()(
         set((state) => ({
           watchlist: state.watchlist.filter((x) => x !== s),
         })),
-      setTool: (tool) => set({ tool }),
       setSymbolDialogOpen: (v, onSelect) =>
         set({ symbolDialogOpen: v, symbolDialogOnSelect: v ? (onSelect ?? null) : null }),
       setSettingsTarget: (settingsTarget) => set({ settingsTarget }),
       togglePortfolioOverlay: () =>
         set((s) => ({ showPortfolioOverlay: !s.showPortfolioOverlay })),
       setActiveWatchlistId: (activeWatchlistId) => set({ activeWatchlistId }),
-      setMagnetMode: (magnetMode) => set({ magnetMode }),
-      updateToolStyle: (tool, style) =>
-        set((s) => ({
-          toolStyles: {
-            ...s.toolStyles,
-            [tool]: { ...(s.toolStyles[tool] || DEFAULT_STYLE[tool as keyof typeof DEFAULT_STYLE] || DEFAULT_STYLE.trendline), ...style },
-          },
-        })),
       bumpWatchlistRefresh: () =>
         set((s) => ({ watchlistRefreshTick: s.watchlistRefreshTick + 1 })),
     }),
@@ -244,8 +185,6 @@ export const useChartStore = create<ChartState>()(
         watchlist: s.watchlist,
         activeWatchlistId: s.activeWatchlistId,
         showPortfolioOverlay: s.showPortfolioOverlay,
-        magnetMode: s.magnetMode,
-        toolStyles: s.toolStyles,
       }),
     },
   ),

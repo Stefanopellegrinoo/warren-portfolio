@@ -1,65 +1,44 @@
 "use client";
 
 import { useChartStore } from "@/lib/store/chart-store";
+import { getProviderForSymbol } from "@/lib/market-data/resolver";
+import { coerceTimeframe, timeframesFor } from "@/lib/chart/timeframes";
 import type { Timeframe } from "@/lib/binance/types";
 import { cn } from "@/lib/utils";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { ChevronDown } from "lucide-react";
 
-const TIMEFRAMES: Timeframe[] = ["1m", "5m", "15m", "1h", "4h", "1d", "1w"];
+const LABELS: Partial<Record<Timeframe, string>> = { "1d": "1D", "1w": "1S", "1M": "1M" };
+const NAMES: Partial<Record<Timeframe, string>> = {
+  "1m": "1 minuto", "5m": "5 minutos", "15m": "15 minutos", "1h": "1 hora", "4h": "4 horas",
+  "1d": "Diario", "1w": "Semanal", "1M": "Mensual",
+};
 
+/** Only the timeframes the symbol's source really serves. */
 export function TimeframeSelector() {
-  const tf = useChartStore((s) => s.timeframe);
+  const symbol = useChartStore((s) => s.symbol);
+  const stored = useChartStore((s) => s.timeframe);
   const setTf = useChartStore((s) => s.setTimeframe);
+  const source = getProviderForSymbol(symbol);
+  const tf = coerceTimeframe(stored, source);
 
   return (
-    <>
-      {/* Desktop version: horizontal pills */}
-      <div className="hidden sm:flex items-center gap-0.5 rounded bg-tv-bg p-0.5">
-        {TIMEFRAMES.map((t) => (
-          <button
-            key={t}
-            onClick={() => setTf(t)}
-            className={cn(
-              "rounded px-2 py-1 text-xs font-medium uppercase transition-colors",
-              tf === t
-                ? "bg-tv-panel-hover text-tv-text"
-                : "text-tv-text-muted hover:bg-tv-panel-hover hover:text-tv-text",
-            )}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-
-      {/* Mobile version: dropdown */}
-      <div className="flex sm:hidden">
-        <DropdownMenu>
-          <DropdownMenuTrigger className="flex items-center gap-1 rounded bg-tv-bg px-2 py-1.5 text-xs font-medium uppercase text-tv-text hover:bg-tv-panel-hover outline-none">
-            {tf}
-            <ChevronDown className="h-3 w-3 text-tv-text-muted" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="bg-tv-panel border-tv-border min-w-[80px]">
-            {TIMEFRAMES.map((t) => (
-              <DropdownMenuItem
-                key={t}
-                onClick={() => setTf(t)}
-                className={cn(
-                  "text-xs uppercase focus:bg-tv-panel-hover focus:text-tv-text",
-                  tf === t ? "bg-tv-panel-hover text-tv-text" : "text-tv-text-muted"
-                )}
-              >
-                {t}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </>
+    <div role="radiogroup" aria-label="Temporalidad" className="flex shrink-0 items-center gap-0.5 rounded bg-surface-2 p-0.5">
+      {timeframesFor(source).map((t) => (
+        <button
+          key={t}
+          type="button"
+          role="radio"
+          aria-checked={tf === t}
+          aria-label={NAMES[t]}
+          title={NAMES[t]}
+          onClick={() => setTf(t)}
+          className={cn(
+            "inline-flex min-h-8 items-center rounded px-2.5 text-[13px] tabular-nums text-ink-2 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring max-[819px]:min-h-11 max-[819px]:px-2",
+            tf === t && "bg-surface text-ink shadow-[0_0_0_1px_var(--line)]",
+          )}
+        >
+          {LABELS[t] ?? t}
+        </button>
+      ))}
+    </div>
   );
 }

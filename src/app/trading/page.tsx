@@ -3,13 +3,14 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Header } from "@/components/trading/layout/Header";
-import { LeftSidebar } from "@/components/trading/layout/LeftSidebar";
 import { RightSidebar } from "@/components/trading/layout/RightSidebar";
 import { BottomPanel } from "@/components/trading/layout/BottomPanel";
-import { PriceChart } from "@/components/trading/chart/PriceChart";
+import { TradingChart } from "@/components/trading/chart/TradingChart";
 import { IndicatorSettingsDialog } from "@/components/trading/chart/IndicatorSettingsDialog";
 import { Watchlist } from "@/components/trading/watchlist/Watchlist";
 import { useChartStore } from "@/lib/store/chart-store";
+import { getProviderForSymbol } from "@/lib/market-data/resolver";
+import { coerceTimeframe } from "@/lib/chart/timeframes";
 import { TrendingUp, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -25,7 +26,7 @@ function SymbolFromQuery() {
 
 export default function TradingPage() {
   const symbol = useChartStore((s) => s.symbol);
-  const timeframe = useChartStore((s) => s.timeframe);
+  const timeframe = coerceTimeframe(useChartStore((s) => s.timeframe), getProviderForSymbol(symbol));
   const setSymbol = useChartStore((s) => s.setSymbol);
   const [mobileView, setMobileView] = useState<'chart' | 'watchlist'>('chart');
 
@@ -71,28 +72,16 @@ export default function TradingPage() {
         {/* Content Area */}
         <main className="min-h-0 flex-1 overflow-hidden">
           <div className="flex h-full w-full">
-            {/* Desktop Left Sidebar */}
-            <div className="hidden md:block">
-              <LeftSidebar />
-            </div>
-
-            {/* Middle Content */}
+            {/* One chart instance: on phones the watchlist tab hides it, it never mounts twice. */}
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              {/* Mobile Logic */}
-              <div className="flex h-full flex-col md:hidden">
-                {mobileView === 'chart' ? (
-                  <PriceChart symbol={symbol} timeframe={timeframe} />
-                ) : (
-                  <div className="min-h-0 flex-1 overflow-y-auto bg-tv-bg">
-                    <Watchlist onSelectSymbol={handleMobileSymbolSelect} />
-                  </div>
-                )}
+              <div className={cn("flex min-h-0 flex-1 flex-col", mobileView === 'watchlist' && "max-md:hidden")}>
+                <TradingChart symbol={symbol} timeframe={timeframe} />
               </div>
-
-              {/* Desktop Logic */}
-              <div className="hidden h-full md:block">
-                <PriceChart symbol={symbol} timeframe={timeframe} />
-              </div>
+              {mobileView === 'watchlist' && (
+                <div className="min-h-0 flex-1 overflow-y-auto bg-tv-bg md:hidden">
+                  <Watchlist onSelectSymbol={handleMobileSymbolSelect} />
+                </div>
+              )}
             </div>
 
             {/* Desktop Right Sidebar */}
