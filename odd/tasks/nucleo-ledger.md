@@ -14,6 +14,7 @@ Branch: `feat/ledger-core` (from `feat/dashboard-layout`). Delivery: ask-on-risk
 - S7 (dollar): "No nos cuesta nada preguntar el valor cada vez que se pregunta por las acciones, ademas en argentina se re ve el valor del dolar, ahsta podriamos ponerlo com dato en el dashboard" → one dollar series: today live from dolarapi.com (1-minute cache), closed days from `fx_rates`; the GGAL-implied CCL is removed; the Resumen shows today's MEP and CCL.
 - S8 (missing payments): "la 1" (option 1, after asking "pero como sabe la app que le falta pagos") → when no source covers a payment the bond's own calendar says had to exist (or its residual shows an unexplained amortization), the app asks the user for it, pre-filled with an estimate when one exists; it never invents it.
 - S9 (Rendimiento): "1" (option 1: the whole portfolio) → Rendimiento measures stocks, ONs and cash together as the default view, with per-class filters (stocks only, ONs only); the 'measurable' universe disappears, and so does the copy "Las ONs quedan afuera porque no tienen historia".
+- S10 (payments UI): "si, me cierra así" → in ONs → Mi cartera, a "Pagos cobrados" section listing every coupon and amortization, newest first (date, ticker, kind, amount, "Corregir" or "Corregido por vos"); "Corregir" sets the broker's amount or "No lo cobré"; a "⚠ Faltan pagos de <TICKER>: <dates>" line with "Cargar", pre-filled with an estimate when one exists (S8); "Cupón" is removed from Nueva operación for ONs.
 
 ## Design (approved 2026-10-22, "si")
 
@@ -51,7 +52,7 @@ Branch: `feat/ledger-core` (from `feat/dashboard-layout`). Delivery: ask-on-risk
 | T4.1 | S2,S3,S4,S8 | History and statistics read the core | delegated (context backstop) | done | see L13 |
 | T4.2a | S9 | Rendimiento and the Resumen chart measure the whole portfolio; 'measurable' removed; dead "estimated" markers removed | delegated (context backstop) | in progress | |
 | T4.2b | S2,S5 | Resumen, ONs, statistics allocation/trade stats and trading sidebar read the core instead of stored tables | — | pending | |
-| T4.2c | S4,S8 | Payment corrections UI (replaces manual ON CUPON entry; asks for missing payments) | — | pending (UI design to agree with the user) | |
+| T4.2c | S4,S8,S10 | Payment corrections UI (replaces manual ON CUPON entry; asks for missing payments) | delegated (parallel with T4.2a, disjoint surfaces) | in progress | |
 | T5.1 | S5 | Write path: RPC validates and inserts only; engines removed | inline | pending | |
 | T5.2 | S5 | Drop stored derived tables and dead code (high risk, item 1) | inline | pending | |
 | T5.3 | S5 | `multicurrency` built on the core | inline | pending | |
