@@ -1,13 +1,12 @@
 import type { Transaction, Position, ClosedTrade, TransactionInput, Quote, PortfolioSummary, AssetType, Moneda, ONPosition, ONClosedTrade } from '@/types'
 import { createServerClientInstance } from './supabase-server'
-import { getRedis, isRedisReady, SUMMARY_VERSION_TTL } from './redis'
-import { processCashMovement, rebuildCashBalance } from './cash-engine'
-import { rebuildONPosition } from './on-engine'
+import { getRedis, isRedisReady } from './redis'
 import { normalizeError } from './errors'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { tradeRecordRpcParams, type TradeRecord } from './trade-record'
 import { loadPortfolioNow } from './ledger-now'
 import { argentinaDate } from './utils'
+import { assertNoNewOversell, OversellError, pendingTrade, stateAfterWrite } from './ledger-write'
 
 /**
  * SECURITY: Explicitly validate userId to prevent data corruption.
@@ -33,7 +32,9 @@ export interface FullPortfolio {
 }
 
 /**
- * THE CORE ENGINE
+ * Legacy pure average cost. The write path and every reader use the ledger core
+ * (src/lib/ledger-core.ts) since T5.1; its only caller is portfolio-replay (the snapshot
+ * backfill), which T5.2 removes together with this function.
  * 
  * Calculates running weighted average cost correctly:
  * - COMPRA: new_avg = (old_cost_basis + qty*price) / (old_qty + qty)
@@ -72,10 +73,10 @@ export function calculateRunningAvgCost(
 }
 
 /**
- * Process a new transaction:
- * 1. Insert into transactions table
- * 2. Update position (with optimistic locking for concurrency)
- * 3. If position closes, write to closed_trades (handled by RPC)
+ * Process a new transaction (odd/tasks/nucleo-ledger.md T5.1, S5):
+ * 1. A sale is validated by the ledger core on the ledger after the write
+ * 2. The RPC inserts the transaction and its linked cash movement — nothing else
+ * 3. The position and the sale come back from the core, as the old RPC's tables did
  */
 export async function processTransaction(
   supabase: SupabaseClient,
@@ -93,82 +94,54 @@ export async function processTransaction(
     }
   }
 
-  // 1. Call the atomic RPC — retry up to 3× on concurrent modification conflicts
-  const RPC_MAX_RETRIES = 3
-  let rpcData: any
-  for (let attempt = 1; attempt <= RPC_MAX_RETRIES; attempt++) {
-    const { data, error: rpcErr } = await supabase.rpc('process_transaction_atomic', {
-      p_date: input.date,
-      p_ticker: input.ticker.toUpperCase().trim(),
-      p_operation: input.operation,
-      p_quantity: Math.abs(input.quantity),
-      p_price: input.price,
-      p_commission: input.commission ?? 0,
-      p_notes: input.notes ?? null,
-      p_asset_type: (input as any).assetType ?? 'ACCION',
-      p_moneda: (input as any).moneda ?? 'USD',
-      p_user_id: userId,
-      // Only callers with a broker ticket send these (migration 044); every
-      // other caller keeps the exact pre-044 call.
-      ...(input.tradeRecord ? tradeRecordRpcParams(input.tradeRecord) : {}),
-    })
+  const ticker = input.ticker.toUpperCase().trim()
+  const assetType = (input as any).assetType ?? 'ACCION'
+  if (input.operation === 'VENTA') {
+    const pending = pendingTrade({ ...input, assetType })
+    await assertNoNewOversell(supabase, userId, rows => [...rows, pending])
+  }
 
-    if (!rpcErr) { rpcData = data; break }
-
-    const isConcurrentConflict = rpcErr.message?.includes('Concurrent modification')
-    if (isConcurrentConflict && attempt < RPC_MAX_RETRIES) {
-      console.warn(`[Portfolio Engine] Concurrent modification — retrying (${attempt}/${RPC_MAX_RETRIES})`)
-      await new Promise(r => setTimeout(r, 50 * Math.pow(2, attempt - 1)))
-      continue
-    }
-
+  const { data: rpcData, error: rpcErr } = await supabase.rpc('process_transaction_atomic', {
+    p_date: input.date,
+    p_ticker: ticker,
+    p_operation: input.operation,
+    p_quantity: Math.abs(input.quantity),
+    p_price: input.price,
+    p_commission: input.commission ?? 0,
+    p_notes: input.notes ?? null,
+    p_asset_type: assetType,
+    p_moneda: (input as any).moneda ?? 'USD',
+    p_user_id: userId,
+    // Only callers with a broker ticket send these (migration 044); every
+    // other caller keeps the exact pre-044 call.
+    ...(input.tradeRecord ? tradeRecordRpcParams(input.tradeRecord) : {}),
+  })
+  if (rpcErr) {
     console.error('[Portfolio Engine] RPC Error:', rpcErr)
     throw normalizeError(rpcErr)
   }
 
-  const { transaction_id } = rpcData
-
-  // 2. Fetch results to return to frontend
-  const [txRes, posRes, ctRes] = await Promise.all([
-    supabase.from('transactions').select('*').eq('id', transaction_id).single(),
-    supabase.from('positions').select('*').eq('user_id', userId).eq('ticker', input.ticker.toUpperCase().trim()).single(),
-    input.operation === 'VENTA' 
-      ? supabase.from('closed_trades').select('*').eq('user_id', userId).eq('ticker', input.ticker.toUpperCase().trim()).order('close_date', { ascending: false }).limit(1).single()
-      : Promise.resolve({ data: null })
-  ])
-
-  // 4. Invalidate Redis cache for this user
-  if (isRedisReady()) {
-    try {
-      const redis = getRedis()
-      // Bump version before deleting summary so the worker can detect stale writes
-      await redis?.incr(`summary:version:${userId}`)
-      await redis?.expire(`summary:version:${userId}`, SUMMARY_VERSION_TTL)
-      await redis?.del(`summary:${userId}`)
-    } catch (cacheErr) {}
-  }
+  const { data: transaction, error: txErr } = await supabase.from('transactions').select('*').eq('id', rpcData.transaction_id).single()
+  if (txErr) throw normalizeError(txErr)
+  const { position, closedTrade } = await stateAfterWrite(supabase, userId, ticker, assetType === 'ON' ? 'ON' : 'STOCK', input.operation === 'VENTA')
 
   // Warm up price cache and enqueue background price update job
-  const tickerClean = input.ticker.toUpperCase().trim()
   try {
     const { fetchQuotesWithFallback } = await import('./yahoo-finance')
-    console.log(`[Portfolio Engine] Warming up price for ${tickerClean}...`)
-    await fetchQuotesWithFallback([tickerClean])
+    console.log(`[Portfolio Engine] Warming up price for ${ticker}...`)
+    await fetchQuotesWithFallback([ticker])
   } catch (priceError) {
-    console.warn(`[Portfolio Engine] Failed to warm up price for ${tickerClean}:`, priceError)
+    console.warn(`[Portfolio Engine] Failed to warm up price for ${ticker}:`, priceError)
   }
   try {
     const { addPriceUpdateJob } = await import('./queue')
-    await addPriceUpdateJob([tickerClean])
+    await addPriceUpdateJob([ticker])
   } catch (queueErr) {
-    console.warn(`[Portfolio Engine] Failed to enqueue price update for ${tickerClean}:`, queueErr)
+    console.warn(`[Portfolio Engine] Failed to enqueue price update for ${ticker}:`, queueErr)
   }
 
-  return { 
-    transaction: txRes.data, 
-    position: posRes.data ?? null, 
-    closedTrade: ctRes.data ?? null 
-  }
+  // Cache invalidation is the caller's (the route), after this returns.
+  return { transaction, position, closedTrade }
 }
 
 /**
@@ -303,146 +276,6 @@ export async function getFullPortfolio(
   return loadPortfolioNow(supabase, userId, today)
 }
 
-/**
- * Recalculate closed trades for a ticker using incremental UPSERT.
- */
-export async function rebuildClosedTrades(supabase: SupabaseClient, userId: string, ticker: string) {
-  assertUserId(userId)
-  const cleanTicker = ticker.toUpperCase().trim()
-
-  const { data: allTx, error: fetchErr } = await supabase
-    .from('transactions')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('ticker', cleanTicker)
-    .order('date', { ascending: true })
-    .order('created_at', { ascending: true })
-
-  if (fetchErr) throw normalizeError(fetchErr)
-  if (!allTx || allTx.length === 0) {
-    await supabase.from('closed_trades').delete().eq('user_id', userId).eq('ticker', cleanTicker)
-    return
-  }
-
-  let quantity = 0
-  let costBasis = 0
-  let firstBought: string | null = null
-  let avgCost = 0
-  const closedTradeRows: any[] = []
-
-  for (const tx of allTx) {
-    const qty = Math.abs(tx.quantity)
-    const comm = tx.commission || 0
-
-    if (tx.operation === 'COMPRA') {
-      if (quantity === 0) firstBought = tx.date
-      costBasis += (qty * tx.price) + comm
-      quantity += qty
-      avgCost = costBasis / quantity
-    } else if (tx.operation === 'VENTA') {
-      if (quantity > 0) {
-        const sellQty = Math.min(qty, quantity)
-        const proceeds = sellQty * tx.price - comm
-        closedTradeRows.push({
-          user_id: userId,
-          ticker: cleanTicker,
-          open_date: firstBought || tx.date,
-          close_date: tx.date,
-          avg_cost: avgCost,
-          close_price: tx.price,
-          quantity: sellQty,
-          invested: sellQty * avgCost,
-          proceeds,
-          transaction_id: tx.id
-        })
-        costBasis -= sellQty * avgCost
-        quantity -= sellQty
-        if (quantity <= 0.0001) {
-          quantity = 0
-          costBasis = 0
-          firstBought = null
-        }
-      }
-    }
-  }
-
-  // Unlinked rows first, and separately: `NOT (NULL IN (...))` is NULL — never
-  // TRUE — so a row with no transaction_id survives the cleanup below, and
-  // UNIQUE(transaction_id) permits many NULLs so the upsert's ON CONFLICT does
-  // not see it either and inserts a duplicate beside it. Every row the bulk
-  // import wrote is unlinked, so without this one rebuild doubles the ticker's
-  // realized P&L. A closed trade with no VENTA behind it is never legitimate.
-  const { error: unlinkedErr } = await supabase
-    .from('closed_trades')
-    .delete()
-    .eq('user_id', userId)
-    .eq('ticker', cleanTicker)
-    .is('transaction_id', null)
-  if (unlinkedErr) throw normalizeError(unlinkedErr)
-
-  // Cleanup BEFORE upsert: a row keyed to a transaction that is no longer a
-  // VENTA (the user edited the operation) survives every rebuild otherwise —
-  // the FK cascade only fires when the transaction row itself is deleted.
-  // Rows keyed to still-VENTA transactions are refreshed by the upsert below.
-  const ventaIds = allTx.filter(t => t.operation === 'VENTA').map(t => t.id)
-  let cleanup = supabase
-    .from('closed_trades')
-    .delete()
-    .eq('user_id', userId)
-    .eq('ticker', cleanTicker)
-  if (ventaIds.length > 0) {
-    cleanup = cleanup.not('transaction_id', 'in', `(${ventaIds.join(',')})`)
-  }
-  const { error: cleanupErr } = await cleanup
-  if (cleanupErr) throw normalizeError(cleanupErr)
-
-  if (closedTradeRows.length > 0) {
-    await supabase.from('closed_trades').upsert(closedTradeRows, { onConflict: 'transaction_id' })
-  }
-}
-
-/**
- * Recalculate a single position from scratch.
- */
-export async function rebuildPosition(supabase: SupabaseClient, userId: string, ticker: string) {
-  assertUserId(userId)
-  const cleanTicker = ticker.toUpperCase().trim()
-
-  await rebuildClosedTrades(supabase, userId, cleanTicker)
-
-  const { data: allTx, error: fetchErr } = await supabase
-    .from('transactions')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('ticker', cleanTicker)
-    .order('date', { ascending: true })
-    .order('created_at', { ascending: true })
-
-  if (fetchErr) throw normalizeError(fetchErr)
-
-  if (!allTx || allTx.length === 0) {
-    await supabase.from('positions').delete().eq('user_id', userId).eq('ticker', cleanTicker)
-    return null
-  }
-
-  const { avgCost, quantity, costBasis } = calculateRunningAvgCost(allTx)
-  const firstBought = allTx.find(t => t.operation === 'COMPRA')?.date || allTx[0].date
-
-  if (quantity <= 0.0001) {
-    await supabase.from('positions').delete().eq('user_id', userId).eq('ticker', cleanTicker)
-  } else {
-    await supabase.from('positions').upsert({
-      user_id: userId,
-      ticker: cleanTicker,
-      quantity,
-      avg_cost: avgCost,
-      total_invested: costBasis,
-      first_bought: firstBought,
-      last_updated: new Date().toISOString(),
-    }, { onConflict: 'user_id,ticker' })
-  }
-}
-
 export function splitTickersByAssetType(
   inputs: Array<{ ticker: string; assetType?: string }>
 ): { stockTickers: string[]; onTickers: string[] } {
@@ -491,6 +324,12 @@ export async function processTransactionBatch(
     if (onProgress) await onProgress(10, 'Validating and sorting transactions...')
     const sortedInputs = [...inputs].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 
+    // The core's sale rule on the ledger after the import (a replace: the file alone).
+    // The RPC stamps one created_at on the whole batch, so the pending rows share one too.
+    const at = new Date().toISOString()
+    const pending = sortedInputs.map(i => ({ ...pendingTrade({ ...i, assetType: (i as any).assetType }), created_at: at }))
+    await assertNoNewOversell(supabase, userId, rows => (replace ? pending : [...rows, ...pending]), rows => (replace ? [] : rows))
+
     // Convert to JSONB for RPC
     const transactionsJson = sortedInputs.map(input => ({
       date: input.date,
@@ -519,15 +358,7 @@ export async function processTransactionBatch(
     const result = Array.isArray(data) ? data[0] : data
     if (!result.success) return { success: false, imported: 0, failed: result.failed, errors: result.error_details }
 
-    if (onProgress) await onProgress(60, 'Rebuilding positions...')
     const tickers = Array.from(new Set(sortedInputs.map(i => i.ticker.toUpperCase().trim())))
-    const { stockTickers, onTickers } = splitTickersByAssetType(sortedInputs as any[])
-
-    await Promise.all([
-      ...stockTickers.map((ticker: string) => rebuildPosition(supabase, userId, ticker)),
-      ...onTickers.map((ticker: string) => rebuildONPosition(supabase, userId, ticker)),
-    ])
-    await rebuildCashBalance(supabase, userId)
 
     // Warm up prices for all new tickers in batch
     try {
@@ -537,7 +368,8 @@ export async function processTransactionBatch(
 
     return { success: true, imported: result.imported, failed: 0, errors: [] }
   } catch (err: any) {
-    return { success: false, imported: 0, failed: inputs.length, errors: [{ line: 0, ticker: 'BATCH', error: err.message }] }
+    const ticker = err instanceof OversellError ? err.issue.ticker : 'BATCH'
+    return { success: false, imported: 0, failed: inputs.length, errors: [{ line: 0, ticker, error: err.message }] }
   }
 }
 

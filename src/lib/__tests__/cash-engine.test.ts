@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { processCashMovement, rebuildCashBalance } from '../cash-engine'
+import { processCashMovement } from '../cash-engine'
+import { writeSupabase } from './fixtures/ledger-write-supabase'
 
 const mockAddRefreshSummaryJob = vi.fn().mockResolvedValue(undefined)
 const mockInvalidateUserCache = vi.fn().mockResolvedValue(undefined)
@@ -32,23 +33,9 @@ describe('processCashMovement', () => {
   })
 
   it('enqueues a summary refresh after processing', async () => {
-    const mockSupabase = {
-      rpc: vi.fn().mockResolvedValue({ data: { transaction_id: 'tx-1' }, error: null }),
-      from: vi.fn().mockImplementation((table: string) => ({
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        order: vi.fn().mockReturnThis(),
-        limit: vi.fn().mockReturnThis(),
-        single: vi.fn().mockResolvedValue({
-          data: table === 'cash_movements'
-            ? { id: 'cm-1', user_id: 'u1', amount: 100 }
-            : { user_id: 'u1', balance: 100 },
-          error: null,
-        }),
-      })),
-    }
+    const sb = writeSupabase()
 
-    await processCashMovement(mockSupabase as any, 'u1', {
+    await processCashMovement(sb as any, 'u1', {
       date: '2024-01-01',
       type: 'DEPOSITO',
       amount: 100,
@@ -57,43 +44,15 @@ describe('processCashMovement', () => {
 
     expect(mockedAddRefreshSummaryJob).toHaveBeenCalledWith('u1')
   })
-})
 
-describe('rebuildCashBalance', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockedAddRefreshSummaryJob.mockResolvedValue(undefined)
-  })
+  it('keeps the response shape: the movement and the balance', async () => {
+    const sb = writeSupabase()
 
-  it('enqueues a summary refresh after rebuild', async () => {
-    const mockSupabase = {
-      from: vi.fn().mockImplementation((table: string) => {
-        if (table === 'cash_movements') {
-          return {
-            select: vi.fn().mockReturnThis(),
-            eq: vi.fn().mockReturnThis(),
-            order: vi.fn().mockReturnThis(),
-            data: [],
-            error: null,
-          }
-        }
-        return {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          order: vi.fn().mockReturnThis(),
-          upsert: vi.fn().mockReturnValue({
-            select: vi.fn().mockReturnValue({
-              single: vi.fn().mockResolvedValue({ data: { user_id: 'u1', balance: 0 }, error: null }),
-            }),
-          }),
-          data: { user_id: 'u1', balance: 0 },
-          error: null,
-        }
-      }),
-    }
+    const result = await processCashMovement(sb as any, 'u1', { date: '2024-01-01', type: 'RETIRO', amount: 40 })
 
-    await rebuildCashBalance(mockSupabase as any, 'u1')
-
-    expect(mockedAddRefreshSummaryJob).toHaveBeenCalledWith('u1')
+    expect(result).toEqual({
+      movement: expect.objectContaining({ type: 'RETIRO', amount: 40, transaction_id: null }),
+      balance: { user_id: 'u1', balance: -40 },
+    })
   })
 })

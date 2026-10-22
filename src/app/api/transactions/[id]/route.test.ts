@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
 
-const mockRebuild = vi.fn(async () => undefined)
-vi.mock('@/lib/portfolio-engine', () => ({ rebuildPosition: (...a: unknown[]) => mockRebuild(...(a as [])) }))
-vi.mock('@/lib/cash-engine', () => ({ rebuildCashBalance: vi.fn(async () => undefined) }))
 vi.mock('@/lib/redis', () => ({ invalidateUserCache: vi.fn(async () => undefined) }))
 
 const ID = '11111111-1111-4111-8111-111111111111'
 let original: Record<string, unknown>
 let updates: Record<string, unknown>[]
+let deletes: string[]
+/** The user's ledger, as the core's sale validation reads it (T5.1). */
+let ledger: Record<string, unknown>[]
 
 const db = {
   from(table: string) {
@@ -21,7 +21,8 @@ const db = {
     chain.order = () => chain
     chain.limit = () => chain
     chain.update = (obj: Record<string, unknown>) => { pendingUpdate = obj; updates.push(obj); return chain }
-    chain.delete = () => chain
+    chain.delete = () => { deletes.push(table); return chain }
+    chain.range = async () => ({ data: table === 'transactions' ? ledger : [], error: null })
     chain.insert = async () => ({ error: null })
     chain.single = async () => {
       if (pendingUpdate) return { data: { ...original, ...pendingUpdate, ticker: original.ticker }, error: null }
@@ -45,7 +46,8 @@ const patch = (body: Record<string, unknown>) =>
 
 beforeEach(() => {
   updates = []
-  mockRebuild.mockClear()
+  deletes = []
+  ledger = []
   original = { ticker: 'AAPL', asset_type: 'CEDEAR', needs_review: true }
 })
 
@@ -63,7 +65,6 @@ describe('PATCH /api/transactions/[id]', () => {
       trade_currency: 'ARS', trade_quantity: 40, trade_price: 15000, trade_commission: 0, cedear_ratio: 20,
       fx_mep: 1400, fx_ccl: 1500, fx_date: '2026-03-02', fx_source: 'reference', needs_review: false, review_note: null,
     })
-    expect(mockRebuild).toHaveBeenCalledWith(db, 'user-1', 'AAPL')
   })
 
   it('refuses a ticket for a ticker that is not a CEDEAR and writes nothing', async () => {
@@ -82,5 +83,37 @@ describe('PATCH /api/transactions/[id]', () => {
     const res = await PATCH(patch({ date: '2026-03-02', ticker: 'AAPL', operation: 'VENTA', quantity: 2, price: 200, commission: 1, assetType: 'CEDEAR' }), { params: { id: ID } })
     expect(res.status).toBe(200)
     expect(updates).toEqual([{ date: '2026-03-02', operation: 'VENTA', quantity: -2, price: 200, commission: 1, notes: null }])
+  })
+})
+
+describe('the core validates edits and deletes (T5.1)', () => {
+  const sale = { id: 's1', ticker: 'AAPL', operation: 'VENTA', quantity: -2, price: 210, commission: 0, date: '2026-03-05', asset_type: 'CEDEAR', created_at: '2026-03-05T10:00:00Z' }
+  const bought = { id: ID, ticker: 'AAPL', operation: 'COMPRA', quantity: 2, price: 200, commission: 0, date: '2026-03-02', asset_type: 'CEDEAR', created_at: '2026-03-02T10:00:00Z' }
+
+  it('refuses an edit that leaves a later sale selling more than held, with 400, and writes nothing', async () => {
+    ledger = [bought, sale]
+    const { PATCH } = await import('./route')
+    const res = await PATCH(patch({ date: '2026-03-02', ticker: 'AAPL', operation: 'COMPRA', quantity: 1, price: 200, assetType: 'CEDEAR' }), { params: { id: ID } })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('No podés vender 2 AAPL el 2026-03-05: a esa fecha tenías 1.')
+    expect(updates).toEqual([])
+    expect(deletes).toEqual([])
+  })
+
+  it('refuses deleting the buy a later sale depends on, with 400, and deletes nothing', async () => {
+    ledger = [bought, sale]
+    const { DELETE } = await import('./route')
+    const res = await DELETE(new NextRequest(`http://localhost/api/transactions/${ID}`, { method: 'DELETE' }), { params: { id: ID } })
+    expect(res.status).toBe(400)
+    expect(deletes).toEqual([])
+  })
+
+  it('a delete that breaks nothing keeps its previous response shape', async () => {
+    ledger = [bought]
+    const { DELETE } = await import('./route')
+    const res = await DELETE(new NextRequest(`http://localhost/api/transactions/${ID}`, { method: 'DELETE' }), { params: { id: ID } })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ success: true, invalidated: expect.any(Number), message: 'Transaction deleted. Portfolio and cash balance recalculated.' })
+    expect(deletes).toEqual(['transactions'])
   })
 })

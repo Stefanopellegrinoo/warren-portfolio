@@ -5,13 +5,12 @@ vi.mock('../yahoo-finance', () => ({ fetchQuotesWithFallback: vi.fn(async () => 
 vi.mock('../queue', () => ({ addPriceUpdateJob: vi.fn(async () => undefined) }))
 
 import { processTransaction } from '../portfolio-engine'
+import { writeSupabase } from './fixtures/ledger-write-supabase'
 
 function client() {
-  const rpc = vi.fn(async () => ({ data: { transaction_id: 'tx-1' }, error: null }))
-  const chain: Record<string, unknown> = {}
-  for (const m of ['select', 'eq', 'order', 'limit']) chain[m] = () => chain
-  chain.single = async () => ({ data: null, error: null })
-  return { rpc, from: () => chain } as never as { rpc: typeof rpc }
+  const sb = writeSupabase()
+  const rpc = vi.fn(sb.rpc)
+  return Object.assign(sb, { rpc })
 }
 
 const input = { date: '2026-10-20', ticker: 'aapl', operation: 'COMPRA' as const, quantity: 2, price: 200, commission: 1, assetType: 'CEDEAR' as const, moneda: 'ARS' as const }

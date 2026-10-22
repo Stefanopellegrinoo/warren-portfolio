@@ -1,9 +1,9 @@
 import type { CashBalance, CashMovement, CashMovementInput } from '@/types'
-import { getRedis, isRedisReady, invalidateUserCache, SUMMARY_VERSION_TTL } from './redis'
-import { invalidateCacheKey } from './cache'
+import { invalidateUserCache } from './redis'
 import { normalizeError } from './errors'
 import { addRefreshSummaryJob } from './queue'
-import { cashDelta } from './cash-signs'
+import { loadPortfolioNow } from './ledger-now'
+import { argentinaDate } from './utils'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 /**
@@ -17,38 +17,43 @@ function assertUserId(userId: unknown): asserts userId is string {
   }
 }
 
+/** The cash the screens show: the ledger core's (movements plus automatic ON payments). */
+export type LedgerCash = Pick<CashBalance, 'user_id' | 'balance'>
+
+async function ledgerCash(supabase: SupabaseClient, userId: string): Promise<LedgerCash> {
+  const { cashBalance } = await loadPortfolioNow(supabase, userId, argentinaDate())
+  return { user_id: userId, balance: cashBalance }
+}
+
+/** Manual cash movements. No CUPON: ON coupons are automatic (odd/tasks/nucleo-ledger.md S4, S10). */
+const MANUAL_TYPES = new Set(['DEPOSITO', 'RETIRO', 'DIVIDENDO'])
+
 /**
- * CASH ENGINE
- * 
- * Manages cash balance operations:
+ * CASH ENGINE (odd/tasks/nucleo-ledger.md T5.1, S5): writes cash_movements rows only; the
+ * balance is always the ledger core's, never a stored one.
  * - DEPOSITO: adds to balance
  * - RETIRO: subtracts from balance
- * - CUPON: adds coupon payment (from ONs)
- * - DIVIDENDO: adds dividend payment (from stocks)
- * 
- * Strategy: ATOMIC SQL RPC (Postgres)
+ * - DIVIDENDO: adds dividend income (from stocks)
  */
 
 /**
- * Process a new cash movement and update balance.
- * 
- * CONCURRENCY STRATEGY:
- * - Uses ATOMIC SQL RPC (fast path & consistency guaranteed)
- * 
- * Returns the created movement and updated balance.
+ * Record a manual cash movement through the RPC and answer the movement and the ledger cash.
  */
 export async function processCashMovement(
   supabase: SupabaseClient,
   userId: string,
   input: CashMovementInput
-): Promise<{ movement: CashMovement; balance: CashBalance }> {
+): Promise<{ movement: CashMovement; balance: LedgerCash }> {
   assertUserId(userId)
-  
-  // 1. Call the atomic RPC to handle everything in one DB transaction
-  const { data, error: rpcErr } = await supabase.rpc('process_transaction_atomic', {
+  if (!MANUAL_TYPES.has(input.type)) {
+    throw Object.assign(new Error('Tipo de movimiento inválido: usá DEPOSITO, RETIRO o DIVIDENDO.'), { status: 400 })
+  }
+
+  // DIVIDENDO without quantity is a cash-only income of p_price (migration 046).
+  const { error: rpcErr } = await supabase.rpc('process_transaction_atomic', {
     p_date: input.date,
     p_operation: input.type,
-    p_price: input.amount, // For DEPOSITO/RETIRO, p_price is used as the amount
+    p_price: input.amount, // the amount of a manual movement
     p_notes: input.description ?? null,
     p_ticker: input.ticker ?? null,
     p_user_id: userId
@@ -59,82 +64,11 @@ export async function processCashMovement(
     throw normalizeError(rpcErr)
   }
 
-  // 2. Fetch results
-  const [movementRes, balanceRes] = await Promise.all([
-    supabase.from('cash_movements').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(1).single(),
-    supabase.from('cash_balance').select('*').eq('user_id', userId).single()
-  ])
+  const movementRes = await supabase.from('cash_movements').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(1).single()
+  if (movementRes.error) throw normalizeError(movementRes.error)
+  const balance = await ledgerCash(supabase, userId)
 
-  // 3. Invalidate Redis cache
   await invalidateUserCache(userId)
-
-  // 4. Trigger an on-demand summary refresh so the dashboard updates immediately
-  try {
-    await addRefreshSummaryJob(userId)
-  } catch (err) {
-    console.warn('[Cash Engine] Failed to enqueue summary refresh:', err)
-  }
-
-  return { movement: movementRes.data, balance: balanceRes.data }
-}
-
-/**
- * Rebuild cash balance from all movements.
- * 
- * This is the source of truth — balance is always derived from movements.
- */
-export async function rebuildCashBalance(
-  supabase: SupabaseClient,
-  userId: string
-): Promise<CashBalance> {
-  assertUserId(userId)
-  
-  // Fetch all movements in chronological order
-  const { data: movements, error: fetchErr } = await supabase
-    .from('cash_movements')
-    .select('*')
-    .eq('user_id', userId)
-    .order('date', { ascending: true })
-    .order('created_at', { ascending: true })
-  
-  if (fetchErr) throw normalizeError(fetchErr)
-  
-  let balance = 0
-
-  for (const m of movements ?? []) {
-    balance += cashDelta(m.type, m.amount)
-  }
-
-  // Upsert the calculated balance
-  const { data: updatedBalance, error: upsertErr } = await supabase
-    .from('cash_balance')
-    .upsert({
-      user_id: userId,
-      balance,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'user_id' })
-    .select()
-    .single()
-  
-  if (upsertErr) throw normalizeError(upsertErr)
-  
-  // Invalidate Redis cache for portfolio summary
-  if (isRedisReady()) {
-    try { 
-      const redis = getRedis()
-      // Bump version before deleting summary so the worker can detect stale writes
-      await Promise.all([
-        redis?.incr(`summary:version:${userId}`),
-        redis?.expire(`summary:version:${userId}`, SUMMARY_VERSION_TTL),
-      ])
-      await Promise.all([
-        redis?.del(`summary:${userId}`),
-        invalidateCacheKey(`cash:balance:${userId}`), // Invalidate cached balance
-      ])
-    } catch (err) {
-      console.warn('[Cash Engine] Failed to invalidate Redis cache:', err)
-    }
-  }
 
   // Trigger an on-demand summary refresh so the dashboard updates immediately
   try {
@@ -142,8 +76,8 @@ export async function rebuildCashBalance(
   } catch (err) {
     console.warn('[Cash Engine] Failed to enqueue summary refresh:', err)
   }
-  
-  return updatedBalance
+
+  return { movement: movementRes.data, balance }
 }
 
 /** Money is stored as numeric(18,4); keep replayed floats on that grid. */
@@ -158,7 +92,7 @@ function roundMoney(value: number): number {
 export interface CashAdjustment {
   /** The movement written to close the gap, or null when nothing was needed. */
   movement: CashMovement | null
-  balance: CashBalance
+  balance: LedgerCash
   /** Signed difference applied: target minus what the ledger said. */
   delta: number
 }
@@ -167,7 +101,7 @@ export interface CashAdjustment {
  * Reconciles the ledger to a known real-world cash balance.
  *
  * An imported transaction history contains buys but not the deposits that
- * funded them, so `rebuildCashBalance` legitimately lands on a large negative
+ * funded them, so the ledger cash legitimately lands on a large negative
  * number. Asking the user to remember months-old deposits does not work; asking
  * for today's balance does. This writes the single movement that closes the
  * gap, instead of inventing a deposit history.
@@ -190,9 +124,8 @@ export async function adjustCashBalance(
     throw new Error('Target balance must be a finite number')
   }
 
-  // Recompute from the ledger first: the stored balance could be stale, and an
-  // adjustment built on a stale figure would silently land on the wrong number.
-  const current = await rebuildCashBalance(supabase, userId)
+  // The gap is measured against the ledger core's cash: the figure the screens show.
+  const current = await ledgerCash(supabase, userId)
   const delta = roundMoney(targetBalance - Number(current.balance))
 
   if (Math.abs(delta) < NEGLIGIBLE) {
@@ -214,7 +147,7 @@ export async function adjustCashBalance(
 
   if (error) throw normalizeError(error)
 
-  const balance = await rebuildCashBalance(supabase, userId)
+  const balance = await ledgerCash(supabase, userId)
 
   // Post-condition: the ledger must now replay to the requested figure. If it
   // does not, another write landed between the read and the insert and the
@@ -227,28 +160,6 @@ export async function adjustCashBalance(
   }
 
   return { movement, balance, delta }
-}
-
-/**
- * Get current cash balance for a user.
- */
-export async function getCashBalance(
-  supabase: SupabaseClient,
-  userId: string
-): Promise<CashBalance | null> {
-  assertUserId(userId)
-
-  const { data, error } = await supabase
-    .from('cash_balance')
-    .select('*')
-    .eq('user_id', userId)
-    .single()
-  
-  if (error) {
-    return null
-  }
-  
-  return data
 }
 
 /**
@@ -266,14 +177,14 @@ export class LinkedMovementError extends Error {
 }
 
 /**
- * Delete a MANUAL cash movement and recalculate balance.
- * Transaction-linked movements are refused — see LinkedMovementError.
+ * Delete a MANUAL cash movement. Transaction-linked movements are refused — see LinkedMovementError.
+ * The balance is the ledger's, so there is nothing else to update.
  */
 export async function deleteCashMovement(
   supabase: SupabaseClient,
   userId: string,
   movementId: string
-): Promise<CashBalance> {
+): Promise<void> {
   assertUserId(userId)
 
   // 0. Guard: only movements with no source transaction may be deleted here.
@@ -288,7 +199,6 @@ export async function deleteCashMovement(
   if (!movement) throw new Error('Movimiento no encontrado')
   if (movement.transaction_id) throw new LinkedMovementError()
 
-  // 1. Delete the movement
   const { error: deleteErr } = await supabase
     .from('cash_movements')
     .delete()
@@ -296,7 +206,4 @@ export async function deleteCashMovement(
     .eq('user_id', userId)
 
   if (deleteErr) throw normalizeError(deleteErr)
-
-  // 2. Rebuild balance from remaining movements
-  return await rebuildCashBalance(supabase, userId)
 }
