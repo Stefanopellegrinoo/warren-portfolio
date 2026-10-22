@@ -4,10 +4,27 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
-        display: ['var(--font-display)'],
+        sans: ['var(--font-sans)', 'system-ui', 'sans-serif'],
+        serif: ['var(--font-serif)', 'Georgia', 'serif'],
+        display: ['var(--font-sans)', 'system-ui', 'sans-serif'],
         mono: ['var(--font-mono)', 'monospace'],
       },
       colors: {
+        // Design tokens (see globals.css). Old palette below stays until every page is redesigned.
+        canvas: 'var(--bg)',
+        sidebar: 'var(--sidebar)',
+        surface: { DEFAULT: 'var(--surface)', 2: 'var(--surface-2)' },
+        hover: 'var(--hover)',
+        line: { DEFAULT: 'var(--line)', strong: 'var(--line-strong)' },
+        ink: { DEFAULT: 'var(--ink)', 2: 'var(--ink-2)', 3: 'var(--ink-3)' },
+        accent: { DEFAULT: 'var(--accent)', ink: 'var(--accent-ink)', soft: 'var(--accent-soft)', on: 'var(--on-accent)' },
+        primary: { DEFAULT: 'var(--primary)', hover: 'var(--primary-hover)', on: 'var(--on-primary)' },
+        ring: 'var(--ring)',
+        danger: { DEFAULT: 'var(--danger)', soft: 'var(--danger-soft)', dot: 'var(--danger-dot)' },
+        warn: { DEFAULT: 'var(--warn)', soft: 'var(--warn-soft)', dot: 'var(--warn-dot)' },
+        info: { DEFAULT: 'var(--info)', soft: 'var(--info-soft)', dot: 'var(--info-dot)' },
+        ok: { DEFAULT: 'var(--ok)', soft: 'var(--ok-soft)', dot: 'var(--ok-dot)' },
+        neutral: { DEFAULT: 'var(--neutral)', soft: 'var(--neutral-soft)', dot: 'var(--neutral-dot)' },
         bg: {
           900: '#040810',
           800: '#080f1c',
@@ -37,6 +54,10 @@ module.exports = {
       },
       backgroundImage: {
         'grid-pattern': "url(\"data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23132035' fill-opacity='0.6'%3E%3Cpath d='M0 40L40 0H20L0 20M40 40V20L20 40'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")",
+      },
+      boxShadow: {
+        pop: 'var(--shadow-pop)',
+        toast: 'var(--shadow-toast)',
       },
       animation: {
         'fade-in': 'fadeIn 0.4s ease forwards',

@@ -1,18 +1,25 @@
 import type { Metadata, Viewport } from 'next'
-import { Syne, JetBrains_Mono } from 'next/font/google'
+import { IBM_Plex_Sans, IBM_Plex_Mono, Newsreader } from 'next/font/google'
 import './globals.css'
 import { Toaster } from 'sonner'
+import { THEME_BOOT_SCRIPT } from '@/lib/theme'
 
-const syne = Syne({
+const plexSans = IBM_Plex_Sans({
   subsets: ['latin'],
-  variable: '--font-display',
-  weight: ['400', '600', '700', '800'],
+  variable: '--font-sans',
+  weight: ['400', '500', '600'],
 })
 
-const jetbrains = JetBrains_Mono({
+const plexMono = IBM_Plex_Mono({
   subsets: ['latin'],
   variable: '--font-mono',
-  weight: ['400', '500', '600'],
+  weight: ['400', '500'],
+})
+
+const newsreader = Newsreader({
+  subsets: ['latin'],
+  variable: '--font-serif',
+  weight: ['400', '500'],
 })
 
 export const viewport: Viewport = {
@@ -20,7 +27,10 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 5,
   userScalable: true,
-  themeColor: '#0f172a',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#faf9f7' },
+    { media: '(prefers-color-scheme: dark)', color: '#161513' },
+  ],
 }
 
 export const metadata: Metadata = {
@@ -45,29 +55,28 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es" className={`${syne.variable} ${jetbrains.variable}`}>
-      <body className="bg-bg-900 text-white antialiased">
+    <html lang="es" className={`${plexSans.variable} ${plexMono.variable} ${newsreader.variable}`} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
+      </head>
+      <body className="antialiased">
         {children}
         <Toaster
-          richColors
           position="top-right"
-          theme="dark"
-          className="glass"
+          theme="system"
           toastOptions={{
             classNames: {
-              toast: "group glass border border-white/10 rounded-2xl",
-              title: "font-display font-700 text-base",
-              description: "font-mono text-sm text-slate-400",
-              icon: "text-primary-500",
-              success: "bg-gradient-to-br from-emerald-900/30 to-emerald-800/20",
-              error: "bg-gradient-to-br from-rose-900/30 to-rose-800/20",
-              info: "bg-gradient-to-br from-blue-900/30 to-blue-800/20",
-              warning: "bg-gradient-to-br from-amber-900/30 to-amber-800/20",
-              loading: "bg-gradient-to-br from-slate-900/30 to-slate-800/20",
-              closeButton: "text-slate-500 hover:text-slate-300 transition-colors",
-              actionButton: "bg-primary-500 hover:bg-primary-600 text-white font-600 px-3 py-1.5 rounded-lg",
-              cancelButton: "bg-slate-800 hover:bg-slate-700 text-slate-300 font-600 px-3 py-1.5 rounded-lg",
-            }
+              toast: 'bg-surface text-ink border border-line rounded-lg shadow-toast font-sans',
+              title: 'text-sm font-medium',
+              description: 'text-sm text-ink-3',
+              success: '[&_[data-icon]]:text-ok',
+              error: '[&_[data-icon]]:text-danger',
+              warning: '[&_[data-icon]]:text-warn',
+              info: '[&_[data-icon]]:text-info',
+              actionButton: 'bg-primary text-primary-on font-medium rounded-md',
+              cancelButton: 'bg-surface-2 text-ink-2 font-medium rounded-md',
+              closeButton: 'text-ink-3 hover:text-ink',
+            },
           }}
         />
       </body>
