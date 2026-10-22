@@ -1,3 +1,4 @@
+import { parseEsArNumber } from './on-format'
 /**
  * Parses the balance-reconciliation form into the payload POST /api/cash/adjust
  * expects, or an error message for the user.
@@ -26,7 +27,10 @@ export function buildAdjustPayload(
     return { ok: false, error: 'Ingresá un saldo válido' }
   }
 
-  const balance = Number(rawBalance)
+  // Typed the Argentine way ("83.578,96"); a leading minus is allowed for an overdrawn balance.
+  const t = rawBalance.trim()
+  const magnitude = parseEsArNumber(t.replace(/^-/, ''))
+  const balance = magnitude === null ? NaN : t.startsWith('-') ? -magnitude : magnitude
   if (!Number.isFinite(balance)) {
     return { ok: false, error: 'Ingresá un saldo válido' }
   }

@@ -34,7 +34,6 @@ describe('buildAdjustPayload', () => {
 
   it('rejects text that is not a number', () => {
     expect(buildAdjustPayload('abc', DATE).ok).toBe(false)
-    expect(buildAdjustPayload('1.234,56', DATE).ok).toBe(false)
   })
 
   it('rejects a missing or malformed date', () => {
@@ -50,5 +49,22 @@ describe('buildAdjustPayload', () => {
   it('trims a supplied description', () => {
     const result = buildAdjustPayload('100', DATE, '  Saldo inicial  ')
     expect(result.ok && result.payload.description).toBe('Saldo inicial')
+  })
+})
+
+describe('buildAdjustPayload: Argentine number format', () => {
+  it.each([
+    ['83.578,96', 83578.96],
+    ['83578,96', 83578.96],
+    ['83578.96', 83578.96],
+    ['83.578', 83578],
+    ['0,5', 0.5],
+  ])('reads %s as %d', (raw, expected) => {
+    const r = buildAdjustPayload(raw, '2026-10-22')
+    expect(r).toEqual({ ok: true, payload: { balance: expected, date: '2026-10-22', description: undefined } })
+  })
+
+  it('rejects text that is not a number instead of guessing', () => {
+    expect(buildAdjustPayload('83,578.96', '2026-10-22')).toEqual({ ok: false, error: 'Ingresá un saldo válido' })
   })
 })

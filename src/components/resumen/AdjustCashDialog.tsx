@@ -74,7 +74,7 @@ export default function AdjustCashDialog({ open, onClose, onDone, currentBalance
         </div>
         <div className="grid gap-2">
           <label htmlFor="adjust-balance" className="text-[13px] font-medium">Saldo real en dólares</label>
-          <input id="adjust-balance" type="number" inputMode="decimal" step="0.01" required value={balance} onChange={e => setBalance(e.target.value)} className={field} aria-invalid={!!error} aria-describedby={error ? 'adjust-error' : undefined} />
+          <input id="adjust-balance" type="text" inputMode="decimal" autoComplete="off" placeholder="83.578,96" required value={balance} onChange={e => setBalance(e.target.value)} className={field} aria-invalid={!!error} aria-describedby={error ? 'adjust-error' : undefined} />
         </div>
         <div className="grid gap-2">
           <label htmlFor="adjust-date" className="text-[13px] font-medium">Fecha</label>
