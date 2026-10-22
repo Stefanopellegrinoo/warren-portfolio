@@ -1,6 +1,8 @@
 import { valuePortfolio } from './portfolio-valuation'
 import { loadUserPortfolios } from './user-portfolios'
 import { getRedis, SUMMARY_CACHE_TTL } from './redis'
+import { createServiceClient } from './supabase-server'
+import { currencyViewsFor, loadCurrencyContext } from './currency-views'
 
 /**
  * Lua compare-and-set used by cacheUserSummaries to avoid overwriting a summary
@@ -82,6 +84,14 @@ export async function cacheUserSummaries(
   const redis = getRedis()
   if (!redis) return
 
+  // The Pesos / MEP / Cable views are an addition: failing to build them never
+  // blocks the summary, which then keeps only the USD fields.
+  const supabase = createServiceClient()
+  const currencyCtx = await loadCurrencyContext(supabase).catch(err => {
+    console.error('[Worker] currency views unavailable this cycle:', err)
+    return null
+  })
+
   for (const portfolio of portfolios) {
     const { userId } = portfolio
     const isImporting = await redis.get(`importing:${userId}`)
@@ -105,7 +115,12 @@ export async function cacheUserSummaries(
       { missingQuotePolicy: 'drop' }
     )
 
-    const payload = JSON.stringify({ positions: enriched, onPositions: enrichedONs, summary, unpricedCount, unpricedTickers })
+    const currencies = currencyCtx
+      ? await currencyViewsFor(supabase, userId, currencyCtx, { positions: enriched, onPositions: enrichedONs, cashBalance: portfolio.cashBalance })
+          .catch(err => { console.error(`[Worker] currency views failed for ${userId}:`, err); return undefined })
+      : undefined
+
+    const payload = JSON.stringify({ positions: enriched, onPositions: enrichedONs, summary, unpricedCount, unpricedTickers, ...(currencies && { currencies }) })
     await setSummaryIfVersion(userId, payload, startVersion)
   }
 

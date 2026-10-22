@@ -6,6 +6,23 @@ import { valuePortfolio } from '@/lib/portfolio-valuation'
 import { getRedis, ensureRedisConnected } from '@/lib/redis'
 import type { Position, ONPosition } from '@/types'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
+import { currencyViewsFor, loadCurrencyContext } from '@/lib/currency-views'
+import type { SupabaseClient } from '@supabase/supabase-js'
+
+/** The Pesos / MEP / Cable views; their failure never fails the response. */
+async function currencyViews(
+  supabase: SupabaseClient,
+  userId: string,
+  valued: { positions: Position[]; onPositions: ONPosition[]; cashBalance: number }
+) {
+  try {
+    const ctx = await loadCurrencyContext(supabase)
+    return ctx ? { currencies: await currencyViewsFor(supabase, userId, ctx, valued) } : {}
+  } catch (err) {
+    console.error('[positions] currency views failed:', err)
+    return {}
+  }
+}
 
 export const dynamic = 'force-dynamic'
 
@@ -48,7 +65,8 @@ export async function GET(req: NextRequest) {
         { stockQuotes: new Map(), onQuotes: new Map() },
         { missingQuotePolicy: 'drop' }
       )
-      return NextResponse.json({ positions, onPositions, summary, lastRefresh })
+      const views = await currencyViews(supabase, user.id, { positions, onPositions, cashBalance: portfolio.cashBalance })
+      return NextResponse.json({ positions, onPositions, summary, lastRefresh, ...views })
     }
 
     // 3. Fetch quotes for stocks and ONs in parallel
@@ -88,7 +106,8 @@ export async function GET(req: NextRequest) {
     //    and produce inconsistent snapshots (e.g. missing positions after a buy).
     //    The worker's cacheUserSummaries is the only writer for summary:* keys.
 
-    return NextResponse.json({ positions, onPositions, summary, unpricedCount, unpricedTickers, lastRefresh })
+    const views = await currencyViews(supabase, user.id, { positions, onPositions, cashBalance: portfolio.cashBalance })
+    return NextResponse.json({ positions, onPositions, summary, unpricedCount, unpricedTickers, lastRefresh, ...views })
   } catch (err) {
     console.error(err)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
