@@ -1,6 +1,6 @@
 // ON flow history read helpers (pure, plus one thin loader). BYMA lists FUTURE flows only and the nightly
 // replace drops what has passed, so past flows come from three places, in this priority:
-//   past (< today):  on_flow_history (provenance 'byma-history') > on_cashflows > derived
+//   past (< today):  on_flow_history BYMA rows ('byma-history') > on_cashflows > bonistas reports > derived
 //   future (>= today): on_cashflows ('byma') > on_flow_history ('byma-history', e.g. dropped on its own date)
 // 'derived' = reconstructed from on_terms.accrual_start for plain fixed-rate bonds (see deriveBackwardFlows).
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -8,7 +8,7 @@ import { NON_PERIODIC_FC, PERIOD_MONTHS, addMonths } from './byma-educa'
 import { dcf, type DayCount } from './bond-math'
 import { addBusinessDays } from './ar-calendar'
 
-export type FlowProvenance = 'byma-history' | 'byma-history-unconfirmed' | 'byma' | 'derived'
+export type FlowProvenance = 'byma-history' | 'byma-history-unconfirmed' | 'byma' | 'bonistas' | 'derived'
 
 export interface FlowRow {
   date: string // unadjusted
@@ -96,7 +96,14 @@ export function deriveBackwardFlows(i: DerivationInput): DerivationResult {
 export interface HistoryRow extends FlowRow {
   firstSeenAsOf: string
   lastSeenAsOf: string
+  /** 'bonistas' = a past payment reported by bonistas.com; anything else is a BYMA listing. */
+  source?: string
 }
+
+/** A payment reported on another date within this window is the same payment (schedule vs paid date). */
+export const SAME_PAYMENT_DAYS = 7
+const DAY_MS = 86_400_000
+const daysApart = (a: string, b: string) => Math.abs(Date.parse(a) - Date.parse(b)) / DAY_MS
 
 export interface MergeInput {
   today: string
@@ -121,9 +128,14 @@ export function mergeFlowHistory({ today, history, current, inCatalog, derived }
     taken.add(f.date)
     out.push(f)
   }
-  // First writer wins, so insert in priority order: past = history > on_cashflows > derived;
+  // A second-hand source on a nearby date is the same payment, not another one.
+  const addIfNew = (f: HistoryFlow) => {
+    if (!out.some((o) => daysApart(o.date, f.date) <= SAME_PAYMENT_DAYS)) add(f)
+  }
+  const byma = history.filter((x) => x.source !== 'bonistas')
+  // First writer wins, so insert in priority order: past = BYMA history > on_cashflows > bonistas > derived;
   // future = on_cashflows only (history adds future rows only for an ISIN no longer in the catalog).
-  for (const r of history.filter((x) => x.date < today)) {
+  for (const r of byma.filter((x) => x.date < today)) {
     const { date, ren, amo } = r
     add(isConfirmed(r)
       ? { date, ren, amo, provenance: 'byma-history' }
@@ -131,17 +143,60 @@ export function mergeFlowHistory({ today, history, current, inCatalog, derived }
   }
   for (const r of current) add({ date: r.date, ren: r.ren, amo: r.amo, provenance: 'byma' })
   if (!inCatalog) {
-    for (const r of history.filter((x) => x.date >= today)) add({ date: r.date, ren: r.ren, amo: r.amo, provenance: 'byma-history-unconfirmed', reason: 'isin-not-in-catalog' })
+    for (const r of byma.filter((x) => x.date >= today)) add({ date: r.date, ren: r.ren, amo: r.amo, provenance: 'byma-history-unconfirmed', reason: 'isin-not-in-catalog' })
   }
-  for (const f of derived.filter((x) => x.date < today)) add(f)
+  for (const r of history.filter((x) => x.source === 'bonistas' && x.date < today)) addIfNew({ date: r.date, ren: r.ren, amo: r.amo, provenance: 'bonistas' })
+  for (const f of derived.filter((x) => x.date < today)) addIfNew(f)
   return out.sort((x, y) => x.date.localeCompare(y.date))
+}
+
+export interface GapTerms {
+  frequency: string | null
+  est: string | null
+  issueDate: string
+  accrualStart: string
+  residualPct: number
+}
+
+export interface ScheduleGaps {
+  /** Expected payment dates in [from, to) that no source covers: the user is asked for them. */
+  missingDates: string[]
+  /** % of original VN amortized (100 − residual) that the known flows do not explain. */
+  unexplainedAmortization: number
+}
+
+/**
+ * What the app knows is missing: the bond's own calendar (period stepped from accrual_start)
+ * gives the dates a payment had to exist, and its residual says how much has amortized.
+ */
+export function scheduleGaps(terms: GapTerms, flows: FlowRow[], from: string, to: string): ScheduleGaps {
+  const months = terms.frequency ? PERIOD_MONTHS[terms.frequency] : undefined
+  const expected: string[] = []
+  if (months && terms.est !== 'Cupon Cero' && !NON_PERIODIC_FC.includes(terms.frequency!)) {
+    for (let k = 0; ; k--) {
+      const d = addMonths(terms.accrualStart, k * months)
+      if (d <= terms.issueDate) break
+      expected.push(d)
+    }
+    for (let k = 1; ; k++) {
+      const d = addMonths(terms.accrualStart, k * months)
+      if (d >= to) break
+      expected.push(d)
+    }
+  }
+  const missingDates = expected
+    .filter((d) => d >= from && d < to && !flows.some((f) => daysApart(f.date, d) <= SAME_PAYMENT_DAYS))
+    .sort()
+  const known = flows.filter((f) => f.date < to).reduce((sum, f) => sum + f.amo, 0)
+  const unexplainedAmortization = Math.max(0, round6(100 - terms.residualPct - known))
+  return { missingDates, unexplainedAmortization }
 }
 
 type Row = Record<string, unknown>
 const toRows = (data: Row[] | null): FlowRow[] =>
   (data ?? []).map((r) => ({ date: r.flow_date as string, ren: Number(r.ren), amo: Number(r.amo) }))
 const toHistoryRows = (data: Row[] | null): HistoryRow[] =>
-  (data ?? []).map((r) => ({ date: r.flow_date as string, ren: Number(r.ren), amo: Number(r.amo), firstSeenAsOf: r.first_seen_as_of as string, lastSeenAsOf: r.last_seen_as_of as string }))
+  (data ?? []).map((r) => ({ date: r.flow_date as string, ren: Number(r.ren), amo: Number(r.amo), firstSeenAsOf: r.first_seen_as_of as string, lastSeenAsOf: r.last_seen_as_of as string, source: r.source as string }))
 
 /** Both public tables for one ISIN. Throws on any read error: a partial schedule is worse than none. */
 export async function loadFlowRows(sb: SupabaseClient, isin: string): Promise<{ history: HistoryRow[]; current: FlowRow[] }> {
@@ -151,7 +206,7 @@ export async function loadFlowRows(sb: SupabaseClient, isin: string): Promise<{ 
     return data as unknown as Row[] | null
   }
   const [history, current] = await Promise.all([
-    read('on_flow_history', 'flow_date, ren, amo, first_seen_as_of, last_seen_as_of'),
+    read('on_flow_history', 'flow_date, ren, amo, first_seen_as_of, last_seen_as_of, source'),
     read('on_cashflows', 'flow_date, ren, amo'),
   ])
   return { history: toHistoryRows(history), current: toRows(current) }
