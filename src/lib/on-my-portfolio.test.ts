@@ -37,6 +37,7 @@ const onFl = make(FL, { tickerO: 'FLOO', tickerD: 'FLOD', tickerC: null, est: 'T
 const onNp = make(NP, { tickerO: 'NPNO', tickerD: 'NPND', tickerC: null, issuer: 'Emisor Sin Precio S.A.' }, [{ date: '2027-04-22', ren: 3, amo: 100 }], null)
 const onMa = make(MA, { tickerO: 'MATO', tickerD: 'MATD', tickerC: null }, [{ date: '2026-10-20', ren: 3, amo: 100 }], 100)
 const ALL = [on1, on2, on3, onFl, onNp, onMa]
+const NO_QUOTE_WARNING = 'Precios de mercado no disponibles: valor estimado con el precio de referencia'
 const build = (holdings: { ticker: string; quantity: number }[], analyses = ALL, ownPrices?: Record<string, number>) => buildMyOnPortfolio({ holdings, analyses, today: TODAY, ownPrices })
 // Independent effective-annual (ACT/365 from settlement) IRR by bisection: [pay date, amount] flows against a base value.
 const SETTLE = '2026-10-22'
@@ -109,8 +110,22 @@ describe('buildMyOnPortfolio: held semantics', () => {
   it('M2: a ticker without its own quote falls back to the payment-plaza price, with a warning', () => {
     const r = build([{ ticker: 'AAAAD', quantity: 100 }, { ticker: 'BBBBD', quantity: 50 }], ALL, { AAAAD: 98 })
     expect(pos(r, H2).cost).toBeCloseTo(4_900, 9) // plaza price 98 x 5,000
-    expect(r.analysis.warnings.some((w) => w.kind === 'price-fallback' && w.isin === H2 && w.message.includes('cotización propia'))).toBe(true)
+    expect(r.analysis.warnings.some((w) => w.kind === 'price-fallback' && w.isin === H2 && w.message.includes(NO_QUOTE_WARNING))).toBe(true)
     expect(r.analysis.warnings.some((w) => w.kind === 'price-fallback' && w.isin === H1)).toBe(false)
+  })
+
+  it.each([[undefined], [{}]])('feed down (ownPrices %j): every held priced ticker is warned and valued at the plaza price', (own) => {
+    const r = build([{ ticker: 'AAAAD', quantity: 100 }, { ticker: 'BBBBD', quantity: 50 }], ALL, own)
+    expect(pos(r, H1).cost).toBeCloseTo(10_000, 9) // plaza price 100 x 10,000 VN
+    expect(pos(r, H2).cost).toBeCloseTo(4_900, 9) // plaza price 98 x 5,000 VN
+    for (const isin of [H1, H2]) {
+      expect(r.analysis.warnings.some((w) => w.kind === 'price-fallback' && w.isin === isin && w.message.includes(NO_QUOTE_WARNING))).toBe(true)
+    }
+  })
+
+  it('all held tickers quoted on their own line: no reference-price warning', () => {
+    const r = build([{ ticker: 'AAAAD', quantity: 100 }], ALL, { AAAAD: 98 })
+    expect(r.analysis.warnings.some((w) => w.message.includes(NO_QUOTE_WARNING))).toBe(false)
   })
 
   it('unpriced holdings are left out of the issuer and plaza concentration', () => {

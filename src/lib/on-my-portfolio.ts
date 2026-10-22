@@ -11,6 +11,7 @@ export interface UnmappedHolding { ticker: string; vn: number }
 export interface MyOnPortfolio { analysis: PortfolioAnalysis; unmapped: UnmappedHolding[] }
 
 const key = (t: string | null | undefined) => (t ?? '').trim().toUpperCase()
+const NO_OWN_QUOTE = 'Precios de mercado no disponibles: valor estimado con el precio de referencia'
 const usd = (x: number) => `USD ${fmtNum(x)}`
 
 /** ticker -> ISIN, trying the D line first, then C, then O (a ticker is never reassigned by a later line). */
@@ -29,7 +30,6 @@ export function buildMyOnPortfolio({ holdings, analyses, today, ownPrices = {} }
   const byIsin = new Map(analyses.map((a) => [a.row.isin, a]))
   const index = tickerIndex(analyses)
   const vnByIsin = new Map<string, number>()
-  const ownPricesGiven = Object.keys(ownPrices).length > 0
   const ownValue = new Map<string, { vn: number; usd: number }>() // holdings that have a quote on their own line
   const unmappedVn = new Map<string, number>()
   for (const h of holdings) {
@@ -80,7 +80,7 @@ export function buildMyOnPortfolio({ holdings, analyses, today, ownPrices = {} }
     for (const p of r.payments) payments.push({ isin, ticker: tk, date: p.date, payDate: p.payDate, interest: p.interest, principal: p.principal, total: p.total, exForBuyer: p.recordPassed })
 
     if (r.floating) warn('floating', 'tasa variable: se lista, pero sus cobros no se proyectan.')
-    if (ownPricesGiven && !r.floating && rest > 1e-9 && restValue !== null) warn('price-fallback', 'sin cotización propia del ticker: se valuó con el precio de la línea de pago.')
+    if (!r.floating && rest > 1e-9 && restValue !== null) warn('price-fallback', NO_OWN_QUOTE) // also when the whole feed is down (ownPrices empty)
     if (r.pricePct === null && !r.floating && marketValue === null) warn('no-price', 'sin precio: se proyectan los cobros, pero no hay valor de mercado ni TIR.')
     for (const p of r.payments.filter((x) => x.recordPassed)) {
       warn('held-record-passed', `corte ya pasado: lo cobrás (${usd(p.interest)} de interés el ${fmtDate(p.payDate)}).`)
