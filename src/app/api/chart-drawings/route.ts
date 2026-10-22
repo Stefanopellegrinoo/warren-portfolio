@@ -1,0 +1,68 @@
+import { NextRequest, NextResponse } from "next/server"
+import { z } from "zod"
+import { requireUser, isAuthFailure } from "@/lib/api-auth"
+
+// One document per user and ticker: the drawing list exactly as the chart's
+// DrawingManager exports it. The drawing core validates and migrates it on
+// import, so the server only checks the envelope.
+const MAX_DRAWINGS = 500
+
+const tickerSchema = z.string().min(1).max(20)
+
+const drawingSchema = z
+  .object({
+    id: z.string().min(1),
+    kind: z.string().min(1),
+    points: z.array(z.object({ time: z.union([z.number(), z.string()]), price: z.number().finite() }).passthrough()),
+  })
+  .passthrough()
+
+const bodySchema = z.object({
+  ticker: tickerSchema,
+  drawings: z.array(drawingSchema).max(MAX_DRAWINGS),
+})
+
+export async function GET(req: NextRequest) {
+  const parsed = tickerSchema.safeParse(req.nextUrl.searchParams.get("ticker"))
+  if (!parsed.success) return NextResponse.json({ error: "invalid ticker" }, { status: 400 })
+
+  const auth = await requireUser()
+  if (isAuthFailure(auth)) return auth.error
+  const { supabase, user } = auth
+
+  const { data, error } = await supabase
+    .from("chart_drawing_sets")
+    .select("drawings")
+    .eq("user_id", user.id)
+    .eq("ticker", parsed.data.toUpperCase())
+    .maybeSingle()
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  // null = never saved: the client converts the legacy chart_drawings rows.
+  return NextResponse.json({ drawings: data?.drawings ?? null })
+}
+
+export async function PUT(req: NextRequest) {
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
+  }
+  const parsed = bodySchema.safeParse(body)
+  if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
+
+  const auth = await requireUser()
+  if (isAuthFailure(auth)) return auth.error
+  const { supabase, user } = auth
+
+  const { error } = await supabase
+    .from("chart_drawing_sets")
+    .upsert(
+      { user_id: user.id, ticker: parsed.data.ticker.toUpperCase(), drawings: parsed.data.drawings },
+      { onConflict: "user_id,ticker" }
+    )
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return new NextResponse(null, { status: 204 })
+}
