@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Header } from "@/components/trading/layout/Header";
 import { LeftSidebar } from "@/components/trading/layout/LeftSidebar";
 import { RightSidebar } from "@/components/trading/layout/RightSidebar";
@@ -9,9 +10,18 @@ import { PriceChart } from "@/components/trading/chart/PriceChart";
 import { IndicatorSettingsDialog } from "@/components/trading/chart/IndicatorSettingsDialog";
 import { Watchlist } from "@/components/trading/watchlist/Watchlist";
 import { useChartStore } from "@/lib/store/chart-store";
-import Sidebar from "@/components/layout/Sidebar";
 import { TrendingUp, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+// Opens the chart on ?symbol=X (links from the summary and the asset search).
+function SymbolFromQuery() {
+  const requested = useSearchParams().get("symbol");
+  const setSymbol = useChartStore((s) => s.setSymbol);
+  useEffect(() => {
+    if (requested) setSymbol(requested.toUpperCase());
+  }, [requested, setSymbol]);
+  return null;
+}
 
 export default function TradingPage() {
   const symbol = useChartStore((s) => s.symbol);
@@ -26,10 +36,9 @@ export default function TradingPage() {
 
   return (
     <>
-      {/* Sidebar ONLY for Mobile (includes bottom nav) */}
-      <div className="md:hidden">
-        <Sidebar />
-      </div>
+      <Suspense fallback={null}>
+        <SymbolFromQuery />
+      </Suspense>
 
       {/* Main Container: Full screen, no desktop margins */}
       <div className="flex h-[100dvh] flex-col w-full">
@@ -60,7 +69,7 @@ export default function TradingPage() {
         </div>
 
         {/* Content Area */}
-        <main className="min-h-0 flex-1 overflow-hidden pb-14 md:pb-0">
+        <main className="min-h-0 flex-1 overflow-hidden">
           <div className="flex h-full w-full">
             {/* Desktop Left Sidebar */}
             <div className="hidden md:block">

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { TrendingUp, LayoutDashboard, History, DollarSign, PieChart, BookOpen } from "lucide-react";
+import { ChevronLeft, LayoutDashboard, History, DollarSign, PieChart, BookOpen } from "lucide-react";
 import { SymbolSelector } from "@/components/trading/chart/SymbolSelector";
 import { TimeframeSelector } from "@/components/trading/chart/TimeframeSelector";
 import { IndicatorMenu } from "@/components/trading/chart/IndicatorMenu";
@@ -30,12 +30,10 @@ export function Header({ onSymbolSelect }: HeaderProps = {}) {
       {/* Left: brand + chart controls */}
       <div className="flex items-center gap-1">
         {/* Warren brand */}
-        <div className="flex items-center gap-2 pr-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/20">
-            <TrendingUp className="h-4 w-4 text-amber-400" strokeWidth={2.5} />
-          </div>
-          <span className="hidden sm:inline text-sm font-bold tracking-tight text-white">WARREN</span>
-        </div>
+        <Link href="/dashboard" aria-label="Volver al Resumen" className="flex min-h-9 items-center gap-1.5 rounded-md pr-2 pl-1 text-tv-text hover:bg-tv-panel-hover">
+          <ChevronLeft className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+          <span className="font-serif text-base">Warren</span>
+        </Link>
 
         <Separator orientation="vertical" className="h-6 bg-tv-border" />
         <SymbolSelector onSymbolSelect={onSymbolSelect} />
