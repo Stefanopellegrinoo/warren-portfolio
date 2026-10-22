@@ -9,9 +9,9 @@ describe('PriceAge', () => {
     expect(renderToStaticMarkup(<PriceAge asOf="2026-10-14T14:55:00Z" now={now} />)).toBe('')
   })
 
-  it('renders an amber dot with the as-of time in the tooltip for a stale price', () => {
+  it('renders a warning dot with the as-of time in the tooltip for a stale price', () => {
     const html = renderToStaticMarkup(<PriceAge asOf="2026-10-14T10:00:00Z" now={now} />)
-    expect(html).toContain('bg-amber')
+    expect(html).toContain('bg-warn-dot')
     expect(html).toContain('title="Precio desactualizado')
     expect(html).toContain('14/10/2026')
   })
