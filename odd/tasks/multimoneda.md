@@ -29,6 +29,32 @@ Branch: `feat/multimoneda`. Delivery: ask-on-risk. Test runner: vitest. Design: 
 - **Ratio changes.** The engine keeps underlying shares, which are invariant to ratio changes. A reconstructed CEDEAR count uses today's ratio and is approximate.
 - **Out of stage B.** Cash movements in three currencies, and the engines' per-currency views (stage C).
 
+## Stage C decisions (parent; approved approach "Ok" L3, see design doc)
+
+- **Live peso-line prices.** The worker also fetches data912 `/live/arg_cedears` and `/live/arg_stocks` once per cycle (one GET each, never faster than their 30 s cache) and caches the peso-line `c` per symbol in Redis (`local:{SYMBOL}`, same last-known-price pattern as `price:*`).
+  - The ON peso value comes from the D (MEP) price × today's MEP.
+- **Value today per position.**
+  - `value_ARS`:
+    - CEDEAR: `quantity × ratio × local peso price`.
+    - ON: `MEP value × MEP_today`.
+    - Anything without a local price: `engine USD-CCL value × CCL_today`, flagged as estimated.
+  - `value_MEP = value_ARS / MEP_today`; `value_CCL = value_ARS / CCL_today`.
+  - Today's MEP and CCL are the latest `fx_rates` row (`getFxRate(today)`).
+- **Cost per lot**, from the trade record of each row:
+  - `ARS` trade: `trade_price × trade_quantity` (+ commission).
+  - `MEP` trade: that × `fx_mep`.
+  - `CCL` / reconstructed: engine `price × |quantity| × fx_ccl` (+ commission × fx_ccl).
+  - Then `cost_MEP = cost_ARS / fx_mep` and `cost_CCL = cost_ARS / fx_ccl` of the trade.
+- **Average cost per currency.** A moving weighted average with Cocos semantics: a sale leaves it unchanged, and a full close resets it.
+- **Realized result per currency.** The sale proceeds converted with the sale's FX. Dividends and coupons are converted with the FX of their date.
+- **Cash.** `cash_movements` has no currency. The balance stays in the engine unit (USD-CCL): ARS = balance × CCL_today, MEP = ARS / MEP_today. Shown with a note. Not stored differently.
+- **UI.**
+  - A selector "Pesos · Dólar MEP · Dólar cable" in the Resumen header. The default is MEP, remembered per viewer in localStorage.
+  - Every figure (total, day change where available, holdings value, cost, result, distribution) follows the selector.
+  - A one-line note explains that results differ between currencies because of the dollar.
+  - Estimated values are labelled.
+- **Unchanged:** the existing USD engine numbers stay available, and no stored data changes.
+
 ## Tasks
 
 | ID | Specs | Route | Status | Evidence |
@@ -37,7 +63,8 @@ Branch: `feat/multimoneda`. Delivery: ask-on-risk. Test runner: vitest. Design: 
 | A2 | S2, S3 | inline | done 6b4b208, migration 043 applied, deployed | `fx_rates` table (MEP/CCL daily from argentinadatos), backfill and daily ingest. Risk item 1 (new table; DB write needs OK) |
 | B1 | S3, S5 | delegated (context backstop) | done 65622c6, 5116b2f, a371405 (044 NOT applied) | migration 044 (additive nullable columns), `/api/fx` route, server-side derivation in `/api/transactions`, new CEDEAR form |
 | B2 | S4, S5, S6 | delegated (same writer, after B1) | done ac58c9a, 293a798, 5ea6c89; independent verifier: no blockers, 6 advisories | reconstruction as a reviewed SQL/TS step (dry run first), review list in Operaciones. Risk item 1: changes stored rows; backup and user OK before applying |
-| C | S2 | tbd | todo | per-currency engines + selector |
+| C1 | S2 | delegated (context backstop) | todo | local peso prices in the worker + pure per-currency valuation/cost module with tests |
+| C2 | S2 | delegated (same writer, after C1) | todo | /api/positions exposes the three views; Resumen selector and figures |
 
 ## Log
 
