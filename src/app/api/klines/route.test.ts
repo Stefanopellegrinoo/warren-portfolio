@@ -21,6 +21,12 @@ vi.mock('@/lib/api-auth', () => ({
   isAuthFailure: mockIsAuthFailure,
 }))
 
+// ── Mock cache: pass-through that records key and TTL ────────────────────────
+const mockCached = vi.fn(async (_key: string, _ttl: number, fetcher: () => Promise<unknown>) => fetcher())
+vi.mock('@/lib/cache', () => ({
+  cached: (key: string, ttl: number, fetcher: () => Promise<unknown>) => mockCached(key, ttl, fetcher),
+}))
+
 function makeRequest(params: Record<string, string>) {
   const url = new URL('http://localhost/api/klines')
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v))
@@ -36,13 +42,68 @@ describe('GET /api/klines', () => {
     mockIsAuthFailure.mockReturnValue(false)
   })
 
-  it('calls provider with no from when days param is absent', async () => {
+  function daysBack(from: Date): number {
+    return Math.round((Date.now() - from.getTime()) / 86_400_000)
+  }
+
+  it('bounds 1d to ten years when days param is absent', async () => {
     const { GET } = await import('./route')
     mockGetCandles.mockResolvedValue([fakeCandle])
 
     await GET(makeRequest({ ticker: 'AAPL', interval: '1d' }))
 
-    expect(mockGetCandles).toHaveBeenCalledWith('AAPL', '1d', undefined)
+    expect(mockGetCandles).toHaveBeenCalledWith('AAPL', '1d', expect.any(Date))
+    expect(daysBack(mockGetCandles.mock.calls[0][2])).toBe(3650)
+  })
+
+  it('bounds 15m to the 59 days Yahoo serves intraday', async () => {
+    const { GET } = await import('./route')
+    mockGetCandles.mockResolvedValue([fakeCandle])
+
+    const res = await GET(makeRequest({ ticker: 'AAPL', interval: '15m' }))
+
+    expect(res.status).toBe(200)
+    expect(mockGetCandles).toHaveBeenCalledWith('AAPL', '15m', expect.any(Date))
+    expect(daysBack(mockGetCandles.mock.calls[0][2])).toBe(59)
+  })
+
+  it('bounds 1h to 729 days', async () => {
+    const { GET } = await import('./route')
+    mockGetCandles.mockResolvedValue([fakeCandle])
+
+    await GET(makeRequest({ ticker: 'AAPL', interval: '1h' }))
+
+    expect(daysBack(mockGetCandles.mock.calls[0][2])).toBe(729)
+  })
+
+  it('keeps full history for 1w', async () => {
+    const { GET } = await import('./route')
+    mockGetCandles.mockResolvedValue([fakeCandle])
+
+    await GET(makeRequest({ ticker: 'AAPL', interval: '1w' }))
+
+    expect(mockGetCandles).toHaveBeenCalledWith('AAPL', '1w', undefined)
+  })
+
+  it('rejects an interval the provider cannot serve with 400', async () => {
+    const { GET } = await import('./route')
+
+    const res = await GET(makeRequest({ ticker: 'AAPL', interval: '4h' }))
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'unsupported interval: 4h' })
+    expect(mockGetCandles).not.toHaveBeenCalled()
+  })
+
+  it('caches intraday for 60 s and daily for 15 min, keyed by ticker, interval and days', async () => {
+    const { GET } = await import('./route')
+    mockGetCandles.mockResolvedValue([fakeCandle])
+
+    await GET(makeRequest({ ticker: 'AAPL', interval: '15m' }))
+    await GET(makeRequest({ ticker: 'aapl', interval: '1d', days: '90' }))
+
+    expect(mockCached.mock.calls[0].slice(0, 2)).toEqual(['klines:AAPL:15m:59', 60])
+    expect(mockCached.mock.calls[1].slice(0, 2)).toEqual(['klines:AAPL:1d:90', 900])
   })
 
   it('calls provider with from date when days=90 is provided', async () => {

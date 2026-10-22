@@ -26,10 +26,17 @@ function classifyError(err: unknown): MarketDataError {
   return new MarketDataError('PROVIDER_UNAVAILABLE', msg, err)
 }
 
+function isoDay(d: Date): string {
+  return d.toISOString().split('T')[0]
+}
+
 export class YahooProvider implements MarketDataProvider {
   // ── getCandles ─────────────────────────────────────────────────────────────
   async getCandles(ticker: string, interval: CandleInterval, from?: Date): Promise<Candle[]> {
     const symbol = normalizeTickerForYahoo(ticker)
+    if (interval === '15m' || interval === '1h') {
+      return this.getIntradayCandles(ticker, symbol, interval, from ?? new Date(0))
+    }
     const period1 = from ?? new Date(0)   // epoch = maximum history
     const period2 = new Date()
 
@@ -89,6 +96,57 @@ export class YahooProvider implements MarketDataProvider {
       })
 
       return candles
+    } catch (err) {
+      throw classifyError(err)
+    }
+  }
+
+  // Intraday bars come from chart(): historical() only serves 1d and longer.
+  // Times are UTC seconds; chart() pads gaps with null bars, which are dropped.
+  private async getIntradayCandles(
+    ticker: string,
+    symbol: string,
+    interval: '15m' | '1h',
+    period1: Date
+  ): Promise<Candle[]> {
+    try {
+      const yahooFinance = await getYahooFinanceInstance()
+      const result = await withRetry(() =>
+        yahooFinance.chart(symbol, { period1, interval })
+      ) as { quotes: any[] }
+
+      const rows = result.quotes.filter(
+        (q) => q.open != null && q.high != null && q.low != null && q.close != null
+      )
+
+      // BCBA: day rate from the historical CCL; days after the last known rate
+      // (today, before its close is published) use the live rate, as getQuote does.
+      let rateFor: ((day: string) => number | undefined) | null = null
+      if (ticker.startsWith('BCBA:')) {
+        const hCcl = await getHistoricalCCL(period1, new Date())
+        const lastKnown = [...hCcl.keys()].sort().at(-1) ?? ''
+        const live = rows.some((q) => isoDay(q.date) > lastKnown) ? await getCCLRate() : null
+        rateFor = (day) => hCcl.get(day) ?? (day > lastKnown ? live ?? undefined : undefined)
+      }
+
+      return rows.map((q) => {
+        let { open, high, low, close } = q
+        if (rateFor) {
+          const day = isoDay(q.date)
+          const rate = rateFor(day)
+          if (!rate) {
+            throw new MarketDataError(
+              'PROVIDER_UNAVAILABLE',
+              `No historical CCL rate for ${ticker} on ${day} — refusing to return an ARS candle as USD`
+            )
+          }
+          open /= rate
+          high /= rate
+          low /= rate
+          close /= rate
+        }
+        return { time: Math.floor((q.date as Date).getTime() / 1000), open, high, low, close, volume: q.volume ?? 0 }
+      })
     } catch (err) {
       throw classifyError(err)
     }

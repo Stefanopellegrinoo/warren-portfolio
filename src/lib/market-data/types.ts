@@ -1,9 +1,9 @@
 // ── Market Data Types ───────────────────────────────────────────────────────
 // Candle: compatible with yahoo-finance2 historical() output and lightweight-charts.
 // lightweight-charts requires `time` as UTCTimestamp (seconds) or business-day string YYYY-MM-DD.
-// We emit `time: string` (YYYY-MM-DD).
+// Daily and longer emit `time: string` (YYYY-MM-DD); intraday emits UTC seconds.
 export interface Candle {
-  time: string       // YYYY-MM-DD (UTC business day)
+  time: string | number  // YYYY-MM-DD (UTC business day), or UTC seconds intraday
   open: number
   high: number
   low: number
@@ -11,7 +11,7 @@ export interface Candle {
   volume?: number
 }
 
-export type CandleInterval = '1d' | '1w' | '1mo'
+export type CandleInterval = '15m' | '1h' | '1d' | '1w' | '1mo'
 
 export interface Quote {
   ticker: string       // original input (e.g. "BCBA:GGAL")

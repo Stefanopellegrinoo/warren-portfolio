@@ -4,7 +4,8 @@ import { MarketDataError } from '../types'
 // ── Mock yahoo-finance singleton ─────────────────────────────────────────────
 const mockHistorical = vi.fn()
 const mockSearch = vi.fn()
-const mockYahooInstance = { historical: mockHistorical, search: mockSearch }
+const mockChart = vi.fn()
+const mockYahooInstance = { historical: mockHistorical, search: mockSearch, chart: mockChart }
 
 const mockNormalizeTickerForYahoo = vi.fn((ticker: string) => {
   // Simple normalization: BCBA:GGAL → GGAL.BA, NASDAQ:AAPL → AAPL
@@ -109,6 +110,55 @@ describe('YahooProvider.getCandles', () => {
       'AAPL',
       expect.objectContaining({ interval: '1wk' })
     )
+  })
+})
+
+describe('YahooProvider.getCandles — intraday', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  const bar = (iso: string, close: number | null = 152) =>
+    ({ date: new Date(iso), open: 150, high: 155, low: 148, close, volume: 10 })
+
+  it('reads 15m bars from chart() and returns UTC-second times', async () => {
+    const { YahooProvider } = await import('./yahoo')
+    const from = new Date('2026-09-01T00:00:00Z')
+    mockChart.mockResolvedValue({ quotes: [bar('2026-10-20T14:30:00Z')] })
+
+    const candles = await new YahooProvider().getCandles('AAPL', '15m', from)
+
+    expect(mockChart).toHaveBeenCalledWith('AAPL', expect.objectContaining({ period1: from, interval: '15m' }))
+    expect(mockHistorical).not.toHaveBeenCalled()
+    expect(candles).toEqual([{ time: 1792506600, open: 150, high: 155, low: 148, close: 152, volume: 10 }])
+  })
+
+  it('drops the empty bars chart() returns for gaps', async () => {
+    const { YahooProvider } = await import('./yahoo')
+    mockChart.mockResolvedValue({ quotes: [bar('2026-10-20T14:30:00Z', null), bar('2026-10-20T14:45:00Z')] })
+
+    const candles = await new YahooProvider().getCandles('AAPL', '1h', new Date('2026-09-01'))
+
+    expect(candles.map((c) => c.time)).toEqual([1792507500])
+  })
+
+  it('converts a BCBA intraday bar by its day rate and uses the live rate after the last known day', async () => {
+    const { YahooProvider } = await import('./yahoo')
+    mockGetHistoricalCCL.mockResolvedValueOnce(new Map([['2026-10-20', 1000]]))
+    mockGetCCLRate.mockResolvedValueOnce(1500)
+    mockChart.mockResolvedValue({ quotes: [bar('2026-10-20T15:00:00Z', 3000), bar('2026-10-21T15:00:00Z', 3000)] })
+
+    const candles = await new YahooProvider().getCandles('BCBA:GGAL', '15m', new Date('2026-10-01'))
+
+    expect(candles.map((c) => c.close)).toEqual([3, 2])
+  })
+
+  it('still refuses a BCBA intraday bar on a past day with no rate', async () => {
+    const { YahooProvider } = await import('./yahoo')
+    mockGetHistoricalCCL.mockResolvedValueOnce(new Map([['2026-10-21', 1000]]))
+    mockChart.mockResolvedValue({ quotes: [bar('2026-10-20T15:00:00Z', 3000), bar('2026-10-21T15:00:00Z', 3000)] })
+
+    await expect(new YahooProvider().getCandles('BCBA:GGAL', '15m', new Date('2026-10-01'))).rejects.toThrow(/No historical CCL rate/)
   })
 })
 
