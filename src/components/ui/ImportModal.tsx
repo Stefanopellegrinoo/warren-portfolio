@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import { formatNumber } from '@/lib/utils'
 import { X, Upload, FileSpreadsheet } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -15,13 +16,19 @@ export default function ImportModal({ onClose, onSuccess }: Props) {
   const [replace, setReplace] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const dialog = useRef<HTMLDialogElement>(null)
+
+  // Native modal dialog: focus trap, Escape and top layer come from the browser.
+  useEffect(() => {
+    const d = dialog.current
+    if (d && !d.open) d.showModal()
+  }, [])
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault()
     setDragging(false)
     const f = e.dataTransfer.files[0]
-    if (f && (f.name.endsWith('.xlsx') || f.name.endsWith('.xls'))) setFile(f)
+    if (f && (f.name.endsWith('.xlsx') || f.name.endsWith('.xls'))) { setFile(f); setError(null) }
     else setError('Solo se aceptan archivos .xlsx o .xls')
   }
 
@@ -159,78 +166,80 @@ export default function ImportModal({ onClose, onSuccess }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-lg glass rounded-2xl p-4 md:p-6 animate-slide-up border border-white/10">
-
-        <div className="flex items-center justify-between mb-6">
+    <dialog
+      ref={dialog}
+      onClose={onClose}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+      aria-labelledby="import-title"
+      className="w-[min(480px,calc(100vw-32px))] rounded-lg border border-line bg-surface p-0 text-ink shadow-pop backdrop:bg-black/30"
+    >
+      <div className="grid gap-4 p-6 max-[819px]:p-5">
+        <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="font-display font-700 text-lg">Importar Excel</h2>
-            <p className="text-xs text-slate-500 font-mono mt-0.5">Columnas: FECHA · TICKER · OPERACIÓN · CANTIDAD · PRECIO · COMISIÓN</p>
+            <h2 id="import-title" className="font-serif text-2xl">Importar operaciones</h2>
+            <p className="mt-1 text-[13px] text-ink-3">
+              Un archivo Excel con las columnas FECHA, TICKER, OPERACIÓN, CANTIDAD, PRECIO y COMISIÓN.
+            </p>
           </div>
-          <button onClick={onClose} className="text-slate-600 hover:text-white transition-colors">
-            <X className="w-5 h-5" />
+          <button type="button" onClick={onClose} aria-label="Cerrar" className="-mr-2 -mt-1 grid h-9 w-9 shrink-0 place-items-center rounded-md text-ink-3 hover:bg-hover hover:text-ink max-[819px]:h-11 max-[819px]:w-11">
+            <X className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />
           </button>
         </div>
 
-        {/* Drop zone */}
-        <div
+        <label
+          htmlFor="import-file"
           onDragOver={e => { e.preventDefault(); setDragging(true) }}
           onDragLeave={() => setDragging(false)}
           onDrop={handleDrop}
-          onClick={() => inputRef.current?.click()}
-          className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-200 mb-4
-            ${dragging ? 'border-amber/60 bg-amber/5' : file ? 'border-emerald/40 bg-emerald/5' : 'border-bg-500 hover:border-slate-500 bg-bg-700/50'}`}
+          className={`grid cursor-pointer justify-items-center gap-1.5 rounded-md border border-dashed px-4 py-8 text-center has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-ring
+            ${dragging ? 'border-accent bg-accent-soft' : 'border-line-strong bg-surface-2 hover:border-ink-3'}`}
         >
-          <input ref={inputRef} type="file" accept=".xlsx,.xls" className="hidden"
-            onChange={e => setFile(e.target.files?.[0] ?? null)} />
+          <input id="import-file" type="file" accept=".xlsx,.xls" className="sr-only"
+            onChange={e => { setFile(e.target.files?.[0] ?? null); setError(null) }} />
           {file ? (
-            <div className="flex flex-col items-center gap-2">
-              <FileSpreadsheet className="w-8 h-8 text-emerald" />
-              <p className="text-emerald font-display font-600 text-sm">{file.name}</p>
-              <p className="text-xs text-slate-500 font-mono">{(file.size / 1024).toFixed(1)} KB</p>
-            </div>
+            <>
+              <FileSpreadsheet className="h-7 w-7 text-accent-ink" strokeWidth={1.5} aria-hidden="true" />
+              <span className="font-medium">{file.name}</span>
+              <span className="text-[13px] text-ink-3 tabular-nums">{formatNumber(file.size / 1024, { decimals: 1 })} KB</span>
+            </>
           ) : (
-            <div className="flex flex-col items-center gap-2">
-              <Upload className="w-8 h-8 text-slate-600" />
-              <p className="text-slate-400 text-sm font-display">Arrastrá tu archivo o hacé click</p>
-              <p className="text-xs text-slate-600 font-mono">.xlsx o .xls</p>
-            </div>
+            <>
+              <Upload className="h-7 w-7 text-ink-3" strokeWidth={1.5} aria-hidden="true" />
+              <span className="font-medium">Arrastrá tu archivo o elegilo</span>
+              <span className="text-[13px] text-ink-3">.xlsx o .xls</span>
+            </>
           )}
-        </div>
-
-        {/* Replace toggle */}
-        <label className="flex items-center gap-3 mb-4 cursor-pointer group">
-          <div className={`w-9 h-5 rounded-full transition-colors duration-200 relative
-            ${replace ? 'bg-amber' : 'bg-bg-500'}`}
-            onClick={() => setReplace(r => !r)}>
-            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200
-              ${replace ? 'translate-x-4' : 'translate-x-0.5'}`} />
-          </div>
-          <div>
-            <span className="text-sm text-slate-300 font-display">Reemplazar todo</span>
-            <p className="text-[11px] text-slate-600 font-mono">Borra todas las transacciones existentes antes de importar</p>
-          </div>
         </label>
 
+        {error && <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-[13px] text-danger">{error}</p>}
+
+        <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3">
+          <input id="import-replace" type="checkbox" checked={replace} onChange={e => setReplace(e.target.checked)} aria-describedby="import-replace-hint"
+            className="mt-0.5 h-5 w-5 cursor-pointer accent-[var(--accent)]" />
+          <div>
+            <label htmlFor="import-replace" className="cursor-pointer font-medium">Reemplazar todo</label>
+            <p id="import-replace-hint" className="text-[13px] text-ink-3">Borra todas las operaciones cargadas antes de importar.</p>
+          </div>
+        </div>
+
         {replace && (
-          <div className="mb-4 px-3 py-2.5 rounded-lg border border-rose/30 bg-rose/10">
-            <p className="text-[12px] text-rose font-display font-600">
-              Acción destructiva e irreversible
-            </p>
-            <p className="text-[11px] text-slate-400 font-mono mt-1">
+          <div role="alert" className="rounded-md bg-danger-soft px-3 py-2.5 text-[13px]">
+            <p className="font-medium text-danger">Acción destructiva e irreversible</p>
+            <p className="mt-1 text-ink-2">
               Se borran posiciones, trades cerrados y todas las transacciones.
               Los depósitos, retiros y ajustes de saldo cargados a mano se conservan.
             </p>
           </div>
         )}
 
-        <button onClick={handleImport} disabled={!file || loading}
-          className="btn-primary w-full flex items-center justify-center gap-2 py-2.5 disabled:opacity-40 disabled:cursor-not-allowed">
-          {loading ? <div className="w-4 h-4 border-2 border-bg-900/30 border-t-bg-900 rounded-full animate-spin" /> : <Upload className="w-4 h-4" />}
-          {loading ? 'Importando...' : 'Importar Transacciones'}
-        </button>
+        <div className="flex justify-end gap-2 max-[419px]:grid max-[419px]:grid-cols-1">
+          <button type="button" onClick={onClose} className="min-h-11 rounded-md px-4 font-medium text-ink-2 hover:bg-hover hover:text-ink">Cancelar</button>
+          <button type="button" onClick={handleImport} disabled={!file || loading} aria-busy={loading}
+            className="min-h-11 rounded-md bg-primary px-4 font-medium text-primary-on hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50 max-[419px]:row-start-1">
+            {loading ? 'Importando…' : 'Importar operaciones'}
+          </button>
+        </div>
       </div>
-    </div>
+    </dialog>
   )
 }

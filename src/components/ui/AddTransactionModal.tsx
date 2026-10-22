@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { X, Plus, Search, AlertCircle, ChevronLeft, TrendingUp, DollarSign, Landmark, Banknote } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { useState, useEffect, useRef } from 'react'
+import { X, Search, AlertCircle, ChevronLeft, ChevronRight, TrendingUp, Landmark, Banknote } from 'lucide-react'
+import { formatNumber, formatUSD } from '@/lib/utils'
 import type { Operation, TransactionInput, Cedear, Activo, ONOperation, CashMovementType } from '@/types'
 import { postTransaction } from '@/lib/api/post-transaction'
 import type { PostTransactionResult } from '@/lib/api/post-transaction'
@@ -161,29 +161,133 @@ interface Props {
   }
 }
 
-const ASSET_CLASSES: { id: AssetClass; label: string; desc: string; icon: React.ReactNode; color: string }[] = [
-  {
-    id: 'CEDEAR',
-    label: 'CEDEAR',
-    desc: 'Certificados de depósito',
-    icon: <TrendingUp className="w-5 h-5" />,
-    color: 'bg-purple-500/15 text-purple-400 border-purple-500/40 hover:bg-purple-500/25',
-  },
-  {
-    id: 'ON',
-    label: 'Obligación Negociable',
-    desc: 'Bonos corporativos USD',
-    icon: <Landmark className="w-5 h-5" />,
-    color: 'bg-amber/15 text-amber border-amber/40 hover:bg-amber/25',
-  },
-  {
-    id: 'CASH',
-    label: 'Cash USD',
-    desc: 'Depósito o retiro de efectivo',
-    icon: <Banknote className="w-5 h-5" />,
-    color: 'bg-emerald/15 text-emerald border-emerald/40 hover:bg-emerald/25',
-  },
+const ASSET_CLASSES: { id: AssetClass; label: string; desc: string; icon: React.ReactNode }[] = [
+  { id: 'CEDEAR', label: 'CEDEAR', desc: 'Certificados de depósito', icon: <TrendingUp className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" /> },
+  { id: 'ON', label: 'Obligación negociable', desc: 'Bonos corporativos en dólares', icon: <Landmark className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" /> },
+  { id: 'CASH', label: 'Caja en dólares', desc: 'Depósito o retiro de efectivo', icon: <Banknote className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" /> },
 ]
+
+const CLASS_NAMES: Record<AssetClass, string> = { ACCION: 'acciones', CEDEAR: 'CEDEAR', ON: 'ON', CASH: 'caja' }
+const CHOICE_LABELS: Record<string, string> = {
+  COMPRA: 'Compra', VENTA: 'Venta', DIVIDENDO: 'Dividendo', CUPON: 'Cupón', DEPOSITO: 'Depósito', RETIRO: 'Retiro', ARS: 'Pesos', USD: 'Dólares',
+}
+
+// ─────────────────────────────────────────────────────────
+// Presentational pieces (same tokens as the Resumen dialogs)
+// ─────────────────────────────────────────────────────────
+const fieldCls = 'min-h-11 w-full rounded-md border border-line-strong bg-surface px-3 text-ink placeholder:text-ink-3 hover:border-ink-3 focus-visible:border-accent focus-visible:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_28%,transparent)] focus-visible:outline-none'
+const pairCls = 'grid grid-cols-2 gap-3 max-[419px]:grid-cols-1'
+const primaryCls = 'inline-flex min-h-11 items-center justify-center rounded-md bg-primary px-4 font-medium text-primary-on hover:bg-primary-hover disabled:opacity-70'
+const secondaryCls = 'inline-flex min-h-11 items-center justify-center rounded-md px-4 font-medium text-ink-2 hover:bg-hover hover:text-ink'
+const iconBtnCls = 'grid h-9 w-9 shrink-0 place-items-center rounded-md text-ink-3 hover:bg-hover hover:text-ink max-[819px]:h-11 max-[819px]:w-11'
+const listCls = 'absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-line bg-surface shadow-pop'
+const optionCls = 'flex min-h-11 w-full items-center gap-2 border-b border-line px-3 text-left text-[13px] last:border-b-0 hover:bg-hover focus-visible:outline-offset-[-2px]'
+const MINUS = '−'
+
+/** Quantities keep their own decimals (up to 6). */
+const qty = (n: number) => formatNumber(n, { decimals: Math.min(6, (String(n).split('.')[1] ?? '').length) })
+
+function Field({ id, label, hint, children }: { id: string; label: string; hint?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="grid content-start gap-1.5">
+      <label htmlFor={id} className="text-[13px] font-medium">{label}</label>
+      {children}
+      {hint}
+    </div>
+  )
+}
+
+function Choice<T extends string>({ name, legend, options, value, onChange }: {
+  name: string; legend: string; options: readonly T[]; value: T; onChange: (v: T) => void
+}) {
+  return (
+    <fieldset>
+      <legend className="mb-1.5 text-[13px] font-medium">{legend}</legend>
+      <div className="flex gap-0.5 rounded-md border border-line bg-surface-2 p-0.5">
+        {options.map(o => (
+          <label
+            key={o}
+            className="relative flex min-h-10 flex-1 cursor-pointer items-center justify-center rounded px-3 text-[13px] text-ink-2 has-[:checked]:bg-surface has-[:checked]:font-medium has-[:checked]:text-ink has-[:checked]:shadow-[0_0_0_1px_var(--line)] has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-ring max-[819px]:min-h-11"
+          >
+            <input type="radio" name={name} value={o} checked={value === o} onChange={() => onChange(o)} className="absolute inset-0 m-0 cursor-pointer opacity-0" />
+            {CHOICE_LABELS[o] ?? o}
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  )
+}
+
+function SearchInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <div className="relative">
+      <input type="text" autoComplete="off" {...props} className={`${fieldCls} pr-9`} />
+      <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-3" strokeWidth={1.5} aria-hidden="true" />
+    </div>
+  )
+}
+
+function Holding({ held, price }: { held: string; price: number }) {
+  return (
+    <dl className="grid grid-cols-2 gap-4 border-b border-line pb-4">
+      <div>
+        <dt className="text-[13px] text-ink-3">Tenés</dt>
+        <dd className="font-medium tabular-nums">{held}</dd>
+      </div>
+      <div className="text-right">
+        <dt className="text-[13px] text-ink-3">Precio de mercado</dt>
+        <dd className="font-medium tabular-nums">{formatUSD(price)}</dd>
+      </div>
+    </dl>
+  )
+}
+
+function Total({ label, value, tone = '' }: { label: string; value: string; tone?: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 border-t border-line pt-3">
+      <span className="text-[13px] text-ink-2">{label}</span>
+      <span className={`font-semibold tabular-nums ${tone}`}>{value}</span>
+    </div>
+  )
+}
+
+function FormError({ error }: { error: string }) {
+  return error ? <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-[13px] text-danger">{error}</p> : null
+}
+
+function Submit({ loading, selling }: { loading: boolean; selling: boolean }) {
+  return (
+    <button type="submit" disabled={loading} aria-busy={loading} className={`${primaryCls} w-full`}>
+      {loading ? 'Guardando…' : selling ? 'Confirmar venta' : 'Guardar operación'}
+    </button>
+  )
+}
+
+function TickerConfirmation({ pending, loading, onConfirm, onCancel }: {
+  pending: NonNullable<PendingConfirmation>; loading: boolean; onConfirm: () => void; onCancel: () => void
+}) {
+  const ticker = String(pending.payload.ticker)
+  const r = pending.resolution
+  return (
+    <div role="alert" className="grid gap-3 rounded-md bg-warn-soft px-4 py-3 text-[13px] text-ink">
+      {r.found ? (
+        <p>
+          <b className="font-semibold">{ticker}</b> es <b className="font-semibold">{r.identity.name}</b>
+          {r.identity.exchange ? ` (${r.identity.exchange})` : ''} a {formatUSD(r.identity.price)}.
+          {' '}¿Es este el instrumento que estás agregando?
+        </p>
+      ) : (
+        <p>
+          No se encontró un instrumento para <b className="font-semibold">{ticker}</b>. Se valuará a su propio costo hasta que exista una fuente de precio.
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={primaryCls} disabled={loading} onClick={onConfirm}>Sí, agregar</button>
+        <button type="button" className={secondaryCls} onClick={onCancel}>Cancelar</button>
+      </div>
+    </div>
+  )
+}
 
 // ─────────────────────────────────────────────────────────
 // Form state types
@@ -301,6 +405,13 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
   const [error, setError] = useState('')
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation>(null)
   const [retroWarning, setRetroWarning] = useState<RetroactiveWarning | null>(null)
+  const dialog = useRef<HTMLDialogElement>(null)
+
+  // Native modal dialog: focus trap, Escape and top layer come from the browser.
+  useEffect(() => {
+    const d = dialog.current
+    if (d && !d.open) d.showModal()
+  }, [])
 
   // ── Fetch activos & cedears ──
   useEffect(() => {
@@ -582,632 +693,311 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
   // ─────────────────────────────────────────────────────────
   // RENDER
   // ─────────────────────────────────────────────────────────
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-md glass rounded-2xl p-4 md:p-6 animate-slide-up border border-white/10 max-h-[90vh] overflow-y-auto">
+  const selling = !!initialData
+  const title = retroWarning ? 'Listo' : step === 1 ? 'Nueva operación' : initialData ? `Vender ${initialData.ticker}` : assetClass === 'CASH' ? 'Movimiento de caja' : `Operación con ${CLASS_NAMES[assetClass ?? 'ACCION']}`
+  const subtitle = retroWarning ? 'Revisá el aviso' : step === 1 ? 'Elegí el tipo de activo' : initialData ? 'Confirmá los datos de la venta' : 'Completá los datos'
+  const stockTotal = (stockOp === 'VENTA' ? form.quantity * form.price - (form.commission ?? 0) : form.quantity * form.price + (form.commission ?? 0))
+  const onTotal = (onForm.operation === 'VENTA' ? onForm.quantity * onForm.price - (onForm.commission ?? 0) : onForm.quantity * onForm.price + (onForm.commission ?? 0))
 
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-2">
-            {!retroWarning && step === 2 && (
-              <button onClick={() => { setStep(1); resetFormNavigationState(setError, setPendingConfirmation) }} className="text-slate-500 hover:text-white transition-colors">
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-            )}
-            <div>
-              <h2 className="font-display font-700 text-lg text-white">
-                {retroWarning ? 'Listo' : step === 1 ? 'Nueva Operación' : initialData ? `Vender ${initialData.ticker}` : assetClass === 'CASH' ? 'Movimiento de Cash' : `Operación ${assetClass}`}
-              </h2>
-              <p className="text-xs text-slate-500 font-mono mt-0.5">
-                {retroWarning ? 'Revisá el aviso' : step === 1 ? 'Elegí el tipo de activo' : initialData ? 'Confirmá los datos de la venta' : 'Completá los datos'}
-              </p>
-            </div>
+  return (
+    <dialog
+      ref={dialog}
+      onClose={onClose}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+      aria-labelledby="tx-title"
+      className="w-[min(480px,calc(100vw-32px))] rounded-lg border border-line bg-surface p-0 text-ink shadow-pop backdrop:bg-black/30"
+    >
+      <div className="grid gap-5 p-6 max-[819px]:p-5">
+        <div className="flex items-start gap-2">
+          {!retroWarning && step === 2 && (
+            <button type="button" aria-label="Volver" onClick={() => { setStep(1); resetFormNavigationState(setError, setPendingConfirmation) }} className={`${iconBtnCls} -ml-2`}>
+              <ChevronLeft className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />
+            </button>
+          )}
+          <div className="min-w-0 flex-1">
+            <h2 id="tx-title" className="font-serif text-2xl">{title}</h2>
+            <p className="mt-1 text-[13px] text-ink-3">{subtitle}</p>
           </div>
-          <button onClick={onClose} className="text-slate-600 hover:text-white transition-colors">
-            <X className="w-5 h-5" />
+          <button type="button" aria-label="Cerrar" onClick={onClose} className={`${iconBtnCls} -mr-2`}>
+            <X className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />
           </button>
         </div>
 
         {retroWarning && (
-          <div role="alert" className="rounded-lg border border-amber/40 bg-amber/10 p-3 text-xs font-mono text-slate-300">
-            <p className="text-amber font-600">Operación guardada</p>
-            <p className="mt-2">
-              Tiene fecha <span className="text-white">{retroWarning.entryDate}</span> y se cargó
-              hoy. Estos días ya se habían medido sin ella, y un día medido no se recalcula:
-            </p>
-            <p className="mt-2 text-white">
-              {summarizeStaleSnapshots(retroWarning.staleSnapshots)}
-            </p>
-            {retroWarning.staleSnapshots.length > 1 && (
-              <details className="mt-1">
-                <summary className="cursor-pointer text-slate-400 hover:text-slate-300">Ver los días</summary>
-                <ul className="mt-1 list-disc list-inside">
-                  {retroWarning.staleSnapshots.map(date => (
-                    <li key={date} className="text-white">{date}</li>
-                  ))}
-                </ul>
-              </details>
-            )}
-            <p className="mt-2">
-              Tus posiciones y tu efectivo de hoy están bien. Lo que queda desactualizado es el
-              historial medido de esos días.
-            </p>
-            <div className="mt-3">
-              <button
-                type="button"
-                onClick={() => { setRetroWarning(null); onClose() }}
-                className="btn-primary py-1.5 px-3 text-xs"
-              >
-                Entendido
-              </button>
+          <>
+            <div role="alert" className="grid gap-2 rounded-md bg-warn-soft px-4 py-3 text-[13px] text-ink">
+              <p className="font-medium text-warn">Operación guardada</p>
+              <p>
+                Tiene fecha <b className="font-medium tabular-nums">{retroWarning.entryDate}</b> y se cargó
+                hoy. Estos días ya se habían medido sin ella, y un día medido no se recalcula:
+              </p>
+              <p className="font-medium tabular-nums">{summarizeStaleSnapshots(retroWarning.staleSnapshots)}</p>
+              {retroWarning.staleSnapshots.length > 1 && (
+                <details>
+                  <summary className="inline-flex min-h-8 cursor-pointer items-center font-medium text-accent-ink">Ver los días</summary>
+                  <ul className="list-disc pl-5 tabular-nums">
+                    {retroWarning.staleSnapshots.map(date => <li key={date}>{date}</li>)}
+                  </ul>
+                </details>
+              )}
+              <p>
+                Tus posiciones y tu efectivo de hoy están bien. Lo que queda desactualizado es el
+                historial medido de esos días.
+              </p>
             </div>
-          </div>
+            <div className="flex justify-end">
+              <button type="button" onClick={() => { setRetroWarning(null); onClose() }} className={primaryCls}>Entendido</button>
+            </div>
+          </>
         )}
 
         {/* ── STEP 1: Asset Type Selector ── */}
         {!retroWarning && step === 1 && (
-          <div className="grid grid-cols-2 gap-3">
+          <ul className="border-y border-line">
             {ASSET_CLASSES.map(ac => (
-              <button
-                key={ac.id}
-                onClick={() => { setAssetClass(ac.id); setStep(2); resetFormNavigationState(setError, setPendingConfirmation) }}
-                className={cn(
-                  'flex flex-col items-start gap-2 p-4 rounded-xl border transition-all duration-150 text-left',
-                  ac.color
-                )}
-              >
-                {ac.icon}
-                <div>
-                  <p className="text-sm font-display font-700">{ac.label}</p>
-                  <p className="text-[10px] font-mono opacity-70 mt-0.5">{ac.desc}</p>
-                </div>
-              </button>
+              <li key={ac.id} className="border-b border-line last:border-b-0">
+                <button
+                  type="button"
+                  onClick={() => { setAssetClass(ac.id); setStep(2); resetFormNavigationState(setError, setPendingConfirmation) }}
+                  className="flex min-h-14 w-full items-center gap-3 px-2 py-3 text-left hover:bg-hover focus-visible:outline-offset-[-2px]"
+                >
+                  <span className="text-ink-3">{ac.icon}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-medium">{ac.label}</span>
+                    <span className="block text-[13px] text-ink-3">{ac.desc}</span>
+                  </span>
+                  <ChevronRight className="h-4 w-4 text-ink-3" strokeWidth={1.5} aria-hidden="true" />
+                </button>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
 
         {/* ── STEP 2: Forms ── */}
         {!retroWarning && step === 2 && assetClass === 'ACCION' && (
-          <form onSubmit={handleSubmitAccion} className="space-y-4">
-            {/* Operation tabs */}
-            <div>
-              <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Operación</label>
-              <div className={cn("grid gap-1.5", filteredStockOps.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
-                {filteredStockOps.map(op => (
-                  <button key={op} type="button" 
-                    onClick={() => setStockOp(op)}
-                    className={cn('py-2 rounded-lg text-xs font-display font-600 transition-all duration-150 border',
-                      stockOp === op
-                        ? op === 'COMPRA' ? 'bg-emerald/20 text-emerald border-emerald/40'
-                          : op === 'VENTA' ? 'bg-rose/20 text-rose border-rose/40'
-                          : 'bg-amber/20 text-amber border-amber/40'
-                        : 'bg-bg-700 text-slate-500 border-bg-500 hover:border-slate-500')}>
-                    {op}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {initialData && (
-              <div className="bg-bg-700/50 border border-white/5 rounded-xl p-3 flex items-center justify-between">
-                <div>
-                  <p className="text-[10px] font-mono text-slate-500 uppercase tracking-tighter">Posición Actual</p>
-                  <p className="text-sm font-mono font-600 text-white">{initialData.quantity.toLocaleString()} acciones</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[10px] font-mono text-slate-500 uppercase tracking-tighter">Precio Mercado</p>
-                  <p className="text-sm font-mono font-600 text-emerald">${initialData.price.toLocaleString()}</p>
-                </div>
-              </div>
-            )}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Fecha</label>
-                <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} className="input-field w-full" required />
-              </div>
-              <div className="relative">
-                <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Ticker</label>
+          <form onSubmit={handleSubmitAccion} className="grid gap-4">
+            <Choice name="tx-op" legend="Operación" options={filteredStockOps} value={stockOp} onChange={setStockOp} />
+            {initialData && <Holding held={`${qty(initialData.quantity)} acciones`} price={initialData.price} />}
+            <div className={pairCls}>
+              <Field id="tx-date" label="Fecha">
+                <input id="tx-date" type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} className={fieldCls} required />
+              </Field>
+              <Field id="tx-ticker" label="Ticker">
                 <div className="relative">
-                  <input type="text" placeholder="Buscar acción..." value={activoSearch}
+                  <SearchInput id="tx-ticker" placeholder="Buscar acción" value={activoSearch}
                     onChange={e => { setActivoSearch(e.target.value); setShowActivoDropdown(true) }}
-                    onFocus={() => setShowActivoDropdown(true)}
-                    className="input-field w-full pr-8" required />
-                  <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                    onFocus={() => setShowActivoDropdown(true)} required />
+                  {showActivoDropdown && filteredActivos.length > 0 && (
+                    <div className={listCls}>
+                      {filteredActivos.slice(0, 10).map(a => (
+                        <button key={a.ticker} type="button" className={optionCls}
+                          onClick={() => { setForm(f => ({ ...f, ticker: a.ticker })); setActivoSearch(`${a.ticker} - ${a.nombre}`); setShowActivoDropdown(false) }}>
+                          <span className="font-semibold">{a.ticker}</span>
+                          <span className="truncate text-ink-3">{a.nombre}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                {showActivoDropdown && filteredActivos.length > 0 && (
-                  <div className="absolute z-10 w-full mt-1 bg-bg-800 border border-bg-500 rounded-lg max-h-48 overflow-y-auto">
-                    {filteredActivos.slice(0, 10).map(a => (
-                      <button key={a.ticker} type="button"
-                        onClick={() => { setForm(f => ({ ...f, ticker: a.ticker })); setActivoSearch(`${a.ticker} - ${a.nombre}`); setShowActivoDropdown(false) }}
-                        className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-bg-700 border-b border-bg-600 last:border-0">
-                        <span className="font-mono text-blue-400">{a.ticker}</span>
-                        <span className="text-slate-500 ml-2">{a.nombre}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              </Field>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Cantidad</label>
-                <input type="number" min="0" step="any" placeholder="10" value={form.quantity || ''}
-                  onChange={e => setForm(f => ({ ...f, quantity: parseFloat(e.target.value) || 0 }))}
-                  className="input-field w-full" required />
-              </div>
-              <div>
-                <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Precio USD</label>
-                <input type="number" min="0" step="any" placeholder="190.70" value={form.price || ''}
-                  onChange={e => setForm(f => ({ ...f, price: parseFloat(e.target.value) || 0 }))}
-                  className="input-field w-full" required />
-              </div>
+            <div className={pairCls}>
+              <Field id="tx-quantity" label="Cantidad">
+                <input id="tx-quantity" type="number" inputMode="decimal" min="0" step="any" placeholder="10" value={form.quantity || ''}
+                  onChange={e => setForm(f => ({ ...f, quantity: parseFloat(e.target.value) || 0 }))} className={fieldCls} required />
+              </Field>
+              <Field id="tx-price" label="Precio en dólares">
+                <input id="tx-price" type="number" inputMode="decimal" min="0" step="any" placeholder="190.70" value={form.price || ''}
+                  onChange={e => setForm(f => ({ ...f, price: parseFloat(e.target.value) || 0 }))} className={fieldCls} required />
+              </Field>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Comisión</label>
-                <input type="number" min="0" step="any" placeholder="0" value={form.commission || ''}
-                  onChange={e => setForm(f => ({ ...f, commission: parseFloat(e.target.value) || 0 }))}
-                  className="input-field w-full" />
-              </div>
-              <div>
-                <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Notas</label>
-                <input type="text" placeholder="Opcional" value={form.notes ?? ''}
-                  onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-                  className="input-field w-full" />
-              </div>
+            <div className={pairCls}>
+              <Field id="tx-commission" label="Comisión">
+                <input id="tx-commission" type="number" inputMode="decimal" min="0" step="any" placeholder="0" value={form.commission || ''}
+                  onChange={e => setForm(f => ({ ...f, commission: parseFloat(e.target.value) || 0 }))} className={fieldCls} />
+              </Field>
+              <Field id="tx-notes" label="Notas">
+                <input id="tx-notes" type="text" placeholder="Opcional" value={form.notes ?? ''}
+                  onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className={fieldCls} />
+              </Field>
             </div>
             {form.quantity > 0 && form.price > 0 && (
-              <div className="bg-bg-700 rounded-lg px-4 py-3 flex justify-between items-center">
-                <span className="text-xs text-slate-500 font-mono">
-                  {stockOp === 'VENTA' ? 'Total a recibir' : 'Total estimado'}
-                </span>
-                <span className={cn("font-mono font-600", stockOp === 'VENTA' ? "text-rose" : "text-amber")}>
-                  ${(stockOp === 'VENTA'
-                    ? (form.quantity * form.price) - (form.commission ?? 0)
-                    : (form.quantity * form.price) + (form.commission ?? 0)
-                  ).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                </span>
-              </div>
+              <Total label={stockOp === 'VENTA' ? 'Total a recibir' : 'Total estimado'} value={formatUSD(stockTotal)} />
             )}
             {pendingConfirmation && (
-              <div className="rounded-lg border border-amber/40 bg-amber/10 p-3 text-xs font-mono text-slate-300">
-                {pendingConfirmation.resolution.found ? (
-                  <>
-                    <p>
-                      <span className="text-amber">{String(pendingConfirmation.payload.ticker)}</span>{' '}
-                      es <span className="text-white font-600">{pendingConfirmation.resolution.identity.name}</span>
-                      {pendingConfirmation.resolution.identity.exchange
-                        ? ` (${pendingConfirmation.resolution.identity.exchange})`
-                        : ''}{' '}
-                      a ${pendingConfirmation.resolution.identity.price}.
-                    </p>
-                    <p className="mt-1">¿Es este el instrumento que estás agregando?</p>
-                  </>
-                ) : (
-                  <p>
-                    No se encontró un instrumento para{' '}
-                    <span className="text-amber">{String(pendingConfirmation.payload.ticker)}</span>. Se
-                    valuará a su propio costo hasta que exista una fuente de precio.
-                  </p>
-                )}
-                <div className="mt-2 flex gap-2">
-                  <button
-                    type="button"
-                    className="btn-primary py-1.5 px-3 text-xs"
-                    disabled={loading}
-                    onClick={() => handleConfirmTicker(buildAccionPayload)}
-                  >
-                    Sí, agregar
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-ghost py-1.5 px-3 text-xs"
-                    onClick={() => setPendingConfirmation(null)}
-                  >
-                    Cancelar
-                  </button>
-                </div>
-              </div>
+              <TickerConfirmation pending={pendingConfirmation} loading={loading}
+                onConfirm={() => handleConfirmTicker(buildAccionPayload)} onCancel={() => setPendingConfirmation(null)} />
             )}
-            {error && <p className="text-rose text-xs font-mono bg-rose/10 rounded-lg px-3 py-2 border border-rose/20">{error}</p>}
-            <button type="submit" disabled={loading} className="btn-primary w-full flex items-center justify-center gap-2 py-2.5">
-              {loading ? <div className="w-4 h-4 border-2 border-bg-900/30 border-t-bg-900 rounded-full animate-spin" /> : <Plus className="w-4 h-4" />}
-              {loading ? 'Guardando...' : initialData ? 'Confirmar Venta' : 'Guardar Operación'}
-            </button>
-
+            <FormError error={error} />
+            <Submit loading={loading} selling={selling} />
           </form>
         )}
 
         {!retroWarning && step === 2 && assetClass === 'CEDEAR' && (
-          <form onSubmit={handleSubmitCedear} className="space-y-4">
-            <div>
-              <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Operación</label>
-              <div className={cn("grid gap-1.5", filteredStockOps.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
-                {filteredStockOps.map(op => (
-                  <button key={op} type="button" 
-                    onClick={() => setStockOp(op)}
-                    className={cn('py-2 rounded-lg text-xs font-display font-600 transition-all duration-150 border',
-                      stockOp === op
-                        ? op === 'COMPRA' ? 'bg-emerald/20 text-emerald border-emerald/40'
-                          : op === 'VENTA' ? 'bg-rose/20 text-rose border-rose/40'
-                          : 'bg-amber/20 text-amber border-amber/40'
-                        : 'bg-bg-700 text-slate-500 border-bg-500 hover:border-slate-500')}>
-                    {op}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {initialData && (
-              <div className="bg-bg-700/50 border border-white/5 rounded-xl p-3 flex items-center justify-between">
-                <div>
-                  <p className="text-[10px] font-mono text-slate-500 uppercase tracking-tighter">Tenencia Actual</p>
-                  <p className="text-sm font-mono font-600 text-white">{initialData.quantity.toLocaleString()} CEDEARs</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[10px] font-mono text-slate-500 uppercase tracking-tighter">Precio Mercado</p>
-                  <p className="text-sm font-mono font-600 text-emerald">${initialData.price.toLocaleString()}</p>
-                </div>
-              </div>
-            )}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Fecha</label>
-                <input type="date" value={cedearForm.date} onChange={e => setCedearForm(f => ({ ...f, date: e.target.value }))} className="input-field w-full" required />
-              </div>
-              <div className="relative">
-                <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">CEDEAR</label>
+          <form onSubmit={handleSubmitCedear} className="grid gap-4">
+            <Choice name="tx-op" legend="Operación" options={filteredStockOps} value={stockOp} onChange={setStockOp} />
+            {initialData && <Holding held={`${qty(initialData.quantity)} CEDEARs`} price={initialData.price} />}
+            <div className={pairCls}>
+              <Field id="tx-date" label="Fecha">
+                <input id="tx-date" type="date" value={cedearForm.date} onChange={e => setCedearForm(f => ({ ...f, date: e.target.value }))} className={fieldCls} required />
+              </Field>
+              <Field id="tx-ticker" label="CEDEAR">
                 <div className="relative">
-                  <input type="text" placeholder="Buscar CEDEAR..." value={cedearSearch}
+                  <SearchInput id="tx-ticker" placeholder="Buscar CEDEAR" value={cedearSearch}
                     onChange={e => { setCedearSearch(e.target.value); setShowCedearDropdown(true) }}
-                    onFocus={() => setShowCedearDropdown(true)}
-                    className="input-field w-full pr-8" required />
-                  <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                    onFocus={() => setShowCedearDropdown(true)} required />
+                  {showCedearDropdown && filteredCedears.length > 0 && (
+                    <div className={listCls}>
+                      {filteredCedears.map(c => (
+                        <button key={c.ticker} type="button" className={optionCls}
+                          onClick={() => { setCedearForm(f => ({ ...f, ticker: c.ticker })); setCedearSearch(`${c.ticker} - ${c.nombre}`); setShowCedearDropdown(false) }}>
+                          <span className="font-semibold">{c.ticker}</span>
+                          <span className="truncate text-ink-3">{c.nombre}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                {showCedearDropdown && filteredCedears.length > 0 && (
-                  <div className="absolute z-10 w-full mt-1 bg-bg-800 border border-bg-500 rounded-lg max-h-48 overflow-y-auto">
-                    {filteredCedears.map(c => (
-                      <button key={c.ticker} type="button"
-                        onClick={() => { setCedearForm(f => ({ ...f, ticker: c.ticker })); setCedearSearch(`${c.ticker} - ${c.nombre}`); setShowCedearDropdown(false) }}
-                        className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-bg-700 border-b border-bg-600 last:border-0">
-                        <span className="font-mono text-purple-400">{c.ticker}</span>
-                        <span className="text-slate-500 ml-2">{c.nombre}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              </Field>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Cantidad (CEDEARs)</label>
-                <input type="number" min="0" step="any" placeholder="10" value={cedearForm.cantidad || ''}
-                  onChange={e => setCedearForm(f => ({ ...f, cantidad: parseFloat(e.target.value) || 0 }))}
-                  className="input-field w-full" required />
-                {selectedCedear && cedearForm.cantidad > 0 && (
-                  <p className="text-xs text-slate-500 mt-1">= {cantidadAcciones.toFixed(4)} acciones</p>
-                )}
-              </div>
-              <div>
-                <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Precio</label>
-                <input type="number" min="0" step="any" placeholder="190.70" value={cedearForm.precio || ''}
-                  onChange={e => setCedearForm(f => ({ ...f, precio: parseFloat(e.target.value) || 0 }))}
-                  className="input-field w-full" required />
-              </div>
+            <div className={pairCls}>
+              <Field id="tx-quantity" label="Cantidad de CEDEARs"
+                hint={selectedCedear && cedearForm.cantidad > 0 && <p className="text-[13px] text-ink-3 tabular-nums">Equivale a {formatNumber(cantidadAcciones, { decimals: 4 })} acciones</p>}>
+                <input id="tx-quantity" type="number" inputMode="decimal" min="0" step="any" placeholder="10" value={cedearForm.cantidad || ''}
+                  onChange={e => setCedearForm(f => ({ ...f, cantidad: parseFloat(e.target.value) || 0 }))} className={fieldCls} required />
+              </Field>
+              <Field id="tx-price" label="Precio">
+                <input id="tx-price" type="number" inputMode="decimal" min="0" step="any" placeholder="190.70" value={cedearForm.precio || ''}
+                  onChange={e => setCedearForm(f => ({ ...f, precio: parseFloat(e.target.value) || 0 }))} className={fieldCls} required />
+              </Field>
             </div>
-            <div>
-              <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Moneda</label>
-              <div className="grid grid-cols-2 gap-1.5">
-                {(['ARS', 'USD'] as const).map(m => (
-                  <button key={m} type="button" onClick={() => setCedearForm(f => ({ ...f, moneda: m }))}
-                    className={cn('py-2 rounded-lg text-xs font-display font-600 transition-all duration-150 border',
-                      cedearForm.moneda === m
-                        ? m === 'ARS' ? 'bg-emerald/20 text-emerald border-emerald/40' : 'bg-blue-500/20 text-blue-400 border-blue-500/40'
-                        : 'bg-bg-700 text-slate-500 border-bg-500 hover:border-slate-500')}>
-                    {m}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Comisión</label>
-                <input type="number" min="0" step="any" placeholder="0" value={cedearForm.comision || ''}
-                  onChange={e => setCedearForm(f => ({ ...f, comision: parseFloat(e.target.value) || 0 }))}
-                  className="input-field w-full" />
-              </div>
-              <div>
-                <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Notas</label>
-                <input type="text" placeholder="Opcional" value={cedearForm.notas}
-                  onChange={e => setCedearForm(f => ({ ...f, notas: e.target.value }))}
-                  className="input-field w-full" />
-              </div>
+            <Choice name="tx-currency" legend="Moneda" options={['ARS', 'USD'] as const} value={cedearForm.moneda} onChange={m => setCedearForm(f => ({ ...f, moneda: m }))} />
+            <div className={pairCls}>
+              <Field id="tx-commission" label="Comisión">
+                <input id="tx-commission" type="number" inputMode="decimal" min="0" step="any" placeholder="0" value={cedearForm.comision || ''}
+                  onChange={e => setCedearForm(f => ({ ...f, comision: parseFloat(e.target.value) || 0 }))} className={fieldCls} />
+              </Field>
+              <Field id="tx-notes" label="Notas">
+                <input id="tx-notes" type="text" placeholder="Opcional" value={cedearForm.notas}
+                  onChange={e => setCedearForm(f => ({ ...f, notas: e.target.value }))} className={fieldCls} />
+              </Field>
             </div>
             {selectedCedear && dollarRates.loaded && cedearForm.cantidad > 0 && cedearForm.precio > 0 && (
-              <div className="bg-bg-700 rounded-lg px-4 py-3 space-y-2">
-                <div className="flex justify-between text-xs">
-                  <span className="text-slate-500 font-mono">Ratio</span>
-                  <span className="text-slate-300 font-mono">{selectedCedear.ratio}</span>
-                </div>
-                <div className="flex justify-between text-xs">
-                  <span className="text-slate-500 font-mono">CCL</span>
-                  <span className="text-slate-300 font-mono">${dollarRates.ccl.toFixed(2)}</span>
-                </div>
-                <div className="border-t border-bg-500 pt-2 mt-2">
-                  <div className="flex justify-between">
-                    <span className="text-xs text-slate-500 font-mono">Precio acción</span>
-                    <span className="font-mono font-600 text-purple-400">${precioAccionUSD.toFixed(2)} USD</span>
-                  </div>
-                </div>
-              </div>
+              <dl className="grid gap-1 border-t border-line pt-3 text-[13px]">
+                <div className="flex justify-between gap-3"><dt className="text-ink-3">Ratio</dt><dd className="tabular-nums">{qty(selectedCedear.ratio)}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-ink-3">Dólar CCL</dt><dd className="tabular-nums">{formatNumber(dollarRates.ccl)}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-ink-3">Precio por acción</dt><dd className="font-medium tabular-nums">{formatUSD(precioAccionUSD)}</dd></div>
+              </dl>
             )}
             {cedearForm.cantidad > 0 && cedearForm.precio > 0 && (
-              <div className="bg-bg-700 rounded-lg px-4 py-3 flex justify-between items-center">
-                <span className="text-xs text-slate-500 font-mono">
-                  {stockOp === 'VENTA' ? 'Recibir en Portfolio (USD)' : 'Inversión en Portfolio (USD)'}
-                </span>
-                <span className={cn("font-mono font-600", stockOp === 'VENTA' ? "text-rose" : "text-amber")}>
-                  ${totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
-                </span>
-              </div>
+              <Total label={stockOp === 'VENTA' ? 'A recibir en la cartera' : 'Inversión en la cartera'} value={formatUSD(totalUSD)} />
             )}
             {dollarRates.error && (
-              <div className="bg-rose/10 rounded-lg px-4 py-3 flex items-center gap-2 border border-rose/20">
-                <AlertCircle className="w-4 h-4 text-rose" />
-                <span className="text-xs text-rose">No se pudo obtener cotización CCL/MEP.</span>
-              </div>
+              <p role="alert" className="flex items-center gap-2 rounded-md bg-danger-soft px-3 py-2 text-[13px] text-danger">
+                <AlertCircle className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden="true" />
+                No se pudo obtener la cotización CCL/MEP.
+              </p>
             )}
             {pendingConfirmation && (
-              <div className="rounded-lg border border-amber/40 bg-amber/10 p-3 text-xs font-mono text-slate-300">
-                {pendingConfirmation.resolution.found ? (
-                  <>
-                    <p>
-                      <span className="text-amber">{String(pendingConfirmation.payload.ticker)}</span>{' '}
-                      es <span className="text-white font-600">{pendingConfirmation.resolution.identity.name}</span>
-                      {pendingConfirmation.resolution.identity.exchange
-                        ? ` (${pendingConfirmation.resolution.identity.exchange})`
-                        : ''}{' '}
-                      a ${pendingConfirmation.resolution.identity.price}.
-                    </p>
-                    <p className="mt-1">¿Es este el instrumento que estás agregando?</p>
-                  </>
-                ) : (
-                  <p>
-                    No se encontró un instrumento para{' '}
-                    <span className="text-amber">{String(pendingConfirmation.payload.ticker)}</span>. Se
-                    valuará a su propio costo hasta que exista una fuente de precio.
-                  </p>
-                )}
-                <div className="mt-2 flex gap-2">
-                  <button
-                    type="button"
-                    className="btn-primary py-1.5 px-3 text-xs"
-                    disabled={loading}
-                    onClick={() => handleConfirmTicker(buildCedearPayload)}
-                  >
-                    Sí, agregar
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-ghost py-1.5 px-3 text-xs"
-                    onClick={() => setPendingConfirmation(null)}
-                  >
-                    Cancelar
-                  </button>
-                </div>
-              </div>
+              <TickerConfirmation pending={pendingConfirmation} loading={loading}
+                onConfirm={() => handleConfirmTicker(buildCedearPayload)} onCancel={() => setPendingConfirmation(null)} />
             )}
-            {error && <p className="text-rose text-xs font-mono bg-rose/10 rounded-lg px-3 py-2 border border-rose/20">{error}</p>}
-            <button type="submit" disabled={loading} className="btn-primary w-full flex items-center justify-center gap-2 py-2.5">
-              {loading ? <div className="w-4 h-4 border-2 border-bg-900/30 border-t-bg-900 rounded-full animate-spin" /> : <Plus className="w-4 h-4" />}
-              {loading ? 'Guardando...' : initialData ? 'Confirmar Venta' : 'Guardar Operación'}
-            </button>
-
+            <FormError error={error} />
+            <Submit loading={loading} selling={selling} />
           </form>
         )}
 
         {!retroWarning && step === 2 && assetClass === 'ON' && (
-          <form onSubmit={handleSubmitON} className="space-y-4">
-            {/* ON Operation tabs */}
-            <div>
-              <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Operación</label>
-              <div className={cn("grid gap-1.5", filteredOnOps.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
-                {filteredOnOps.map(op => (
-                  <button key={op} type="button" 
-                    onClick={() => setOnForm(f => ({ ...f, operation: op }))}
-                    className={cn('py-2 rounded-lg text-xs font-display font-600 transition-all duration-150 border',
-                      onForm.operation === op
-                        ? op === 'COMPRA' ? 'bg-emerald/20 text-emerald border-emerald/40'
-                          : op === 'VENTA' ? 'bg-rose/20 text-rose border-rose/40'
-                          : 'bg-amber/20 text-amber border-amber/40'
-                        : 'bg-bg-700 text-slate-500 border-bg-500 hover:border-slate-500')}>
-                    {op}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {initialData && (
-              <div className="bg-bg-700/50 border border-white/5 rounded-xl p-3 flex items-center justify-between">
-                <div>
-                  <p className="text-[10px] font-mono text-slate-500 uppercase tracking-tighter">VN actuales</p>
-                  <p className="text-sm font-mono font-600 text-white">{fmtNum(initialData.quantity * 100, 0)} VN{/* ON ledger quantity = VN / 100 */}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[10px] font-mono text-slate-500 uppercase tracking-tighter">Precio Mercado</p>
-                  <p className="text-sm font-mono font-600 text-emerald">${initialData.price.toLocaleString()}</p>
-                </div>
-              </div>
-            )}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Fecha</label>
-                <input type="date" value={onForm.date} onChange={e => setOnForm(f => ({ ...f, date: e.target.value }))} className="input-field w-full" required />
-              </div>
-              <div className="relative">
-                <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Ticker ON</label>
+          <form onSubmit={handleSubmitON} className="grid gap-4">
+            <Choice name="tx-op" legend="Operación" options={filteredOnOps} value={onForm.operation} onChange={op => setOnForm(f => ({ ...f, operation: op }))} />
+            {/* ON ledger quantity = VN / 100 */}
+            {initialData && <Holding held={`${fmtNum(initialData.quantity * 100, 0)} VN`} price={initialData.price} />}
+            <div className={pairCls}>
+              <Field id="tx-date" label="Fecha">
+                <input id="tx-date" type="date" value={onForm.date} onChange={e => setOnForm(f => ({ ...f, date: e.target.value }))} className={fieldCls} required />
+              </Field>
+              <Field id="tx-ticker" label="Ticker de la ON">
                 <div className="relative">
-                  <input 
-                    type="text" 
-                    placeholder="Buscar ON..." 
-                    value={onSearch}
+                  <SearchInput id="tx-ticker" placeholder="Buscar ON" value={onSearch}
                     onChange={e => { setOnSearch(e.target.value.toUpperCase()); setShowOnDropdown(true) }}
-                    onFocus={() => setShowOnDropdown(true)}
-                    className="input-field w-full pr-8 font-mono" 
-                    required 
-                  />
-                  <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                    onFocus={() => setShowOnDropdown(true)} required />
+                  {showOnDropdown && onResults.length > 0 && (
+                    <div className={listCls}>
+                      {onResults.map(on => (
+                        <button key={on.ticker} type="button" className={optionCls}
+                          onClick={() => { setOnForm(f => ({ ...f, ticker: on.ticker })); setOnSearch(on.ticker); setShowOnDropdown(false) }}>
+                          <span className="font-semibold">{on.ticker}</span>
+                          {on.name && <span className="truncate text-ink-3">{on.name}</span>}
+                          <span className="ml-auto text-xs text-ink-3">{on.source}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {showOnDropdown && onSearchLoading && <div className={`${listCls} px-3 py-2 text-[13px] text-ink-3`}>Buscando…</div>}
+                  {showOnDropdown && !onSearchLoading && onSearch.length >= 2 && onResults.length === 0 && (
+                    <div className={`${listCls} px-3 py-2 text-[13px] text-ink-3`}>No se encontraron ONs</div>
+                  )}
                 </div>
-                {showOnDropdown && onResults.length > 0 && (
-                  <div className="absolute z-10 w-full mt-1 bg-bg-800 border border-bg-500 rounded-lg max-h-48 overflow-y-auto">
-                    {onResults.map((on) => (
-                      <button 
-                        key={on.ticker} 
-                        type="button"
-                        onClick={() => { 
-                          setOnForm(f => ({ ...f, ticker: on.ticker })); 
-                          setOnSearch(on.ticker); 
-                          setShowOnDropdown(false) 
-                        }}
-                        className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-bg-700 border-b border-bg-600 last:border-0"
-                      >
-                        <span className="font-mono text-amber">{on.ticker}</span>
-                        {on.name && <span className="text-slate-500 ml-2">{on.name}</span>}
-                        <span className="text-[10px] text-slate-600 ml-2">({on.source})</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {showOnDropdown && onSearchLoading && (
-                  <div className="absolute z-10 w-full mt-1 bg-bg-800 border border-bg-500 rounded-lg px-3 py-2">
-                    <span className="text-xs text-slate-500">Buscando...</span>
-                  </div>
-                )}
-                {showOnDropdown && !onSearchLoading && onSearch.length >= 2 && onResults.length === 0 && (
-                  <div className="absolute z-10 w-full mt-1 bg-bg-800 border border-bg-500 rounded-lg px-3 py-2">
-                    <span className="text-xs text-slate-500">No se encontraron ONs</span>
-                  </div>
-                )}
-              </div>
+              </Field>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">
-                  {onForm.operation === 'CUPON' ? 'Monto cupón (USD)' : 'Cantidad (nominales / 100)'}
-                </label>
-                <input type="number" min="0" step="any" placeholder={onForm.operation === 'CUPON' ? '500' : '200'}
-                  value={onForm.quantity || ''}
-                  onChange={e => setOnForm(f => ({ ...f, quantity: parseFloat(e.target.value) || 0 }))}
-                  className="input-field w-full" required />
-              </div>
-              <div>
-                <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">
-                  {onForm.operation === 'CUPON' ? 'Precio unitario' : 'Precio (× 100)'}
-                </label>
-                <input type="number" min="0" step="any"
-                  placeholder={onForm.operation === 'CUPON' ? '1' : '100'}
-                  value={onForm.price || ''}
-                  onChange={e => setOnForm(f => ({ ...f, price: parseFloat(e.target.value) || 0 }))}
-                  className="input-field w-full" required />
-              </div>
+            <div className={pairCls}>
+              <Field id="tx-quantity" label={onForm.operation === 'CUPON' ? 'Monto del cupón en dólares' : 'Cantidad (nominales / 100)'}>
+                <input id="tx-quantity" type="number" inputMode="decimal" min="0" step="any" placeholder={onForm.operation === 'CUPON' ? '500' : '200'}
+                  value={onForm.quantity || ''} onChange={e => setOnForm(f => ({ ...f, quantity: parseFloat(e.target.value) || 0 }))} className={fieldCls} required />
+              </Field>
+              <Field id="tx-price" label={onForm.operation === 'CUPON' ? 'Precio unitario' : 'Precio (× 100)'}>
+                <input id="tx-price" type="number" inputMode="decimal" min="0" step="any" placeholder={onForm.operation === 'CUPON' ? '1' : '100'}
+                  value={onForm.price || ''} onChange={e => setOnForm(f => ({ ...f, price: parseFloat(e.target.value) || 0 }))} className={fieldCls} required />
+              </Field>
             </div>
             {onForm.operation !== 'CUPON' && (
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Comisión</label>
-                  <input type="number" min="0" step="any" placeholder="0" value={onForm.commission || ''}
-                    onChange={e => setOnForm(f => ({ ...f, commission: parseFloat(e.target.value) || 0 }))}
-                    className="input-field w-full" />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Notas</label>
-                  <input type="text" placeholder="Opcional" value={onForm.notes}
-                    onChange={e => setOnForm(f => ({ ...f, notes: e.target.value }))}
-                    className="input-field w-full" />
-                </div>
+              <div className={pairCls}>
+                <Field id="tx-commission" label="Comisión">
+                  <input id="tx-commission" type="number" inputMode="decimal" min="0" step="any" placeholder="0" value={onForm.commission || ''}
+                    onChange={e => setOnForm(f => ({ ...f, commission: parseFloat(e.target.value) || 0 }))} className={fieldCls} />
+                </Field>
+                <Field id="tx-notes" label="Notas">
+                  <input id="tx-notes" type="text" placeholder="Opcional" value={onForm.notes}
+                    onChange={e => setOnForm(f => ({ ...f, notes: e.target.value }))} className={fieldCls} />
+                </Field>
               </div>
             )}
             {onForm.quantity > 0 && onForm.price > 0 && (
-              <div className="bg-bg-700 rounded-lg px-4 py-3 flex justify-between items-center">
-                <span className="text-xs text-slate-500 font-mono">
-                  {onForm.operation === 'CUPON' ? 'Monto cupón' : onForm.operation === 'VENTA' ? 'Total a recibir' : 'Total estimado'}
-                </span>
-                <span className={cn("font-mono font-600", onForm.operation === 'VENTA' ? "text-rose" : "text-amber")}>
-                  ${(onForm.operation === 'VENTA' 
-                    ? (onForm.quantity * onForm.price) - (onForm.commission ?? 0)
-                    : (onForm.quantity * onForm.price) + (onForm.commission ?? 0)
-                  ).toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
-                </span>
-              </div>
+              <Total label={onForm.operation === 'CUPON' ? 'Monto del cupón' : onForm.operation === 'VENTA' ? 'Total a recibir' : 'Total estimado'} value={formatUSD(onTotal)} />
             )}
-            {error && <p className="text-rose text-xs font-mono bg-rose/10 rounded-lg px-3 py-2 border border-rose/20">{error}</p>}
-            <button type="submit" disabled={loading} className="btn-primary w-full flex items-center justify-center gap-2 py-2.5">
-              {loading ? <div className="w-4 h-4 border-2 border-bg-900/30 border-t-bg-900 rounded-full animate-spin" /> : <Plus className="w-4 h-4" />}
-              {loading ? 'Guardando...' : initialData ? 'Confirmar Venta' : 'Guardar Operación'}
-            </button>
-
+            <FormError error={error} />
+            <Submit loading={loading} selling={selling} />
           </form>
         )}
 
         {!retroWarning && step === 2 && assetClass === 'CASH' && (
-          <form onSubmit={handleSubmitCash} className="space-y-4">
-            {/* DEPOSITO / RETIRO */}
-            <div>
-              <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Tipo de movimiento</label>
-              <div className="grid grid-cols-2 gap-1.5">
-                {CASH_OPS.map(op => (
-                  <button key={op} type="button" onClick={() => setCashForm(f => ({ ...f, type: op }))}
-                    className={cn('py-2.5 rounded-lg text-xs font-display font-700 transition-all duration-150 border',
-                      cashForm.type === op
-                        ? op === 'DEPOSITO' ? 'bg-emerald/20 text-emerald border-emerald/40'
-                          : 'bg-rose/20 text-rose border-rose/40'
-                        : 'bg-bg-700 text-slate-500 border-bg-500 hover:border-slate-500')}>
-                    {op === 'DEPOSITO' ? '↑ DEPÓSITO' : '↓ RETIRO'}
-                  </button>
-                ))}
-              </div>
+          <form onSubmit={handleSubmitCash} className="grid gap-4">
+            <Choice name="tx-cash" legend="Tipo de movimiento" options={CASH_OPS} value={cashForm.type} onChange={op => setCashForm(f => ({ ...f, type: op }))} />
+            <div className={pairCls}>
+              <Field id="tx-date" label="Fecha">
+                <input id="tx-date" type="date" value={cashForm.date} onChange={e => setCashForm(f => ({ ...f, date: e.target.value }))} className={fieldCls} required />
+              </Field>
+              <Field id="tx-amount" label="Monto en dólares">
+                <input id="tx-amount" type="number" inputMode="decimal" min="0" step="any" placeholder="1000" value={cashForm.amount || ''}
+                  onChange={e => setCashForm(f => ({ ...f, amount: parseFloat(e.target.value) || 0 }))} className={fieldCls} required />
+              </Field>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Fecha</label>
-                <input type="date" value={cashForm.date} onChange={e => setCashForm(f => ({ ...f, date: e.target.value }))} className="input-field w-full" required />
-              </div>
-              <div>
-                <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Monto USD</label>
-                <input type="number" min="0" step="any" placeholder="1000" value={cashForm.amount || ''}
-                  onChange={e => setCashForm(f => ({ ...f, amount: parseFloat(e.target.value) || 0 }))}
-                  className="input-field w-full" required />
-              </div>
-            </div>
-            <div>
-              <label className="block text-[11px] font-mono text-slate-500 uppercase tracking-widest mb-1.5">Descripción</label>
-              <input type="text" placeholder="Ej: Transferencia desde banco, cobro dividendo..." value={cashForm.description}
-                onChange={e => setCashForm(f => ({ ...f, description: e.target.value }))}
-                className="input-field w-full" />
-            </div>
+            <Field id="tx-description" label="Descripción">
+              <input id="tx-description" type="text" placeholder="Ej: transferencia desde el banco" value={cashForm.description}
+                onChange={e => setCashForm(f => ({ ...f, description: e.target.value }))} className={fieldCls} />
+            </Field>
             {cashForm.amount > 0 && (
-              <div className={cn('rounded-lg px-4 py-3 flex justify-between items-center',
-                cashForm.type === 'DEPOSITO' ? 'bg-emerald/10 border border-emerald/20' : 'bg-rose/10 border border-rose/20'
-              )}>
-                <span className="text-xs font-mono text-slate-400">
-                  {cashForm.type === 'DEPOSITO' ? 'Saldo aumentará' : 'Saldo disminuirá'}
-                </span>
-                <span className={cn('font-mono font-700', cashForm.type === 'DEPOSITO' ? 'text-emerald' : 'text-rose')}>
-                  {cashForm.type === 'DEPOSITO' ? '+' : '-'}${cashForm.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                </span>
-              </div>
+              <Total
+                label={cashForm.type === 'DEPOSITO' ? 'Saldo aumentará' : 'Saldo disminuirá'}
+                value={`${cashForm.type === 'DEPOSITO' ? '+' : MINUS}US$ ${formatNumber(cashForm.amount)}`}
+                tone={cashForm.type === 'DEPOSITO' ? 'text-ok' : 'text-danger'}
+              />
             )}
-            {error && <p className="text-rose text-xs font-mono bg-rose/10 rounded-lg px-3 py-2 border border-rose/20">{error}</p>}
-            <button type="submit" disabled={loading} className="btn-primary w-full flex items-center justify-center gap-2 py-2.5">
-              {loading ? <div className="w-4 h-4 border-2 border-bg-900/30 border-t-bg-900 rounded-full animate-spin" /> : <Plus className="w-4 h-4" />}
-              {loading ? 'Guardando...' : initialData ? 'Confirmar Venta' : 'Guardar Operación'}
-            </button>
-
+            <FormError error={error} />
+            <Submit loading={loading} selling={selling} />
           </form>
         )}
-
       </div>
-    </div>
+    </dialog>
   )
 }

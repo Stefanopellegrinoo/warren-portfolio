@@ -1,65 +1,132 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { formatUSD, formatPct, formatDate, cn } from '@/lib/utils'
+import { Trash2 } from 'lucide-react'
+import { formatDate, formatNumber, formatPct, formatUSD } from '@/lib/utils'
 import type { ClosedTrade, Transaction } from '@/types'
-import { TrendingUp, TrendingDown, ChevronUp, ChevronDown, Trash2 } from 'lucide-react'
 
 type ClosedSortKey = 'ticker' | 'open_date' | 'close_date' | 'days_held' | 'avg_cost' | 'close_price' | 'quantity' | 'invested' | 'proceeds' | 'pnl' | 'pnl_pct'
-type AllSortKey = 'date' | 'ticker' | 'operation' | 'quantity' | 'price' | 'commission' | 'total' | 'created_at'
-type SortDir = 'asc' | 'desc'
+type AllSortKey = 'date' | 'ticker' | 'operation' | 'quantity' | 'price' | 'commission' | 'created_at'
+type Sort<K> = { key: K; dir: 'asc' | 'desc' }
+type Column<K> = { label: string; key: K; numeric: boolean }
 
-const CLOSED_COLUMNS: { label: string; key: ClosedSortKey }[] = [
-  { label: 'TICKER',        key: 'ticker' },
-  { label: 'COMPRA',        key: 'open_date' },
-  { label: 'VENTA',         key: 'close_date' },
-  { label: 'DÍAS',          key: 'days_held' },
-  { label: 'COSTO PROM.',   key: 'avg_cost' },
-  { label: 'PRECIO CIERRE', key: 'close_price' },
-  { label: 'CANTIDAD',      key: 'quantity' },
-  { label: 'INVERTIDO',     key: 'invested' },
-  { label: 'RETORNO',       key: 'proceeds' },
-  { label: 'P&L USD',       key: 'pnl' },
-  { label: 'P&L %',         key: 'pnl_pct' },
+const CLOSED_COLUMNS: Column<ClosedSortKey>[] = [
+  { label: 'Activo', key: 'ticker', numeric: false },
+  { label: 'Compra', key: 'open_date', numeric: false },
+  { label: 'Venta', key: 'close_date', numeric: false },
+  { label: 'Días', key: 'days_held', numeric: true },
+  { label: 'Costo prom.', key: 'avg_cost', numeric: true },
+  { label: 'Precio de cierre', key: 'close_price', numeric: true },
+  { label: 'Cantidad', key: 'quantity', numeric: true },
+  { label: 'Invertido', key: 'invested', numeric: true },
+  { label: 'Retorno', key: 'proceeds', numeric: true },
+  { label: 'Resultado', key: 'pnl', numeric: true },
+  { label: 'Resultado %', key: 'pnl_pct', numeric: true },
 ]
 
-const ALL_COLUMNS: { label: string; key: AllSortKey }[] = [
-  { label: 'FECHA',         key: 'date' },
-  { label: 'TICKER',        key: 'ticker' },
-  { label: 'OPERACIÓN',     key: 'operation' },
-  { label: 'CANTIDAD',      key: 'quantity' },
-  { label: 'PRECIO',        key: 'price' },
-  { label: 'COMISIÓN',      key: 'commission' },
-  { label: 'CARGA',         key: 'created_at' },
-  { label: '',              key: 'date' }, // For delete button
+const ALL_COLUMNS: Column<AllSortKey>[] = [
+  { label: 'Fecha', key: 'date', numeric: false },
+  { label: 'Activo', key: 'ticker', numeric: false },
+  { label: 'Operación', key: 'operation', numeric: false },
+  { label: 'Cantidad', key: 'quantity', numeric: true },
+  { label: 'Precio', key: 'price', numeric: true },
+  { label: 'Comisión', key: 'commission', numeric: true },
+  { label: 'Cargada', key: 'created_at', numeric: false },
 ]
+
+const OPERATION_LABELS: Record<string, string> = { COMPRA: 'Compra', VENTA: 'Venta', DIVIDENDO: 'Dividendo' }
+
+const symbolOf = (ticker: string) => ticker.split(':')[1] ?? ticker
+const marketOf = (ticker: string) => (ticker.includes(':') ? ticker.split(':')[0] : null)
+const signColor = (n: number) => (n > 0 ? 'text-ok' : n < 0 ? 'text-danger' : '')
+/** Quantities keep their own decimals (up to 6), like the old view. */
+const qty = (n: number, sign = false) => formatNumber(n, { decimals: Math.min(6, (String(n).split('.')[1] ?? '').length), sign })
+const shortDay = (iso: string) => new Date(iso.slice(0, 10) + 'T12:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })
+
+function sortRows<T, K extends string>(rows: T[], sort: Sort<K>, textKeys: K[], dateKeys: K[], textOf: (row: T, key: K) => string) {
+  return [...rows].sort((a, b) => {
+    const dir = sort.dir === 'asc' ? 1 : -1
+    if (textKeys.includes(sort.key)) {
+      const va = textOf(a, sort.key), vb = textOf(b, sort.key)
+      return sort.dir === 'asc' ? (va < vb ? -1 : 1) : (va > vb ? -1 : 1)
+    }
+    const read = (row: T) => {
+      const v = (row as Record<string, unknown>)[sort.key]
+      return dateKeys.includes(sort.key) ? new Date(v as string).getTime() : ((v as number) ?? 0)
+    }
+    return (read(a) - read(b)) * dir
+  })
+}
+
+function nextSort<K>(s: Sort<K>, key: K): Sort<K> {
+  return s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'desc' }
+}
+
+function SortHead<K extends string>({ col, sort, onSort }: { col: Column<K>; sort: Sort<K>; onSort: (k: K) => void }) {
+  const active = sort.key === col.key
+  return (
+    <th
+      scope="col"
+      aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+      className={`whitespace-nowrap py-2 pr-3 font-medium ${col.numeric ? 'text-right' : 'text-left'}`}
+    >
+      <button type="button" onClick={() => onSort(col.key)} className={`inline-flex min-h-8 items-center gap-1 hover:text-ink ${active ? 'text-ink' : ''}`}>
+        {col.label}
+        {active && <span aria-hidden="true">{sort.dir === 'asc' ? '↑' : '↓'}</span>}
+      </button>
+    </th>
+  )
+}
+
+function Skeleton() {
+  return (
+    <div role="status" aria-label="Cargando operaciones" className="grid gap-2 pt-3">
+      {[0, 1, 2, 3, 4].map(i => <span key={i} className="block h-12 animate-pulse rounded bg-surface-2" />)}
+    </div>
+  )
+}
+
+function LoadError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div role="alert" className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md bg-danger-soft px-4 py-3 text-sm text-danger">
+      No se pudieron cargar las operaciones.
+      <button type="button" onClick={onRetry} className="font-medium underline underline-offset-2 max-[819px]:min-h-11">Reintentar</button>
+    </div>
+  )
+}
+
+const field = 'min-h-9 w-64 rounded-md border border-line-strong bg-surface px-3 text-ink placeholder:text-ink-3 hover:border-ink-3 focus-visible:border-accent focus-visible:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_28%,transparent)] focus-visible:outline-none max-[819px]:min-h-11 max-[819px]:w-full'
+// Tables need the width; below this the same rows read as a list.
+const TABLE_ONLY = 'max-[1079px]:hidden'
+const LIST_ONLY = 'min-[1080px]:hidden'
 
 export default function HistoryPage() {
   const [activeTab, setActiveTab] = useState<'closed' | 'all'>('closed')
-  
-  // Closed Trades State
+
   const [closedTrades, setClosedTrades] = useState<ClosedTrade[]>([])
   const [closedLoading, setClosedLoading] = useState(true)
+  const [closedError, setClosedError] = useState(false)
   const [closedFilter, setClosedFilter] = useState('')
-  const [closedSortKey, setClosedSortKey] = useState<ClosedSortKey>('close_date')
-  const [closedSortDir, setClosedSortDir] = useState<SortDir>('desc')
+  const [closedSort, setClosedSort] = useState<Sort<ClosedSortKey>>({ key: 'close_date', dir: 'desc' })
 
-  // All Transactions State
   const [allTx, setAllTx] = useState<Transaction[]>([])
   const [allLoading, setAllLoading] = useState(false)
+  const [allError, setAllError] = useState(false)
   const [allFilter, setAllFilter] = useState('')
-  const [allSortKey, setAllSortKey] = useState<AllSortKey>('date')
-  const [allSortDir, setAllSortDir] = useState<SortDir>('desc')
+  const [allSort, setAllSort] = useState<Sort<AllSortKey>>({ key: 'date', dir: 'desc' })
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const fetchClosedTrades = useCallback(async () => {
     setClosedLoading(true)
+    setClosedError(false)
     try {
       const res = await fetch('/api/transactions/closed')
+      if (!res.ok) throw new Error(String(res.status))
       const data = await res.json()
       setClosedTrades(data.data ?? [])
-    } catch (err) {
-      console.error(err)
+    } catch {
+      setClosedError(true)
     } finally {
       setClosedLoading(false)
     }
@@ -67,417 +134,207 @@ export default function HistoryPage() {
 
   const fetchAllTransactions = useCallback(async () => {
     setAllLoading(true)
+    setAllError(false)
     try {
-      const res = await fetch('/api/transactions?limit=1000') // Adjust limit if needed
+      const res = await fetch('/api/transactions?limit=1000')
+      if (!res.ok) throw new Error(String(res.status))
       const data = await res.json()
       setAllTx(data.data ?? [])
-    } catch (err) {
-      console.error(err)
+    } catch {
+      setAllError(true)
     } finally {
       setAllLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    if (activeTab === 'closed') {
-      fetchClosedTrades()
-    } else {
-      fetchAllTransactions()
-    }
+    if (activeTab === 'closed') fetchClosedTrades()
+    else fetchAllTransactions()
   }, [activeTab, fetchClosedTrades, fetchAllTransactions])
 
-  async function handleDelete(id: string) {
+  async function handleDelete(t: Transaction) {
     if (!confirm('¿Estás seguro que querés borrar esta operación? Esto recalculará toda la posición desde cero.')) return
-    
-    setDeletingId(id)
+
+    setDeletingId(t.id)
+    setDeleteError(null)
     try {
-      const res = await fetch(`/api/transactions/${id}`, { method: 'DELETE' })
+      const res = await fetch(`/api/transactions/${t.id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error('Error deleting transaction')
-      
-      // Refresh the data on current tab
-      if (activeTab === 'closed') {
-        await fetchClosedTrades()
-      } else {
-        await fetchAllTransactions()
-      }
-      
-      // ALSO refresh the dashboard by navigating to it and back
-      // This ensures portfolio positions and cash are updated
-      // We use a small delay to allow backend processing
+      await (activeTab === 'closed' ? fetchClosedTrades() : fetchAllTransactions())
       setTimeout(() => {
-        // Force a hard refresh of dashboard by temporarily navigating away and back
-        // This is a workaround until we implement proper cache invalidation
-        if (window.location.pathname === '/history') {
-          // Navigate to dashboard to force portfolio refresh
-          window.dispatchEvent(new CustomEvent('portfolio-needs-refresh'))
-        }
+        if (window.location.pathname === '/history') window.dispatchEvent(new CustomEvent('portfolio-needs-refresh'))
       }, 500)
-    } catch (err) {
-      console.error(err)
-      alert('Hubo un error al intentar borrar la operación.')
+    } catch {
+      setDeleteError('Hubo un error al intentar borrar la operación.')
     } finally {
       setDeletingId(null)
     }
   }
 
-  // --- CLOSED TRADES LOGIC ---
-  const closedFiltered = closedTrades.filter(t =>
-    !closedFilter || t.ticker.toLowerCase().includes(closedFilter.toLowerCase())
+  const closedSorted = sortRows(
+    closedTrades.filter(t => !closedFilter || t.ticker.toLowerCase().includes(closedFilter.toLowerCase())),
+    closedSort, ['ticker'], ['open_date', 'close_date'], t => symbolOf(t.ticker).toLowerCase(),
+  )
+  const allSorted = sortRows(
+    allTx.filter(t => !allFilter || t.ticker.toLowerCase().includes(allFilter.toLowerCase())),
+    allSort, ['ticker', 'operation'], ['date', 'created_at'], (t, k) => String(t[k as 'ticker' | 'operation'] ?? '').toLowerCase(),
   )
 
-  function handleClosedSort(key: ClosedSortKey) {
-    if (closedSortKey === key) {
-      setClosedSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    } else {
-      setClosedSortKey(key)
-      setClosedSortDir('desc')
-    }
-  }
-
-  const closedSorted = [...closedFiltered].sort((a, b) => {
-    let va: number | string = 0
-    let vb: number | string = 0
-
-    if (closedSortKey === 'ticker') {
-      va = (a.ticker.split(':')[1] ?? a.ticker).toLowerCase()
-      vb = (b.ticker.split(':')[1] ?? b.ticker).toLowerCase()
-      return closedSortDir === 'asc' ? (va < vb ? -1 : 1) : (va > vb ? -1 : 1)
-    }
-
-    if (closedSortKey === 'open_date' || closedSortKey === 'close_date') {
-      va = new Date((a as any)[closedSortKey]).getTime()
-      vb = new Date((b as any)[closedSortKey]).getTime()
-    } else {
-      va = (a as any)[closedSortKey] ?? 0
-      vb = (b as any)[closedSortKey] ?? 0
-    }
-
-    return closedSortDir === 'asc' ? (va as number) - (vb as number) : (vb as number) - (va as number)
-  })
-
-  // --- ALL TRANSACTIONS LOGIC ---
-  const allFiltered = allTx.filter(t =>
-    !allFilter || t.ticker.toLowerCase().includes(allFilter.toLowerCase())
-  )
-
-  function handleAllSort(key: AllSortKey) {
-    // skip sorting if empty key
-    if (!key) return
-    
-    if (allSortKey === key) {
-      setAllSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    } else {
-      setAllSortKey(key)
-      setAllSortDir('desc')
-    }
-  }
-
-  const allSorted = [...allFiltered].sort((a, b) => {
-    let va: number | string = 0
-    let vb: number | string = 0
-
-    if (allSortKey === 'ticker' || allSortKey === 'operation') {
-      va = ((a as any)[allSortKey] ?? '').toLowerCase()
-      vb = ((b as any)[allSortKey] ?? '').toLowerCase()
-      return allSortDir === 'asc' ? (va < vb ? -1 : 1) : (va > vb ? -1 : 1)
-    }
-
-    if (allSortKey === 'date' || allSortKey === 'created_at') {
-      va = new Date((a as any)[allSortKey]).getTime()
-      vb = new Date((b as any)[allSortKey]).getTime()
-    } else {
-      va = (a as any)[allSortKey] ?? 0
-      vb = (b as any)[allSortKey] ?? 0
-    }
-
-    return allSortDir === 'asc' ? (va as number) - (vb as number) : (vb as number) - (va as number)
-  })
-
-  // Derived
   const totalPnl = closedTrades.reduce((s, t) => s + t.pnl, 0)
   const totalInvested = closedTrades.reduce((s, t) => s + t.invested, 0)
-  const winners = closedTrades.filter(t => t.pnl > 0)
-  const winRate = closedTrades.length > 0 ? winners.length / closedTrades.length : 0
+  const winRate = closedTrades.length > 0 ? closedTrades.filter(t => t.pnl > 0).length / closedTrades.length : 0
 
-  function ClosedSortIcon({ colKey }: { colKey: ClosedSortKey }) {
-    if (closedSortKey !== colKey) return <ChevronDown className="w-3 h-3 text-slate-700 opacity-0 group-hover:opacity-100 transition-opacity" />
-    return closedSortDir === 'asc'
-      ? <ChevronUp className="w-3 h-3 text-amber" />
-      : <ChevronDown className="w-3 h-3 text-amber" />
-  }
-
-  function AllSortIcon({ colKey }: { colKey: AllSortKey }) {
-    if (!colKey) return null
-    if (allSortKey !== colKey) return <ChevronDown className="w-3 h-3 text-slate-700 opacity-0 group-hover:opacity-100 transition-opacity" />
-    return allSortDir === 'asc'
-      ? <ChevronUp className="w-3 h-3 text-amber" />
-      : <ChevronDown className="w-3 h-3 text-amber" />
-  }
+  const filter = activeTab === 'closed' ? closedFilter : allFilter
+  const setFilter = activeTab === 'closed' ? setClosedFilter : setAllFilter
 
   return (
-    <div className="min-h-screen">
-      <div className="max-w-7xl mx-auto px-6 py-8">
+    <div className="mx-auto w-full max-w-[1240px] px-10 pb-16 pt-8 max-[819px]:px-4 max-[819px]:pb-24 max-[819px]:pt-5">
+      <div className="mb-6">
+        <h1 className="font-serif text-[2rem] font-normal leading-tight tracking-[-0.015em] max-[819px]:text-2xl">Operaciones</h1>
+        <p className="mt-1 text-ink-3">Tus posiciones cerradas y todas las compras, ventas y dividendos que cargaste.</p>
+      </div>
 
-        <div className="mb-6 animate-fade-in flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-          <div>
-            <h1 className="font-display font-800 text-3xl text-white tracking-tight">
-              Historial
-              <span className="text-amber text-glow-amber"> de Operaciones</span>
-            </h1>
-            <p className="text-slate-500 font-mono text-sm mt-1">Revisá el rendimiento y todas tus compras/ventas</p>
-          </div>
-          
-          <div className="flex bg-white/[0.03] p-1 rounded-xl border border-white/[0.05]">
-            <button
-              onClick={() => setActiveTab('closed')}
-              className={cn(
-                'px-4 py-2 rounded-lg text-sm font-display font-600 transition-all',
-                activeTab === 'closed' ? 'bg-amber/10 text-amber' : 'text-slate-400 hover:text-white'
-              )}
+      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-line pb-4">
+        <fieldset className="inline-flex gap-0.5 rounded-md border border-line bg-surface-2 p-0.5 max-[819px]:w-full">
+          <legend className="sr-only">Vista</legend>
+          {([['closed', 'Posiciones cerradas'], ['all', 'Todas las operaciones']] as const).map(([id, label]) => (
+            <label
+              key={id}
+              className="relative inline-flex min-h-8 cursor-pointer items-center justify-center rounded px-3 text-[13px] text-ink-2 has-[:checked]:bg-surface has-[:checked]:font-medium has-[:checked]:text-ink has-[:checked]:shadow-[0_0_0_1px_var(--line)] has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-ring max-[819px]:min-h-11 max-[819px]:flex-1"
             >
-              Posiciones Cerradas
-            </button>
-            <button
-              onClick={() => setActiveTab('all')}
-              className={cn(
-                'px-4 py-2 rounded-lg text-sm font-display font-600 transition-all',
-                activeTab === 'all' ? 'bg-amber/10 text-amber' : 'text-slate-400 hover:text-white'
-              )}
-            >
-              Todas las Operaciones
-            </button>
-          </div>
+              <input type="radio" name="history-view" value={id} checked={activeTab === id} onChange={() => setActiveTab(id)} className="absolute inset-0 m-0 cursor-pointer opacity-0" />
+              {label}
+            </label>
+          ))}
+        </fieldset>
+        <div className="grid gap-1.5 max-[819px]:w-full">
+          <label htmlFor="history-filter" className="text-[13px] font-medium">Filtrar por activo</label>
+          <input id="history-filter" type="search" placeholder="Ticker" value={filter} onChange={e => setFilter(e.target.value)} className={field} />
         </div>
+      </div>
 
-        {/* --- CLOSED TRADES TAB --- */}
-        {activeTab === 'closed' && (
-          <div className="animate-fade-in">
-            {/* Summary KPIs */}
-            <div className="grid grid-cols-1 min-[400px]:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-              {[
-                { label: 'P&L Realizado',  value: totalPnl,      highlight: true,  type: 'currency' as const },
-                { label: 'Capital Rotado', value: totalInvested,  highlight: false, type: 'currency' as const },
-                { label: 'Win Rate',       value: winRate,        highlight: false, type: 'percent'  as const },
-                { label: 'Operaciones',    value: closedTrades.length,  highlight: false, type: 'number'   as const },
-              ].map((k, i) => (
-                <div key={i} className="kpi-card animate-slide-up"
-                     style={{ animationDelay: `${i * 60}ms`, animationFillMode: 'both' }}>
-                  <span className="text-[11px] font-mono text-slate-500 uppercase tracking-widest">{k.label}</span>
-                  <span className={cn(
-                    'text-2xl font-display font-800 mt-1',
-                    k.highlight ? (k.value >= 0 ? 'text-emerald' : 'text-rose') : 'text-white'
-                  )}>
-                    {k.type === 'currency' ? formatUSD(k.value)
-                     : k.type === 'percent' ? formatPct(k.value)
-                     : k.value.toString()}
-                  </span>
+      {deleteError && <p role="alert" className="mt-4 rounded-md bg-danger-soft px-3 py-2 text-[13px] text-danger">{deleteError}</p>}
+
+      {activeTab === 'closed' && (
+        <section aria-labelledby="h-closed">
+          <h2 id="h-closed" className="sr-only">Posiciones cerradas</h2>
+          {closedLoading ? <Skeleton /> : closedError ? <LoadError onRetry={fetchClosedTrades} /> : (
+            <>
+              <dl className="grid grid-cols-4 gap-4 border-b border-line py-5 max-[819px]:grid-cols-2">
+                <div>
+                  <dt className="text-[13px] text-ink-3">Resultado realizado</dt>
+                  <dd className={`text-base font-medium tabular-nums ${signColor(totalPnl)}`}>{totalPnl > 0 ? '+' : ''}{formatUSD(totalPnl)}</dd>
                 </div>
-              ))}
-            </div>
+                <div>
+                  <dt className="text-[13px] text-ink-3">Capital rotado</dt>
+                  <dd className="text-base font-medium tabular-nums">{formatUSD(totalInvested)}</dd>
+                </div>
+                <div>
+                  <dt className="text-[13px] text-ink-3">Cerradas con ganancia</dt>
+                  <dd className="text-base font-medium tabular-nums">{formatPct(winRate, { digits: 1, sign: false })}</dd>
+                </div>
+                <div>
+                  <dt className="text-[13px] text-ink-3">Posiciones cerradas</dt>
+                  <dd className="text-base font-medium tabular-nums">{closedTrades.length}</dd>
+                </div>
+              </dl>
 
-            {/* Filter */}
-            <div className="mb-4">
-              <input type="text" placeholder="Filtrar por ticker..."
-                value={closedFilter} onChange={e => setClosedFilter(e.target.value)}
-                className="input-field w-full sm:w-64" />
-            </div>
-
-            <div className="glass rounded-2xl overflow-hidden">
-              {/* DESKTOP TABLE */}
-              <div className="hidden md:block overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-white/[0.04]">
-                      {CLOSED_COLUMNS.map(col => (
-                        <th
-                          key={col.key}
-                          onClick={() => handleClosedSort(col.key)}
-                          className="group text-left px-4 py-3 text-[10px] font-mono text-slate-600 uppercase tracking-widest whitespace-nowrap cursor-pointer select-none hover:text-slate-400 transition-colors"
-                        >
-                          <span className="inline-flex items-center gap-1">
-                            {col.label}
-                            <ClosedSortIcon colKey={col.key} />
-                          </span>
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {closedLoading ? (
-                      <tr><td colSpan={11} className="text-center py-12">
-                        <div className="w-6 h-6 border-2 border-amber/30 border-t-amber rounded-full animate-spin mx-auto" />
-                      </td></tr>
-                    ) : closedSorted.length === 0 ? (
-                      <tr><td colSpan={11} className="text-center py-12 text-slate-600 font-mono text-sm">
-                        Sin operaciones cerradas todavía
-                      </td></tr>
-                    ) : closedSorted.map((t, i) => {
-                      const isPos = t.pnl > 0
-                      return (
-                        <tr key={t.id} className="table-row">
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-mono font-600 text-sm text-white">
-                                {t.ticker.split(':')[1] ?? t.ticker}
-                              </span>
-                              <span className="text-[9px] text-slate-600 font-mono">
-                                {t.ticker.split(':')[0]}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 font-mono text-xs text-slate-400">{formatDate(t.open_date)}</td>
-                          <td className="px-4 py-3 font-mono text-xs text-slate-400">{formatDate(t.close_date)}</td>
-                          <td className="px-4 py-3 font-mono text-xs text-slate-500">{t.days_held}d</td>
-                          <td className="px-4 py-3 font-mono text-sm text-slate-400">{formatUSD(t.avg_cost)}</td>
-                          <td className="px-4 py-3 font-mono text-sm text-slate-400">{formatUSD(t.close_price)}</td>
-                          <td className="px-4 py-3 font-mono text-sm text-slate-400">
-                            {t.quantity.toLocaleString('en-US', { maximumFractionDigits: 3 })}
-                          </td>
-                          <td className="px-4 py-3 font-mono text-sm text-slate-400">{formatUSD(t.invested)}</td>
-                          <td className="px-4 py-3 font-mono text-sm text-white font-600">{formatUSD(t.proceeds)}</td>
-                          <td className="px-4 py-3">
-                            <span className={cn('font-mono text-sm font-600', isPos ? 'text-emerald' : 'text-rose')}>
-                              {isPos ? '+' : ''}{formatUSD(t.pnl)}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={cn(
-                              'inline-flex items-center gap-1 text-xs font-mono font-600 px-2 py-0.5 rounded-full border',
-                              isPos ? 'tag-positive' : 'tag-negative'
-                            )}>
-                              {isPos ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                              {formatPct(t.pnl_pct)}
-                            </span>
-                          </td>
+              {closedSorted.length === 0 ? (
+                <p className="py-6 text-[13px] text-ink-3">{closedFilter ? 'Ninguna posición cerrada coincide con el filtro.' : 'Todavía no cerraste ninguna posición.'}</p>
+              ) : (
+                <>
+                  <div className={`overflow-x-auto pt-3 ${TABLE_ONLY}`}>
+                    <table className="w-full border-collapse text-sm tabular-nums">
+                      <caption className="sr-only">Posiciones cerradas, importes en dólares. Ordená con los botones del encabezado.</caption>
+                      <thead>
+                        <tr className="border-b border-line-strong text-[13px] text-ink-3">
+                          {CLOSED_COLUMNS.map(c => <SortHead key={c.key} col={c} sort={closedSort} onSort={k => setClosedSort(s => nextSort(s, k))} />)}
                         </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                      </thead>
+                      <tbody>
+                        {closedSorted.map(t => (
+                          <tr key={t.id} className="border-b border-line last:border-b-0 hover:bg-hover">
+                            <th scope="row" className="whitespace-nowrap py-2.5 pr-3 text-left font-normal">
+                              <span className="font-semibold">{symbolOf(t.ticker)}</span>
+                              {marketOf(t.ticker) && <span className="ml-1.5 text-[13px] text-ink-3">{marketOf(t.ticker)}</span>}
+                            </th>
+                            <td className="whitespace-nowrap py-2.5 pr-3 text-ink-2">{formatDate(t.open_date)}</td>
+                            <td className="whitespace-nowrap py-2.5 pr-3 text-ink-2">{formatDate(t.close_date)}</td>
+                            <td className="py-2.5 pr-3 text-right">{t.days_held}</td>
+                            <td className="py-2.5 pr-3 text-right">{formatNumber(t.avg_cost)}</td>
+                            <td className="py-2.5 pr-3 text-right">{formatNumber(t.close_price)}</td>
+                            <td className="py-2.5 pr-3 text-right">{qty(t.quantity)}</td>
+                            <td className="py-2.5 pr-3 text-right">{formatNumber(t.invested)}</td>
+                            <td className="py-2.5 pr-3 text-right">{formatNumber(t.proceeds)}</td>
+                            <td className={`py-2.5 pr-3 text-right font-medium ${signColor(t.pnl)}`}>{formatNumber(t.pnl, { sign: true })}</td>
+                            <td className={`py-2.5 text-right ${signColor(t.pnl)}`}>{formatPct(t.pnl_pct, { digits: 1 })}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
 
-              {/* MOBILE CARDS */}
-              <div className="flex md:hidden flex-col divide-y divide-white/[0.05]">
-                {closedLoading ? (
-                  <div className="py-12 flex justify-center">
-                    <div className="w-6 h-6 border-2 border-amber/30 border-t-amber rounded-full animate-spin" />
-                  </div>
-                ) : closedSorted.length === 0 ? (
-                  <div className="text-center py-10 text-slate-600 font-mono text-sm">
-                    Sin operaciones cerradas
-                  </div>
-                ) : closedSorted.map((t) => {
-                  const isPos = t.pnl > 0
-                  return (
-                    <div key={`mob-c-${t.id}`} className="p-4 flex flex-col gap-3">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <p className="font-display font-800 text-lg text-white leading-none mb-1">
-                            {t.ticker.split(':')[1] ?? t.ticker}
-                          </p>
-                          <p className="text-[10px] text-slate-500 font-mono">
-                            {formatDate(t.open_date)} → {formatDate(t.close_date)} ({t.days_held}d)
-                          </p>
-                        </div>
-                        <div className="text-right flex flex-col items-end">
-                          <p className={cn('font-mono text-base font-600 mb-1.5', isPos ? 'text-emerald' : 'text-rose')}>
-                            {isPos ? '+' : ''}{formatUSD(t.pnl)}
-                          </p>
-                          <span className={cn(
-                            'inline-flex items-center gap-1 text-[11px] font-mono font-600 px-2 py-0.5 rounded-full border',
-                            isPos ? 'tag-positive' : 'tag-negative'
-                          )}>
-                            {isPos ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                            {formatPct(t.pnl_pct)}
+                  <ul className={LIST_ONLY}>
+                    {closedSorted.map(t => (
+                      <li key={t.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 border-b border-line py-3 last:border-b-0">
+                        <span className="min-w-0">
+                          <span className="font-semibold">{symbolOf(t.ticker)}</span>
+                          {marketOf(t.ticker) && <span className="ml-1.5 text-[13px] text-ink-3">{marketOf(t.ticker)}</span>}
+                          <span className="block text-[13px] text-ink-3">
+                            {formatDate(t.open_date)} al {formatDate(t.close_date)}, {t.days_held} {t.days_held === 1 ? 'día' : 'días'}
                           </span>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          </div>
-        )}
+                          <span className="block text-[13px] text-ink-3 tabular-nums">Invertido {formatNumber(t.invested)}, retorno {formatNumber(t.proceeds)}</span>
+                        </span>
+                        <span className={`text-right tabular-nums ${signColor(t.pnl)}`}>
+                          <b className="block font-medium">{formatNumber(t.pnl, { sign: true })}</b>
+                          <small className="text-[13px]">{formatPct(t.pnl_pct, { digits: 1 })}</small>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </>
+          )}
+        </section>
+      )}
 
-        {/* --- ALL TRANSACTIONS TAB --- */}
-        {activeTab === 'all' && (
-          <div className="animate-fade-in">
-            {/* Filter */}
-            <div className="mb-4">
-              <input type="text" placeholder="Filtrar por ticker..."
-                value={allFilter} onChange={e => setAllFilter(e.target.value)}
-                className="input-field w-full sm:w-64" />
-            </div>
-
-            <div className="glass rounded-2xl overflow-hidden">
-              {/* DESKTOP TABLE */}
-              <div className="hidden md:block overflow-x-auto">
-                <table className="w-full">
+      {activeTab === 'all' && (
+        <section aria-labelledby="h-all">
+          <h2 id="h-all" className="sr-only">Todas las operaciones</h2>
+          {allLoading ? <Skeleton /> : allError ? <LoadError onRetry={fetchAllTransactions} /> : allSorted.length === 0 ? (
+            <p className="py-6 text-[13px] text-ink-3">{allFilter ? 'Ninguna operación coincide con el filtro.' : 'Todavía no cargaste operaciones.'}</p>
+          ) : (
+            <>
+              <div className={`overflow-x-auto pt-3 ${TABLE_ONLY}`}>
+                <table className="w-full border-collapse text-sm tabular-nums">
+                  <caption className="sr-only">Todas las operaciones, importes en dólares. Ordená con los botones del encabezado.</caption>
                   <thead>
-                    <tr className="border-b border-white/[0.04]">
-                      {ALL_COLUMNS.map((col, idx) => (
-                        <th
-                          key={idx}
-                          onClick={() => handleAllSort(col.key)}
-                          className={cn(
-                            "group text-left px-4 py-3 text-[10px] font-mono text-slate-600 uppercase tracking-widest whitespace-nowrap select-none transition-colors",
-                            col.key ? "cursor-pointer hover:text-slate-400" : ""
-                          )}
-                        >
-                          <span className="inline-flex items-center gap-1">
-                            {col.label}
-                            {col.key && <AllSortIcon colKey={col.key} />}
-                          </span>
-                        </th>
-                      ))}
+                    <tr className="border-b border-line-strong text-[13px] text-ink-3">
+                      {ALL_COLUMNS.map(c => <SortHead key={c.key} col={c} sort={allSort} onSort={k => setAllSort(s => nextSort(s, k))} />)}
+                      <th scope="col" className="py-2"><span className="sr-only">Acciones</span></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {allLoading ? (
-                      <tr><td colSpan={8} className="text-center py-12">
-                        <div className="w-6 h-6 border-2 border-amber/30 border-t-amber rounded-full animate-spin mx-auto" />
-                      </td></tr>
-                    ) : allSorted.length === 0 ? (
-                      <tr><td colSpan={8} className="text-center py-12 text-slate-600 font-mono text-sm">
-                        No hay operaciones cargadas
-                      </td></tr>
-                    ) : allSorted.map((t) => (
-                      <tr key={t.id} className="table-row group">
-                        <td className="px-4 py-3 font-mono text-xs text-slate-400 whitespace-nowrap">{formatDate(t.date)}</td>
-                        <td className="px-4 py-3">
-                          <span className="font-mono font-600 text-sm text-white">
-                            {t.ticker.split(':')[1] ?? t.ticker}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={cn(
-                            'text-[10px] font-mono font-600 px-2 py-0.5 rounded-full bg-white/[0.03] border border-white/[0.05]',
-                            t.operation === 'COMPRA' ? 'text-emerald' : t.operation === 'VENTA' ? 'text-rose' : 'text-blue-400'
-                          )}>
-                            {t.operation}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 font-mono text-sm text-white">
-                          {t.quantity > 0 ? '+' : ''}{t.quantity.toLocaleString('en-US', { maximumFractionDigits: 6 })}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-sm text-slate-400">{formatUSD(t.price)}</td>
-                        <td className="px-4 py-3 font-mono text-sm text-slate-500">{t.commission ? formatUSD(t.commission) : '—'}</td>
-                        <td className="px-4 py-3 font-mono text-xs text-slate-600 whitespace-nowrap">
-                          {new Date(t.created_at).toLocaleDateString('es-AR')}
-                        </td>
-                        <td className="px-4 py-3 text-right">
+                    {allSorted.map(t => (
+                      <tr key={t.id} className="border-b border-line last:border-b-0 hover:bg-hover">
+                        <td className="whitespace-nowrap py-2 pr-3 text-ink-2">{formatDate(t.date)}</td>
+                        <th scope="row" className="py-2 pr-3 text-left font-semibold">{symbolOf(t.ticker)}</th>
+                        <td className="py-2 pr-3">{OPERATION_LABELS[t.operation] ?? t.operation}</td>
+                        <td className="py-2 pr-3 text-right">{qty(t.quantity, true)}</td>
+                        <td className="py-2 pr-3 text-right">{formatNumber(t.price)}</td>
+                        <td className="py-2 pr-3 text-right text-ink-2">{t.commission ? formatNumber(t.commission) : '—'}</td>
+                        <td className="whitespace-nowrap py-2 pr-3 text-ink-3">{new Date(t.created_at).toLocaleDateString('es-AR')}</td>
+                        <td className="py-2 text-right">
                           <button
-                            onClick={() => handleDelete(t.id)}
+                            type="button"
+                            onClick={() => handleDelete(t)}
                             disabled={deletingId === t.id}
-                            className="p-1.5 text-slate-600 hover:text-rose hover:bg-rose/10 rounded-md transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 disabled:opacity-50"
-                            title="Eliminar operación"
+                            aria-label={`Borrar operación de ${symbolOf(t.ticker)} del ${formatDate(t.date)}`}
+                            title="Borrar operación"
+                            className="grid h-8 w-8 place-items-center rounded-md text-ink-3 hover:bg-hover hover:text-danger disabled:opacity-50"
                           >
-                            {deletingId === t.id ? (
-                              <div className="w-4 h-4 border-2 border-rose/30 border-t-rose rounded-full animate-spin" />
-                            ) : (
-                              <Trash2 className="w-4 h-4" />
-                            )}
+                            <Trash2 className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
                           </button>
                         </td>
                       </tr>
@@ -486,66 +343,33 @@ export default function HistoryPage() {
                 </table>
               </div>
 
-              {/* MOBILE CARDS */}
-              <div className="flex md:hidden flex-col divide-y divide-white/[0.05]">
-                {allLoading ? (
-                  <div className="py-12 flex justify-center">
-                    <div className="w-6 h-6 border-2 border-amber/30 border-t-amber rounded-full animate-spin" />
-                  </div>
-                ) : allSorted.length === 0 ? (
-                  <div className="text-center py-10 text-slate-600 font-mono text-sm">
-                    No hay operaciones cargadas
-                  </div>
-                ) : allSorted.map((t) => (
-                  <div key={`mob-a-${t.id}`} className="p-4 flex flex-col gap-3">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <p className="font-display font-800 text-lg text-white leading-none">
-                            {t.ticker.split(':')[1] ?? t.ticker}
-                          </p>
-                          <span className={cn(
-                            'text-[9px] font-mono font-600 px-1.5 py-0.5 rounded-sm bg-white/[0.03] border border-white/[0.05]',
-                            t.operation === 'COMPRA' ? 'text-emerald' : t.operation === 'VENTA' ? 'text-rose' : 'text-blue-400'
-                          )}>
-                            {t.operation}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-slate-500 font-mono">
-                          {formatDate(t.date)}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-mono text-sm font-600 text-white mb-0.5">
-                          {t.quantity > 0 ? '+' : ''}{t.quantity.toLocaleString('en-US', { maximumFractionDigits: 6 })}
-                        </p>
-                        <p className="text-[11px] text-slate-500 font-mono">
-                          a {formatUSD(t.price)}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex justify-end pt-2 border-t border-white/[0.05] mt-1">
-                      <button
-                        onClick={() => handleDelete(t.id)}
-                        disabled={deletingId === t.id}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono font-600 text-slate-400 hover:text-rose bg-white/[0.02] hover:bg-rose/10 rounded-md transition-colors disabled:opacity-50"
-                      >
-                        {deletingId === t.id ? (
-                          <div className="w-3 h-3 border-2 border-rose/30 border-t-rose rounded-full animate-spin" />
-                        ) : (
-                          <Trash2 className="w-3 h-3" />
-                        )}
-                        Eliminar
-                      </button>
-                    </div>
-                  </div>
+              <ul className={LIST_ONLY}>
+                {allSorted.map(t => (
+                  <li key={t.id} className="grid min-h-[52px] grid-cols-[56px_minmax(0,1fr)_auto_auto] items-center gap-3 border-b border-line py-2 last:border-b-0 max-[819px]:grid-cols-[48px_minmax(0,1fr)_auto_auto]">
+                    <time dateTime={t.date} className="text-[13px] font-medium tabular-nums">
+                      {shortDay(t.date)}<small className="block text-xs font-normal text-ink-3">{t.date.slice(0, 4)}</small>
+                    </time>
+                    <span className="min-w-0">
+                      <span className="block font-semibold">{symbolOf(t.ticker)}</span>
+                      <span className="block truncate text-[13px] text-ink-3 tabular-nums">{OPERATION_LABELS[t.operation] ?? t.operation} a {formatNumber(t.price)}</span>
+                    </span>
+                    <span className="font-medium tabular-nums">{qty(t.quantity, true)}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(t)}
+                      disabled={deletingId === t.id}
+                      aria-label={`Borrar operación de ${symbolOf(t.ticker)} del ${formatDate(t.date)}`}
+                      className="grid h-11 w-11 place-items-center rounded-md text-ink-3 hover:bg-hover hover:text-danger disabled:opacity-50"
+                    >
+                      <Trash2 className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+                    </button>
+                  </li>
                 ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-      </div>
+              </ul>
+            </>
+          )}
+        </section>
+      )}
     </div>
   )
 }
