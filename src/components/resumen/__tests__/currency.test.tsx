@@ -33,7 +33,7 @@ describe('ValueSection figures', () => {
   it('shows every figure in the chosen currency with its label and notes', () => {
     const html = renderToStaticMarkup(<ValueSection figures={figures} notes={['Nota uno.', 'Nota dos.']} />)
     expect(html).toContain('$ 2.440.000,00')
-    expect(html).toContain('+30.000,00 (+3,75 %)')
+    expect(html.replace(/<[^>]+>/g, '')).toContain('+30.000,00 (+3,75 %)')
     expect(html).toContain('hoy, por precio')
     expect(html).toContain('−1.500,00')
     expect(html).toContain('Realizado, con dividendos y cupones')
