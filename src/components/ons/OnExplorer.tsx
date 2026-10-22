@@ -8,6 +8,7 @@ import type { OnListRow } from '@/lib/on-analytics'
 import { applyExplorer, DEFAULT_STATE, issuersOf, parseExplorerQuery, serializeExplorerQuery, type ExplorerFilters, type SortKey } from '@/lib/on-explorer-filters'
 import { fmtDate } from '@/lib/on-format'
 import { formatAge } from '@/lib/utils'
+import { Loading, LoadError, Notice, btnSecondary } from './ui'
 
 interface CatalogResponse {
   rows: OnListRow[]
@@ -17,11 +18,6 @@ interface CatalogResponse {
 }
 
 const PAGE_SIZE = 100
-
-function Banner({ tone, children }: { tone: 'warn' | 'info'; children: React.ReactNode }) {
-  const cls = tone === 'warn' ? 'border-amber/30 bg-amber/10 text-amber' : 'border-slate-500/30 bg-slate-500/10 text-slate-300'
-  return <div role="status" className={`rounded-xl border px-4 py-3 text-sm ${cls}`}>{children}</div>
-}
 
 export default function OnExplorer() {
   const pathname = usePathname()
@@ -60,43 +56,34 @@ export default function OnExplorer() {
   const issuers = useMemo(() => issuersOf(rows), [rows])
   const currencies = useMemo(() => [...new Set(rows.map((r) => r.currencyLabel))].sort(), [rows])
 
-  if (error) {
-    return (
-      <div className="glass flex flex-col items-start gap-3 rounded-2xl p-6" role="alert">
-        <p className="text-sm text-rose">No se pudo cargar el catálogo de ONs.</p>
-        <button type="button" className="btn-ghost" onClick={() => void load()}>Reintentar</button>
-      </div>
-    )
-  }
-  if (!data) {
-    return <div className="glass flex items-center justify-center rounded-2xl p-10"><div role="status" aria-label="Cargando ONs" className="h-6 w-6 animate-spin rounded-full border-2 border-amber/30 border-t-amber" /></div>
-  }
+  if (error) return <LoadError message="No se pudo cargar el catálogo de ONs." onRetry={() => void load()} />
+  if (!data) return <Loading label="Cargando ONs" />
 
   return (
-    <div className="space-y-4">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
       {rows.length === 0 && (
-        <Banner tone="info">El catálogo de ONs todavía no tiene datos. Se actualiza cada noche desde BYMA Educa; volvé a probar mañana.</Banner>
+        <Notice tone="info">El catálogo de ONs todavía no tiene datos. Se actualiza cada noche desde BYMA Educa; volvé a probar mañana.</Notice>
       )}
       {rows.length > 0 && data.stale && (
-        <Banner tone="warn">Catálogo desactualizado: los datos de BYMA Educa son del {fmtDate(data.asOf)}.{data.prices.ok ? ' Los precios son los de hoy.' : ''}</Banner>
+        <Notice tone="warn">Catálogo desactualizado: los datos de BYMA Educa son del {fmtDate(data.asOf)}.{data.prices.ok ? ' Los precios son los de hoy.' : ''}</Notice>
       )}
       {!data.prices.ok && rows.length > 0 && (
-        <Banner tone="warn">Precios no disponibles en este momento (data912). Se muestran los términos sin TIR ni duración.</Banner>
+        <Notice tone="warn">Precios no disponibles en este momento (data912). Se muestran los términos sin TIR ni duración.</Notice>
       )}
       {rows.length > 0 && data.prices.ok && data.prices.quiet && (
-        <Banner tone="info">Mercado sin operaciones aún hoy: se muestran los precios de la última rueda.</Banner>
+        <Notice tone="info">Mercado sin operaciones aún hoy: se muestran los precios de la última rueda.</Notice>
       )}
       {rows.length > 0 && (
         <>
           <OnExplorerFilters filters={state.filters} issuers={issuers} currencies={currencies} onChange={onChange} onReset={() => push(DEFAULT_STATE)} />
-          <p className="text-xs font-mono text-slate-400" aria-live="polite">{filtered.length} de {rows.length} ONs</p>
+          <p className="text-[13px] text-ink-3 tabular-nums" aria-live="polite">{filtered.length} de {rows.length} ONs</p>
           <OnExplorerTable rows={filtered.slice(0, shown)} sort={state.sort} onSort={onSort} />
           {filtered.length > shown && (
-            <button type="button" className="btn-ghost w-full" onClick={() => setShown((s) => s + PAGE_SIZE)}>
+            <button type="button" className={`${btnSecondary} w-full`} onClick={() => setShown((s) => s + PAGE_SIZE)}>
               Mostrar {Math.min(PAGE_SIZE, filtered.length - shown)} más ({filtered.length - shown} restantes)
             </button>
           )}
-          <p className="text-[11px] font-mono leading-relaxed text-slate-500">
+          <p className="max-w-[96ch] text-[13px] leading-relaxed text-ink-3">
             Fuentes: términos y TIR de referencia de BYMA Educa (datos al {fmtDate(data.asOf)}); precios de data912
             {data.prices.fetchedAt ? ` (${formatAge(data.prices.fetchedAt)})` : ''}; TIR, duración, paridad, tasa corriente, vida promedio y spread: cálculo propio de Warren sobre precio sucio.
             Informativo, no es una recomendación de inversión.

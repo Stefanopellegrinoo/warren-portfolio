@@ -1,6 +1,8 @@
 'use client'
 
 import { fmtNum, parseEsArNumber } from '@/lib/on-format'
+import { cn } from '@/lib/utils'
+import { field, hint, label } from '../ui'
 
 export interface ItemFieldValues {
   mode: 'usd' | 'vn'
@@ -44,29 +46,29 @@ export default function PortfolioItemFields({ idPrefix, values, onChange, market
   const A = `${idPrefix}-amount`
   const P = `${idPrefix}-price`
   return (
-    <div className="grid gap-3 sm:grid-cols-[auto_1fr_1fr] sm:items-start">
-      <fieldset>
-        <legend className="mb-1 text-[11px] font-mono uppercase tracking-widest text-slate-400">Ingresar</legend>
-        <div className="flex flex-wrap gap-x-4 gap-y-1">
-          {([['usd', 'Monto en dólares (USD)'], ['vn', 'Valor nominal (VN)']] as const).map(([id, label]) => (
-            <label key={id} className="flex items-center gap-2 text-sm text-slate-200">
-              <input type="radio" name={`${idPrefix}-mode`} value={id} checked={values.mode === id} onChange={() => set({ mode: id })} />
-              {label}
+    <div className="grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] items-start gap-4 max-[1080px]:grid-cols-2 max-[819px]:grid-cols-1">
+      <fieldset className="max-[1080px]:col-span-2 max-[819px]:col-span-1">
+        <legend className={cn(label, 'mb-1')}>Ingresar</legend>
+        <div className="flex flex-wrap gap-x-5">
+          {([['usd', 'Monto en dólares (USD)'], ['vn', 'Valor nominal (VN)']] as const).map(([id, text]) => (
+            <label key={id} className="flex min-h-9 cursor-pointer items-center gap-2 max-[819px]:min-h-11">
+              <input type="radio" name={`${idPrefix}-mode`} value={id} checked={values.mode === id} onChange={() => set({ mode: id })} className="h-4 w-4 accent-[var(--accent)]" />
+              {text}
             </label>
           ))}
         </div>
       </fieldset>
-      <div className="flex flex-col gap-1">
-        <label htmlFor={A} className="text-[11px] font-mono uppercase tracking-widest text-slate-400">{values.mode === 'usd' ? 'Monto (USD)' : 'Valor nominal (VN)'}</label>
-        <input id={A} className="input-field" type="text" inputMode="decimal" autoComplete="off" value={values.amount} aria-invalid={amountBad || undefined} aria-describedby={`${A}-hint`} onChange={(e) => set({ amount: e.target.value })} />
-        <p id={`${A}-hint`} className={`text-[11px] ${amountBad ? 'text-amber' : 'text-slate-400'}`}>
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <label htmlFor={A} className={label}>{values.mode === 'usd' ? 'Monto (USD)' : 'Valor nominal (VN)'}</label>
+        <input id={A} className={field} type="text" inputMode="decimal" autoComplete="off" value={values.amount} aria-invalid={amountBad || undefined} aria-describedby={`${A}-hint`} onChange={(e) => set({ amount: e.target.value })} />
+        <p id={`${A}-hint`} className={amountBad ? 'text-[13px] font-medium text-danger' : hint}>
           {amountBad ? FORMAT_ERROR : amountValue !== null ? `Interpretado: ${values.mode === 'usd' ? 'USD' : 'VN'} ${typed(amountValue)}` : ' '}
         </p>
       </div>
-      <div className="flex flex-col gap-1">
-        <label htmlFor={P} className="text-[11px] font-mono uppercase tracking-widest text-slate-400">Precio manual (opcional, sucio por 100 VN)</label>
-        <input id={P} className="input-field" type="text" inputMode="decimal" autoComplete="off" placeholder={marketPrice != null ? fmtNum(marketPrice) : 'Precio de mercado'} value={values.price} aria-invalid={priceBad || undefined} aria-describedby={`${P}-hint`} onChange={(e) => set({ price: e.target.value })} />
-        <p id={`${P}-hint`} className={`text-[11px] ${priceBad ? 'text-amber' : 'text-slate-400'}`}>
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <label htmlFor={P} className={label}>Precio manual (opcional, sucio por 100 VN)</label>
+        <input id={P} className={field} type="text" inputMode="decimal" autoComplete="off" placeholder={marketPrice != null ? fmtNum(marketPrice) : 'Precio de mercado'} value={values.price} aria-invalid={priceBad || undefined} aria-describedby={`${P}-hint`} onChange={(e) => set({ price: e.target.value })} />
+        <p id={`${P}-hint`} className={priceBad ? 'text-[13px] font-medium text-danger' : hint}>
           {priceBad ? FORMAT_ERROR : priceValue !== null ? `Interpretado: ${typed(priceValue)} por 100 VN` : ' '}
         </p>
       </div>

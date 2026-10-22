@@ -1,6 +1,7 @@
 import { cn } from '@/lib/utils'
 import { fmtDate, safeHref } from '@/lib/on-format'
 import type { Prov } from '@/lib/bond-math'
+import { tag } from './ui'
 
 interface Props {
   prov: Prov
@@ -9,11 +10,7 @@ interface Props {
   className?: string
 }
 
-const STYLE = {
-  verified: 'border-emerald/30 bg-emerald/10 text-emerald',
-  byma: 'border-sky/30 bg-sky/10 text-sky',
-  unverified: 'border-amber/30 bg-amber/10 text-amber',
-}
+const TONE = { verified: 'ok', byma: 'info', unverified: 'warn' } as const
 
 /** Provenance of one term: verificado (primary source) / BYMA / sin verificar. */
 export default function OnSourceChip({ prov, sourceUrl, verifiedAt, className }: Props) {
@@ -28,14 +25,14 @@ export default function OnSourceChip({ prov, sourceUrl, verifiedAt, className }:
           ? 'Fuente secundaria: sin verificar contra el prospecto'
           : 'Valor por defecto según la ley aplicable: sin verificar contra el prospecto'
   const href = safeHref(sourceUrl)
-  const cls = cn('inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-mono leading-none', STYLE[prov === 'verified' ? 'verified' : unverified ? 'unverified' : 'byma'], className)
+  const cls = cn(tag(TONE[prov === 'verified' ? 'verified' : unverified ? 'unverified' : 'byma']), className)
   const text = prov === 'verified' && verifiedAt ? `${label} ${fmtDate(verifiedAt)}` : label
   return href ? (
-    <a href={href} target="_blank" rel="noopener noreferrer" title={`${title}. Ver fuente`} className={cn(cls, 'hover:brightness-125 underline-offset-2 hover:underline')}>
+    <a href={href} target="_blank" rel="noopener noreferrer" title={`${title}. Ver fuente`} className={cn(cls, 'underline decoration-1 underline-offset-2 hover:decoration-2')}>
       {text}
     </a>
   ) : (
-    <span title={title} className={cls}>
+    <span title={title} className={cn(cls, 'cursor-help')}>
       {text}
     </span>
   )

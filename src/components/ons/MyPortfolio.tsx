@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from './portfolios/api'
 import MyPortfolioView, { type MyPortfolioData } from './MyPortfolioView'
+import { Loading, LoadError } from './ui'
 
 export default function MyPortfolio() {
   const [data, setData] = useState<MyPortfolioData | null>(null)
@@ -18,14 +19,7 @@ export default function MyPortfolio() {
   }, [])
   useEffect(() => { void load() }, [load])
 
-  if (failed) {
-    return (
-      <div className="glass flex flex-col items-start gap-3 rounded-2xl p-6" role="alert">
-        <p className="text-sm text-rose">No se pudo calcular tu cartera de ONs.</p>
-        <button type="button" className="btn-ghost" onClick={() => void load()}>Reintentar</button>
-      </div>
-    )
-  }
-  if (!data) return <div className="glass flex items-center justify-center rounded-2xl p-10"><div role="status" aria-label="Cargando tu cartera" className="h-6 w-6 animate-spin rounded-full border-2 border-amber/30 border-t-amber" /></div>
+  if (failed) return <LoadError message="No se pudo calcular tu cartera de ONs." onRetry={() => void load()} />
+  if (!data) return <Loading label="Cargando tu cartera" />
   return <MyPortfolioView data={data} />
 }

@@ -1,17 +1,15 @@
-import Link from 'next/link'
 import PortfolioList from '@/components/ons/portfolios/PortfolioList'
+import { PAGE, PageHeader } from '@/components/ons/ui'
 
 export default function CarterasPage() {
   return (
-    <div className="min-h-screen">
-      <div className="space-y-6 p-4 md:p-8">
-        <Link href="/ons" className="inline-block text-sm text-slate-400 hover:text-white">← Volver al listado</Link>
-        <header>
-          <h1 className="font-display text-2xl font-bold tracking-tight text-white">Carteras de prueba de ONs</h1>
-          <p className="mt-1 text-sm text-slate-400">Combiná ONs con montos hipotéticos y mirá el calendario de cobros, la TIR y la concentración de la cartera.</p>
-        </header>
-        <PortfolioList />
-      </div>
+    <div className={PAGE}>
+      <PageHeader
+        back={{ href: '/ons', label: 'Volver al listado' }}
+        title="Carteras de prueba de ONs"
+        intro="Combiná ONs con montos hipotéticos y mirá el calendario de cobros, la TIR y la concentración de la cartera."
+      />
+      <PortfolioList />
     </div>
   )
 }

@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import type { ReactNode } from 'react'
 import OnPriceChart from './OnPriceChart'
 import OnSchedule from './OnSchedule'
@@ -9,6 +8,8 @@ import type { PricePoint } from '@/lib/on-catalog'
 import type { F } from '@/lib/on-terms'
 import { lineLabel, eventLabel, TAX_COPY, fmtBp, fmtDate, fmtNum, fmtPct, fmtVn, plazaCopy, rateTypeLabel, safeHref } from '@/lib/on-format'
 import { formatAge } from '@/lib/utils'
+import { SectionHead } from '@/components/resumen/ui'
+import { BackLink, Metric, Metrics, Notice, Tag, tag } from './ui'
 
 interface Props {
   analysis: OnAnalysis
@@ -21,40 +22,31 @@ interface Props {
 const SRC_WARREN = 'Warren (cálculo propio)'
 const BDC_LABEL = { following: 'Siguiente día hábil', modified_following: 'Siguiente día hábil modificado', preceding: 'Día hábil anterior' }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
-    <section className="glass rounded-2xl p-5">
-      <h2 className="mb-3 font-display text-sm font-bold uppercase tracking-widest text-slate-300">{title}</h2>
-      {children}
+    <section aria-labelledby={id} className="min-w-0">
+      <SectionHead id={id} title={title} />
+      <div className="pt-4">{children}</div>
     </section>
   )
 }
 
-function Tile({ label, value, source, children }: { label: string; value: string; source: string; children?: ReactNode }) {
-  return (
-    <div className="kpi-card">
-      <span className="text-[11px] font-mono uppercase tracking-widest text-slate-400">{label}</span>
-      <span className="text-xl font-bold tracking-tight text-white">{value}</span>
-      {children}
-      <span className="text-[10px] font-mono text-slate-500">{source}</span>
-    </div>
-  )
+function Tile({ label, value, source, children, className }: { label: string; value: string; source: string; children?: ReactNode; className?: string }) {
+  return <Metric label={label} value={value} hint={source} className={className}>{children}</Metric>
 }
 
 function Term({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex flex-col gap-0.5 border-b border-bg-600/40 py-2 sm:flex-row sm:items-baseline sm:gap-4">
-      <dt className="w-56 shrink-0 text-[11px] font-mono uppercase tracking-widest text-slate-500">{label}</dt>
-      <dd className="flex flex-wrap items-center gap-2 text-sm text-slate-200">{children}</dd>
+    <div className="grid grid-cols-[14rem_minmax(0,1fr)] items-baseline gap-4 border-b border-line py-2.5 last:border-b-0 max-[819px]:grid-cols-1 max-[819px]:gap-1">
+      <dt className="text-ink-3">{label}</dt>
+      <dd className="flex min-w-0 flex-wrap items-center gap-2 break-words">{children}</dd>
     </div>
   )
 }
 
 const chip = <T,>(f: F<T>) => <OnSourceChip prov={f.prov} sourceUrl={f.sourceUrl} verifiedAt={f.verifiedAt} />
 
-function Banner({ children }: { children: ReactNode }) {
-  return <div role="status" className="rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-sm text-amber">{children}</div>
-}
+const Banner = ({ children }: { children: ReactNode }) => <Notice>{children}</Notice>
 
 export default function OnDetail({ analysis, history, asOf, stale, prices }: Props) {
   const { row, detail } = analysis
@@ -63,43 +55,48 @@ export default function OnDetail({ analysis, history, asOf, stale, prices }: Pro
   const floating = row.rateType === 'floating'
   const flag = row.methodFlag
   const note = row.termsNote
-  const lot = (f: F<number | null>, unknown: string) => (f.value === null ? <span className="text-slate-400">{unknown}</span> : <span>{fmtVn(f.value)}</span>)
+  const lot = (f: F<number | null>, unknown: string) => (f.value === null ? <span className="text-ink-3">{unknown}</span> : <span>{fmtVn(f.value)}</span>)
 
   return (
-    <div className="space-y-5">
-      <Link href="/ons" className="inline-block text-sm text-slate-400 hover:text-white">← Volver al listado</Link>
-
-      <header className="space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="font-display text-2xl font-bold tracking-tight text-white">{row.tickerO}</h1>
-          <span className="rounded-full border border-slate-500/30 px-2 py-0.5 text-[11px] font-mono text-slate-300">{row.currencyLabel} · Ley {row.law === 'ARG' ? 'argentina' : 'Nueva York'}</span>
-          <span className="rounded-full border border-slate-500/30 px-2 py-0.5 text-[11px] font-mono text-slate-300">{rateTypeLabel(row.rateType)}</span>
-          {floating && <span title="Tasa variable: no se proyectan los cupones, por eso no se calcula TIR ni se puede simular" className="cursor-help rounded-full border border-slate-500/30 bg-slate-500/10 px-2 py-0.5 text-[11px] font-mono text-slate-400">No simulable</span>}
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-10">
+      <header>
+        <BackLink href="/ons">Volver al listado</BackLink>
+        <h1 className="font-serif text-[2rem] font-normal leading-tight tracking-[-0.015em] max-[819px]:text-2xl">{row.tickerO}</h1>
+        <p className="mt-1 break-words text-ink-3">{row.issuer ?? 'Emisor sin dato'}{row.description ? ` · ${row.description}` : ''} · {row.isin}</p>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Tag tone="neutral">{row.currencyLabel} · Ley {row.law === 'ARG' ? 'argentina' : 'Nueva York'}</Tag>
+          <Tag tone="neutral">{rateTypeLabel(row.rateType)}</Tag>
+          {floating && <Tag tone="neutral" title="Tasa variable: no se proyectan los cupones, por eso no se calcula TIR ni se puede simular">No simulable</Tag>}
           {row.events.map((e) => {
             const href = safeHref(e.sourceUrl)
             const text = `${eventLabel(e.kind)} ${fmtDate(e.eventDate)}`
-            const cls = 'rounded-full border border-sky/30 bg-sky/10 px-2 py-0.5 text-[11px] font-mono text-sky'
-            return href ? <a key={`${e.kind}-${e.eventDate}`} href={href} target="_blank" rel="noopener noreferrer" title={e.note ?? undefined} className={cls}>{text}</a> : <span key={`${e.kind}-${e.eventDate}`} className={cls}>{text}</span>
+            const cls = tag('info')
+            return href ? <a key={`${e.kind}-${e.eventDate}`} href={href} target="_blank" rel="noopener noreferrer" title={e.note ?? undefined} className={`${cls} underline-offset-2 hover:underline`}>{text}</a> : <span key={`${e.kind}-${e.eventDate}`} className={cls}>{text}</span>
           })}
         </div>
-        <p className="text-sm text-slate-400">{row.issuer ?? 'Emisor sin dato'}{row.description ? ` · ${row.description}` : ''} · <span className="font-mono">{row.isin}</span></p>
       </header>
 
+      {(stale || (prices.ok && prices.quiet) || !prices.ok) && (
+      <div className="-mt-6 grid gap-2">
       {stale && <Banner>Catálogo desactualizado: los datos de BYMA Educa son del {fmtDate(asOf)}.</Banner>}
       {prices.ok && prices.quiet && <Banner>Mercado sin operaciones aún hoy: se muestran los precios de la última rueda.</Banner>}
       {!prices.ok && <Banner>Precios no disponibles en este momento (data912): no se calculan TIR ni duración.</Banner>}
+      </div>
+      )}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section aria-labelledby="on-metrics" className="min-w-0">
+      <SectionHead id="on-metrics" title="Precio y rendimiento" />
+      <Metrics>
         {priced ? (
           <>
             <Tile label="Precio sucio" value={fmtNum(row.price)} source={`data912, ${lineLabel(row.priceLine, row.cclUsed)}${prices.fetchedAt ? ` · ${formatAge(prices.fetchedAt)}` : ''}`}>
               {row.priceLine === 'O' && row.cclUsed && (
-                <span className="text-[11px] leading-tight text-slate-400">
+                <span>
                   Precio implícito: línea O (pesos) ÷ CCL de ${fmtNum(row.cclUsed.rate)} (CCL al {fmtDate(row.cclUsed.asOf.slice(0, 10))}), mismo método que BYMA (CCL implícito de GGAL).
                 </span>
               )}
               {row.lineFallback && row.priceLine !== 'O' && (
-                <span className="text-[11px] leading-tight text-slate-400">
+                <span className="text-warn">
                   Atención: precio de la línea {row.priceLine}; esta ON paga en dólar {row.plaza === 'CCL' ? 'cable' : 'MEP'}: la TIR no incluye el canje.
                 </span>
               )}
@@ -108,22 +105,22 @@ export default function OnDetail({ analysis, history, asOf, stale, prices }: Pro
             <Tile label="Intereses devengados" value={fmtNum(detail.accrued, 4)} source={SRC_WARREN} />
             <Tile label="Paridad" value={fmtPct(row.paridadPct)} source={SRC_WARREN} />
             <Tile label={row.priceLine === 'O' ? 'TIR Warren (precio en dólares, implícito O ÷ CCL)' : `TIR Warren (precio en dólares, línea ${row.priceLine})`} value={fmtPct(row.ytmPct)} source={SRC_WARREN}>
-              {row.priceQuality === 'no-trades' && <span className="text-[11px] text-slate-400">Atención: precio de referencia sin operaciones en la línea {row.priceLine}{row.priceLine === 'O' ? ' (pesos)' : ''} en la rueda; la TIR puede no ser representativa.</span>}
-              {row.shortDated && <span className="text-[10px] text-slate-400">Vence en menos de 90 días: la TIR es muy sensible al precio y poco representativa.</span>}
+              {row.priceQuality === 'no-trades' && <span className="text-warn">Atención: precio de referencia sin operaciones en la línea {row.priceLine}{row.priceLine === 'O' ? ' (pesos)' : ''} en la rueda; la TIR puede no ser representativa.</span>}
+              {row.shortDated && <span>Vence en menos de 90 días: la TIR es muy sensible al precio y poco representativa.</span>}
               {flag && (
-                <span className="rounded-md border border-amber/30 bg-amber/10 px-1.5 py-1 text-[11px] leading-tight text-amber">
+                <span className="rounded bg-warn-soft px-2 py-1 text-warn">
                   Cálculo no verificado: difiere de BYMA (BYMA {fmtPct(flag.bymaYtmPct)} · Warren {fmtPct(flag.methodYtmPct)}, {fmtBp(flag.diffBp)}, control del {fmtDate(flag.asOf)}). Ninguno es definitivo.
                 </span>
               )}
               {!flag && note && (
-                <span className="text-[11px] leading-tight text-slate-400">
+                <span>
                   Con los términos de Warren la TIR es {fmtPct(note.termsYtmPct)}; BYMA informa {fmtPct(note.bymaYtmPct)} ({fmtBp(note.diffBp)}): difiere de BYMA por convención de intereses. Es informativo.
                 </span>
               )}
             </Tile>
             {row.bymaYtm && (
               <Tile label="TIR BYMA (precio en pesos ÷ MEP)" value={fmtPct(row.bymaYtm.pct)} source={`BYMA Educa · ${fmtDate(row.bymaYtm.asOf)}`}>
-                <span className="text-[11px] leading-tight text-slate-400">Ambas TIR son válidas y pueden diferir porque parten de precios distintos: la de BYMA usa el precio en pesos dividido por el MEP; la de Warren, el precio en dólares de la línea D.</span>
+                <span>Ambas TIR son válidas y pueden diferir porque parten de precios distintos: la de BYMA usa el precio en pesos dividido por el MEP; la de Warren, el precio en dólares de la línea D.</span>
               </Tile>
             )}
             {detail.ytw && (
@@ -132,7 +129,7 @@ export default function OnDetail({ analysis, history, asOf, stale, prices }: Pro
                 value={fmtPct(detail.ytw.ytwPct)}
                 source={SRC_WARREN}
               >
-                <span className="text-[11px] text-slate-400">{detail.ytw.kind === 'call' ? `Hasta rescate el ${fmtDate(detail.ytw.workoutDate)}` : `Hasta vencimiento el ${fmtDate(detail.ytw.workoutDate)}`}</span>
+                <span>{detail.ytw.kind === 'call' ? `Hasta rescate el ${fmtDate(detail.ytw.workoutDate)}` : `Hasta vencimiento el ${fmtDate(detail.ytw.workoutDate)}`}</span>
               </Tile>
             )}
             <Tile label="Tasa corriente" value={fmtPct(row.currentYieldPct)} source={`${SRC_WARREN} · sobre precio limpio`} />
@@ -143,38 +140,37 @@ export default function OnDetail({ analysis, history, asOf, stale, prices }: Pro
             <Tile label="Spread vs. soberana" value={fmtBp(row.spreadBp)} source="Opcional · referencial · BYMA Educa + Warren" />
           </>
         ) : (
-          <div className="kpi-card col-span-2 lg:col-span-4">
-            <span className="text-[11px] font-mono uppercase tracking-widest text-slate-400">Precio y rendimiento</span>
-            <span className="text-xl font-bold text-slate-300">{floating ? '—' : 'Sin precio'}</span>
-            <span className="text-xs text-slate-400">
+          <Metric label="Precio y rendimiento" value={floating ? '—' : 'Sin precio'} valueClass="text-ink-2" className="col-span-4 max-[1080px]:col-span-3 max-[819px]:col-span-2">
+            <span>
               {floating ? 'Tasa variable: no se calcula TIR ni duración.' : row.currency !== 'USD' ? 'Esta ON no cotiza en dólares: no se calcula TIR con un precio en otra moneda.' : 'No hay cotización de la línea D (dólar MEP): no se calculan TIR, duración ni paridad. Los términos y el cronograma siguen disponibles.'}
             </span>
-          </div>
+          </Metric>
         )}
         <Tile label="Próximo pago" value={row.nextPayDate ? fmtDate(row.nextPayDate) : '—'} source={row.nextPayAmountPct !== null ? `${fmtNum(row.nextPayAmountPct, 4)}% del VN original · fecha ajustada por día hábil` : 'Sin pagos futuros'} />
-      </div>
+      </Metrics>
+      </section>
 
-      <Section title="Historial de precio">
-        <p className="mb-2 text-[11px] font-mono text-slate-500">Precio sucio de la línea D · data912</p>
+      <Section id="on-history" title="Historial de precio">
+        <p className="mb-2 text-[13px] text-ink-3">Precio sucio de la línea D · data912</p>
         <OnPriceChart history={history} ticker={row.tickerD} />
       </Section>
 
-      <Section title="Cronograma de pagos">
+      <Section id="on-schedule" title="Cronograma de pagos">
         <OnSchedule schedule={detail.schedule} floating={floating} />
       </Section>
 
       <OnSimulator analysis={analysis} />
 
-      <Section title="Condiciones de emisión">
+      <Section id="on-terms" title="Condiciones de emisión">
         <dl>
           <Term label="Emisor">{row.issuer ?? 'sin dato'}{row.description ? ` · ${row.description}` : ''}</Term>
           <Term label="Tickers">{[row.tickerO, row.tickerD, detail.tickerC].filter(Boolean).join(' · ')}</Term>
           <Term label="Plaza de pago"><span>{plazaCopy(t.paymentPlaza.value)}</span>{chip(t.paymentPlaza)}</Term>
           <Term label="Monto emitido">
-            {t.issuedAmount.value === null ? <span className="text-slate-400">sin dato</span> : <span>{fmtVn(t.issuedAmount.value)}</span>}
+            {t.issuedAmount.value === null ? <span className="text-ink-3">sin dato</span> : <span>{fmtVn(t.issuedAmount.value)}</span>}
             {t.issuedAmount.prov !== 'byma' && t.issuedAmount.value !== null && chip(t.issuedAmount)}
             {t.issuedAmountByma !== null && (t.issuedAmount.prov === 'byma' || t.issuedAmount.value !== t.issuedAmountByma) && (
-              <span className="text-[11px] text-slate-500">{fmtVn(t.issuedAmountByma)} según BYMA, puede estar desactualizado</span>
+              <span className="text-[13px] text-ink-3">{fmtVn(t.issuedAmountByma)} según BYMA, puede estar desactualizado</span>
             )}
           </Term>
           <Term label="Emisión / vencimiento">{fmtDate(detail.issueDate)} → {fmtDate(row.maturityDate)}</Term>
@@ -183,7 +179,7 @@ export default function OnDetail({ analysis, history, asOf, stale, prices }: Pro
           <Term label="Día hábil (pagos)"><span>{BDC_LABEL[t.bdc.value]}</span>{chip(t.bdc)}</Term>
           <Term label="Día hábil (vencimiento)"><span>{BDC_LABEL[t.maturityBdc.value]}</span>{chip(t.maturityBdc)}</Term>
           <Term label="Fecha de registro">
-            {t.recordOffsetDays.value === null ? <span className="text-slate-400">sin fecha de registro cargada</span> : <span>{t.recordOffsetDays.value} días corridos antes del pago</span>}
+            {t.recordOffsetDays.value === null ? <span className="text-ink-3">sin fecha de registro cargada</span> : <span>{t.recordOffsetDays.value} días corridos antes del pago</span>}
             {chip(t.recordOffsetDays)}
           </Term>
           <Term label="Lámina mínima (VN)">{lot(t.minDenomination, 'lámina mínima desconocida')}{chip(t.minDenomination)}</Term>
@@ -192,14 +188,14 @@ export default function OnDetail({ analysis, history, asOf, stale, prices }: Pro
         </dl>
       </Section>
 
-      <Section title="Opciones de rescate y venta">
-        <div className="space-y-2 text-sm text-slate-200">
+      <Section id="on-calls" title="Opciones de rescate y venta">
+        <div className="grid gap-2">
           {t.calls.value.length === 0 ? (
-            <p className="flex flex-wrap items-center gap-2"><span className="text-slate-400">Sin opciones de rescate registradas</span>{chip(t.calls)}</p>
+            <p className="flex flex-wrap items-center gap-2"><span className="text-ink-2">Sin opciones de rescate registradas</span>{chip(t.calls)}</p>
           ) : (
             <>
               <p className="flex flex-wrap items-center gap-2"><span>Rescate anticipado del emisor</span>{chip(t.calls)}</p>
-              <ul className="list-disc space-y-1 pl-5 font-mono text-xs">
+              <ul className="list-disc space-y-1 pl-5 tabular-nums">
                 {t.calls.value.map((c) => (
                   <li key={c.from}>Desde {fmtDate(c.from)}{c.to ? ` hasta ${fmtDate(c.to)}` : ' sin fecha límite'}: {fmtPct(c.pricePct)} del valor residual</li>
                 ))}
@@ -209,7 +205,7 @@ export default function OnDetail({ analysis, history, asOf, stale, prices }: Pro
           {t.puts.value.length > 0 && (
             <>
               <p className="flex flex-wrap items-center gap-2"><span>Opciones de venta del inversor</span>{chip(t.puts)}</p>
-              <ul className="list-disc space-y-1 pl-5 font-mono text-xs">
+              <ul className="list-disc space-y-1 pl-5 tabular-nums">
                 {t.puts.value.map((p, i) => (
                   <li key={`${p.kind}-${i}`}>
                     {p.kind === 'change_of_control' ? 'Por cambio de control' : p.kind}: {fmtPct(p.pricePct)}{p.note ? ` · ${p.note}` : ''}
@@ -219,7 +215,7 @@ export default function OnDetail({ analysis, history, asOf, stale, prices }: Pro
               </ul>
             </>
           )}
-          <p className="text-[11px] text-slate-500">El rendimiento al peor considera solo rescates con fecha cierta; las opciones contingentes no se incluyen.</p>
+          <p className="text-[13px] text-ink-3">El rendimiento al peor considera solo rescates con fecha cierta; las opciones contingentes no se incluyen.</p>
         </div>
       </Section>
 
@@ -227,11 +223,11 @@ export default function OnDetail({ analysis, history, asOf, stale, prices }: Pro
         <Banner>Hay datos curados que no se pudieron leer ({detail.warnings.map((w) => w.field).join(', ')}) y se usaron los valores por defecto.</Banner>
       )}
 
-      <Section title="Impuestos">
-        <p className="text-sm text-slate-300">{TAX_COPY}</p>
+      <Section id="on-taxes" title="Impuestos">
+        <p className="max-w-[80ch] text-ink-2">{TAX_COPY}</p>
       </Section>
 
-      <p className="text-[11px] font-mono leading-relaxed text-slate-500">
+      <p className="max-w-[96ch] text-[13px] leading-relaxed text-ink-3">
         Fuentes: términos y cronograma de BYMA Educa (datos al {fmtDate(detail.asOf)}) con condiciones curadas por Warren; precios de data912 (precio sucio);
         TIR, duración, convexidad, paridad, tasa corriente, vida promedio y spread: {SRC_WARREN}. Informativo, no es una recomendación de inversión.
       </p>

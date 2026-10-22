@@ -5,6 +5,7 @@ import type { ExplorerFilters } from '@/lib/on-explorer-filters'
 import { DEFAULT_STATE } from '@/lib/on-explorer-filters'
 import { rateTypeLabel } from '@/lib/on-format'
 import type { RateType } from '@/lib/on-analytics'
+import { btnSecondary, field, label as labelCls } from './ui'
 
 interface Props {
   filters: ExplorerFilters
@@ -15,12 +16,12 @@ interface Props {
 }
 
 const RATE_TYPES: RateType[] = ['fixed', 'step', 'zero', 'floating']
-const FIELD = 'input-field w-full'
+const FIELD = field
 
 function Field({ id, label, children, wide }: { id: string; label: string; children: ReactNode; wide?: boolean }) {
   return (
     <div className={`flex min-w-0 flex-col gap-1 ${wide ? 'col-span-2' : ''}`}>
-      <label htmlFor={id} className="text-[10px] font-mono uppercase tracking-widest text-slate-400">{label}</label>
+      <label htmlFor={id} className={labelCls}>{label}</label>
       {children}
     </div>
   )
@@ -38,13 +39,13 @@ export default function OnExplorerFilters({ filters: f, issuers, currencies, onC
     </Field>
   )
   return (
-    <div className="space-y-2">
-      <button type="button" aria-expanded={open} aria-controls="on-filters" onClick={() => setOpen((o) => !o)} className="btn-ghost w-full md:hidden">
+    <div className="grid gap-2">
+      <button type="button" aria-expanded={open} aria-controls="on-filters" onClick={() => setOpen((o) => !o)} className={`${btnSecondary} w-full min-[820px]:hidden`}>
         {open ? 'Ocultar filtros' : 'Mostrar filtros'}{isActive(f) ? ' (activos)' : ''}
       </button>
-      <form id="on-filters" role="search" aria-label="Filtros de ONs" onSubmit={(e) => e.preventDefault()} className={`glass ${open ? 'grid' : 'hidden'} grid-cols-2 gap-3 rounded-2xl p-4 md:grid md:grid-cols-4 xl:grid-cols-6`}>
+      <form id="on-filters" role="search" aria-label="Filtros de ONs" onSubmit={(e) => e.preventDefault()} className={`${open ? 'grid' : 'hidden'} grid-cols-6 gap-x-4 gap-y-3 border-b border-line pb-4 max-[1080px]:grid-cols-4 max-[819px]:grid-cols-2 min-[820px]:grid`}>
         <Field id="on-q" label="Buscar" wide>
-          <input id="on-q" type="search" placeholder="Ticker, emisor o ISIN" className={`${FIELD} min-w-0 md:min-w-[11rem]`} value={f.q} onChange={(e) => onChange({ q: e.target.value })} />
+          <input id="on-q" type="search" placeholder="Ticker, emisor o ISIN" className={`${FIELD} min-w-0 min-[820px]:min-w-[11rem]`} value={f.q} onChange={(e) => onChange({ q: e.target.value })} />
         </Field>
         <Field id="on-issuer" label="Emisor">
           <select id="on-issuer" className={FIELD} value={f.issuer} onChange={(e) => onChange({ issuer: e.target.value })}>
@@ -83,7 +84,7 @@ export default function OnExplorerFilters({ filters: f, issuers, currencies, onC
         {num('on-md-max', 'Duración máx.', 'mdMax')}
         {isActive(f) && (
           <div className="flex items-end">
-            <button type="button" onClick={onReset} className="btn-ghost w-full">Limpiar filtros</button>
+            <button type="button" onClick={onReset} className={`${btnSecondary} w-full`}>Limpiar filtros</button>
           </div>
         )}
       </form>

@@ -3,7 +3,9 @@
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
 import { fmtDate } from '@/lib/on-format'
+import { SectionHead } from '@/components/resumen/ui'
 import { api } from './api'
+import { btnPrimary, btnQuiet, btnSecondary, field, label, Loading, LoadError, notice } from '../ui'
 
 interface Item { id: string; name: string; itemCount: number; updatedAt: string }
 interface Listing { portfolios: Item[]; limits: { portfolios: number; items: number } }
@@ -42,55 +44,53 @@ export default function PortfolioList() {
     await load()
   }
 
-  if (failed) {
-    return (
-      <div className="glass flex flex-col items-start gap-3 rounded-2xl p-6" role="alert">
-        <p className="text-sm text-rose">No se pudieron cargar tus carteras.</p>
-        <button type="button" className="btn-ghost" onClick={() => void load()}>Reintentar</button>
-      </div>
-    )
-  }
-  if (!data) return <div className="glass flex items-center justify-center rounded-2xl p-10"><div role="status" aria-label="Cargando carteras" className="h-6 w-6 animate-spin rounded-full border-2 border-amber/30 border-t-amber" /></div>
+  if (failed) return <LoadError message="No se pudieron cargar tus carteras." onRetry={() => void load()} />
+  if (!data) return <Loading label="Cargando carteras" />
 
   const full = data.portfolios.length >= data.limits.portfolios
   return (
-    <div className="space-y-5">
-      <section className="glass rounded-2xl p-5" aria-labelledby="pl-new">
-        <h2 id="pl-new" className="mb-3 font-display text-sm font-bold uppercase tracking-widest text-slate-300">Nueva cartera ({data.portfolios.length} de {data.limits.portfolios})</h2>
-        {full ? <p className="text-sm text-amber">Llegaste al máximo de {data.limits.portfolios} carteras. Eliminá una para crear otra.</p> : (
-          <form onSubmit={(e) => void create(e)} className="flex max-w-md items-end gap-2">
-            <div className="flex min-w-0 flex-1 flex-col gap-1">
-              <label htmlFor="pl-name" className="text-[11px] font-mono uppercase tracking-widest text-slate-400">Nombre</label>
-              <input id="pl-name" className="input-field" maxLength={60} autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej.: Ingreso mensual en dólares" />
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-10">
+      <section aria-labelledby="pl-new">
+        <SectionHead id="pl-new" title={`Nueva cartera (${data.portfolios.length} de ${data.limits.portfolios})`} />
+        <div className="pt-4">
+        {full ? <p className={notice('warn')}>Llegaste al máximo de {data.limits.portfolios} carteras. Eliminá una para crear otra.</p> : (
+          <form onSubmit={(e) => void create(e)} className="flex max-w-md items-end gap-2 max-[819px]:max-w-none">
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+              <label htmlFor="pl-name" className={label}>Nombre</label>
+              <input id="pl-name" className={field} maxLength={60} autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej.: Ingreso mensual en dólares" />
             </div>
-            <button type="submit" className="btn-primary" disabled={busy || name.trim() === ''}>Crear</button>
+            <button type="submit" className={btnPrimary} disabled={busy || name.trim() === ''}>Crear</button>
           </form>
         )}
-        <p aria-live="assertive" role={message ? 'alert' : undefined} className={message ? 'mt-3 text-sm text-amber' : 'sr-only'}>{message}</p>
+        <p aria-live="assertive" role={message ? 'alert' : undefined} className={message ? `mt-3 ${notice('danger')}` : 'sr-only'}>{message}</p>
+        </div>
       </section>
 
       {data.portfolios.length === 0 ? (
-        <p className="text-sm text-slate-400">Todavía no tenés carteras de prueba. Creá la primera para armar una combinación de ONs y ver su calendario de cobros.</p>
+        <p className="text-ink-2">Todavía no tenés carteras de prueba. Creá la primera para armar una combinación de ONs y ver su calendario de cobros.</p>
       ) : (
-        <ul className="grid gap-3 md:grid-cols-2" aria-label="Mis carteras de prueba">
+        <section aria-labelledby="pl-list">
+        <SectionHead id="pl-list" title="Mis carteras de prueba" count={data.portfolios.length} />
+        <ul aria-label="Mis carteras de prueba">
           {data.portfolios.map((p) => (
-            <li key={p.id} className="glass flex flex-wrap items-center justify-between gap-3 rounded-2xl p-4">
-              <div className="min-w-0">
-                <Link href={`/ons/carteras/${p.id}`} className="block truncate font-display text-base font-bold text-white hover:text-amber">{p.name}</Link>
-                <p className="text-xs text-slate-400">{p.itemCount} {p.itemCount === 1 ? 'ON' : 'ONs'} · actualizada {fmtDate(p.updatedAt.slice(0, 10))}</p>
+            <li key={p.id} className="flex min-h-14 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line py-2.5 last:border-b-0">
+              <div className="min-w-0 flex-1">
+                <Link href={`/ons/carteras/${p.id}`} className="block truncate font-semibold text-ink hover:text-accent-ink hover:underline hover:underline-offset-2">{p.name}</Link>
+                <p className="text-[13px] text-ink-3">{p.itemCount} {p.itemCount === 1 ? 'ON' : 'ONs'} · actualizada {fmtDate(p.updatedAt.slice(0, 10))}</p>
               </div>
               {confirming === p.id ? (
-                <div className="flex items-center gap-2" role="group" aria-label={`Confirmar eliminación de ${p.name}`}>
-                  <span className="text-xs text-amber">¿Eliminar?</span>
-                  <button type="button" className="btn-ghost" disabled={busy} onClick={() => void remove(p.id)}>Sí, eliminar</button>
-                  <button type="button" className="btn-ghost" onClick={() => setConfirming(null)}>Cancelar</button>
+                <div className="flex flex-wrap items-center gap-2" role="group" aria-label={`Confirmar eliminación de ${p.name}`}>
+                  <span className="text-[13px] font-medium text-danger">¿Eliminar?</span>
+                  <button type="button" className={`${btnSecondary} text-danger`} disabled={busy} onClick={() => void remove(p.id)}>Sí, eliminar</button>
+                  <button type="button" className={btnQuiet} onClick={() => setConfirming(null)}>Cancelar</button>
                 </div>
               ) : (
-                <button type="button" className="btn-ghost" onClick={() => setConfirming(p.id)} aria-label={`Eliminar ${p.name}`}>Eliminar</button>
+                <button type="button" className={btnQuiet} onClick={() => setConfirming(p.id)} aria-label={`Eliminar ${p.name}`}>Eliminar</button>
               )}
             </li>
           ))}
         </ul>
+        </section>
       )}
     </div>
   )

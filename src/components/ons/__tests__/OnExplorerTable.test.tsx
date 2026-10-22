@@ -111,7 +111,7 @@ describe('OnExplorerTable', () => {
   it('no-trades: visible tag, dimmed yield, sr-only text', () => {
     const html = render([row({ priceQuality: 'no-trades' })])
     expect(html).toContain('sin operaciones en la rueda')
-    expect(html).toContain('text-[11px]')
+    expect(html).toContain('text-warn') // the tag is a warning in text, not color only
     expect(html).not.toContain('opacity-50') // dimming must keep AA contrast
     expect(html).toContain('class="sr-only"')
     expect(render([row()])).not.toContain('sin operaciones en la rueda')
@@ -154,5 +154,16 @@ describe('OnExplorerTable', () => {
     expect(html).toContain('aria-sort="descending"')
     expect(html).toContain('<caption')
     expect(html.match(/aria-sort="none"/g)!.length).toBeGreaterThan(3)
+  })
+
+  it('phones get a stacked list with its own sort control, since the table header is hidden there', () => {
+    const html = render([row()], { key: 'ytm', dir: 'desc' })
+    expect(html).toMatch(/<label[^>]*for="on-sort"[^>]*>Ordenar por</)
+    expect(html).toMatch(/<option value="ytm" selected="">TIR</)
+    expect(html).toContain('Mayor a menor')
+    const list = html.match(/<ul aria-label="Obligaciones negociables"[\s\S]*?<\/ul>/)![0]
+    expect(list).toContain('href="/ons/AR0000000001"')
+    expect(list).toContain('6,09%')
+    expect(list).toContain('Vence 22/10/2029')
   })
 })
