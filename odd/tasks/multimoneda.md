@@ -54,3 +54,9 @@ Branch: `feat/multimoneda`. Delivery: ask-on-risk. Test runner: vitest. Design: 
   - Backfill function all-or-nothing and service_role only.
   - Real dry run, expected: 161 planned / 0 skipped; ACCION 124, CEDEAR 24, ON 13; CCL 124, MEP 33, ARS 4; needs_review 8 (DIS×2, TGS×2, PAM×2, VST loaded 6 days late, MSFT non-integer 297.9 CEDEARs). The CEDEAR round-trip is exact.
   - Advisories: A1 load day is the UTC date; A2 apply 044 before deploying; A3 float noise in FX; A4/A5 FX edit edge cases; A6 old MEP commission (pre-existing, all real commissions are 0).
+- L9 (2026-10-22): 044 applied in two parts.
+  - Columns via MCP.
+  - RPC + backfill function pasted by the user in the SQL Editor; the MCP UI froze three times on the long function.
+  - Live body is identical to the verified file (comment/whitespace-stripped md5 d773443d…).
+  - Backfill applied: 161 rows in one transaction; backup in trade-record-backup-2026-10-22T16-10-58-617Z.json (gitignored). DB check: 0 missing FX, 0 FX after trade date, 8 needs_review.
+  - Stage B pushed: master bd1f385..3a24dd1.
