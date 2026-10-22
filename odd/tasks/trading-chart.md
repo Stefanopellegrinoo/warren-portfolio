@@ -29,11 +29,11 @@ Base library, chosen by the user: lightweight-charts 5.2 + `lightweight-charts-d
 
 | ID | Specs | Route | Status | Evidence |
 |---|---|---|---|---|
-| T1 | S1, S2 | inline | todo | |
-| T2 | S1 | inline | todo | |
-| T3 | S3, S4 | inline | todo | |
-| T4 | S5, S6 | inline | todo | |
-| T5 | S7 | inline | todo | |
+| T1 | S1, S2 | inline | done | 44914a1 (+60 s TTL in 9a72184); RED→GREEN klines route 5 tests, provider 3 tests |
+| T2 | S1 | inline | done | 9a72184; browser: 1 AAPL klines request, error+retry, 15m interval, 375 px no scroll |
+| T3 | S3, S4 | inline | done (migration 042 applied 2026-10-22, user OK) | 81a9c76 + 9a72184; browser: legacy 2 rows converted+saved, trend line/fib placed, Delete removes |
+| T4 | S5, S6 | backend delegated (writer: parallel unit), UI inline | done (prod worker unverified) | ed534ee + 9a72184; browser: create, select, re-arm, drag PATCH |
+| T5 | S7 | delegated (context backstop) | done | 7a73555, 0fac55d, d15a5f3; sweep 11 widths x 2 themes PASS; 1838 tests |
 
 - T1: market data. `/api/klines` takes `interval` in 15m/1h/1d/1w/1mo with a bounded range per interval, uses `yf.chart()` for intraday, and adds a Redis cache (TTL 60 s intraday, 15 min daily+). The CCL lookup covers only the range.
 - T2: a single chart core. Replaces `PriceChart` with one instance and a candles hook (abort on change, error state); live update via `series.update`; indicators in v5 panes. EMA add/remove and hide work; quote polls are consolidated.
@@ -47,3 +47,6 @@ Base library, chosen by the user: lightweight-charts 5.2 + `lightweight-charts-d
 - L2 (2026-10-22, user): library choice "LWC + plugin (Recommended)".
 - L3 (2026-10-22, user): "Que tanta pregunta arranca, el cambio de ui solo lo hiciste del Dashboard que te pasa?" → skip questions; the other pages follow after Trading, one at a time (spec 2026-10-21 lists them as non-goals of the first project).
 - L4: diagnosis evidence lives in memory `trading-diagnostico-2026-10-22`. Prod data: 18 drawings (17 `horizontal_ray`, 1 `channel`); 6 alerts (5 triggered, last 2026-07-02).
+- L5: T1-T4 done in 4 commits. Note: timeframes.ts was written together with its test (RED not observed); every later module observed RED first. Design correction: live Yahoo bars come from re-polling /api/klines (TTL 60 s) because rolling bars from quotes invented bars after the close.
+- L6: pending user decisions: apply migration 042 to the shared Supabase (without it /api/chart-drawings returns 500 and the chart shows "Dibujos sin guardar"); ssh to prod to check that the worker container runs.
+- L7 (2026-10-22, ssh read-only with user OK, host `portfolio`): prod worker `warren-portfolio-worker-1` runs, job every 5 min (skipped while market closed). TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are UNSET in the worker; log: "Telegram disabled". Triggered alerts therefore change status silently and never notify — a root cause of "alertas andan muy mal" outside the code.
