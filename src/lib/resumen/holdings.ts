@@ -25,6 +25,39 @@ export interface HoldingRow {
   estimated?: boolean
 }
 
+export type SortKey = 'ticker' | 'quantity' | 'price' | 'avgCost' | 'invested' | 'value' | 'dayChangePct' | 'pnl' | 'pnlPct' | 'weightPct'
+export interface Sort { key: SortKey; dir: 'asc' | 'desc' }
+export const DEFAULT_SORT: Sort = { key: 'value', dir: 'desc' }
+
+/** Rows without the figure (no price yet) go last whichever way you sort. */
+export function sortRows(rows: HoldingRow[], sort: Sort): HoldingRow[] {
+  return [...rows].sort((a, b) => {
+    const av = a[sort.key], bv = b[sort.key]
+    if (av === null && bv === null) return 0
+    if (av === null) return 1
+    if (bv === null) return -1
+    const cmp = typeof av === 'string' ? av.localeCompare(bv as string) : (av as number) - (bv as number)
+    return sort.dir === 'asc' ? cmp : -cmp
+  })
+}
+
+/** Same column flips the direction; a new one starts A→Z for names, biggest first for figures. */
+export function nextSort(sort: Sort, key: SortKey): Sort {
+  if (sort.key === key) return { key, dir: sort.dir === 'asc' ? 'desc' : 'asc' }
+  return { key, dir: key === 'ticker' ? 'asc' : 'desc' }
+}
+
+const GROUPS: { kind: HoldingKind; title: string }[] = [
+  { kind: 'stock', title: 'Acciones' },
+  { kind: 'cedear', title: 'CEDEARs' },
+  { kind: 'on', title: 'Obligaciones negociables' },
+]
+
+/** One group per asset type, in a fixed order, keeping the rows' order inside each. */
+export function groupRows(rows: HoldingRow[]): { kind: HoldingKind; title: string; items: HoldingRow[] }[] {
+  return GROUPS.map(g => ({ ...g, items: rows.filter(r => r.kind === g.kind) }))
+}
+
 const num = (x: number | undefined): number | null => (typeof x === 'number' && isFinite(x) ? x : null)
 
 /** Shares are kept to 6 decimals, so a whole CEDEAR count comes back as 1099.99999... */

@@ -36,7 +36,6 @@ export interface Headline {
   total: number
   dayPnl: number
   dayPnlPct: number
-  dayLabel: string
   openPnl: number
   openPnlPct: number
   realized: number
@@ -48,7 +47,7 @@ export interface Headline {
 export function headline(summary: PortfolioSummary, views: CurrencyViews | null, currency: Currency): Headline {
   if (!views) {
     return {
-      prefix: 'US$', total: summary.total_market_value, dayPnl: summary.day_pnl, dayPnlPct: summary.day_pnl_pct, dayLabel: 'hoy',
+      prefix: 'US$', total: summary.total_market_value, dayPnl: summary.day_pnl, dayPnlPct: summary.day_pnl_pct,
       openPnl: summary.open_pnl, openPnlPct: summary.open_pnl_pct, realized: summary.realized_pnl, realizedLabel: 'Resultado realizado',
       capital: summary.total_invested + summary.cash.balance,
     }
@@ -57,10 +56,9 @@ export function headline(summary: PortfolioSummary, views: CurrencyViews | null,
   return {
     prefix: CURRENCIES.find(c => c.id === currency)!.prefix,
     total: t.value[currency],
+    // The day's move of each price at today's dollar: the dollar's own move is not in it.
     dayPnl: t.dayChange[currency],
     dayPnlPct: t.dayChangePct[currency],
-    // The day's move of each price at today's dollar: the dollar's own move is not in it.
-    dayLabel: 'hoy, por precio',
     openPnl: t.openPnl[currency],
     openPnlPct: t.openPnlPct[currency],
     realized: t.realized[currency],

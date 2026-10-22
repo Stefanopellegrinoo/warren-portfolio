@@ -14,7 +14,7 @@ import MovementsList from '@/components/resumen/MovementsList'
 import AdjustCashDialog from '@/components/resumen/AdjustCashDialog'
 import ValueChart from '@/components/resumen/ValueChart'
 import { SectionHead } from '@/components/resumen/ui'
-import { buildHoldings, distribution } from '@/lib/resumen/holdings'
+import { buildHoldings, distribution, DEFAULT_SORT, type Sort } from '@/lib/resumen/holdings'
 import { DEFAULT_CURRENCY, headline, readCurrency, saveCurrency, viewsOf } from '@/lib/resumen/currency'
 import type { Currency, CurrencyViews } from '@/lib/multicurrency'
 import type { Position, ONPosition, PortfolioSummary } from '@/types'
@@ -57,6 +57,8 @@ export default function DashboardPage() {
   const [showImport, setShowImport] = useState(false)
   const [showAdjust, setShowAdjust] = useState(false)
   const [asTable, setAsTable] = useState(false)
+  // One order for both views, so switching to all columns keeps it.
+  const [sort, setSort] = useState<Sort>(DEFAULT_SORT)
   const [currency, setCurrency] = useState<Currency>(DEFAULT_CURRENCY)
   const [movementsKey, setMovementsKey] = useState(0)
   const [marketOpen, setMarketOpen] = useState(isMarketOpen())
@@ -191,7 +193,7 @@ export default function DashboardPage() {
 
           {/* Phone: every holding, then the rest.
               Wide screens: holdings take the main column and the rest sits beside them. */}
-          <div className="resumen-grid grid items-start gap-x-10 gap-y-10">
+          <div className={`resumen-grid grid items-start gap-x-10 gap-y-10 ${asTable ? 'is-table' : ''}`}>
             <section aria-labelledby="h-tenencias" id="tenencias" className="min-w-0 scroll-mt-20 [grid-area:holdings]">
               <SectionHead
                 id="h-tenencias"
@@ -204,13 +206,15 @@ export default function DashboardPage() {
                 }
               />
               {asTable
-                ? <div className="pt-3"><HoldingsTable rows={rows} onSell={sell} /></div>
+                ? <div className="pt-3"><HoldingsTable rows={rows} sort={sort} onSort={setSort} onSell={sell} /></div>
                 : <HoldingsList
                     rows={rows}
                     cash={cash}
                     cashWeightPct={total > 0 ? (cash / total) * 100 : 0}
                     cashNote={views && currency !== 'MEP' ? 'Se registra en dólar MEP' : undefined}
                     onAdjustCash={() => setShowAdjust(true)}
+                    sort={sort}
+                    onSort={setSort}
                   />}
             </section>
 

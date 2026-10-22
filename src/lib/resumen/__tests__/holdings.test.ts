@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildHoldings, distribution, type HoldingRow } from '../holdings'
+import { buildHoldings, distribution, groupRows, nextSort, sortRows, DEFAULT_SORT, type HoldingRow } from '../holdings'
 import type { Position, ONPosition, PortfolioSummary } from '@/types'
 
 const base = { id: 'x', user_id: 'u', avg_cost: 0, total_invested: 0, first_bought: null, last_updated: '', version: 1 }
@@ -89,5 +89,40 @@ describe('distribution', () => {
   it('never returns NaN for an empty portfolio', () => {
     const empty = { total_market_value: 0, stocks: { market_value: 0 }, ons: { market_value: 0 }, cash: { balance: 0 } } as unknown as PortfolioSummary
     expect(distribution(empty).map(x => x.pct)).toEqual([0, 0, 0, 0])
+  })
+})
+
+describe('sorting and grouping holdings', () => {
+  const r = (ticker: string, kind: HoldingRow['kind'], value: number | null, pnlPct: number | null) =>
+    ({ ticker, kind, value, pnlPct } as HoldingRow)
+  const rows = [r('B', 'stock', 10, 0.2), r('A', 'cedear', 30, -0.1), r('C', 'stock', null, null), r('D', 'on', 20, 0.05), r('E', 'stock', 40, -0.3)]
+
+  it('sorts by value, biggest first, by default', () => {
+    expect(DEFAULT_SORT).toEqual({ key: 'value', dir: 'desc' })
+    expect(sortRows(rows, DEFAULT_SORT).map(x => x.ticker)).toEqual(['E', 'A', 'D', 'B', 'C'])
+  })
+
+  it('sorts either way and always leaves rows without a figure last', () => {
+    expect(sortRows(rows, { key: 'pnlPct', dir: 'asc' }).map(x => x.ticker)).toEqual(['E', 'A', 'D', 'B', 'C'])
+    expect(sortRows(rows, { key: 'pnlPct', dir: 'desc' }).map(x => x.ticker)).toEqual(['B', 'D', 'A', 'E', 'C'])
+  })
+
+  it('sorts names alphabetically', () => {
+    expect(sortRows(rows, { key: 'ticker', dir: 'asc' }).map(x => x.ticker)).toEqual(['A', 'B', 'C', 'D', 'E'])
+  })
+
+  it('flips the direction on the same column and starts a new one in its natural order', () => {
+    expect(nextSort({ key: 'value', dir: 'desc' }, 'value')).toEqual({ key: 'value', dir: 'asc' })
+    expect(nextSort({ key: 'value', dir: 'asc' }, 'pnl')).toEqual({ key: 'pnl', dir: 'desc' })
+    expect(nextSort({ key: 'value', dir: 'desc' }, 'ticker')).toEqual({ key: 'ticker', dir: 'asc' })
+  })
+
+  it('groups by asset type in a fixed order, keeping the order inside each group', () => {
+    const groups = groupRows(sortRows(rows, DEFAULT_SORT))
+    expect(groups.map(g => [g.title, g.items.map(x => x.ticker)])).toEqual([
+      ['Acciones', ['E', 'B', 'C']],
+      ['CEDEARs', ['A']],
+      ['Obligaciones negociables', ['D']],
+    ])
   })
 })

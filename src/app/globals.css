@@ -134,7 +134,8 @@
 
 /* Resumen: phone shows every holding, then the rest;
    wide screens keep holdings in the main column with the rest beside them. */
-.resumen-grid { grid-template-areas: "holdings" "chart" "dist" "moves"; }
+/* minmax(0, 1fr): a wide table scrolls inside its box instead of stretching the page. */
+.resumen-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "holdings" "chart" "dist" "moves"; }
 @media (min-width: 820px) {
   .resumen-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -146,5 +147,10 @@
     grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
     grid-template-rows: auto 1fr auto;
     grid-template-areas: "holdings dist" "holdings moves" "chart moves";
+  }
+  /* All columns asked for: the table takes the full width. */
+  .resumen-grid.is-table {
+    grid-template-rows: auto auto 1fr;
+    grid-template-areas: "holdings holdings" "chart dist" "chart moves";
   }
 }

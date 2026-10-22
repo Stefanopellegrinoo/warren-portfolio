@@ -82,14 +82,14 @@ describe('currency selector state', () => {
 describe('headline', () => {
   it('without views: the USD figures exactly as before', () => {
     expect(headline(summary, null, 'ARS')).toEqual({
-      prefix: 'US$', total: 1600, dayPnl: 12, dayPnlPct: 0.012, dayLabel: 'hoy', openPnl: 500, openPnlPct: 0.5,
+      prefix: 'US$', total: 1600, dayPnl: 12, dayPnlPct: 0.012, openPnl: 500, openPnlPct: 0.5,
       realized: 7, realizedLabel: 'Resultado realizado', capital: 1100,
     })
   })
 
   it('with views: every figure in the chosen currency', () => {
     expect(headline(summary, views, 'ARS')).toEqual({
-      prefix: '$', total: 2_440_000, dayPnl: 30_000, dayPnlPct: 0.0375, dayLabel: 'hoy, por precio', openPnl: 1_480_000, openPnlPct: 1.85,
+      prefix: '$', total: 2_440_000, dayPnl: 30_000, dayPnlPct: 0.0375, openPnl: 1_480_000, openPnlPct: 1.85,
       realized: 12_500, realizedLabel: 'Realizado, con dividendos y cupones', capital: 960_000,
     })
     expect(headline(summary, views, 'CCL')).toMatchObject({ prefix: 'US$', total: 1525, dayPnl: 18.75, openPnl: 865, realized: 10, capital: 660 })

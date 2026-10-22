@@ -1,5 +1,6 @@
 import Link from 'next/link'
-import type { HoldingRow } from '@/lib/resumen/holdings'
+import { ArrowUpDown } from 'lucide-react'
+import { groupRows, nextSort, sortRows, type HoldingRow, type Sort, type SortKey } from '@/lib/resumen/holdings'
 import { formatNumber, formatPct } from '@/lib/utils'
 import { Chip, GroupHead, linkButton, toneOf } from './ui'
 
@@ -12,14 +13,35 @@ const valueCell = 'col-start-3 row-start-1 text-right tabular-nums cq-wide:col-s
 const resultCell = 'col-start-3 row-start-2 text-right text-[13px] tabular-nums cq-wide:col-start-5 cq-wide:row-start-1 cq-wide:text-sm'
 const weightCell = 'hidden text-right text-[13px] tabular-nums text-ink-2 cq-wide:col-start-6 cq-wide:row-start-1 cq-wide:block'
 
-function ColumnHeads() {
+const SORTABLE: { key: SortKey; label: string }[] = [
+  { key: 'ticker', label: 'Activo' },
+  { key: 'dayChangePct', label: 'Hoy' },
+  { key: 'value', label: 'Valor' },
+  { key: 'pnl', label: 'Resultado' },
+  { key: 'weightPct', label: 'Peso' },
+]
+
+/** Wide: the column heads, aligned over their figures. Narrow: a row of sort buttons. */
+function SortBar({ sort, onSort }: { sort: Sort; onSort: (sort: Sort) => void }) {
   return (
-    <div aria-hidden="true" className={`hidden border-b border-line pb-2 pt-4 text-xs text-ink-3 cq-wide:grid cq-wide:gap-x-3 ${COLS}`}>
-      <span className="col-span-2">Activo</span>
-      <span className="text-right">Hoy</span>
-      <span className="text-right">Valor</span>
-      <span className="text-right">Resultado</span>
-      <span className="text-right">Peso</span>
+    <div role="group" aria-label="Ordenar tenencias" className={`flex flex-wrap items-center gap-1.5 pt-3 text-xs text-ink-3 cq-wide:grid cq-wide:gap-x-3 cq-wide:border-b cq-wide:border-line cq-wide:pb-2 cq-wide:pt-4 ${COLS}`}>
+      <ArrowUpDown className="h-4 w-4 cq-wide:hidden" strokeWidth={1.5} aria-hidden="true" />
+      {SORTABLE.map((c, i) => {
+        const active = sort.key === c.key
+        return (
+          <button
+            key={c.key}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onSort(nextSort(sort, c.key))}
+            className={`inline-flex min-h-11 items-center gap-1 rounded-md border px-2 hover:text-ink cq-wide:min-h-6 cq-wide:border-0 cq-wide:px-0 ${i === 0 ? 'cq-wide:col-span-2 cq-wide:justify-self-start' : 'cq-wide:justify-self-end'} ${active ? 'border-line-strong font-medium text-ink' : 'border-line'}`}
+          >
+            {c.label}
+            {active && <span aria-hidden="true">{sort.dir === 'asc' ? '↑' : '↓'}</span>}
+            {active && <span className="sr-only">{sort.dir === 'asc' ? ', de menor a mayor' : ', de mayor a menor'}</span>}
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -44,8 +66,8 @@ function Holding({ r }: { r: HoldingRow }) {
         {wideMeta && <span className="hidden truncate text-[13px] text-ink-3 cq-wide:block">{wideMeta}</span>}
       </span>
       {r.dayChangePct === null
-        ? <Chip tone="neutral" className="col-start-2 row-start-2 justify-self-start cq-wide:col-start-3 cq-wide:row-start-1 cq-wide:justify-self-end">Sin precio hoy</Chip>
-        : <Chip tone={toneOf(r.dayChangePct)} className="col-start-2 row-start-2 justify-self-start cq-wide:col-start-3 cq-wide:row-start-1 cq-wide:justify-self-end">{formatPct(r.dayChangePct, { digits: 1 })} hoy</Chip>}
+        ? <Chip tone="neutral" className="col-start-2 row-start-2 justify-self-start cq-wide:col-start-3 cq-wide:row-start-1 cq-wide:justify-self-end">Sin precio</Chip>
+        : <Chip tone={toneOf(r.dayChangePct)} className="col-start-2 row-start-2 justify-self-start cq-wide:col-start-3 cq-wide:row-start-1 cq-wide:justify-self-end">{formatPct(r.dayChangePct, { digits: 1 })}<span className="sr-only"> hoy</span></Chip>}
       <span className={valueCell}>
         <b className="block font-semibold">{r.value === null ? '—' : formatNumber(r.value)}</b>
         {r.estimated && r.value !== null && <small className="block text-[13px] text-ink-3">estimado</small>}
@@ -62,32 +84,30 @@ function Holding({ r }: { r: HoldingRow }) {
   )
 }
 
-export default function HoldingsList({ rows, cash, cashWeightPct, cashNote, onAdjustCash }: {
+export default function HoldingsList({ rows, cash, cashWeightPct, cashNote, onAdjustCash, sort, onSort }: {
   rows: HoldingRow[]
+  sort: Sort
+  onSort: (sort: Sort) => void
   cash: number
   cashWeightPct: number
   /** Why the balance reads as it does in the chosen currency. */
   cashNote?: string
   onAdjustCash: () => void
 }) {
-  const groups = [
-    { title: 'Acciones', items: rows.filter(r => r.kind === 'stock') },
-    { title: 'CEDEARs', items: rows.filter(r => r.kind === 'cedear') },
-  ]
-  const ons = rows.filter(r => r.kind === 'on')
+  const [stocks, cedears, ons] = groupRows(sortRows(rows, sort))
   return (
     <div className="[container-type:inline-size]">
-      <ColumnHeads />
-      {groups.filter(g => g.items.length > 0).map(g => (
-        <section key={g.title} aria-label={g.title}>
+      <SortBar sort={sort} onSort={onSort} />
+      {[stocks, cedears].filter(g => g.items.length > 0).map(g => (
+        <section key={g.kind} aria-label={g.title}>
           <GroupHead>{g.title} <span className="tabular-nums">{g.items.length}</span></GroupHead>
           <ul>{g.items.map(r => <Holding key={r.ticker} r={r} />)}</ul>
         </section>
       ))}
 
-      <GroupHead>Obligaciones negociables{ons.length > 0 && <span className="tabular-nums">{ons.length}</span>}</GroupHead>
-      {ons.length > 0
-        ? <ul>{ons.map(r => <Holding key={r.ticker} r={r} />)}</ul>
+      <GroupHead>Obligaciones negociables{ons.items.length > 0 && <span className="tabular-nums">{ons.items.length}</span>}</GroupHead>
+      {ons.items.length > 0
+        ? <ul>{ons.items.map(r => <Holding key={r.ticker} r={r} />)}</ul>
         : <p className="py-2 text-[13px] text-ink-3">No tenés ONs. <Link href="/ons" className="text-accent-ink underline underline-offset-2">Explorar ONs</Link></p>}
 
       <GroupHead>Caja</GroupHead>

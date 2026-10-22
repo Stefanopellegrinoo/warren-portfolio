@@ -27,8 +27,9 @@ export default function ValueSection({ figures: f }: { figures: Headline }) {
           <p className={`mt-3 inline-flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md px-2.5 py-1.5 text-base font-semibold tabular-nums ${f.dayPnl < 0 ? 'bg-danger-soft' : f.dayPnl > 0 ? 'bg-ok-soft' : 'bg-neutral-soft'} ${tone(f.dayPnl)}`}>
             <DayIcon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden="true" />
             <span className="whitespace-nowrap">{formatNumber(f.dayPnl, { sign: true })}</span>{' '}
-            <span className="whitespace-nowrap">({formatPct(f.dayPnlPct)})</span>{' '}
-            <span className="font-normal">{f.dayLabel}</span>
+            <span className="whitespace-nowrap">({formatPct(f.dayPnlPct)})</span>
+            {/* The chip reads as today's move; a screen reader needs the word. */}
+            <span className="sr-only">hoy</span>
           </p>
         </div>
 
