@@ -115,3 +115,12 @@ describe('enrichPositionsForStats', () => {
     expect(totals.unpricedCount).toBe(1)
   })
 })
+
+describe('enrichPositionsForStats — the one valuation rule (S3)', () => {
+  it('marks an unquoted position at its last close before its cost', () => {
+    const { positions, totals } = enrichPositionsForStats([position('ONA', 10, 95)], new Map(), new Map([['ONA', 98]]))
+
+    expect(positions[0]).toMatchObject({ market_value: 980, priced: false })
+    expect(totals.openPnl).toBeCloseTo(30)
+  })
+})

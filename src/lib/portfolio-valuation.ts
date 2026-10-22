@@ -1,56 +1,43 @@
 /**
- * Canonical portfolio valuation.
+ * Canonical portfolio valuation: ONE rule for a held position's price (odd/tasks/nucleo-ledger.md
+ * S3, `markPrice` in ledger-now.ts): the live quote if positive, else the last close, else the
+ * position's own average cost — never 0, never dropped, never a fabricated -100% loss.
  *
- * Single-sources the missing-quote rule promoted from the private
- * withCostFallback in portfolio-snapshots.ts: a held ticker with no quote or a
- * quote priced <= 0 is valued at its own average cost — a conservative mark
- * that reports zero P&L, NEVER a fabricated -100% loss.
- *
- * WORKER-SAFE: imported (via portfolio-snapshots.ts) by the BullMQ worker,
- * which runs under tsx outside the Next build. Value imports MUST be relative;
- * `import type` from '@/types' is erased at compile time and is the
- * established pattern (see portfolio-snapshots.ts).
+ * WORKER-SAFE: imported by the BullMQ worker, which runs under tsx outside the Next build.
+ * Value imports MUST be relative; `import type` from '@/types' is erased at compile time.
  */
 import type { ONPosition, Position, PortfolioSummary, Quote } from '@/types'
 import { calculatePortfolioSummary } from './portfolio-engine'
+import { markPrice } from './ledger-now'
 
-export interface CostFallbackResult {
+export interface ValuationRuleResult {
   quotes: Map<string, Quote>
   unpricedCount: number
   unpricedTickers: string[]
 }
 
 /**
- * The single implementation of the missing-quote rule.
- *
- * A quote priced at 0/null counts as "no price": the engine treats a falsy
- * price as unpriced and drops the position from value AND invested, which
- * would understate a snapshot exactly like a missing quote does. A position
- * with no usable cost either is left out of the map but still counted, so the
- * gap is surfaced rather than hidden.
+ * Applies the valuation rule to a quote map. A position without a live quote (none, or
+ * priced <= 0) gets a neutral synthetic quote at its last close, else its cost, and is
+ * counted as unpriced. One with no usable price at all is left out but still counted, so
+ * the gap is surfaced rather than hidden. The caller's map is never mutated.
  */
-export function applyCostFallback(
+export function applyValuationRule(
   positions: Array<{ ticker: string; avg_cost: number }>,
-  quotes: Map<string, Quote>
-): CostFallbackResult {
+  quotes: Map<string, Quote>,
+  lastCloses: Map<string, number> = new Map()
+): ValuationRuleResult {
   const effective = new Map(quotes)
   const unpricedTickers: string[] = []
 
   for (const pos of positions) {
-    const quoted = Number(effective.get(pos.ticker)?.price)
-    if (quoted > 0) continue
+    if (Number(effective.get(pos.ticker)?.price) > 0) continue
 
     unpricedTickers.push(pos.ticker)
 
-    const cost = Number(pos.avg_cost)
-    if (!(cost > 0)) continue // no price and no usable cost — leave it out
-    effective.set(pos.ticker, {
-      ticker: pos.ticker,
-      price: cost,
-      change: 0,
-      changePercent: 0,
-      previousClose: cost,
-    })
+    const price = markPrice(null, lastCloses.get(pos.ticker), Number(pos.avg_cost))
+    if (!(price > 0)) continue // no price and no usable cost — leave it out
+    effective.set(pos.ticker, { ticker: pos.ticker, price, change: 0, changePercent: 0, previousClose: price })
   }
 
   return { quotes: effective, unpricedCount: unpricedTickers.length, unpricedTickers }
@@ -84,8 +71,6 @@ export function splitQuotesByAssetClass(
   return { stockQuotes, onQuotes }
 }
 
-export type MissingQuotePolicy = 'avg_cost' | 'drop'
-
 export type PortfolioQuotes =
   | Map<string, Quote>
   | { stockQuotes: Map<string, Quote>; onQuotes: Map<string, Quote> }
@@ -107,39 +92,29 @@ export interface PortfolioValuation {
 }
 
 /**
- * The single summary entry. Every calculatePortfolioSummary call site goes
- * through here with an explicit missing-quote policy:
- *
- *  - 'avg_cost' — snapshots and the history live point. Unpriced positions
- *    are marked at their own average cost (never 0, never dropped).
- *  - 'drop' — dashboard / worker summary. Quotes pass through UNTOUCHED, so
- *    unpriced positions fall out of the totals exactly as they always have —
- *    no displayed dashboard number changes. unpricedCount is still surfaced
- *    for a future badge.
- *
- * Accepts either one flat quote map (split by ON-position membership via
- * splitQuotesByAssetClass) or pre-split maps (dashboard/worker, whose stock
- * and ON quotes come from different providers).
+ * The single summary entry. Accepts either one flat quote map (split by ON-position
+ * membership via splitQuotesByAssetClass) or pre-split maps (dashboard/worker, whose stock
+ * and ON quotes come from different providers). `lastCloses` (ticker → last close) is the
+ * rule's middle tier for positions without a live quote.
  */
 export function valuePortfolio(
   inputs: PortfolioValuationInputs,
   quotes: PortfolioQuotes,
-  opts: { missingQuotePolicy: MissingQuotePolicy }
+  lastCloses: Map<string, number> = new Map()
 ): PortfolioValuation {
   const { stockQuotes, onQuotes } =
     quotes instanceof Map
       ? splitQuotesByAssetClass(quotes, inputs.onPositions.map(p => p.ticker))
       : quotes
 
-  const stockFallback = applyCostFallback(inputs.positions, stockQuotes)
-  const onFallback = applyCostFallback(inputs.onPositions, onQuotes)
+  const stock = applyValuationRule(inputs.positions, stockQuotes, lastCloses)
+  const on = applyValuationRule(inputs.onPositions, onQuotes, lastCloses)
 
-  const useFallback = opts.missingQuotePolicy === 'avg_cost'
   const { positions, onPositions, summary } = calculatePortfolioSummary(
     inputs.positions,
     inputs.onPositions,
-    useFallback ? stockFallback.quotes : stockQuotes,
-    useFallback ? onFallback.quotes : onQuotes,
+    stock.quotes,
+    on.quotes,
     inputs.cashBalance,
     inputs.realized,
     inputs.onRealized
@@ -149,7 +124,7 @@ export function valuePortfolio(
     positions,
     onPositions,
     summary,
-    unpricedCount: stockFallback.unpricedCount + onFallback.unpricedCount,
-    unpricedTickers: [...stockFallback.unpricedTickers, ...onFallback.unpricedTickers],
+    unpricedCount: stock.unpricedCount + on.unpricedCount,
+    unpricedTickers: [...stock.unpricedTickers, ...on.unpricedTickers],
   }
 }

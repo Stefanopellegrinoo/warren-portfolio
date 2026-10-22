@@ -7,22 +7,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const mockViews = vi.fn()
 const mockCtx = vi.fn()
-const ok = (data: unknown) => ({ data, error: null })
-const tables: Record<string, unknown[]> = {
-  positions: [{ user_id: 'u1', ticker: 'AAPL', quantity: 2, avg_cost: 100, total_invested: 200 }],
-  on_positions: [], closed_trades: [{ pnl: 5 }], on_closed_trades: [],
-}
-// The getFullPortfolio query shapes, as in route.test.ts.
-const supabase = {
-  from: (table: string) => ({
-    select: () => ({
-      eq: () => Object.assign(Promise.resolve(ok(tables[table] ?? [])), {
-        order: () => Promise.resolve(ok(tables[table] ?? [])),
-        single: () => Promise.resolve(ok({ balance: 50 })),
-      }),
-    }),
-  }),
-}
+// The ledger behind 2 AAPL @ 100, a realized +5 and a cash of 50 (T4.2b: the route reads the ledger core).
+const { ledgerSupabase, trade, movement } = await import('@/lib/__tests__/fixtures/ledger-supabase')
+const supabase = ledgerSupabase({
+  transactions: [
+    trade({ quantity: 3 }),
+    trade({ operation: 'VENTA', quantity: 1, price: 105, date: '2026-01-06' }),
+  ],
+  cash_movements: [movement({ amount: 50 })],
+})
 vi.mock('@/lib/api-auth', () => ({
   requireUser: async () => ({ supabase, user: { id: 'u1' } }),
   isAuthFailure: () => false,

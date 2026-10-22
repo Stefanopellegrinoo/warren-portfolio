@@ -6,6 +6,8 @@ import { rebuildONPosition } from './on-engine'
 import { normalizeError } from './errors'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { tradeRecordRpcParams, type TradeRecord } from './trade-record'
+import { loadPortfolioNow } from './ledger-now'
+import { argentinaDate } from './utils'
 
 /**
  * SECURITY: Explicitly validate userId to prevent data corruption.
@@ -289,29 +291,16 @@ export function calculatePortfolioSummary(
 }
 
 /**
- * Fetch all portfolio data in parallel for a user.
+ * The user's portfolio now, from the ledger core (odd/tasks/nucleo-ledger.md T4.2b):
+ * never from the stored positions / closed-trade / cash tables. Throws on a failed read.
  */
 export async function getFullPortfolio(
   supabase: SupabaseClient,
-  userId: string
+  userId: string,
+  today: string = argentinaDate()
 ): Promise<FullPortfolio> {
   assertUserId(userId)
-
-  const [stockPositionsRes, onPositionsRes, stockClosedRes, onClosedRes, cashBalanceRes] = await Promise.all([
-    supabase.from('positions').select('*').eq('user_id', userId).order('total_invested', { ascending: false }),
-    supabase.from('on_positions').select('*').eq('user_id', userId).order('total_invested', { ascending: false }),
-    supabase.from('closed_trades').select('*').eq('user_id', userId),
-    supabase.from('on_closed_trades').select('*').eq('user_id', userId),
-    supabase.from('cash_balance').select('balance').eq('user_id', userId).single(),
-  ])
-
-  return {
-    stockPositions: stockPositionsRes.data ?? [],
-    onPositions: onPositionsRes.data ?? [],
-    stockClosedTrades: stockClosedRes.data ?? [],
-    onClosedTrades: onClosedRes.data ?? [],
-    cashBalance: cashBalanceRes.data?.balance ?? 0,
-  }
+  return loadPortfolioNow(supabase, userId, today)
 }
 
 /**

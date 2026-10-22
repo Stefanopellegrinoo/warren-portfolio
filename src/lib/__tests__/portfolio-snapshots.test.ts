@@ -22,6 +22,7 @@ vi.mock('../yahoo-finance', () => ({
 }))
 
 const { snapshotAllUsers, buildSnapshotRow } = await import('../portfolio-snapshots')
+const { ledgerSupabase, trade, movement } = await import('./fixtures/ledger-supabase')
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -253,13 +254,10 @@ describe('snapshotUser', () => {
   const single = vi.fn()
   const userUpsert = vi.fn(() => ({ select: () => ({ single }) }))
 
-  function clientWith(tables: Record<string, any[]>) {
-    return {
-      from: vi.fn((table: string) => {
-        if (table === 'portfolio_snapshots') return { upsert: userUpsert }
-        return { select: () => ({ eq: () => ({ data: tables[table] ?? [], error: null }) }) }
-      }),
-    }
+  // The ledger (T4.2b: the stored tables are never read); portfolio_snapshots takes the write.
+  function clientWith(tables: Record<string, any>) {
+    const ledger = ledgerSupabase(tables)
+    return { from: vi.fn((table: string) => (table === 'portfolio_snapshots' ? { upsert: userUpsert } : ledger.from(table))) }
   }
 
   beforeEach(() => {
@@ -283,7 +281,7 @@ describe('snapshotUser', () => {
   it('snapshots a cash-only user', async () => {
     // Arrange
     const { snapshotUser } = await import('../portfolio-snapshots')
-    const supabase = clientWith({ cash_balance: [{ balance: 300 }] })
+    const supabase = clientWith({ cash_movements: [movement({ amount: 300 })] })
 
     // Act
     const result = await snapshotUser(supabase, 'u1', DATE)
@@ -298,8 +296,8 @@ describe('snapshotUser', () => {
     // Arrange — real data has users whose cash went negative
     const { snapshotUser } = await import('../portfolio-snapshots')
     const supabase = clientWith({
-      positions: [{ ticker: 'AAPL', quantity: 10, total_invested: 100, avg_cost: 10 }],
-      cash_balance: [{ balance: -60 }],
+      transactions: [trade({ price: 10 })],
+      cash_movements: [movement({ type: 'RETIRO', amount: 60 })],
     })
 
     // Act
@@ -316,7 +314,7 @@ describe('snapshotUser', () => {
     // Arrange
     const { snapshotUser } = await import('../portfolio-snapshots')
     single.mockResolvedValue({ data: null, error: { message: 'rls denied' } })
-    const supabase = clientWith({ cash_balance: [{ balance: 10 }] })
+    const supabase = clientWith({ cash_movements: [movement({ amount: 10 })] })
 
     // Act
     const result = await snapshotUser(supabase, 'u1', DATE)
@@ -329,13 +327,9 @@ describe('snapshotUser', () => {
 describe('computeLiveSnapshotRow', () => {
   const upsert = vi.fn()
 
-  function clientWith(tables: Record<string, any[]>) {
-    return {
-      from: vi.fn((table: string) => {
-        if (table === 'portfolio_snapshots') return { upsert }
-        return { select: () => ({ eq: () => ({ data: tables[table] ?? [], error: null }) }) }
-      }),
-    }
+  function clientWith(tables: Record<string, any>) {
+    const ledger = ledgerSupabase(tables)
+    return { from: vi.fn((table: string) => (table === 'portfolio_snapshots' ? { upsert } : ledger.from(table))) }
   }
 
   beforeEach(() => {
@@ -358,8 +352,8 @@ describe('computeLiveSnapshotRow', () => {
     // Arrange — 10 AAPL @ cost 10 (no quotes mocked → avg_cost fallback) + 50 cash
     const { computeLiveSnapshotRow } = await import('../portfolio-snapshots')
     const supabase = clientWith({
-      positions: [{ ticker: 'AAPL', quantity: 10, total_invested: 100, avg_cost: 10 }],
-      cash_balance: [{ balance: 50 }],
+      transactions: [trade({ price: 10 })],
+      cash_movements: [movement({ amount: 50 })],
     })
 
     // Act
@@ -386,7 +380,7 @@ describe('computeLiveSnapshotRow', () => {
   it('values a cash-only user', async () => {
     // Arrange
     const { computeLiveSnapshotRow } = await import('../portfolio-snapshots')
-    const supabase = clientWith({ cash_balance: [{ balance: 300 }] })
+    const supabase = clientWith({ cash_movements: [movement({ amount: 300 })] })
 
     // Act
     const row = await computeLiveSnapshotRow(supabase, 'u1', DATE)
@@ -397,21 +391,11 @@ describe('computeLiveSnapshotRow', () => {
   })
 
   it('throws instead of returning an understated row when one query errors', async () => {
-    // Arrange — positions select fails; on_positions/closed/cash all succeed.
-    // Silently treating the failed read as "no positions" would understate
-    // the snapshot and poison Max Drawdown once snapshotUser upserts it.
+    // Arrange — the transactions read fails; cash succeeds. Silently treating the
+    // failed read as "no positions" would understate the snapshot and poison Max
+    // Drawdown once snapshotUser upserts it.
     const { computeLiveSnapshotRow } = await import('../portfolio-snapshots')
-    const supabase = {
-      from: vi.fn((table: string) => {
-        if (table === 'positions') {
-          return { select: () => ({ eq: () => ({ data: null, error: { message: 'boom' } }) }) }
-        }
-        if (table === 'cash_balance') {
-          return { select: () => ({ eq: () => ({ data: [{ balance: 50 }], error: null }) }) }
-        }
-        return { select: () => ({ eq: () => ({ data: [], error: null }) }) }
-      }),
-    }
+    const supabase = clientWith({ transactions: { error: { message: 'boom' } }, cash_movements: [movement({ amount: 50 })] })
 
     // Act / Assert — must reject, not resolve to null or an understated row
     await expect(computeLiveSnapshotRow(supabase, 'u1', DATE)).rejects.toThrow()

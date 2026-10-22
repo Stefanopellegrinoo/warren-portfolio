@@ -28,26 +28,7 @@ const { GET } = await import('../route')
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/**
- * Chainable fake for the getFullPortfolio query shapes:
- *   from(t).select('*').eq(...).order(...)      → { data }
- *   from(t).select('*').eq(...)                 → { data }   (awaited directly)
- *   from('cash_balance').select('balance').eq(...).single() → { data: { balance } }
- */
-function clientWith(tables: Record<string, any[]>, cashBalance: number) {
-  const ok = (data: any) => ({ data, error: null })
-  return {
-    from: (table: string) => ({
-      select: () => ({
-        eq: () =>
-          Object.assign(Promise.resolve(ok(tables[table] ?? [])), {
-            order: () => Promise.resolve(ok(tables[table] ?? [])),
-            single: () => Promise.resolve(ok({ balance: cashBalance })),
-          }),
-      }),
-    }),
-  }
-}
+const { ledgerSupabase, trade, movement } = await import('@/lib/__tests__/fixtures/ledger-supabase')
 
 function quote(ticker: string, price: number) {
   return { ticker, price, change: 0, changePercent: 0, previousClose: price }
@@ -63,21 +44,13 @@ beforeEach(() => {
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
-describe('GET /api/positions — characterization before valuation refactor', () => {
-  it('drops an unpriced position from the totals but keeps it in the response', async () => {
-    // Arrange — AAPL quoted @150; MISS has no quote
-    const supabase = clientWith(
-      {
-        positions: [
-          { user_id: 'u1', ticker: 'AAPL', quantity: 10, avg_cost: 100, total_invested: 1000 },
-          { user_id: 'u1', ticker: 'MISS', quantity: 5, avg_cost: 100, total_invested: 500 },
-        ],
-        on_positions: [],
-        closed_trades: [],
-        on_closed_trades: [],
-      },
-      200
-    )
+describe('GET /api/positions — the ledger core and the one valuation rule', () => {
+  it('marks an unpriced position at its own cost and keeps the response shape', async () => {
+    // Arrange — AAPL quoted @150; MISS has no quote; cash 1700 − 1500 = 200
+    const supabase = ledgerSupabase({
+      transactions: [trade(), trade({ ticker: 'MISS', quantity: 5 })],
+      cash_movements: [movement({ amount: 1700 }), movement({ type: 'COMPRA', amount: 1500, date: '2026-01-05' })],
+    })
     mockRequireUser.mockResolvedValue({ supabase, user: { id: 'u1' } })
     mockFetchQuotesWithFallback.mockResolvedValue(new Map([['AAPL', quote('AAPL', 150)]]))
 
@@ -85,28 +58,19 @@ describe('GET /api/positions — characterization before valuation refactor', ()
     const res = await GET(req)
     const body = await res.json()
 
-    // Assert — today's exact dashboard numbers, pinned
+    // Assert
     expect(res.status).toBe(200)
-    expect(body.summary.total_market_value).toBe(1700) // 10×150 + 200 cash
-    expect(body.summary.total_invested).toBe(1000)     // MISS's invested dropped too
+    expect(Object.keys(body)).toEqual(['positions', 'onPositions', 'summary', 'unpricedCount', 'unpricedTickers', 'lastRefresh'])
+    expect(body.summary.total_market_value).toBe(2200) // 10×150 + MISS at cost 500 + 200 cash
+    expect(body.summary.total_invested).toBe(1500)
     expect(body.summary.open_pnl).toBe(500)
     expect(body.summary.cash.balance).toBe(200)
-    expect(body.positions).toHaveLength(2)
     const miss = body.positions.find((p: any) => p.ticker === 'MISS')
-    expect(miss.market_value).toBeUndefined()
+    expect(miss).toMatchObject({ quantity: 5, avg_cost: 100, total_invested: 500, market_value: 500 })
   })
 
-  it('surfaces how many positions have no price at all instead of dropping them silently', async () => {
-    const supabase = clientWith(
-      {
-        positions: [
-          { user_id: 'u1', ticker: 'AAPL', quantity: 10, avg_cost: 100, total_invested: 1000 },
-          { user_id: 'u1', ticker: 'BCBA:GGAL', quantity: 5, avg_cost: 100, total_invested: 500 },
-        ],
-        on_positions: [], closed_trades: [], on_closed_trades: [],
-      },
-      0
-    )
+  it('surfaces how many positions have no live price', async () => {
+    const supabase = ledgerSupabase({ transactions: [trade(), trade({ ticker: 'BCBA:GGAL', quantity: 5 })] })
     mockRequireUser.mockResolvedValue({ supabase, user: { id: 'u1' } })
     mockFetchQuotesWithFallback.mockResolvedValue(new Map([['AAPL', quote('AAPL', 150)]]))
 
@@ -116,21 +80,39 @@ describe('GET /api/positions — characterization before valuation refactor', ()
   })
 
   it('reports zero unpriced positions when every quote is present', async () => {
-    const supabase = clientWith(
-      { positions: [{ user_id: 'u1', ticker: 'AAPL', quantity: 10, avg_cost: 100, total_invested: 1000 }], on_positions: [], closed_trades: [], on_closed_trades: [] },
-      0
-    )
+    const supabase = ledgerSupabase({ transactions: [trade()] })
     mockRequireUser.mockResolvedValue({ supabase, user: { id: 'u1' } })
     mockFetchQuotesWithFallback.mockResolvedValue(new Map([['AAPL', quote('AAPL', 150)]]))
     expect((await (await GET(req)).json()).unpricedCount).toBe(0)
   })
 
+  it('values an unquoted ON at its last recorded close', async () => {
+    const supabase = ledgerSupabase({
+      transactions: [trade({ ticker: 'ONA', asset_type: 'ON', price: 95 })],
+      on_price_history: [{ ticker: 'ONA', price_date: '2026-01-20', close: 98 }],
+      on_terms: [],
+    })
+    mockRequireUser.mockResolvedValue({ supabase, user: { id: 'u1' } })
+
+    const body = await (await GET(req)).json()
+    expect(body.onPositions[0]).toMatchObject({ ticker: 'ONA', market_value: 980 })
+    expect(body.summary.ons.pnl).toBeCloseTo(30)
+  })
+
+  it('realizes a sale the stored closed_trades missed (L8)', async () => {
+    const supabase = ledgerSupabase({ transactions: [
+      trade({ ticker: 'VIST', quantity: 100, price: 43.64, date: '2026-03-02' }),
+      trade({ ticker: 'VIST', operation: 'VENTA', quantity: 57.333333, price: 64.8508, date: '2026-04-09' }),
+    ] })
+    mockRequireUser.mockResolvedValue({ supabase, user: { id: 'u1' } })
+
+    const body = await (await GET(req)).json()
+    expect(body.summary.realized_pnl).toBeCloseTo(1216.09, 2)
+  })
+
   it('returns a cash-only summary for an empty portfolio', async () => {
     // Arrange
-    const supabase = clientWith(
-      { positions: [], on_positions: [], closed_trades: [], on_closed_trades: [] },
-      300
-    )
+    const supabase = ledgerSupabase({ cash_movements: [movement({ amount: 300 })] })
     mockRequireUser.mockResolvedValue({ supabase, user: { id: 'u1' } })
 
     // Act

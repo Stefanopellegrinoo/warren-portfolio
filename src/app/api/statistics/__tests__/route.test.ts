@@ -52,21 +52,9 @@ vi.mock('@/lib/benchmark', async (importOriginal) => ({
 
 const { GET } = await import('../route')
 
-/** The route reads several tables; each returns an empty set unless overridden. */
-function fakeSupabase() {
-  const empty = { data: [], error: null }
-  return {
-    from: vi.fn(() => ({
-      select: vi.fn(() => ({
-        eq: vi.fn(() => ({
-          is: vi.fn(() => ({ in: vi.fn(() => empty) })),
-          order: vi.fn(() => empty),
-          ...empty,
-        })),
-      })),
-    })),
-  }
-}
+const { ledgerSupabase, trade } = await import('@/lib/__tests__/fixtures/ledger-supabase')
+/** An empty ledger; the fake throws on any stored derived table (T4.2b). */
+const fakeSupabase = (tables = {}) => ledgerSupabase(tables)
 
 // The route reads `req.nextUrl.searchParams` (universe param), which only
 // exists on a real NextRequest — a plain Request cast to the type has no
@@ -89,6 +77,29 @@ beforeEach(() => {
   mockFetchFlowTransactions.mockResolvedValue([])
   mockFetchExternalFlows.mockResolvedValue([])
   mockFetchIncomeMovements.mockResolvedValue([])
+})
+
+describe('GET /api/statistics — allocation and trade stats from the ledger core', () => {
+  it('values allocation at cost without a quote and realizes a sale the stored table missed (L8)', async () => {
+    mockRequireUser.mockResolvedValue({
+      supabase: fakeSupabase({ transactions: [
+        trade(),
+        trade({ ticker: 'VIST', quantity: 100, price: 43.64, date: '2026-03-02' }),
+        trade({ ticker: 'VIST', operation: 'VENTA', quantity: 57.333333, price: 64.8508, date: '2026-04-09' }),
+      ] }),
+      user: { id: 'u1' },
+    })
+
+    const body = await (await GET(request())).json()
+
+    expect(body.realizedPnl).toBeCloseTo(1216.09, 2)
+    expect(body.totalTrades).toBe(1)
+    expect(body.avgHoldingDays).toBe(38)
+    expect(body.cumulativePnl).toMatchObject([{ date: '2026-04-09', ticker: 'VIST' }])
+    expect(body.allocation.map((a: any) => a.name)).toEqual(['VIST', 'AAPL'])
+    expect(body.totalPortfolioValue).toBeCloseTo(1000 + 42.666667 * 43.64, 2)
+    expect(body.unpricedPositions).toBe(2)
+  })
 })
 
 describe('GET /api/statistics — which universes need the transaction list', () => {

@@ -8,6 +8,7 @@ import { normalizeError } from '@/lib/errors'
 import type { ONPosition } from '@/types'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { retroactiveWarnings } from '@/lib/api/retroactive-warning'
+import { getFullPortfolio } from '@/lib/portfolio-engine'
 
 export const dynamic = 'force-dynamic'
 
@@ -56,32 +57,19 @@ export async function GET(req: NextRequest) {
     const { page, limit } = validateQueryParams(PaginationSchema, req.url)
     const offset = (page - 1) * limit
 
-    const { data: positions, error, count } = await supabase
-      .from('on_positions')
-      .select('*', { count: 'exact' })
-      .eq('user_id', user.id)
-      // `on_positions` has NO created_at (migration 003 stamps first_bought
-      // and last_updated). Ordering by a missing column is not a silent no-op
-      // in PostgREST — it fails the request with 42703, which made this route
-      // answer 500 for every user until 2026-08-01. `ticker` breaks the tie:
-      // the bulk import writes every row in one statement, so last_updated
-      // ties across the table, and an unstable sort under `.range()` can serve
-      // one position twice and drop another.
-      .order('last_updated', { ascending: false })
-      .order('ticker', { ascending: true })
-      .range(offset, offset + limit - 1)
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    // From the ledger core (never the stored on_positions), in a stable order so a
+    // paginated row cannot repeat or vanish.
+    const { onPositions } = await getFullPortfolio(supabase, user.id)
+    const positions = [...onPositions].sort((a, b) => a.ticker.localeCompare(b.ticker))
+    const count = positions.length
 
     const response: PaginatedResponse<ONPosition> = {
-      data: (positions ?? []) as ONPosition[],
+      data: positions.slice(offset, offset + limit),
       pagination: {
         page,
         limit,
-        total: count ?? 0,
-        totalPages: count ? Math.ceil(count / limit) : 0,
+        total: count,
+        totalPages: Math.ceil(count / limit),
       },
     }
 

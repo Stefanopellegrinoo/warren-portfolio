@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { validateQueryParams, validationErrorResponse } from '@/lib/api/validation'
 import { TransactionQuerySchema } from '@/lib/schemas/transaction'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
-import { normalizeError } from '@/lib/errors'
+import { getFullPortfolio } from '@/lib/portfolio-engine'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,18 +15,11 @@ export async function GET(req: NextRequest) {
     // Validate query params
     const { ticker, limit, offset } = validateQueryParams(TransactionQuerySchema, req.url)
 
-    let query = supabase
-      .from('closed_trades')
-      .select('*', { count: 'exact' })
-      .eq('user_id', user.id)
-      .order('close_date', { ascending: false })
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1)
-
-    if (ticker) query = query.eq('ticker', ticker.toUpperCase())
-
-    const { data, error, count } = await query
-    if (error) throw normalizeError(error)
+    // The realized stock sales from the ledger core (never the stored closed_trades), newest first.
+    const { stockClosedTrades } = await getFullPortfolio(supabase, user.id)
+    const all = [...stockClosedTrades].reverse().filter(t => !ticker || t.ticker === ticker.toUpperCase())
+    const data = all.slice(offset, offset + limit)
+    const count = all.length
 
     return NextResponse.json({ data, count })
   } catch (err: any) {
