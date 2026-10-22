@@ -211,3 +211,20 @@ export async function loadFlowRows(sb: SupabaseClient, isin: string): Promise<{ 
   ])
   return { history: toHistoryRows(history), current: toRows(current) }
 }
+
+/** Both public tables for several ISINs at once. Throws on any read error. */
+export async function loadFlowRowsMany(sb: SupabaseClient, isins: string[]): Promise<Map<string, { history: HistoryRow[]; current: FlowRow[] }>> {
+  const read = async (table: string, cols: string) => {
+    const { data, error } = await sb.from(table).select(`isin, ${cols}`).in('isin', isins).order('flow_date')
+    if (error) throw new Error(`${table}: ${error.message}`)
+    return (data ?? []) as unknown as Row[]
+  }
+  const [history, current] = await Promise.all([
+    read('on_flow_history', 'flow_date, ren, amo, first_seen_as_of, last_seen_as_of, source'),
+    read('on_cashflows', 'flow_date, ren, amo'),
+  ])
+  const out = new Map(isins.map((i) => [i, { history: [] as HistoryRow[], current: [] as FlowRow[] }]))
+  for (const r of history) out.get(r.isin as string)?.history.push(...toHistoryRows([r]))
+  for (const r of current) out.get(r.isin as string)?.current.push(...toRows([r]))
+  return out
+}
