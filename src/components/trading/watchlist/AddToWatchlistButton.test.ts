@@ -62,12 +62,12 @@ describe('getListsUrl', () => {
 // ── Existing label / disabled helpers (still exported, tested for regression) ──
 
 describe('getAddButtonLabel', () => {
-  it('returns "Add to watchlist" when symbol is not in watchlist', () => {
-    expect(getAddButtonLabel(false)).toBe('Add to watchlist')
+  it('returns "Agregar a la lista" when symbol is not in watchlist', () => {
+    expect(getAddButtonLabel(false)).toBe('Agregar a la lista')
   })
 
-  it('returns "★ In watchlist" when symbol is already in watchlist', () => {
-    expect(getAddButtonLabel(true)).toBe('★ In watchlist')
+  it('returns "En la lista" when symbol is already in watchlist', () => {
+    expect(getAddButtonLabel(true)).toBe('En la lista')
   })
 })
 

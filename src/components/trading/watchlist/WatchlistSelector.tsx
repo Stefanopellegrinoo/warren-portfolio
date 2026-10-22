@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronDown, Plus, List, Trash2, Edit2 } from "lucide-react";
+import { Check, ChevronDown, ListPlus, Trash2, Edit2 } from "lucide-react";
 import { useChartStore } from "@/lib/store/chart-store";
 import {
   DropdownMenu,
@@ -9,20 +9,14 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { Dialog } from "@/components/ui/dialog";
+import { TradingDialog, dangerButton, field, ghostButton, iconButton, primaryButton } from "@/components/trading/ui";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+
+const LOCAL_NAME = "Lista local";
 
 interface WatchlistInfo {
   id: string;
@@ -168,136 +162,93 @@ export function WatchlistSelector() {
   }
 
   const activeListName = activeId
-    ? lists.find((l) => l.id === activeId)?.name || "Cargando..."
-    : "Watchlist Local";
+    ? lists.find((l) => l.id === activeId)?.name || "Cargando…"
+    : LOCAL_NAME;
+  const activeCount = activeId ? lists.find((l) => l.id === activeId)?.item_count : undefined;
+
+  const itemClass = (active: boolean) => cn(
+    "group flex min-h-9 cursor-pointer items-center justify-between gap-2 rounded px-2 text-[13px] text-ink outline-none focus:bg-hover focus:text-ink data-[highlighted]:bg-hover max-[819px]:min-h-11",
+    active && "font-medium",
+  );
 
   return (
-    <div className="flex items-center justify-between px-3 py-1.5 border-b border-tv-border bg-tv-panel/40">
+    <div className="flex min-w-0 flex-1 items-center gap-1">
       <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
-        <DropdownMenuTrigger className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest text-tv-text hover:text-tv-blue transition-colors group outline-none">
-          <List className="h-3 w-3 text-tv-text-dim group-hover:text-tv-blue" />
-          {activeListName}
-          <ChevronDown className="h-3 w-3 text-tv-text-dim group-hover:text-tv-blue" />
+        <DropdownMenuTrigger className="flex min-h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 text-left text-sm font-semibold text-ink hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring max-[819px]:min-h-11">
+          <span className="truncate">{activeListName}</span>
+          {activeCount !== undefined && <span className="font-normal tabular-nums text-ink-3">{activeCount}</span>}
+          <ChevronDown className="h-4 w-4 flex-none text-ink-3" strokeWidth={1.5} aria-hidden="true" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-64 bg-tv-panel border-tv-border text-tv-text p-1 shadow-2xl">
+        <DropdownMenuContent align="start" className="w-64 max-w-[calc(100vw-32px)] rounded-lg border border-line bg-surface p-1 text-ink shadow-pop ring-0">
           <DropdownMenuGroup>
-            <DropdownMenuLabel className="px-2 py-1.5 text-[9px] font-bold uppercase tracking-[0.2em] text-tv-text-dim/60">
-              Tus Listas
-            </DropdownMenuLabel>
+            <DropdownMenuLabel className="px-2 pb-1 pt-2 text-xs font-medium text-ink-3">Tus listas</DropdownMenuLabel>
           </DropdownMenuGroup>
-          <DropdownMenuSeparator className="bg-tv-border/50 mx-1" />
-
-          <div className="max-h-[300px] overflow-y-auto py-1">
-            <DropdownMenuItem
-              onClick={() => setActiveId(null)}
-              className={cn(
-                "flex items-center justify-between text-xs py-2 px-3 cursor-pointer rounded-sm outline-none transition-colors",
-                !activeId ? "bg-tv-blue/10 text-tv-blue" : "hover:bg-tv-panel-hover"
-              )}
-            >
-              <div className="flex items-center justify-between w-full">
-                <div className="flex items-center gap-2.5">
-                  <List className={cn("h-3.5 w-3.5", !activeId ? "text-tv-blue" : "text-tv-text-dim")} />
-                  <span className="font-medium">Watchlist Local</span>
-                </div>
-                {!activeId && <div className="w-1.5 h-1.5 rounded-full bg-tv-blue shadow-[0_0_8px_rgba(41,98,255,0.6)]" />}
-              </div>
+          <div className="max-h-[300px] overflow-y-auto">
+            <DropdownMenuItem onClick={() => setActiveId(null)} className={itemClass(!activeId)}>
+              <span className="truncate">{LOCAL_NAME}</span>
+              {!activeId && <Check className="h-4 w-4 flex-none text-accent" strokeWidth={1.5} aria-label="Lista actual" />}
             </DropdownMenuItem>
 
             {lists.map((l) => (
-              <DropdownMenuItem
-                key={l.id}
-                onClick={() => setActiveId(l.id)}
-                className={cn(
-                  "flex items-center justify-between text-xs py-2 px-3 cursor-pointer rounded-sm outline-none group transition-colors",
-                  activeId === l.id ? "bg-tv-blue/10 text-tv-blue" : "hover:bg-tv-panel-hover"
-                )}
-              >
-                <div className="flex items-center justify-between w-full">
-                  <div className="flex items-center gap-2.5">
-                    <List className={cn("h-3.5 w-3.5", activeId === l.id ? "text-tv-blue" : "text-tv-text-dim")} />
-                    <span className="font-medium">{l.name}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setNewListName(l.name);
-                        setEditingList(l);
-                        setDropdownOpen(false);
-                      }}
-                      className="p-1 rounded hover:bg-tv-bg text-tv-text-dim hover:text-tv-text opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <Edit2 className="h-3 w-3" />
-                    </button>
-                    <button
-                      onClick={(e) => requestDeleteList(l.id, e)}
-                      className="p-1 rounded hover:bg-tv-red/20 text-tv-text-dim hover:text-tv-red opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </button>
-                    {activeId === l.id && (
-                      <div className="w-1.5 h-1.5 rounded-full bg-tv-blue shadow-[0_0_8px_rgba(41,98,255,0.6)]" />
-                    )}
-                  </div>
-                </div>
+              <DropdownMenuItem key={l.id} onClick={() => setActiveId(l.id)} className={itemClass(activeId === l.id)}>
+                <span className="truncate">{l.name}</span>
+                <span className="flex flex-none items-center gap-0.5">
+                  <button
+                    type="button"
+                    aria-label={`Renombrar ${l.name}`}
+                    title="Renombrar"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setNewListName(l.name);
+                      setEditingList(l);
+                      setDropdownOpen(false);
+                    }}
+                    className="grid h-7 w-7 place-items-center rounded text-ink-3 opacity-0 hover:bg-surface-2 hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-data-[highlighted]:opacity-100 max-[819px]:h-9 max-[819px]:w-9 max-[819px]:opacity-100"
+                  >
+                    <Edit2 className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Eliminar ${l.name}`}
+                    title="Eliminar"
+                    onClick={(e) => requestDeleteList(l.id, e)}
+                    className="grid h-7 w-7 place-items-center rounded text-ink-3 opacity-0 hover:bg-danger-soft hover:text-danger focus-visible:opacity-100 group-hover:opacity-100 group-data-[highlighted]:opacity-100 max-[819px]:h-9 max-[819px]:w-9 max-[819px]:opacity-100"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden="true" />
+                  </button>
+                  {activeId === l.id && <Check className="h-4 w-4 text-accent" strokeWidth={1.5} aria-label="Lista actual" />}
+                </span>
               </DropdownMenuItem>
             ))}
           </div>
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {/* Right side: item count + create button (outside dropdown to avoid Base UI focus conflict) */}
-      <div className="flex items-center gap-1.5">
-        <span className="text-[10px] text-tv-text-dim/40 font-mono">
-          {activeId ? lists.find((l) => l.id === activeId)?.item_count || 0 : "∞"}
-        </span>
-        <button
-          onClick={() => {
-            setNewListName("");
-            setShowCreateDialog(true);
-          }}
-          className="p-0.5 rounded hover:bg-tv-panel-hover text-tv-text-dim hover:text-tv-blue transition-colors"
-          title="Crear nueva lista"
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </button>
-      </div>
+      {/* Outside the dropdown to avoid the Base UI focus conflict. */}
+      <button
+        type="button"
+        aria-label="Nueva lista"
+        title="Nueva lista"
+        onClick={() => {
+          setNewListName("");
+          setShowCreateDialog(true);
+        }}
+        className={iconButton}
+      >
+        <ListPlus className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+      </button>
 
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className="bg-tv-panel border-tv-border text-tv-text sm:max-w-[320px] shadow-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-xs font-bold uppercase tracking-[0.2em] text-tv-text-dim">
-              Nueva Watchlist
-            </DialogTitle>
-          </DialogHeader>
-          <div className="py-6">
-            <Input
-              placeholder="Nombre de la lista"
-              value={newListName}
-              onChange={(e) => setNewListName(e.target.value)}
-              className="bg-tv-bg border-tv-border text-xs h-9 focus:border-tv-blue focus:ring-tv-blue/20"
-              autoFocus
-              onKeyDown={(e) => e.key === "Enter" && handleCreateList()}
-            />
-          </div>
-          <DialogFooter className="gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setShowCreateDialog(false)}
-              className="border-tv-border text-[11px] h-8 font-bold uppercase tracking-wider hover:bg-tv-panel-hover"
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={handleCreateList}
-              disabled={loading || !newListName.trim()}
-              className="bg-tv-blue hover:bg-tv-blue/90 text-white text-[11px] h-8 font-bold uppercase tracking-wider px-6"
-            >
-              {loading ? "..." : "Crear"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+        <TradingDialog title="Nueva lista" width={340}>
+          <NameForm
+            value={newListName}
+            onChange={setNewListName}
+            onSubmit={handleCreateList}
+            onCancel={() => setShowCreateDialog(false)}
+            submitLabel="Crear"
+            busy={loading}
+          />
+        </TradingDialog>
       </Dialog>
 
       <Dialog
@@ -307,42 +258,19 @@ export function WatchlistSelector() {
           if (!open) setEditingList(null);
         }}
       >
-        <DialogContent className="bg-tv-panel border-tv-border text-tv-text sm:max-w-[320px] shadow-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-xs font-bold uppercase tracking-[0.2em] text-tv-text-dim">
-              Renombrar Lista
-            </DialogTitle>
-          </DialogHeader>
-          <div className="py-6">
-            <Input
-              placeholder="Nombre de la lista"
-              value={newListName}
-              onChange={(e) => setNewListName(e.target.value)}
-              className="bg-tv-bg border-tv-border text-xs h-9 focus:border-tv-blue focus:ring-tv-blue/20"
-              autoFocus
-              onKeyDown={(e) => e.key === "Enter" && handleRenameList()}
-            />
-          </div>
-          <DialogFooter className="gap-2">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowEditDialog(false);
-                setEditingList(null);
-              }}
-              className="border-tv-border text-[11px] h-8 font-bold uppercase tracking-wider hover:bg-tv-panel-hover"
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={handleRenameList}
-              disabled={loading || !newListName.trim()}
-              className="bg-tv-blue hover:bg-tv-blue/90 text-white text-[11px] h-8 font-bold uppercase tracking-wider px-6"
-            >
-              {loading ? "..." : "Guardar"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+        <TradingDialog title="Renombrar lista" width={340}>
+          <NameForm
+            value={newListName}
+            onChange={setNewListName}
+            onSubmit={handleRenameList}
+            onCancel={() => {
+              setShowEditDialog(false);
+              setEditingList(null);
+            }}
+            submitLabel="Guardar"
+            busy={loading}
+          />
+        </TradingDialog>
       </Dialog>
 
       <Dialog
@@ -354,35 +282,54 @@ export function WatchlistSelector() {
           }
         }}
       >
-        <DialogContent className="bg-tv-panel border-tv-border text-tv-text sm:max-w-[360px] shadow-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-xs font-bold uppercase tracking-[0.2em] text-tv-text-dim">
-              Eliminar Lista
-            </DialogTitle>
-          </DialogHeader>
-          <div className="py-6 text-xs text-tv-text">
-            ¿Estás seguro de que querés eliminar esta lista? Esta acción no se puede deshacer.
-          </div>
-          <DialogFooter className="gap-2">
-            <Button
-              variant="outline"
+        <TradingDialog title="Eliminar lista" width={360}>
+          <p className="p-4 text-sm text-ink-2">
+            ¿Querés eliminar esta lista? Esta acción no se puede deshacer.
+          </p>
+          <div className="flex justify-end gap-2 px-4 pb-4">
+            <button
+              type="button"
               onClick={() => {
                 setPendingDeleteId(null);
                 setShowDeleteDialog(false);
               }}
-              className="border-tv-border text-[11px] h-8 font-bold uppercase tracking-wider hover:bg-tv-panel-hover"
+              className={ghostButton}
             >
               Cancelar
-            </Button>
-            <Button
-              onClick={confirmDeleteList}
-              className="bg-tv-red hover:bg-tv-red/90 text-white text-[11px] h-8 font-bold uppercase tracking-wider px-6"
-            >
+            </button>
+            <button type="button" onClick={confirmDeleteList} className={dangerButton}>
               Eliminar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+            </button>
+          </div>
+        </TradingDialog>
       </Dialog>
     </div>
+  );
+}
+
+function NameForm({ value, onChange, onSubmit, onCancel, submitLabel, busy }: {
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+  submitLabel: string;
+  busy: boolean;
+}) {
+  return (
+    <form
+      onSubmit={(e) => { e.preventDefault(); onSubmit(); }}
+      className="grid gap-4 p-4"
+    >
+      <label className="grid gap-1.5">
+        <span className="text-[13px] font-medium text-ink-2">Nombre</span>
+        <input autoFocus value={value} onChange={(e) => onChange(e.target.value)} className={field} />
+      </label>
+      <div className="flex justify-end gap-2">
+        <button type="button" onClick={onCancel} className={ghostButton}>Cancelar</button>
+        <button type="submit" disabled={busy || !value.trim()} aria-busy={busy} className={primaryButton}>
+          {submitLabel}
+        </button>
+      </div>
+    </form>
   );
 }

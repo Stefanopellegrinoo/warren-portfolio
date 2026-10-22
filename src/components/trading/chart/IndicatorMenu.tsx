@@ -45,20 +45,20 @@ export function IndicatorMenu() {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs text-tv-text hover:bg-tv-panel-hover">
-        <Activity className="h-3.5 w-3.5" />
-        <span>Indicadores</span>
+      <DropdownMenuTrigger aria-label="Indicadores" className="flex min-h-8 items-center justify-center gap-1.5 rounded-md px-2 max-[819px]:min-w-11 text-[13px] text-ink-2 hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring max-[819px]:min-h-11">
+        <Activity className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+        <span className="max-[819px]:hidden">Indicadores</span>
         {activeCount > 0 && (
-          <span className="ml-1 rounded bg-tv-blue/20 px-1.5 py-0.5 text-[10px] font-semibold text-tv-blue">
+          <span className="rounded bg-surface-2 px-1.5 text-xs font-medium tabular-nums text-ink-2 max-[819px]:hidden">
             {activeCount}
           </span>
         )}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-64 bg-tv-panel">
+      <DropdownMenuContent align="start" className="w-64 max-w-[calc(100vw-32px)] rounded-lg border border-line bg-surface p-1 text-ink shadow-pop ring-0">
         {Object.entries(groups).map(([group, items], idx) => (
           <DropdownMenuGroup key={group}>
-            {idx > 0 && <DropdownMenuSeparator />}
-            <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-tv-text-muted">
+            {idx > 0 && <DropdownMenuSeparator className="-mx-1 my-1 h-px bg-line" />}
+            <DropdownMenuLabel className="px-2 pb-1 pt-2 text-xs font-medium text-ink-3">
               {group}
             </DropdownMenuLabel>
             {items.map((i) => (
@@ -66,10 +66,10 @@ export function IndicatorMenu() {
                 key={i.key}
                 closeOnClick={false}
                 onClick={() => toggle(i.key)}
-                className="flex items-center justify-between text-xs"
+                className="flex min-h-8 cursor-pointer items-center justify-between rounded px-2 text-[13px] text-ink outline-none focus:bg-hover focus:text-ink data-[highlighted]:bg-hover max-[819px]:min-h-11"
               >
                 <span>{i.label(config)}</span>
-                {indicators[i.key] && <Check className="h-3.5 w-3.5 text-tv-blue" />}
+                {indicators[i.key] && <Check className="h-4 w-4 text-accent" strokeWidth={1.5} aria-label="Activo" />}
               </DropdownMenuItem>
             ))}
           </DropdownMenuGroup>

@@ -371,7 +371,7 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 				</div>
 
 				{alertMode && (
-					<p role="status" className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded bg-ink px-3 py-1.5 text-[13px] text-bg shadow-[var(--shadow-toast)]">
+					<p role="status" className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded bg-ink px-3 py-1.5 text-[13px] text-canvas shadow-[var(--shadow-toast)]">
 						Tocá el gráfico en el precio de la alerta · Esc para cancelar
 					</p>
 				)}
@@ -426,14 +426,14 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 				)}
 
 				{data.status !== "ready" && (
-					<div className="absolute inset-0 z-30 grid place-items-center bg-bg/80 text-[14px]">
+					<div className="absolute inset-0 z-30 grid place-items-center bg-canvas text-[14px]">
 						{data.status === "loading" ? (
 							<p role="status" className="text-ink-3">Cargando {symbol}…</p>
 						) : (
 							<div role="alert" className="flex flex-col items-center gap-3 text-center">
 								<p className="text-ink">No se pudo cargar {symbol}</p>
 								<p className="max-w-sm text-[13px] text-ink-3">{data.error}</p>
-								<button type="button" onClick={data.retry} className="rounded bg-primary px-3 py-1.5 text-on-primary hover:bg-primary-hover">
+								<button type="button" onClick={data.retry} className="rounded bg-primary px-3 py-1.5 text-primary-on hover:bg-primary-hover">
 									Reintentar
 								</button>
 							</div>

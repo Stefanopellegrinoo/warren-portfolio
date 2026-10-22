@@ -1,14 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
+import { TradingDialog, field, ghostButton, primaryButton } from "@/components/trading/ui";
 import {
   useChartStore,
   DEFAULT_CONFIG,
@@ -16,9 +10,9 @@ import {
 } from "@/lib/store/chart-store";
 
 const TITLES: Record<IndicatorKey, string> = {
-  ema20: "EMA — Slot 1",
-  ema50: "EMA — Slot 2",
-  ema200: "EMA — Slot 3",
+  ema20: "EMA 1",
+  ema50: "EMA 2",
+  ema200: "EMA 3",
   rsi: "RSI",
   macd: "MACD",
   volume: "Volumen",
@@ -43,12 +37,7 @@ export function IndicatorSettingsDialog() {
         if (!v) setTarget(null);
       }}
     >
-      <DialogContent className="max-w-sm bg-tv-panel">
-        <DialogHeader>
-          <DialogTitle className="text-sm font-semibold">
-            {target ? TITLES[target] : ""} — Configuración
-          </DialogTitle>
-        </DialogHeader>
+      <TradingDialog title={target ? `Configurar ${TITLES[target]}` : ""} width={384}>
         {target && (
           <SettingsForm
             target={target}
@@ -63,7 +52,7 @@ export function IndicatorSettingsDialog() {
             }}
           />
         )}
-      </DialogContent>
+      </TradingDialog>
     </Dialog>
   );
 }
@@ -136,7 +125,7 @@ function SettingsForm({ target, config, onSave, onReset }: FormProps) {
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 p-4">
       {(target === "ema20" || target === "ema50" || target === "ema200") && (
         <Field
           label="Período"
@@ -171,7 +160,7 @@ function SettingsForm({ target, config, onSave, onReset }: FormProps) {
         </div>
       )}
       {target === "volume" && (
-        <p className="text-xs text-tv-text-muted">
+        <p className="text-[13px] text-ink-3">
           El indicador de volumen no tiene parámetros configurables en esta
           versión.
         </p>
@@ -191,7 +180,7 @@ function SettingsForm({ target, config, onSave, onReset }: FormProps) {
         </div>
       )}
       {target === "obv" && (
-        <p className="text-xs text-tv-text-muted">
+        <p className="text-[13px] text-ink-3">
           OBV no tiene parámetros configurables.
         </p>
       )}
@@ -204,7 +193,7 @@ function SettingsForm({ target, config, onSave, onReset }: FormProps) {
               onChange={(n) => setDraft((d) => ({ ...d, stochK: n }))}
             />
             <Field
-              label="Smooth"
+              label="Suavizado"
               value={draft.stochSmooth}
               onChange={(n) => setDraft((d) => ({ ...d, stochSmooth: n }))}
             />
@@ -214,14 +203,13 @@ function SettingsForm({ target, config, onSave, onReset }: FormProps) {
               onChange={(n) => setDraft((d) => ({ ...d, stochD: n }))}
             />
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
+          <button
+            type="button"
             onClick={() => setDraft((d) => ({ ...d, stochK: 21, stochSmooth: 5, stochD: 5 }))}
-            className="text-tv-text-muted hover:text-tv-text text-xs"
+            className={`${ghostButton} self-start`}
           >
             Largo plazo (21, 5, 5)
-          </Button>
+          </button>
         </div>
       )}
       {target === "adx" && (
@@ -233,17 +221,12 @@ function SettingsForm({ target, config, onSave, onReset }: FormProps) {
       )}
 
       <div className="mt-2 flex items-center justify-between">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onReset}
-          className="text-tv-text-muted hover:text-tv-text"
-        >
-          Reset defaults
-        </Button>
-        <Button size="sm" onClick={save} className="bg-tv-blue hover:bg-tv-blue/90">
+        <button type="button" onClick={onReset} className={ghostButton}>
+          Restablecer valores
+        </button>
+        <button type="button" onClick={save} className={primaryButton}>
           Aplicar
-        </Button>
+        </button>
       </div>
     </div>
   );
@@ -260,10 +243,8 @@ function Field({
 }) {
   return (
     <label className="flex flex-col gap-1">
-      <span className="text-[10px] font-semibold uppercase tracking-wider text-tv-text-muted">
-        {label}
-      </span>
-      <Input
+      <span className="text-[13px] font-medium text-ink-2">{label}</span>
+      <input
         type="number"
         min={2}
         max={500}
@@ -272,7 +253,7 @@ function Field({
           const n = parseInt(e.target.value, 10);
           if (!isNaN(n)) onChange(n);
         }}
-        className="bg-tv-bg tabular-nums"
+        className={field}
       />
     </label>
   );

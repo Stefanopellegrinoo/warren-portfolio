@@ -40,7 +40,7 @@ export function getListsUrl(): string {
  * Returns the button label based on whether the symbol is in the watchlist.
  */
 export function getAddButtonLabel(isInWatchlist: boolean): string {
-  return isInWatchlist ? "★ In watchlist" : "Add to watchlist";
+  return isInWatchlist ? "En la lista" : "Agregar a la lista";
 }
 
 /**
@@ -155,19 +155,14 @@ export function AddToWatchlistButton({
         disabled={disabled}
         onClick={handleDirectClick}
         className={cn(
-          "rounded px-2 py-1 text-[10px] font-medium transition-colors",
-          inWatchlist
-            ? "cursor-default text-tv-green opacity-75"
-            : "text-tv-text-muted hover:bg-tv-panel-hover hover:text-tv-text",
-          loading && "opacity-50"
+          "inline-flex min-h-8 items-center rounded-md px-2 text-xs font-medium max-[819px]:min-h-11",
+          inWatchlist ? "cursor-default text-ink-3" : "text-accent-ink hover:bg-accent-soft",
+          loading && "opacity-60"
         )}
-        aria-label={
-          inWatchlist
-            ? `${symbol} is in your watchlist`
-            : `Add ${symbol} to watchlist`
-        }
+        aria-label={inWatchlist ? `${symbol} está en la lista` : `Agregar ${symbol} a la lista`}
+        aria-busy={loading}
       >
-        {loading ? "..." : label}
+        {label}
       </button>
     );
   }
@@ -176,19 +171,16 @@ export function AddToWatchlistButton({
   return (
     <Popover open={popoverOpen} onOpenChange={handlePopoverOpenChange}>
       <PopoverTrigger
-        className={cn(
-          "rounded px-2 py-1 text-[10px] font-medium transition-colors",
-          "text-tv-text-muted hover:bg-tv-panel-hover hover:text-tv-text"
-        )}
-        aria-label={`Add ${symbol} to a watchlist`}
+        className="inline-flex min-h-8 items-center rounded-md px-2 text-xs font-medium text-accent-ink hover:bg-accent-soft max-[819px]:min-h-11"
+        aria-label={`Agregar ${symbol} a una lista`}
       >
-        + Watch
+        + Lista
       </PopoverTrigger>
-      <PopoverContent className="min-w-[10rem] p-1">
+      <PopoverContent className="w-auto min-w-[10rem] max-w-[calc(100vw-32px)] rounded-lg border border-line bg-surface p-1 text-ink shadow-pop ring-0">
         {popoverLoading ? (
-          <div className="px-3 py-2 text-[10px] text-tv-text-muted">Loading…</div>
+          <p role="status" className="px-3 py-2 text-[13px] text-ink-3">Cargando…</p>
         ) : popoverLists.length === 0 ? (
-          <div className="px-3 py-2 text-[10px] text-tv-text-muted">No watchlists found.</div>
+          <p className="px-3 py-2 text-[13px] text-ink-3">No tenés listas guardadas.</p>
         ) : (
           popoverLists.map((list) => {
             const alreadyAdded = addedListIds.has(list.id);
@@ -199,14 +191,12 @@ export function AddToWatchlistButton({
                 disabled={alreadyAdded}
                 onClick={() => handleAddToList(list.id)}
                 className={cn(
-                  "flex w-full items-center justify-between rounded px-3 py-1.5 text-left text-[10px] transition-colors",
-                  alreadyAdded
-                    ? "cursor-default text-tv-green opacity-75"
-                    : "text-tv-text hover:bg-tv-panel-hover"
+                  "flex min-h-9 w-full items-center justify-between gap-3 rounded px-3 text-left text-[13px] max-[819px]:min-h-11",
+                  alreadyAdded ? "cursor-default text-ink-3" : "text-ink hover:bg-hover"
                 )}
               >
                 <span>{list.name}</span>
-                {alreadyAdded && <span className="ml-2">★ Added</span>}
+                {alreadyAdded && <span className="text-xs">Agregado</span>}
               </button>
             );
           })

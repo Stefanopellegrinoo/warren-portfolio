@@ -2,14 +2,8 @@
 
 import { useEffect, useState, useMemo, useRef } from "react";
 import { Search, ChevronDown, Loader2 } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { DialogTrigger } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { Dialog, DialogTrigger } from "@/components/ui/dialog";
+import { TradingDialog, field } from "@/components/trading/ui";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { fetchExchangeSymbols } from "@/lib/binance/rest";
 import { getPortfolio } from "@/lib/warren/positions";
@@ -57,9 +51,11 @@ export function debounce<T extends (...args: any[]) => void>(
 
 interface SymbolSelectorProps {
   onSymbolSelect?: () => void;
+  /** Shown next to the ticker inside the trigger (the top bar puts the quote here). */
+  children?: React.ReactNode;
 }
 
-export function SymbolSelector({ onSymbolSelect }: SymbolSelectorProps = {}) {
+export function SymbolSelector({ onSymbolSelect, children }: SymbolSelectorProps = {}) {
   const symbol = useChartStore((s) => s.symbol);
   const setSymbol = useChartStore((s) => s.setSymbol);
   const open = useChartStore((s) => s.symbolDialogOpen);
@@ -146,54 +142,56 @@ export function SymbolSelector({ onSymbolSelect }: SymbolSelectorProps = {}) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => setOpen(v)}>
-      <DialogTrigger className="group flex items-center gap-2 rounded px-3 py-1.5 text-sm font-semibold hover:bg-tv-panel-hover">
-        <Search className="h-3.5 w-3.5 text-tv-text-muted group-hover:text-tv-text" />
-        <span className="tabular-nums">{symbol}</span>
-        <ChevronDown className="h-3.5 w-3.5 text-tv-text-muted" />
+      <DialogTrigger
+        aria-label={`Cambiar símbolo, ahora ${symbol}`}
+        className="group flex min-h-9 min-w-0 items-center gap-2 rounded-md px-2 text-base font-semibold text-ink hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring max-[819px]:min-h-11 max-[819px]:gap-1.5 max-[819px]:px-1"
+      >
+        <Search className="h-4 w-4 flex-none text-ink-3 group-hover:text-ink max-[819px]:hidden" strokeWidth={1.5} aria-hidden="true" />
+        <span className="flex-none tabular-nums">{symbol}</span>
+        {children}
+        <ChevronDown className="h-4 w-4 flex-none text-ink-3 max-[399px]:hidden" strokeWidth={1.5} aria-hidden="true" />
       </DialogTrigger>
-      <DialogContent className="max-w-md gap-0 bg-tv-panel p-0">
-        <DialogHeader className="border-b border-tv-border px-4 py-3">
-          <DialogTitle className="text-sm font-medium">Buscar símbolo</DialogTitle>
-        </DialogHeader>
-        <div className="border-b border-tv-border p-3">
-          <Input
+      <TradingDialog title="Buscar símbolo" width={448}>
+        <div className="border-b border-line p-3">
+          <input
             autoFocus
-            placeholder="BTC, AAPL, GGAL… (Enter para confirmar)"
+            aria-label="Símbolo"
+            placeholder="BTC, AAPL, GGAL…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="bg-tv-bg"
+            className={field}
           />
-          <p className="mt-1.5 text-[10px] text-tv-text-muted">
-            Buscá cripto, acciones o CEDEARs. Enter carga el ticker directamente.
+          <p className="mt-1.5 text-xs text-ink-3">
+            Cripto, acciones o CEDEARs. Enter abre el ticker escrito.
           </p>
         </div>
-        <ScrollArea className="h-[400px]">
+        <ScrollArea className="h-[min(400px,60dvh)]">
           <div className="flex flex-col">
-            <SectionHeader title="Acciones / Portfolio" />
-            
+            <SectionHeader title="Acciones y cartera" />
+
             {isSearching && (
-              <div className="flex items-center justify-center gap-2 p-4 text-xs text-tv-text-muted">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                <span>Searching Yahoo...</span>
+              <div role="status" className="flex items-center justify-center gap-2 p-4 text-[13px] text-ink-3">
+                <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                <span>Buscando…</span>
               </div>
             )}
 
             {!isSearching && query.length < 2 && filteredPortfolio.map((ticker) => (
-              <TickerRow 
+              <TickerRow
                 key={`port-${ticker}`}
-                symbol={ticker} 
-                subtitle="Portfolio" 
+                symbol={ticker}
+                subtitle="En tu cartera"
                 onClick={() => selectTicker(ticker)}
                 active={ticker === symbol}
               />
             ))}
 
             {!isSearching && query.length >= 2 && yahooResults.map((r) => (
-              <TickerRow 
+              <TickerRow
                 key={`yahoo-${r.symbol}`}
-                symbol={r.symbol} 
-                subtitle={r.shortname} 
+                symbol={r.symbol}
+                subtitle={r.shortname}
                 exchange={r.exchange}
                 onClick={() => selectTicker(r.symbol)}
                 active={r.symbol === symbol}
@@ -201,11 +199,11 @@ export function SymbolSelector({ onSymbolSelect }: SymbolSelectorProps = {}) {
               />
             ))}
 
-            <SectionHeader title="Crypto (Binance)" />
+            <SectionHeader title="Cripto (Binance)" />
             {filteredBinance.map((s) => (
-              <TickerRow 
+              <TickerRow
                 key={`binance-${s.symbol}`}
-                symbol={s.symbol} 
+                symbol={s.symbol}
                 subtitle={`${s.baseAsset} / ${s.quoteAsset}`}
                 onClick={() => selectTicker(s.symbol)}
                 active={s.symbol === symbol}
@@ -213,45 +211,38 @@ export function SymbolSelector({ onSymbolSelect }: SymbolSelectorProps = {}) {
             ))}
           </div>
         </ScrollArea>
-      </DialogContent>
+      </TradingDialog>
     </Dialog>
   );
 }
 
 function SectionHeader({ title }: { title: string }) {
-  return (
-    <div className="bg-tv-bg-secondary px-4 py-1 text-[10px] font-bold uppercase tracking-wider text-tv-text-dim border-b border-tv-border">
-      {title}
-    </div>
-  );
+  return <h3 className="border-b border-line bg-surface-2 px-4 py-1.5 text-[13px] font-medium text-ink-2">{title}</h3>;
 }
 
-function TickerRow({ 
-  symbol, 
-  subtitle, 
-  exchange, 
-  onClick, 
+function TickerRow({
+  symbol,
+  subtitle,
+  exchange,
+  onClick,
   active,
-  showAddButton 
-}: { 
-  symbol: string; 
-  subtitle: string; 
+  showAddButton
+}: {
+  symbol: string;
+  subtitle: string;
   exchange?: string;
   onClick: () => void;
   active: boolean;
   showAddButton?: boolean;
 }) {
   return (
-    <div className={cn(
-      "flex items-center justify-between border-b border-tv-border px-4 py-2 text-xs hover:bg-tv-panel-hover",
-      active && "bg-tv-panel-hover"
-    )}>
-      <button type="button" onClick={onClick} className="flex flex-1 flex-col gap-0.5 text-left">
-        <span className="font-semibold text-tv-text">{symbol}</span>
-        <span className="text-[10px] text-tv-text-muted">{subtitle}</span>
+    <div className={cn("flex items-center justify-between gap-2 border-b border-line px-4 hover:bg-hover", active && "bg-hover")}>
+      <button type="button" onClick={onClick} aria-current={active || undefined} className="flex min-h-11 min-w-0 flex-1 flex-col justify-center py-1.5 text-left">
+        <span className="text-sm font-medium text-ink">{symbol}</span>
+        <span className="truncate text-xs text-ink-3">{subtitle}</span>
       </button>
-      <div className="flex items-center gap-2">
-        {exchange && <span className="text-[10px] text-tv-text-muted">{exchange}</span>}
+      <div className="flex flex-none items-center gap-2">
+        {exchange && <span className="text-xs text-ink-3">{exchange}</span>}
         {showAddButton && <AddToWatchlistButton symbol={symbol} />}
       </div>
     </div>
