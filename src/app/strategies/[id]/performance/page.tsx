@@ -588,14 +588,14 @@ export default function PerformancePage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen md:pl-56 pb-20 md:pb-0 p-6 flex items-center justify-center">
+      <div className="min-h-screen p-6 flex items-center justify-center">
         <div className="w-8 h-8 rounded-full border-2 border-amber border-t-transparent animate-spin" />
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen md:pl-56 pb-20 md:pb-0 p-6">
+    <div className="min-h-screen p-6">
       <div className="max-w-[1550px] mx-auto">
 
         {/* Header */}

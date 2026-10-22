@@ -21,18 +21,21 @@ describe('formatNumber (es-AR)', () => {
 })
 
 describe('formatUSD (es-AR)', () => {
+  it('keeps US$ glued to the amount with a non-breaking space', () => {
+    expect(formatUSD(39951.8)).toBe('US$\u00a039.951,80')
+  })
+
   it('prefixes US$ and puts the minus before it', () => {
-    expect(formatUSD(39951.8)).toBe('US$ 39.951,80')
-    expect(formatUSD(-310.45)).toBe('−US$ 310,45')
-    expect(formatUSD(0)).toBe('US$ 0,00')
+    expect(formatUSD(-310.45).replace('\u00a0', ' ')).toBe('−US$ 310,45')
+    expect(formatUSD(0).replace('\u00a0', ' ')).toBe('US$ 0,00')
   })
 
   it('keeps small values exact in compact mode', () => {
-    expect(formatUSD(512.3, true)).toBe('US$ 512,30')
+    expect(formatUSD(512.3, true).replace('\u00a0', ' ')).toBe('US$ 512,30')
   })
 
   it('shortens large values in compact mode', () => {
-    expect(formatUSD(39951.8, true)).toMatch(/^US\$ 40/)
+    expect(formatUSD(39951.8, true)).toMatch(/^US\$\u00a040/)
   })
 })
 

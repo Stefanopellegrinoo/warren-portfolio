@@ -128,7 +128,7 @@ function DetailedStats({ data, assetLabel }: { data: StatData; assetLabel: strin
   return (
     <>
       {/* ═══════════════ ROW 1: Core KPIs ═══════════════ */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+      <div className="grid grid-cols-1 min-[400px]:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
         <KpiCard
           label="P&L Total (Abierto + Realizado)"
           value={totalPnl}
@@ -164,7 +164,7 @@ function DetailedStats({ data, assetLabel }: { data: StatData; assetLabel: strin
       </div>
 
       {/* ═══════════════ ROW 2: Risk Metrics ═══════════════ */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
+      <div className="grid grid-cols-1 min-[400px]:grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
         <div className="glass rounded-xl px-4 py-3 animate-slide-up" style={{ animationDelay: '240ms', animationFillMode: 'both' }}>
           <p className="text-[10px] font-mono text-slate-600 uppercase tracking-widest">Sharpe Ratio</p>
           {data.sharpeRatio !== null && data.sharpeRatio !== undefined ? (
@@ -608,7 +608,7 @@ export default function StatisticsPage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-6 py-8 md:pl-64 pb-24 md:pb-8">
+    <div className="max-w-6xl mx-auto px-6 py-8">
 
       {/* Header */}
       <div className="mb-6 animate-fade-in">
@@ -681,7 +681,7 @@ export default function StatisticsPage() {
           </div>
 
           {/* High-level KPIs */}
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+          <div className="grid grid-cols-1 min-[400px]:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
             <KpiCard
               label="Valor Total Cartera"
               value={combinedData.totalValue}

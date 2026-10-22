@@ -1,0 +1,185 @@
+'use client'
+
+import Link from 'next/link'
+import { useEffect, useRef, useState } from 'react'
+import { usePathname, useRouter } from 'next/navigation'
+import { Menu, X, LogOut } from 'lucide-react'
+import { cn, formatNumber } from '@/lib/utils'
+import { createClient } from '@/lib/supabase-client'
+import { NAV_ITEMS, PERSONAL_ITEMS, activeHref, topHoldings, type NavItem } from './nav'
+import ThemeSwitch from './ThemeSwitch'
+
+const linkBase =
+  'relative flex min-h-8 items-center gap-2 rounded-md px-2 text-ink-2 hover:bg-hover hover:text-ink max-[819px]:min-h-11'
+const linkActive =
+  'bg-surface font-medium text-ink shadow-[0_0_0_1px_var(--line)] before:absolute before:-left-3 before:bottom-2 before:top-2 before:w-0.5 before:rounded before:bg-accent'
+const sectionTitle = 'mb-1 px-2 text-xs font-medium uppercase tracking-[0.06em] text-ink-3'
+
+function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+  const Icon = item.icon
+  return (
+    <Link href={item.href} aria-current={active ? 'page' : undefined} className={cn(linkBase, active && linkActive)}>
+      <Icon className="h-4 w-4 flex-none" strokeWidth={1.5} aria-hidden="true" />
+      {item.label}
+    </Link>
+  )
+}
+
+interface Holding { ticker: string; weightPct: number }
+
+export default function AppShell({ children, pathnameForTest }: { children: React.ReactNode; pathnameForTest?: string }) {
+  const routerPath = usePathname()
+  const pathname = pathnameForTest ?? routerPath ?? ''
+  const router = useRouter()
+  const current = activeHref(pathname)
+  // The menu belongs to the page it was opened on, so navigating closes it.
+  const [openOn, setOpenOn] = useState<string | null>(null)
+  const open = openOn === pathname
+  const [holdings, setHoldings] = useState<Holding[]>([])
+  const [holdingCount, setHoldingCount] = useState(0)
+  const openBtn = useRef<HTMLButtonElement>(null)
+  const closeBtn = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/positions')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (cancelled || !d) return
+        const positions = [...(d.positions ?? []), ...(d.onPositions ?? [])]
+        setHoldings(topHoldings(positions, d.summary?.total_market_value ?? 0))
+        setHoldingCount(positions.length)
+      })
+      .catch(() => { /* the shortcut list is optional; the page shows its own errors */ })
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    closeBtn.current?.focus()
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeMenu() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
+
+  function closeMenu() {
+    setOpenOn(null)
+    openBtn.current?.focus()
+  }
+
+  async function handleLogout() {
+    await createClient().auth.signOut({ scope: 'local' })
+    router.refresh()
+    router.push('/auth/login')
+  }
+
+  return (
+    <div className="grid min-h-dvh grid-cols-[minmax(0,1fr)] bg-canvas text-ink min-[820px]:grid-cols-[264px_minmax(0,1fr)]">
+      <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[60] focus:rounded-md focus:bg-surface focus:px-3 focus:py-2 focus:shadow-pop">
+        Saltar al contenido
+      </a>
+
+      <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-line bg-canvas px-2 min-[820px]:hidden">
+        <button
+          ref={openBtn}
+          type="button"
+          onClick={() => setOpenOn(pathname)}
+          aria-controls="sidebar"
+          aria-expanded={open}
+          className="grid h-11 w-11 place-items-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+        >
+          <Menu className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />
+          <span className="sr-only">Abrir menú</span>
+        </button>
+        <span className="font-serif text-xl font-medium leading-none">Warren</span>
+      </header>
+
+      <div
+        aria-hidden="true"
+        onClick={closeMenu}
+        className={cn(
+          'fixed inset-0 z-[25] bg-black/30 transition-opacity duration-300 min-[820px]:hidden',
+          open ? 'opacity-100' : 'pointer-events-none opacity-0',
+        )}
+      />
+
+      <aside
+        id="sidebar"
+        aria-label="Navegación principal"
+        className={cn(
+          'flex flex-col gap-5 overflow-y-auto border-r border-line bg-sidebar px-3 py-4 text-sm',
+          'min-[820px]:sticky min-[820px]:top-0 min-[820px]:h-dvh',
+          'max-[819px]:fixed max-[819px]:inset-y-0 max-[819px]:left-0 max-[819px]:z-30 max-[819px]:h-dvh max-[819px]:w-[min(86vw,320px)] max-[819px]:shadow-toast max-[819px]:transition-transform max-[819px]:duration-300',
+          open ? 'max-[819px]:translate-x-0' : 'max-[819px]:invisible max-[819px]:-translate-x-full',
+        )}
+      >
+        <div className="flex items-center justify-between px-2 pt-1">
+          <Link href="/dashboard" className="font-serif text-xl font-medium leading-none tracking-[-0.01em] text-ink">Warren</Link>
+          <button
+            ref={closeBtn}
+            type="button"
+            onClick={closeMenu}
+            className="grid h-11 w-11 place-items-center rounded-md text-ink-2 hover:bg-hover hover:text-ink min-[820px]:hidden"
+          >
+            <X className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />
+            <span className="sr-only">Cerrar menú</span>
+          </button>
+        </div>
+
+        <nav aria-label="Vistas">
+          <ul className="grid gap-px">
+            {NAV_ITEMS.map(item => (
+              <li key={item.href}><NavLink item={item} active={current === item.href} /></li>
+            ))}
+          </ul>
+        </nav>
+
+        {holdings.length > 0 && (
+          <nav aria-labelledby="h-mis-activos">
+            <h2 id="h-mis-activos" className={sectionTitle}>Mis activos</h2>
+            <ul className="grid gap-px">
+              {holdings.map(h => (
+                <li key={h.ticker}>
+                  <Link href={`/trading?symbol=${encodeURIComponent(h.ticker)}`} className={linkBase}>
+                    <span className="flex-1 pl-6">{h.ticker}</span>
+                    <span className="text-xs text-ink-3">{formatNumber(h.weightPct, { decimals: 1 })} %</span>
+                  </Link>
+                </li>
+              ))}
+              {holdingCount > holdings.length && (
+                <li>
+                  <Link href="/dashboard#tenencias" className={linkBase}><span className="pl-6">Ver los {holdingCount}</span></Link>
+                </li>
+              )}
+            </ul>
+          </nav>
+        )}
+
+        <nav aria-labelledby="h-personal">
+          <h2 id="h-personal" className={sectionTitle}>Personal</h2>
+          <ul className="grid gap-px">
+            {PERSONAL_ITEMS.map(item => (
+              <li key={item.href}><NavLink item={item} active={current === item.href} /></li>
+            ))}
+          </ul>
+        </nav>
+
+        <div className="mt-auto border-t border-line pt-3">
+          <ThemeSwitch pathname={pathname} />
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-ink-2 hover:bg-hover hover:text-ink max-[819px]:min-h-11"
+          >
+            <LogOut className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+            Cerrar sesión
+          </button>
+        </div>
+      </aside>
+
+      <main id="main" className="min-w-0">
+        {children}
+      </main>
+    </div>
+  )
+}

@@ -4,7 +4,7 @@ import OnExplorer from '@/components/ons/OnExplorer'
 
 export default function OnsPage() {
   return (
-    <div className="min-h-screen pb-20 md:pb-0 md:pl-56">
+    <div className="min-h-screen">
       <div className="space-y-6 p-4 md:p-8">
         <header className="flex flex-wrap items-start justify-between gap-3">
           <div>

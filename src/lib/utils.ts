@@ -25,7 +25,8 @@ export function formatUSD(value: number, compact = false): string {
   const body = compact && Math.abs(value) >= 1000
     ? plainSpaces(new Intl.NumberFormat('es-AR', { notation: 'compact', maximumFractionDigits: 1 }).format(Math.abs(value)))
     : formatNumber(Math.abs(value))
-  return (formatNumber(value).startsWith(MINUS) ? MINUS : '') + 'US$ ' + body
+  // Non-breaking space: the currency must never wrap away from its amount.
+  return (formatNumber(value).startsWith(MINUS) ? MINUS : '') + 'US$\u00a0' + body
 }
 
 /** Formats a FRACTION (0.1234 -> "+12,34 %"). Percent-valued inputs must be divided by 100 first. */

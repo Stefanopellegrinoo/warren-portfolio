@@ -53,7 +53,7 @@ function StrategiesContent() {
   }
 
   return (
-    <div className="min-h-screen md:pl-56 pb-20 md:pb-0 p-6">
+    <div className="min-h-screen p-6">
       <div className="max-w-[1550px] mx-auto">
 
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 animate-fade-in">

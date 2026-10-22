@@ -3,7 +3,7 @@ import PortfolioList from '@/components/ons/portfolios/PortfolioList'
 
 export default function CarterasPage() {
   return (
-    <div className="min-h-screen pb-20 md:pb-0 md:pl-56">
+    <div className="min-h-screen">
       <div className="space-y-6 p-4 md:p-8">
         <Link href="/ons" className="inline-block text-sm text-slate-400 hover:text-white">← Volver al listado</Link>
         <header>

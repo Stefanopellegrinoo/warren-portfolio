@@ -112,7 +112,7 @@ function Badges({ r }: { r: OnListRow }) {
 export default function OnExplorerTable({ rows, sort, onSort }: Props) {
   return (
     <div className="glass relative rounded-2xl">
-      <div className="overflow-x-auto rounded-2xl">
+      <div className="relative overflow-x-auto rounded-2xl">
       <table className="w-full min-w-[1000px] text-sm font-mono">
         <caption className="sr-only">Obligaciones negociables: precio, TIR y duración. Ordená por columna con el encabezado.</caption>
         <thead>

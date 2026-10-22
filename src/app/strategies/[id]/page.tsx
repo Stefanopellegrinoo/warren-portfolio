@@ -143,7 +143,7 @@ export default function StrategyDetailPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen md:pl-56 pb-20 md:pb-0 p-6 flex items-center justify-center">
+      <div className="min-h-screen p-6 flex items-center justify-center">
         <div className="w-8 h-8 rounded-full border-2 border-amber border-t-transparent animate-spin" />
       </div>
     )
@@ -151,7 +151,7 @@ export default function StrategyDetailPage() {
 
   if (notFound) {
     return (
-      <div className="min-h-screen md:pl-56 pb-20 md:pb-0 p-6 flex flex-col items-center justify-center gap-4">
+      <div className="min-h-screen p-6 flex flex-col items-center justify-center gap-4">
         <p className="text-slate-300 font-display font-600 text-lg">Estrategia no encontrada</p>
         <Link href="/strategies" className="btn-ghost text-xs inline-flex items-center gap-1.5">
           <ArrowLeft className="w-3.5 h-3.5" />
@@ -163,7 +163,7 @@ export default function StrategyDetailPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen md:pl-56 pb-20 md:pb-0 p-6 flex flex-col items-center justify-center gap-4">
+      <div className="min-h-screen p-6 flex flex-col items-center justify-center gap-4">
         <p className="text-slate-400 font-mono text-sm">{error}</p>
         <button onClick={loadStrategy} className="btn-ghost text-xs">
           Reintentar
@@ -175,7 +175,7 @@ export default function StrategyDetailPage() {
   if (!strategy) return null
 
   return (
-    <div className="min-h-screen md:pl-56 pb-20 md:pb-0 p-6">
+    <div className="min-h-screen p-6">
       <div className="max-w-[1550px] mx-auto">
 
         {/* Header */}

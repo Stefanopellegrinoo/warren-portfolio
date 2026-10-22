@@ -215,7 +215,7 @@ export default function HistoryPage() {
   }
 
   return (
-    <div className="min-h-screen md:pl-56 pb-20 md:pb-0">
+    <div className="min-h-screen">
       <div className="max-w-7xl mx-auto px-6 py-8">
 
         <div className="mb-6 animate-fade-in flex flex-col sm:flex-row sm:items-end justify-between gap-4">
@@ -253,7 +253,7 @@ export default function HistoryPage() {
         {activeTab === 'closed' && (
           <div className="animate-fade-in">
             {/* Summary KPIs */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+            <div className="grid grid-cols-1 min-[400px]:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
               {[
                 { label: 'P&L Realizado',  value: totalPnl,      highlight: true,  type: 'currency' as const },
                 { label: 'Capital Rotado', value: totalInvested,  highlight: false, type: 'currency' as const },

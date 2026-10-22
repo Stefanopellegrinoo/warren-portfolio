@@ -210,7 +210,7 @@ export default function CashflowPage() {
   const isOverdue = (item: Cashflow) => item.status === 'PENDIENTE' && new Date(item.date) < new Date()
 
   return (
-    <div className="min-h-screen md:pl-56 pb-20 md:pb-0">
+    <div className="min-h-screen">
       <div className="max-w-6xl mx-auto px-6 py-8">
 
         {/* Header */}
@@ -252,7 +252,7 @@ export default function CashflowPage() {
         </div>
 
         {/* KPIs */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <div className="grid grid-cols-1 min-[400px]:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
           <div className="kpi-card animate-slide-up" style={{ animationFillMode: 'both' }}>
             <span className="text-[11px] font-mono text-slate-500 uppercase tracking-widest">Total Gastos</span>
             <span className="text-2xl font-display font-800 mt-1 text-white">{formatUSD(monthTotal)}</span>
