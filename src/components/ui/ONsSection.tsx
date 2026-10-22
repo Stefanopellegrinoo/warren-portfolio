@@ -198,11 +198,9 @@ export default function ONsSection({ positions, loading, summary, onSell }: Prop
                     {fmtNum(pos.quantity * 100, 0)}
                   </td>
 
-                  {/* Precio promedio */}
+                  {/* Precio promedio: stored in USD per 100 VN, same unit as PRECIO */}
                   <td className="px-3 py-3 font-mono text-xs text-slate-400">
-                    {pos.avg_cost < 10
-                      ? `${(pos.avg_cost * 100).toFixed(0)}%`  // price as % of nominal (no decimals)
-                      : formatUSD(pos.avg_cost)}
+                    {formatUSD(pos.avg_cost)}
                   </td>
 
                   {/* Invertido */}
