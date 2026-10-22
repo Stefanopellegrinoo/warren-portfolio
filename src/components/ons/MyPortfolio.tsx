@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from './portfolios/api'
 import MyPortfolioView, { type MyPortfolioData } from './MyPortfolioView'
+import OnPayments from './OnPayments'
 import { Loading, LoadError } from './ui'
 
 export default function MyPortfolio() {
@@ -21,5 +22,10 @@ export default function MyPortfolio() {
 
   if (failed) return <LoadError message="No se pudo calcular tu cartera de ONs." onRetry={() => void load()} />
   if (!data) return <Loading label="Cargando tu cartera" />
-  return <MyPortfolioView data={data} />
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-10">
+      <MyPortfolioView data={data} />
+      <OnPayments />
+    </div>
+  )
 }

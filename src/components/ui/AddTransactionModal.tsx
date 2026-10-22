@@ -342,7 +342,8 @@ function TickerConfirmation({ pending, loading, onConfirm, onCancel }: {
 // Form state types
 // ─────────────────────────────────────────────────────────
 const STOCK_OPS: Operation[] = ['COMPRA', 'VENTA', 'DIVIDENDO']
-const ON_OPS: ONOperation[] = ['COMPRA', 'VENTA', 'CUPON']
+// No CUPON: ON coupons are automatic and corrected in ONs → Mi cartera (odd/tasks/nucleo-ledger.md S10).
+const ON_OPS: ONOperation[] = ['COMPRA', 'VENTA']
 const CASH_OPS: CashMovementType[] = ['DEPOSITO', 'RETIRO']
 
 interface CedearFormData {
@@ -695,7 +696,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
     e.preventDefault()
     setError('')
     if (!onForm.ticker.trim()) { setError('Ingresá el ticker de la ON'); return }
-    if (onForm.operation !== 'CUPON' && onForm.quantity <= 0) { setError('La cantidad debe ser mayor a 0'); return }
+    if (onForm.quantity <= 0) { setError('La cantidad debe ser mayor a 0'); return }
     if (onForm.price <= 0) { setError('El precio debe ser mayor a 0'); return }
 
     setLoading(true)
@@ -993,29 +994,27 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
               </Field>
             </div>
             <div className={pairCls}>
-              <Field id="tx-quantity" label={onForm.operation === 'CUPON' ? 'Monto del cupón en dólares' : 'Cantidad (nominales / 100)'}>
-                <EsNumberInput id="tx-quantity" placeholder={onForm.operation === 'CUPON' ? '500' : '200'}
+              <Field id="tx-quantity" label="Cantidad (nominales / 100)">
+                <EsNumberInput id="tx-quantity" placeholder="200"
                   value={onForm.quantity || null} onValue={n => setOnForm(f => ({ ...f, quantity: n ?? 0 }))} className={fieldCls} required />
               </Field>
-              <Field id="tx-price" label={onForm.operation === 'CUPON' ? 'Precio unitario' : 'Precio (× 100)'}>
-                <EsNumberInput id="tx-price" placeholder={onForm.operation === 'CUPON' ? '1' : '98,50'}
+              <Field id="tx-price" label="Precio (× 100)">
+                <EsNumberInput id="tx-price" placeholder="98,50"
                   value={onForm.price || null} onValue={n => setOnForm(f => ({ ...f, price: n ?? 0 }))} className={fieldCls} required />
               </Field>
             </div>
-            {onForm.operation !== 'CUPON' && (
-              <div className={pairCls}>
-                <Field id="tx-commission" label="Comisión">
-                  <EsNumberInput id="tx-commission" placeholder="0" value={onForm.commission || null}
-                    onValue={n => setOnForm(f => ({ ...f, commission: n ?? 0 }))} className={fieldCls} />
-                </Field>
-                <Field id="tx-notes" label="Notas">
-                  <input id="tx-notes" type="text" placeholder="Opcional" value={onForm.notes}
-                    onChange={e => setOnForm(f => ({ ...f, notes: e.target.value }))} className={fieldCls} />
-                </Field>
-              </div>
-            )}
+            <div className={pairCls}>
+              <Field id="tx-commission" label="Comisión">
+                <EsNumberInput id="tx-commission" placeholder="0" value={onForm.commission || null}
+                  onValue={n => setOnForm(f => ({ ...f, commission: n ?? 0 }))} className={fieldCls} />
+              </Field>
+              <Field id="tx-notes" label="Notas">
+                <input id="tx-notes" type="text" placeholder="Opcional" value={onForm.notes}
+                  onChange={e => setOnForm(f => ({ ...f, notes: e.target.value }))} className={fieldCls} />
+              </Field>
+            </div>
             {onForm.quantity > 0 && onForm.price > 0 && (
-              <Total label={onForm.operation === 'CUPON' ? 'Monto del cupón' : onForm.operation === 'VENTA' ? 'Total a recibir' : 'Total estimado'} value={formatUSD(onTotal)} />
+              <Total label={onForm.operation === 'VENTA' ? 'Total a recibir' : 'Total estimado'} value={formatUSD(onTotal)} />
             )}
             <FormError error={error} />
             <Submit loading={loading} selling={selling} />
