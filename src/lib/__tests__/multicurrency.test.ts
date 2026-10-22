@@ -242,9 +242,9 @@ describe('totals with cash', () => {
     fxAt: noFx,
   }
 
-  it('cash stays in USD-CCL: ARS = balance × CCL today, MEP = ARS / MEP today', () => {
+  it('cash is the broker dollar balance, i.e. dólar MEP: ARS = balance × MEP today, CCL = ARS / CCL today', () => {
     const v = buildCurrencyViews(input)
-    expectAmounts(v.totals.cash, { ARS: 160_000, MEP: 160_000 / 1500, CCL: 100 })
+    expectAmounts(v.totals.cash, { ARS: 150_000, MEP: 100, CCL: 150_000 / 1600 })
   })
 
   it('totals: value with cash, invested and open result of priced positions, realized with income', () => {
@@ -252,8 +252,8 @@ describe('totals with cash', () => {
     expect(v.version).toBe(1)
     expect(v.fx).toEqual({ mep: 1500, ccl: 1600, mepDate: '2026-10-21', cclDate: '2026-10-21' })
 
-    // Values: AAPL 284.200, DIS 480.000, YM34D 16.500.000, cash 160.000 (ARS).
-    const valueArs = 284_200 + 480_000 + 16_500_000 + 160_000
+    // Values: AAPL 284.200, DIS 480.000, YM34D 16.500.000, cash 150.000 (ARS).
+    const valueArs = 284_200 + 480_000 + 16_500_000 + 150_000
     expectAmounts(v.totals.value, { ARS: valueArs, MEP: valueArs / 1500, CCL: valueArs / 1600 })
     expectAmounts(v.totals.stocks, { ARS: 764_200, MEP: 764_200 / 1500, CCL: 764_200 / 1600 })
     expectAmounts(v.totals.ons, { ARS: 16_500_000, MEP: 11_000, CCL: 16_500_000 / 1600 })
@@ -261,14 +261,14 @@ describe('totals with cash', () => {
     // Cost of priced open positions: AAPL 200.000 ARS, DIS 250.000 ARS, YM34D 10.000.000 ARS (MISS left out).
     expectAmounts(v.totals.invested, { ARS: 10_450_000, MEP: 10_450, CCL: 8360 })
     expectAmounts(v.totals.openPnl, {
-      ARS: valueArs - 160_000 - 10_450_000,
-      MEP: (valueArs - 160_000) / 1500 - 10_450,
-      CCL: (valueArs - 160_000) / 1600 - 8360,
+      ARS: valueArs - 150_000 - 10_450_000,
+      MEP: (valueArs - 150_000) / 1500 - 10_450,
+      CCL: (valueArs - 150_000) / 1600 - 8360,
     })
     expectAmounts(v.totals.openPnlPct, {
-      ARS: (valueArs - 160_000 - 10_450_000) / 10_450_000,
-      MEP: ((valueArs - 160_000) / 1500 - 10_450) / 10_450,
-      CCL: ((valueArs - 160_000) / 1600 - 8360) / 8360,
+      ARS: (valueArs - 150_000 - 10_450_000) / 10_450_000,
+      MEP: ((valueArs - 150_000) / 1500 - 10_450) / 10_450,
+      CCL: ((valueArs - 150_000) / 1600 - 8360) / 8360,
     })
     // KO: sold for 100 CCL over cost (125.000 ARS at 1250), plus a 2 CCL dividend (2.500 ARS).
     expectAmounts(v.totals.realized, { ARS: 127_500, MEP: 127.5, CCL: 102 })

@@ -100,8 +100,8 @@ describe('cacheUserSummaries with the currency views', () => {
     expect(v.positions.AAPL.value).toEqual({ ARS: 284_200, MEP: 284_200 / 1500, CCL: 177.625 })
     expect(v.positions.AAPL.cost).toEqual({ ARS: 200_000, MEP: 200, CCL: 160 })
     expect(v.positions.AAPL.source).toBe('local')
-    expect(v.totals.cash).toEqual({ ARS: 160_000, MEP: 160_000 / 1500, CCL: 100 })
-    expect(v.totals.value.ARS).toBe(444_200)
+    expect(v.totals.cash).toEqual({ ARS: 150_000, MEP: 100, CCL: 150_000 / 1600 })
+    expect(v.totals.value.ARS).toBe(434_200)
     expect(v.estimated).toBe(false)
   })
 

@@ -55,9 +55,9 @@ describe('estimado labels and the cash note', () => {
   const rows = [row({}), row({ ticker: 'DIS', name: 'Disney', estimated: true, value: 480_000 })]
 
   it('the list labels estimated values and explains the cash balance', () => {
-    const html = renderToStaticMarkup(<HoldingsList rows={rows} cash={160_000} cashWeightPct={6.6} cashNote="Se registra en dólar cable" onAdjustCash={noop} />)
+    const html = renderToStaticMarkup(<HoldingsList rows={rows} cash={160_000} cashWeightPct={6.6} cashNote="Se registra en dólar MEP" onAdjustCash={noop} />)
     expect(html.match(/>estimado</g)).toHaveLength(1)
-    expect(html).toContain('6,6 % de la cartera. Se registra en dólar cable')
+    expect(html).toContain('6,6 % de la cartera. Se registra en dólar MEP')
     expect(html).toContain('160.000,00')
   })
 

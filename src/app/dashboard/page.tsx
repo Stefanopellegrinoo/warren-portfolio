@@ -202,7 +202,7 @@ export default function DashboardPage() {
                     rows={rows}
                     cash={cash}
                     cashWeightPct={total > 0 ? (cash / total) * 100 : 0}
-                    cashNote={views && currency !== 'CCL' ? 'Se registra en dólar cable' : undefined}
+                    cashNote={views && currency !== 'MEP' ? 'Se registra en dólar MEP' : undefined}
                     onAdjustCash={() => setShowAdjust(true)}
                   />}
             </section>

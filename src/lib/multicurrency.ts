@@ -10,7 +10,7 @@
  * - Value today in pesos: CEDEARs and local shares by their peso-line price, ONs
  *   by their MEP value × today's MEP, anything else by the engine USD-CCL value
  *   × today's CCL (estimated). MEP and cable are that ÷ today's rate.
- * - Cash has no currency in the ledger: it stays in the engine unit (USD-CCL).
+ * - Cash has no currency in the ledger: it is the broker's dollar balance, dólar MEP.
  *
  * WORKER-SAFE: no value imports outside this folder (runs under tsx).
  */
@@ -213,7 +213,8 @@ export function buildCurrencyViews(input: {
 }): CurrencyViews {
   const fx: Fx = { mep: input.fx.mep.rate, ccl: input.fx.ccl.rate }
   const ledger = replayLedger(input.trades, input.fxAt, fx)
-  const cash = { ARS: input.cashBalance * fx.ccl, MEP: (input.cashBalance * fx.ccl) / fx.mep, CCL: input.cashBalance }
+  // An Argentine broker's dollar balance is dólar MEP (local dollars), not cable.
+  const cash = { ARS: input.cashBalance * fx.mep, MEP: input.cashBalance, CCL: (input.cashBalance * fx.mep) / fx.ccl }
 
   const positions: Record<string, PositionView> = {}
   let stocks = ZERO, ons = ZERO, invested = ZERO, dayChange = ZERO
