@@ -1,8 +1,8 @@
 /**
  * Cash-movement contract for transaction-linked operations.
  *
- * Mirror of process_transaction_atomic §7 (migration 030): the movement's
- * TYPE is the operation itself (COMPRA/VENTA/DIVIDENDO/CUPON), the amount is
+ * Mirror of process_transaction_atomic (migration 046): the movement's
+ * TYPE is the operation itself (COMPRA/VENTA/DIVIDENDO), the amount is
  * stored unsigned (direction lives in the type), and transaction_id stays
  * linked by the caller.
  *
@@ -13,7 +13,8 @@
  * deposit or withdrawal into the metric.
  */
 
-export type TransactionOperation = 'COMPRA' | 'VENTA' | 'DIVIDENDO' | 'CUPON'
+// No CUPON: ON coupons are automatic (odd/tasks/nucleo-ledger.md S4, S10).
+export type TransactionOperation = 'COMPRA' | 'VENTA' | 'DIVIDENDO'
 
 export interface TransactionCashMovement {
   type: TransactionOperation
@@ -38,8 +39,6 @@ export function buildCashMovementForTransaction(tx: {
       return { type: 'VENTA', amount: Math.abs(qty * price - commission) }
     case 'DIVIDENDO':
       return { type: 'DIVIDENDO', amount: qty * price }
-    case 'CUPON':
-      return { type: 'CUPON', amount: qty * price }
     default:
       return null
   }

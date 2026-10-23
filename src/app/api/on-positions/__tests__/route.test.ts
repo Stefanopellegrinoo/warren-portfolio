@@ -173,3 +173,21 @@ describe('POST /api/on-positions — retroactive-entry warning', () => {
   // is pinned directly against `retroactiveWarnings` in
   // `src/lib/api/__tests__/retroactive-warning.test.ts`, not re-derived here.
 })
+
+describe('POST /api/on-positions — the core refuses a sale of more than held (T5.1)', () => {
+  it('answers 400 with the Spanish reason the ON form shows', async () => {
+    const { POST } = await import('../route')
+    const { processONTransaction } = await import('@/lib/on-engine')
+    const { OversellError } = await import('@/lib/ledger-write')
+    mockRequireUser.mockResolvedValue({ user: { id: 'u1' }, supabase: {} })
+    vi.mocked(processONTransaction).mockRejectedValue(new OversellError({ kind: 'oversell', ticker: 'MGCRD', date: '2026-05-01', requested: 150, held: 100 }))
+
+    const res = await POST(new Request('http://localhost/api/on-positions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: '2026-05-01', ticker: 'MGCRD', operation: 'VENTA', quantity: 150, price: 106 }),
+    }))
+
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('No podés vender 150 MGCRD el 2026-05-01: a esa fecha tenías 100.')
+  })
+})

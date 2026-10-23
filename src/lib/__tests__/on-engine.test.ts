@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { processONTransaction } from '../on-engine'
+import { writeSupabase } from './fixtures/ledger-write-supabase'
 
 // ── Mock Redis helpers ───────────────────────────────────────────────────────
 const mockFns = {
@@ -22,31 +23,9 @@ vi.mock('@/lib/queue', () => ({
   addPriceUpdateJob: (...args: any[]) => mockFns.addPriceUpdateJob(...args),
 }))
 
-function makeMockSupabase(overrides: {
-  rpcError?: { code: string; message: string } | null
-  rpcData?: any
-  position?: any
-  closedTrade?: any
-} = {}) {
-  const { rpcError = null, rpcData = null, position = null, closedTrade = null } = overrides
+vi.mock('@/lib/supabase-server', () => ({ createServiceClient: () => ({ from: () => ({ upsert: async () => ({ error: null }) }) }) }))
 
-  return {
-    rpc: vi.fn().mockResolvedValue({ data: rpcData, error: rpcError }),
-    from: vi.fn((table: string) => {
-      const builder = {
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        order: vi.fn().mockReturnThis(),
-        limit: vi.fn().mockReturnThis(),
-        maybeSingle: vi.fn().mockResolvedValue({
-          data: table === 'on_positions' ? position : closedTrade,
-          error: null,
-        }),
-      }
-      return builder
-    }),
-  } as any
-}
+const held = { id: 'b1', user_id: 'user-1', ticker: 'AL30D', operation: 'COMPRA', quantity: 100, price: 70, commission: 0, date: '2023-12-01', asset_type: 'ON', created_at: '2023-12-01T10:00:00Z' }
 
 describe('processONTransaction', () => {
   beforeEach(() => {
@@ -56,38 +35,24 @@ describe('processONTransaction', () => {
   })
 
   it('propagates a meaningful Error when the RPC returns a PostgrestError-like object', async () => {
-    const supabase = makeMockSupabase({
-      rpcError: {
-        code: 'P0001',
-        message: 'Insufficient position for ON sale',
-      },
-    })
+    const supabase = writeSupabase({ transactions: [held] })
+    supabase.rpc = vi.fn(async () => ({ data: null, error: { code: 'P0001', message: 'Invalid Price: Must be greater than 0' } as any }))
 
     await expect(
-      processONTransaction(supabase, 'user-1', {
+      processONTransaction(supabase as any, 'user-1', {
         date: '2024-01-01',
         ticker: 'AL30D',
         operation: 'VENTA',
         quantity: 100,
         price: 80,
       })
-    ).rejects.toThrow('Insufficient position for ON sale')
+    ).rejects.toThrow('Invalid Price: Must be greater than 0')
   })
 
   it('returns position: null when a full VENTA closes the position', async () => {
-    const supabase = makeMockSupabase({
-      rpcData: { transaction_id: 'tx-1' },
-      position: null,
-      closedTrade: {
-        id: 'ct-1',
-        user_id: 'user-1',
-        ticker: 'AL30D',
-        quantity: 100,
-        close_price: 80,
-      },
-    })
+    const supabase = writeSupabase({ transactions: [held] })
 
-    const result = await processONTransaction(supabase, 'user-1', {
+    const result = await processONTransaction(supabase as any, 'user-1', {
       date: '2024-01-01',
       ticker: 'AL30D',
       operation: 'VENTA',
@@ -96,8 +61,7 @@ describe('processONTransaction', () => {
     })
 
     expect(result.position).toBeNull()
-    expect(result.closedTrade).toEqual({
-      id: 'ct-1',
+    expect(result.closedTrade).toMatchObject({
       user_id: 'user-1',
       ticker: 'AL30D',
       quantity: 100,

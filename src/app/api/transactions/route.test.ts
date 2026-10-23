@@ -308,3 +308,18 @@ describe('POST /api/transactions — retroactive-entry warning', () => {
   // is pinned directly against `retroactiveWarnings` in
   // `src/lib/api/__tests__/retroactive-warning.test.ts`, not re-derived here.
 })
+
+describe('POST /api/transactions — the core refuses a sale of more than held (T5.1)', () => {
+  it('answers 400 with the Spanish reason, not the old 500', async () => {
+    const { POST } = await import('./route')
+    const { OversellError } = await import('@/lib/ledger-write')
+    mockGetCatalogued.mockResolvedValue({ ticker: 'UN' })
+    mockProcessTransaction.mockRejectedValue(new OversellError({ kind: 'oversell', ticker: 'UN', date: '2026-04-15', requested: 2000, held: 1769 }))
+
+    const res = await POST(makeRequest({ ...validBody, operation: 'VENTA', quantity: 2000 }))
+
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('No podés vender 2000 UN el 2026-04-15: a esa fecha tenías 1769.')
+    expect(mockInvalidate).not.toHaveBeenCalled()
+  })
+})

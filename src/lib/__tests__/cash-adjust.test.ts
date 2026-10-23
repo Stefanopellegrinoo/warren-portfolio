@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { adjustCashBalance } from '../cash-engine'
+import { writeSupabase } from './fixtures/ledger-write-supabase'
 
 vi.mock('../queue', () => ({
   addRefreshSummaryJob: vi.fn().mockResolvedValue(undefined),
@@ -24,47 +25,13 @@ vi.mock('../cache', () => ({
 }))
 
 /**
- * Stateful fake: the balance rebuild must see the movement that adjustCashBalance
- * just inserted, otherwise the test would pass on a no-op implementation.
+ * Stateful fake: the ledger cash after the insert must see the movement that
+ * adjustCashBalance just inserted, otherwise the test would pass on a no-op
+ * implementation. It throws on cash_balance: the gap comes from the ledger core.
  */
 function makeSupabase(movements: any[] = []) {
-  const state = { movements: [...movements], balance: null as any }
-
-  const client = {
-    from(table: string) {
-      if (table === 'cash_movements') {
-        const chain: any = {
-          select: () => chain,
-          eq: () => chain,
-          order: () => chain,
-          get data() {
-            return state.movements
-          },
-          error: null,
-          insert(row: any) {
-            const inserted = { id: `cm-${state.movements.length + 1}`, ...row }
-            state.movements.push(inserted)
-            return {
-              select: () => ({ single: async () => ({ data: inserted, error: null }) }),
-            }
-          },
-        }
-        return chain
-      }
-
-      return {
-        upsert(row: any) {
-          state.balance = { ...row, version: 1 }
-          return {
-            select: () => ({ single: async () => ({ data: state.balance, error: null }) }),
-          }
-        },
-      }
-    },
-    _state: state,
-  }
-
-  return client as any
+  const sb = writeSupabase({ cash_movements: movements.map(m => ({ date: '2026-01-01', transaction_id: null, ...m })) })
+  return Object.assign(sb, { _state: { get movements() { return sb.tables.cash_movements } } }) as any
 }
 
 const USER = 'user-1'

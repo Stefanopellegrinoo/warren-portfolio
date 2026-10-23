@@ -38,8 +38,7 @@ export async function POST(request: Request) {
       body.description
     )
 
-    // rebuildCashBalance clears the summary and cash keys; this also drops the
-    // statistics and history caches, which the new movement invalidates too.
+    // The new movement changes the ledger: drop every cache derived from it.
     await invalidateUserCache(user.id)
 
     return NextResponse.json({

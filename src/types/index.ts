@@ -210,7 +210,8 @@ export interface Cedear extends Activo {
 // ON (OBLIGACIONES NEGOCIABLES) TYPES
 // ═══════════════════════════════════════════════════════════════════════════
 
-export type ONOperation = 'COMPRA' | 'VENTA' | 'CUPON'
+// No CUPON: coupons and amortizations come from the bond schedule (odd/tasks/nucleo-ledger.md S4, S10).
+export type ONOperation = 'COMPRA' | 'VENTA'
 
 export interface ONPosition {
   id: string
@@ -253,7 +254,7 @@ export interface ONClosedTrade {
 // CASH TRACKING TYPES
 // ═══════════════════════════════════════════════════════════════════════════
 
-export type CashMovementType = 'DEPOSITO' | 'RETIRO' | 'CUPON' | 'DIVIDENDO' | 'COMPRA' | 'VENTA'
+export type CashMovementType = 'DEPOSITO' | 'RETIRO' | 'DIVIDENDO' | 'COMPRA' | 'VENTA'
 
 export interface CashBalance {
   id: string
@@ -281,7 +282,7 @@ export interface CashMovementInput {
   amount: number
   description?: string
   ticker?: string
-  transaction_id?: string  // Links to transactions.id (for COMPRA/VENTA), null for manual/CUPON/DIVIDENDO
+  transaction_id?: string  // Links to transactions.id (for COMPRA/VENTA), null for manual DEPOSITO/RETIRO/DIVIDENDO
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
