@@ -9,7 +9,6 @@ import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { createServiceClient } from '@/lib/supabase-server'
 import { resolveTickerIdentity } from '@/lib/ticker-identity'
 import { getCataloguedTicker, upsertTickerIdentity } from '@/lib/ticker-catalog'
-import { retroactiveWarnings } from '@/lib/api/retroactive-warning'
 import { recordCedearTrade, TradeRecordError } from '@/lib/trade-record'
 
 export const dynamic = 'force-dynamic'
@@ -124,11 +123,7 @@ export async function POST(req: NextRequest) {
     // Invalidate Cache since portfolio mutated
     await invalidateUserCache(user.id)
 
-    // Computed AFTER the write, and never allowed to fail it: the entry is
-    // legitimate, only the measured history it invalidated is news.
-    const warnings = await retroactiveWarnings(supabase, user.id, body.date)
-
-    return NextResponse.json(warnings.length ? { ...result, warnings } : result, { status: 201 })
+    return NextResponse.json(result, { status: 201 })
   } catch (err: any) {
     if (err instanceof TradeRecordError) {
       return NextResponse.json({ error: err.message }, { status: err.status })

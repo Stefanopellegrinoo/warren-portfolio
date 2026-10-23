@@ -13,11 +13,27 @@
  * WORKER-SAFE: relative value imports only.
  */
 import type { Quote } from '@/types'
-import type { SnapshotRow } from './portfolio-snapshots'
 import type { DailyBar } from './historical-prices'
 import type { FlowRow } from './on-flow-history'
 import type { FlowTransaction, IncomeMovement } from './asset-universe'
 import { ledgerAt, type FlowOverride, type Holding, type Income, type LedgerMovement, type LedgerState, type LedgerTrade } from './ledger-core'
+
+
+/** The row shape of one day of the derived history; the history and statistics routes read it. */
+export interface SnapshotRow {
+  user_id: string
+  snapshot_date: string
+  total_value: number
+  total_invested: number
+  pnl: number
+  pnl_pct: number
+  /** Per-asset-class breakdown (total_value = stocks + ons + cash). */
+  stocks_value: number
+  stocks_invested: number
+  ons_value: number
+  ons_invested: number
+  cash_value: number
+}
 
 export type DerivedRow = SnapshotRow
 

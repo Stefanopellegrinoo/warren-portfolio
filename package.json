@@ -9,8 +9,7 @@
     "lint": "eslint .",
     "type-check": "tsc --noEmit",
     "test": "vitest run",
-    "worker": "tsx src/lib/price-worker.ts",
-    "backfill": "tsx --env-file=.env scripts/backfill-snapshots.ts"
+    "worker": "tsx src/lib/price-worker.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

@@ -7,7 +7,6 @@ import { PaginationSchema, PaginatedResponse } from '@/lib/schemas/common'
 import { normalizeError } from '@/lib/errors'
 import type { ONPosition } from '@/types'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
-import { retroactiveWarnings } from '@/lib/api/retroactive-warning'
 import { getFullPortfolio } from '@/lib/portfolio-engine'
 
 export const dynamic = 'force-dynamic'
@@ -27,9 +26,7 @@ export async function POST(request: Request) {
     // Invalidate Cache since portfolio mutated
     await invalidateUserCache(user.id)
 
-    const warnings = await retroactiveWarnings(supabase, user.id, body.date)
-
-    return NextResponse.json(warnings.length ? { ...result, warnings } : result, { status: 201 })
+    return NextResponse.json(result, { status: 201 })
   } catch (error) {
     // Handle validation errors with proper type narrowing
     const err = normalizeError(error)

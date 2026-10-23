@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { Quote } from '@/types'
-import { applyValuationRule, valuePortfolio } from '../portfolio-valuation'
+import { applyValuationRule, splitQuotesByAssetClass, valuePortfolio } from '../portfolio-valuation'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -155,5 +155,50 @@ describe('valuePortfolio', () => {
 
     // Assert — the synthetic AAPL cost quote landed in a copy, not here
     expect(stockQuotes.has('AAPL')).toBe(false)
+  })
+})
+
+describe('splitQuotesByAssetClass', () => {
+  it('classifies a stock whose ticker ends in D as a stock, not an ON', () => {
+    // Arrange — JD (JD.com) is a real CEDEAR the portfolio holds. Classifying by
+    // the "D" suffix would route it to Data912 pricing and drop it from the
+    // stock totals entirely.
+    const all = new Map([
+      ['JD', quote('JD', 42)],
+      ['MGCRD', quote('MGCRD', 100)],
+    ])
+
+    // Act — ON membership comes from the ON tables, not from the name
+    const { stockQuotes, onQuotes } = splitQuotesByAssetClass(all, ['MGCRD'])
+
+    // Assert
+    expect(stockQuotes.has('JD')).toBe(true)
+    expect(onQuotes.has('JD')).toBe(false)
+    expect(onQuotes.has('MGCRD')).toBe(true)
+    expect(stockQuotes.has('MGCRD')).toBe(false)
+  })
+
+  it('matches ON membership case-insensitively', () => {
+    // Arrange
+    const all = new Map([['cs50d', quote('cs50d', 104)]])
+
+    // Act
+    const { stockQuotes, onQuotes } = splitQuotesByAssetClass(all, [' CS50D '])
+
+    // Assert — the quote keeps its original casing but lands in the ON bucket
+    expect(onQuotes.has('cs50d')).toBe(true)
+    expect(stockQuotes.size).toBe(0)
+  })
+
+  it('treats an unknown ticker as a stock', () => {
+    // Arrange
+    const all = new Map([['AAPL', quote('AAPL', 200)]])
+
+    // Act
+    const { stockQuotes, onQuotes } = splitQuotesByAssetClass(all, [])
+
+    // Assert
+    expect(stockQuotes.has('AAPL')).toBe(true)
+    expect(onQuotes.size).toBe(0)
   })
 })

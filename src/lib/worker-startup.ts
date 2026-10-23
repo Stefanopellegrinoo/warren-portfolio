@@ -1,5 +1,5 @@
 import { ensureRedisConnected } from './redis'
-import { scheduleRepeatingPriceJob, scheduleDailySnapshotJob, scheduleTickerAuditJob, scheduleOnTermsIngestJob, scheduleFxRatesIngestJob } from './queue'
+import { scheduleRepeatingPriceJob, scheduleNightlyJob, scheduleTickerAuditJob, scheduleOnTermsIngestJob, scheduleFxRatesIngestJob } from './queue'
 import { scheduleSignalsEvaluationJobs } from './signals-queue'
 
 export type StartupResult =
@@ -42,7 +42,7 @@ export async function ensureRedisAndScheduleJobs(): Promise<StartupResult> {
   if (!ready) return { ok: false, reason: 'redis-unreachable' }
   try {
     await scheduleRepeatingPriceJob(1)
-    await scheduleDailySnapshotJob()
+    await scheduleNightlyJob()
     await scheduleTickerAuditJob()
     await scheduleOnTermsIngestJob()
     await scheduleFxRatesIngestJob()

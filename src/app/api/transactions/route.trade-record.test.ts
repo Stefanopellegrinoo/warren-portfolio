@@ -6,7 +6,6 @@ vi.mock('@/lib/portfolio-engine', () => ({ processTransaction: (...a: unknown[])
 vi.mock('@/lib/redis', () => ({ invalidateUserCache: vi.fn(async () => undefined) }))
 vi.mock('@/lib/ticker-identity', () => ({ resolveTickerIdentity: vi.fn() }))
 vi.mock('@/lib/ticker-catalog', () => ({ getCataloguedTicker: vi.fn(async () => ({ ticker: 'AAPL' })), upsertTickerIdentity: vi.fn() }))
-vi.mock('@/lib/api/retroactive-warning', () => ({ retroactiveWarnings: vi.fn(async () => []) }))
 vi.mock('@/lib/supabase-server', () => ({ createServiceClient: vi.fn() }))
 
 const fx: Record<string, { date: string; buy: number; sell: number }> = {

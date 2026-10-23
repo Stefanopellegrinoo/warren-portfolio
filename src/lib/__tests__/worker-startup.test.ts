@@ -9,12 +9,12 @@ vi.mock('../redis', () => ({
 
 const mockScheduleRepeatingPriceJob = vi.fn()
 const mockScheduleFxRatesIngestJob = vi.fn()
-const mockScheduleDailySnapshotJob = vi.fn()
+const mockScheduleNightlyJob = vi.fn()
 const mockScheduleTickerAuditJob = vi.fn()
 const mockScheduleOnTermsIngestJob = vi.fn()
 vi.mock('../queue', () => ({
   scheduleRepeatingPriceJob: (...args: unknown[]) => mockScheduleRepeatingPriceJob(...args),
-  scheduleDailySnapshotJob: (...args: unknown[]) => mockScheduleDailySnapshotJob(...args),
+  scheduleNightlyJob: (...args: unknown[]) => mockScheduleNightlyJob(...args),
   scheduleTickerAuditJob: (...args: unknown[]) => mockScheduleTickerAuditJob(...args),
   scheduleOnTermsIngestJob: (...args: unknown[]) => mockScheduleOnTermsIngestJob(...args),
   scheduleFxRatesIngestJob: (...args: unknown[]) => mockScheduleFxRatesIngestJob(...args),
@@ -37,18 +37,18 @@ describe('ensureRedisAndScheduleJobs', () => {
     mockEnsureRedisConnected.mockResolvedValue(true)
     mockScheduleRepeatingPriceJob.mockResolvedValue(undefined)
     mockScheduleFxRatesIngestJob.mockResolvedValue(undefined)
-    mockScheduleDailySnapshotJob.mockResolvedValue(undefined)
+    mockScheduleNightlyJob.mockResolvedValue(undefined)
     mockScheduleTickerAuditJob.mockResolvedValue(undefined)
     mockScheduleOnTermsIngestJob.mockResolvedValue(undefined)
     mockScheduleSignalsEvaluationJobs.mockResolvedValue(undefined)
   })
 
-  it('schedules the daily portfolio snapshot alongside the other jobs', async () => {
+  it('schedules the nightly ON price capture alongside the other jobs', async () => {
     // Act
     await ensureRedisAndScheduleJobs()
 
-    // Assert — without this the max-drawdown series never gets written
-    expect(mockScheduleDailySnapshotJob).toHaveBeenCalledTimes(1)
+    // Assert — without this on_price_history stops growing
+    expect(mockScheduleNightlyJob).toHaveBeenCalledTimes(1)
   })
 
   it('schedules the weekly ticker identity audit alongside the other jobs', async () => {
@@ -64,7 +64,7 @@ describe('ensureRedisAndScheduleJobs', () => {
     expect(mockScheduleOnTermsIngestJob).toHaveBeenCalledTimes(1)
   })
 
-  it('does not schedule the snapshot when Redis is unreachable', async () => {
+  it('does not schedule the nightly job when Redis is unreachable', async () => {
     // Arrange
     mockEnsureRedisConnected.mockResolvedValue(false)
 
@@ -72,7 +72,7 @@ describe('ensureRedisAndScheduleJobs', () => {
     await ensureRedisAndScheduleJobs()
 
     // Assert
-    expect(mockScheduleDailySnapshotJob).not.toHaveBeenCalled()
+    expect(mockScheduleNightlyJob).not.toHaveBeenCalled()
     expect(mockScheduleTickerAuditJob).not.toHaveBeenCalled()
   })
 

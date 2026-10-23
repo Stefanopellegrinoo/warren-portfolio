@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCachedRoute, cacheRoute } from '@/lib/redis'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
-import { snapshotUser } from '@/lib/portfolio-snapshots'
 import { getDerivedSeries } from '@/lib/derived-series'
 import { argentinaDate } from '@/lib/utils'
 import { parseUniverse, projectHistory, type ProjectedPoint } from '@/lib/asset-universe'
@@ -60,34 +59,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(responseData)
   } catch (err) {
     console.error('[Portfolio History] Error:', err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
-  }
-}
-
-// POST: take a snapshot of the current portfolio value for the caller.
-//
-// The daily snapshot job (src/lib/portfolio-snapshots.ts) writes the same table
-// on a schedule; this route is the manual trigger for the same user. Both MUST
-// value the portfolio identically — stocks + ONs + cash — or the max-drawdown
-// series would mix two different definitions of "portfolio value" depending on
-// which writer touched a given day.
-export async function POST(req: NextRequest) {
-  try {
-    const authResult = await requireUser()
-    if (isAuthFailure(authResult)) return authResult.error
-    const { supabase, user } = authResult
-
-    // Argentine day, matching the scheduled job — a UTC date here would stamp a
-    // late-evening manual snapshot with tomorrow's date.
-    const result = await snapshotUser(supabase, user.id, argentinaDate())
-
-    if (!result.ok) {
-      return NextResponse.json({ error: result.error }, { status: result.status })
-    }
-
-    return NextResponse.json(result.snapshot, { status: 201 })
-  } catch (err) {
-    console.error('[Portfolio History] POST error:', err)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }
 }

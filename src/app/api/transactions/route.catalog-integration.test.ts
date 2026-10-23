@@ -58,34 +58,11 @@ let writeResult: { error: { message: string } | null }
  *   `.from('ticker_identity').select(cols).eq('ticker', v).maybeSingle()`
  *   `.from('ticker_identity').upsert(row, { onConflict: 'ticker' })`
  * Anything else throws, so a change in the query shape surfaces here rather
- * than passing against a stub that accepts everything — EXCEPT
- * `portfolio_snapshots`: this suite is scoped to the ticker-catalog seam, not
- * the retroactive-entry warning, and every 201 response now reaches
- * `retroactiveWarnings`. Without this branch that call would throw the same
- * "unexpected table" error, which the helper swallows-and-logs — polluting
- * every test in this file with a stderr line unrelated to what it verifies.
+ * than passing against a stub that accepts everything.
  */
 function makeSupabaseStub(label: string) {
   const client: Record<string, unknown> = { __label: label }
   client.from = (table: string) => {
-    if (table === 'portfolio_snapshots') {
-      // Must match `fetchSnapshotSeries`'s real chain — select/eq/gte/order all
-      // return the chain, and the query only resolves on `.range()`. This stub
-      // used to resolve off `.order()` directly (the OLD, unpaginated shape);
-      // fetchSnapshotSeries then called `.range()` on the result of `.order()`
-      // — a Promise, not a query builder — and threw `TypeError: ...range is
-      // not a function`. `retroactiveWarnings` swallows that, so every test in
-      // this file silently ran through the fail-open catch instead of the real
-      // "no snapshots, no warnings" path — passing, but not testing what it
-      // claimed to.
-      const chain: Record<string, unknown> = {}
-      chain.select = () => chain
-      chain.eq = () => chain
-      chain.gte = () => chain
-      chain.order = () => chain
-      chain.range = () => Promise.resolve({ data: [], error: null })
-      return chain
-    }
     if (table !== 'ticker_identity') throw new Error(`unexpected table: ${table}`)
     return {
       select: () => ({

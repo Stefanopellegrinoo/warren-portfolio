@@ -21,7 +21,10 @@ export const IMPORT_QUEUE_NAME = 'import-transactions'
 /** Repeatable job names on the price queue — both live here so the schedulers
  *  can clean up their own key without clobbering the other's. */
 export const PRICE_REPEAT_JOB_NAME = 'update-all-prices'
-export const SNAPSHOT_JOB_NAME = 'daily-snapshot'
+/** Nightly ON close capture. The string is the key of the schedule already
+ *  stored in Redis (the job used to snapshot portfolios too); keeping it lets
+ *  the scheduler replace that schedule instead of orphaning it. */
+export const NIGHTLY_JOB_NAME = 'daily-snapshot'
 export const TICKER_AUDIT_JOB_NAME = 'ticker-audit'
 export const ON_TERMS_JOB_NAME = 'on-terms-ingest'
 export const FX_RATES_JOB_NAME = 'fx-rates-ingest'
@@ -116,7 +119,7 @@ export async function scheduleRepeatingPriceJob(intervalMinutes = 5) {
   const queue = getPriceQueue()
 
   // Drop only THIS job's previous schedule. Wiping every repeatable on the queue
-  // would also delete the daily snapshot, which shares this queue.
+  // would also delete the nightly job, which shares this queue.
   const repeatable = await queue.getRepeatableJobs()
   for (const job of repeatable) {
     if (job.name === PRICE_REPEAT_JOB_NAME) {
@@ -137,39 +140,30 @@ export async function scheduleRepeatingPriceJob(intervalMinutes = 5) {
 }
 
 /**
- * Schedule the daily portfolio snapshot at 02:00 UTC Tue–Sat, which is 23:00
- * Mon–Fri in Argentina.
- *
- * The hour is not cosmetic. The snapshot for day D has to represent the END of
- * day D, because the flow-adjusted drawdown pairs it with `cash_movements`
- * rows dated D. Running at 17:00 ART left the evening uncovered: a withdrawal
- * loaded at night was dated D but missing from D's value, so the next interval
- * read it as a loss — a real -4.85% that was purely a withdrawal.
- *
- * Market prices are unaffected: the exchange closed hours earlier, so the LKP
- * quotes at 23:00 are the same closing prices.
+ * Schedule the nightly ON close capture at 02:00 UTC Tue–Sat, which is 23:00
+ * Mon–Fri in Argentina, after the local market closed.
  *
  * Containers run without a TZ set, so cron patterns here are UTC — same
- * convention as the signals queue. The date stamped on the row comes from
+ * convention as the signals queue. The date stamped on the rows comes from
  * argentinaDate(), NOT from the UTC clock.
  */
-export async function scheduleDailySnapshotJob(pattern = '0 2 * * 2-6') {
+export async function scheduleNightlyJob(pattern = '0 2 * * 2-6') {
   const queue = getPriceQueue()
 
   const repeatable = await queue.getRepeatableJobs()
   for (const job of repeatable) {
-    if (job.name === SNAPSHOT_JOB_NAME) {
+    if (job.name === NIGHTLY_JOB_NAME) {
       await queue.removeRepeatableByKey(job.key)
     }
   }
 
-  await queue.add(SNAPSHOT_JOB_NAME, {}, {
+  await queue.add(NIGHTLY_JOB_NAME, {}, {
     repeat: { pattern },
     removeOnComplete: true,
     removeOnFail: { age: 24 * 3600 },
   })
 
-  console.log(`[Queue] Daily portfolio snapshot scheduled (${pattern} UTC)`)
+  console.log(`[Queue] Nightly ON price capture scheduled (${pattern} UTC)`)
 }
 
 /**
@@ -181,7 +175,7 @@ export async function scheduleDailySnapshotJob(pattern = '0 2 * * 2-6') {
 export async function scheduleTickerAuditJob(pattern = '0 3 * * 6') {
   const queue = getPriceQueue()
 
-  // Remove only THIS job's schedule. The price and snapshot jobs share this
+  // Remove only THIS job's schedule. The price and nightly jobs share this
   // queue, and a blanket removeRepeatableByKey would silently delete theirs.
   const repeatable = await queue.getRepeatableJobs()
   for (const job of repeatable) {
