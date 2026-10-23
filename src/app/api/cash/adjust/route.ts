@@ -3,7 +3,7 @@ import { adjustCashBalance } from '@/lib/cash-engine'
 import { validateRequest, validationErrorResponse } from '@/lib/api/validation'
 import { CashAdjustSchema } from '@/lib/schemas/cash'
 import { invalidateUserCache } from '@/lib/redis'
-import { normalizeError } from '@/lib/errors'
+import { serverError } from '@/lib/api/errors'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 
 export const dynamic = 'force-dynamic'
@@ -51,8 +51,6 @@ export async function POST(request: Request) {
     if (error?.status === 400) {
       return validationErrorResponse(error)
     }
-    const normalized = normalizeError(error)
-    console.error('[API /cash/adjust] Failed:', normalized)
-    return NextResponse.json({ error: normalized.message }, { status: 500 })
+    return serverError('API /cash/adjust', error)
   }
 }

@@ -3,6 +3,7 @@ import { deleteCashMovement, LinkedMovementError } from '@/lib/cash-engine'
 import { UUIDSchema } from '@/lib/schemas/common'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { invalidateUserCache } from '@/lib/redis'
+import { serverError } from '@/lib/api/errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,9 +33,10 @@ export async function DELETE(
     if (err instanceof LinkedMovementError) {
       return NextResponse.json({ error: err.message }, { status: 409 })
     }
-    const message = err instanceof Error ? err.message : 'Internal error'
-    const status = message === 'Movimiento no encontrado' ? 404 : 500
-    return NextResponse.json({ error: message }, { status })
+    if (err instanceof Error && err.message === 'Movimiento no encontrado') {
+      return NextResponse.json({ error: err.message }, { status: 404 })
+    }
+    return serverError('API /cash/movements/[id]', err)
   }
 
   await invalidateUserCache(user.id)

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
+import { GENERIC_ERROR } from '@/lib/api/errors'
 
 const mockRequireUser = vi.fn()
 const mockIsAuthFailure = vi.fn()
@@ -80,14 +81,14 @@ describe('GET /api/chart-drawings', () => {
     expect(mockFrom).not.toHaveBeenCalled()
   })
 
-  it('surfaces a database error as 500', async () => {
+  it('answers a database error with a generic 500, never its text', async () => {
     selectChain({ data: null, error: { message: 'boom' } })
     const { GET } = await import('../route')
 
     const res = await GET(new NextRequest(url('AAPL')))
 
     expect(res.status).toBe(500)
-    expect(await res.json()).toEqual({ error: 'boom' })
+    expect(await res.json()).toEqual({ error: GENERIC_ERROR })
   })
 })
 
@@ -143,13 +144,13 @@ describe('PUT /api/chart-drawings', () => {
     expect(res.status).toBe(400)
   })
 
-  it('surfaces a database error as 500', async () => {
+  it('answers a database error with a generic 500, never its text', async () => {
     upsertChain({ error: { message: 'denied' } })
     const { PUT } = await import('../route')
 
     const res = await PUT(put({ ticker: 'AAPL', drawings: [] }))
 
     expect(res.status).toBe(500)
-    expect(await res.json()).toEqual({ error: 'denied' })
+    expect(await res.json()).toEqual({ error: GENERIC_ERROR })
   })
 })

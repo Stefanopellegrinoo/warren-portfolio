@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
 import { requireUser, isAuthFailure } from "@/lib/api-auth"
+import { serverError } from "@/lib/api/errors"
 import type { ChartDrawing } from "@/lib/types/drawings"
 
 const pointSchema = z.object({
@@ -69,7 +70,7 @@ export async function PATCH(
     .select()
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return serverError("API /drawings/[id]", error)
   if (!data) return NextResponse.json({ error: "not found" }, { status: 404 })
   return NextResponse.json(rowToDrawing(data))
 }
@@ -90,6 +91,6 @@ export async function DELETE(
     .eq("id", id)
     .eq("user_id", user.id)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return serverError("API /drawings/[id]", error)
   return new NextResponse(null, { status: 204 })
 }

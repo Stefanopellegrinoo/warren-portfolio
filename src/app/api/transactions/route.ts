@@ -4,7 +4,7 @@ import { invalidateUserCache } from '@/lib/redis'
 import { validateBody, validateQueryParams, validationErrorResponse } from '@/lib/api/validation'
 import { TransactionSchema, TransactionQuerySchema, CedearTradeSchema } from '@/lib/schemas/transaction'
 import { PaginatedResponse } from '@/lib/schemas/common'
-import { normalizeError } from '@/lib/errors'
+import { serverError } from '@/lib/api/errors'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { createServiceClient } from '@/lib/supabase-server'
 import { resolveTickerIdentity } from '@/lib/ticker-identity'
@@ -53,9 +53,7 @@ export async function GET(req: NextRequest) {
       return validationErrorResponse(err)
     }
 
-    const error = normalizeError(err)
-    console.error(error)
-    return NextResponse.json({ error: error.message || 'Internal error' }, { status: 500 })
+    return serverError('Transactions', err)
   }
 }
 
@@ -133,8 +131,6 @@ export async function POST(req: NextRequest) {
       return validationErrorResponse(err)
     }
 
-    const error = normalizeError(err)
-    console.error(error)
-    return NextResponse.json({ error: error.message || 'Internal error' }, { status: 500 })
+    return serverError('Transactions', err)
   }
 }

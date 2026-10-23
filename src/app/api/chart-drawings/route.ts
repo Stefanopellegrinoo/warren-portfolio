@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
 import { requireUser, isAuthFailure } from "@/lib/api-auth"
+import { serverError } from "@/lib/api/errors"
 
 // One document per user and ticker: the drawing list exactly as the chart's
 // DrawingManager exports it. The drawing core validates and migrates it on
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest) {
     .eq("ticker", parsed.data.toUpperCase())
     .maybeSingle()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return serverError("API /chart-drawings", error)
   // null = never saved: the client converts the legacy chart_drawings rows.
   return NextResponse.json({ drawings: data?.drawings ?? null })
 }
@@ -63,6 +64,6 @@ export async function PUT(req: NextRequest) {
       { onConflict: "user_id,ticker" }
     )
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return serverError("API /chart-drawings", error)
   return new NextResponse(null, { status: 204 })
 }

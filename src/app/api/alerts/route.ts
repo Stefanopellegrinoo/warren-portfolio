@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { z } from 'zod'
+import { serverError } from '@/lib/api/errors'
 
 const createSchema = z.object({
   ticker: z.string().min(1).max(20),
@@ -28,7 +29,7 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await query
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return serverError('API /alerts', error)
 
   return NextResponse.json({ alerts: data ?? [] })
 }
@@ -57,7 +58,7 @@ export async function POST(req: NextRequest) {
     .select()
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return serverError('API /alerts', error)
 
   return NextResponse.json({ alert: data }, { status: 201 })
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import type { IndicatorSetup, SetupConfig } from '@/types'
+import { serverError } from '@/lib/api/errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -56,7 +57,7 @@ export async function PUT(
       if (error.code === 'PGRST116') {
         return NextResponse.json({ error: 'Not found' }, { status: 404 })
       }
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      return serverError('API /strategies/[id]/setups/[setupId]', error)
     }
     if (!data) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -86,7 +87,7 @@ export async function DELETE(
       .eq('user_id', user.id)
       .select('id')
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) return serverError('API /strategies/[id]/setups/[setupId]', error)
     if (!data || data.length === 0) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 })
     }

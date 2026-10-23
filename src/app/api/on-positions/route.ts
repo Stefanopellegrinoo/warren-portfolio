@@ -4,7 +4,7 @@ import { invalidateUserCache } from '@/lib/redis'
 import { validateRequest, validateQueryParams, validationErrorResponse } from '@/lib/api/validation'
 import { ONTransactionSchema } from '@/lib/schemas/on'
 import { PaginationSchema, PaginatedResponse } from '@/lib/schemas/common'
-import { normalizeError } from '@/lib/errors'
+import { serverError } from '@/lib/api/errors'
 import type { ONPosition } from '@/types'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { getFullPortfolio } from '@/lib/portfolio-engine'
@@ -29,18 +29,13 @@ export async function POST(request: Request) {
     return NextResponse.json(result, { status: 201 })
   } catch (error) {
     // Handle validation errors with proper type narrowing
-    const err = normalizeError(error)
     const validationError = error as { status?: number; message?: string }
 
     if (validationError.status === 400) {
       return validationErrorResponse(validationError)
     }
 
-    // Handle other errors
-    return NextResponse.json(
-      { error: err.message || 'Unknown error' },
-      { status: 500 }
-    )
+    return serverError('API ON Positions', error)
   }
 }
 
@@ -73,14 +68,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(response)
   } catch (err) {
     // Handle validation errors with proper type narrowing
-    const error = normalizeError(err)
     const validationError = err as { status?: number; message?: string }
 
     if (validationError.status === 400) {
       return validationErrorResponse(validationError)
     }
 
-    console.error('[API] ON Positions error:', error.message)
-    return NextResponse.json({ error: error.message || 'Internal error' }, { status: 500 })
+    return serverError('API ON Positions', err)
   }
 }

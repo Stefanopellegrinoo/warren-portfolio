@@ -23,6 +23,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
+import { GENERIC_ERROR } from '@/lib/api/errors'
 
 const mockProcessTransaction = vi.fn()
 vi.mock('@/lib/portfolio-engine', () => ({
@@ -146,9 +147,8 @@ describe('POST /api/transactions — real ticker-catalog against a failing Supab
     const res = await POST(makeRequest(validBody))
 
     expect(res.status).toBe(500)
-    expect(await res.json()).toMatchObject({
-      error: expect.stringContaining('ticker_identity'),
-    })
+    // S6: the cause is logged, never echoed to the client.
+    expect(await res.json()).toEqual({ error: GENERIC_ERROR })
     expect(mockProcessTransaction).not.toHaveBeenCalled()
     expect(writes()).toHaveLength(0)
   })
@@ -176,9 +176,7 @@ describe('POST /api/transactions — real ticker-catalog against a failing Supab
     const res = await POST(makeRequest({ ...validBody, confirmTicker: true }))
 
     expect(res.status).toBe(500)
-    expect(await res.json()).toMatchObject({
-      error: expect.stringContaining('row-level security policy'),
-    })
+    expect(await res.json()).toEqual({ error: GENERIC_ERROR })
     // The catalog must never fall behind the ledger it describes: no catalog
     // row means no transaction either.
     expect(mockProcessTransaction).not.toHaveBeenCalled()
