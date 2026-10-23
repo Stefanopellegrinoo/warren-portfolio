@@ -1,16 +1,15 @@
 /**
- * Loads one user's ledger and stored state and asks the existing gate whether
- * replaying the former reproduces the latter. No new comparison logic lives
- * here: replayPortfolioAt + reconcileUser are the same pair the snapshot
- * backfill trusts.
+ * Loads one user's ledger and stored state and asks the gate whether the ledger
+ * core reproduces the latter: holdings, cost, cash and realized P&L. This is the
+ * cutover gate for dropping the stored tables (odd/tasks/nucleo-ledger.md T2.2).
  *
  * A failed read THROWS. Treating it as "no rows" would replay an empty ledger
  * against empty storage and report a false PASS.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { normalizeError } from './errors'
-import { replayPortfolioAt, type ReplayMovement, type ReplayTransaction } from './portfolio-replay'
-import { reconcileUser, type GateResult, type StoredPosition } from './backfill-gate'
+import { ledgerAt, type LedgerMovement, type LedgerState, type LedgerTrade } from './ledger-core'
+import { compareRealized, reconcileUser, type GateResult, type StoredPosition } from './backfill-gate'
 
 const PAGE = 1000
 
@@ -59,20 +58,35 @@ export async function reconcileLedger(
 }
 
 async function reconcileOnce(supabase: SupabaseClient, userId: string, today: string): Promise<GateResult> {
-  const [transactions, movements, positions, onPositions, cash] = await Promise.all([
-    selectAll<ReplayTransaction>(
+  type Closed = { ticker: string; invested: number; proceeds: number }
+  const [transactions, movements, positions, onPositions, cash, closed, onClosed] = await Promise.all([
+    selectAll<LedgerTrade>(
       supabase, 'transactions',
       'ticker, operation, quantity, price, commission, date, asset_type, created_at', userId
     ),
-    selectAll<ReplayMovement>(supabase, 'cash_movements', 'type, amount, date', userId),
+    selectAll<LedgerMovement>(supabase, 'cash_movements', 'type, amount, date', userId),
     selectAll<StoredPosition>(supabase, 'positions', 'ticker, quantity, total_invested', userId),
     selectAll<StoredPosition>(supabase, 'on_positions', 'ticker, quantity, total_invested', userId),
     selectAll<{ balance: number }>(supabase, 'cash_balance', 'balance', userId),
+    selectAll<Closed>(supabase, 'closed_trades', 'ticker, invested, proceeds', userId),
+    selectAll<Closed>(supabase, 'on_closed_trades', 'ticker, invested, proceeds', userId),
   ])
 
-  return reconcileUser(replayPortfolioAt(transactions, movements, today), {
+  const core = ledgerAt(transactions, movements, today)
+  const result = reconcileUser(asReplayState(core), {
     positions,
     onPositions,
     cashBalance: Number(cash[0]?.balance ?? 0),
   })
+  const reasons = [...result.reasons]
+  compareRealized(core.realized, [...closed, ...onClosed], reasons)
+  for (const i of core.issues) reasons.push(`oversell ${i.ticker} on ${i.date}: sold ${i.requested}, held ${i.held}`)
+  return { ok: reasons.length === 0, reasons }
+}
+
+function asReplayState(core: LedgerState) {
+  const as = (kind: 'ON' | 'STOCK') => core.holdings
+    .filter(h => h.assetType === kind)
+    .map(h => ({ ticker: h.ticker, quantity: h.quantity, avg_cost: h.avgCost, total_invested: h.costBasis }))
+  return { positions: as('STOCK'), onPositions: as('ON'), cashBalance: core.cash }
 }
