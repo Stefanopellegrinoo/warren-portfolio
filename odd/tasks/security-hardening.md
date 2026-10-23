@@ -70,3 +70,19 @@ Owner actions (outside the code): rotate the Redis password found in public git 
     - klines PROVIDER_UNAVAILABLE 500s are now generic. This includes the deliberate "No historical CCL rate…" message, which is still logged.
     - Domain P0001 messages keep their status 500; moving them to 4xx is a separate decision.
     - The engines' import-lock and ON-suffix guards are matched by text (`ENGINE_GUARDS`); a typed error would be the follow-up.
+- L8 (2026-10-23, independent verifier on T5-T11, baseline `security/hardening`):
+  - S5, S8, S9, S10a and S11 PASS; S1 has not regressed.
+  - Blocker B1, S7 regression from `ec7c841`: `next=/..//evil.com` (also `/.//`, `/a/..//`, `/%2e%2e//`) produced the path `//evil.com`, which the route resolves again as a host and redirects to evil.com.
+  - Blocker B2, S6, pre-existing: `ticker/search` answered provider failures with their raw text.
+  - Correction batch `1786dac`:
+    - The callback now checks the final value against the origin.
+    - `ticker/search` follows the klines pattern through `serverError`.
+    - Advisory 1 is folded in: a hung Redis hung every authenticated route through the limiter, which now gives up after 250 ms and allows the request.
+    - RED 6 → GREEN; the suite is 195 files / 1962 tests and `tsc` is clean.
+  - One recheck, limited to these items, is pending.
+  - Remaining advisories, not fixed:
+    - (2) after a Redis outage longer than ~1.2 s, the existing `getRedis` client stops retrying, so limits stay off until the process restarts;
+    - (3) a watchlist with more than 50 Yahoo tickers would get a 400 (the largest today has 6);
+    - (4) `quote` checks the cap before auth, so it returns 400 instead of 401 (cosmetic);
+    - (5) pre-existing: next-pwa's `cross-origin` rule caches Supabase `GET /auth/v1/user` JSON for up to 1 h on the device; this is user metadata, not a token;
+    - (6) pre-existing: the Excel `toISOString()` day shift east of UTC.
