@@ -33,8 +33,8 @@ Specs S1-S11 come from the 2026-10-23 audit (two read-only audits plus live chec
 - [x] T8 · S8 · inline · security headers · `f4131e1` (RED → GREEN 4/4; browser check L7)
 - [x] T9 · S9 · inline · compose port + CI permissions + actions pinned to SHAs · `fecea5e` (no unit test: config; `docker compose config` OK) · Risk item 5: check the site after the deploy
 - [x] T10a · S10 · inline · Next 14.1.0 → 14.2.35. This is the last 14.x and still uses React 18. It fixes CVE-2025-29927 (middleware bypass), the cache-poisoning and Server Actions SSRF advisories, and several DoS advisories. Risk item 5 · `6f78c1f` (suite 195/1957 green, tsc clean, prod build OK)
-- [ ] T12 · S12 · inline · server reads market tables with the service role; migration 049 revokes anon/authenticated SELECT · Risk item 2
-- [ ] T13 · S13 · inline · per-user limits on the remaining market endpoints; anonymous catalog routes reviewed
+- [ ] T12 · S12 · delegated (writer trigger (b): parent context backstop) · server reads market tables with the service role; migration 049 revokes anon/authenticated SELECT · Risk item 2
+- [ ] T13 · S13 · delegated after T12 (writer trigger (b); its route tests overlap T12) · per-user limits on the remaining market endpoints; anonymous catalog routes reviewed
 - [ ] T10b · S10 · pending user decision · Next 15.5.x: the remaining advisories are only fixed there, and it needs React 19.
 - [x] T11 · S11 · inline · `xlsx` 0.18.5 → SheetJS 0.20.3 from the official CDN tarball. npm has no fixed release. The only user is `transactions/import/route.ts:47`. Risk item 5 · `c827c6e` (round-trip parse with `cellDates` OK; the lockfile keeps sha512 integrity)
 
@@ -129,3 +129,9 @@ Owner actions (outside the code): rotate the Redis password found in public git 
 - L12 (2026-10-23, user): "Anda todo bien." The user logged in with a real account on prod after #21 and #22, which closes the one check left open in L10.
 - L13 (2026-10-23, user): "Pero si quiero que la app la use cualquiera. Lo que no quiero es que otra persona me robe los endpoints con los datos del mercado"
 - L14 (2026-10-23, user): "Ok" (to layers 1 and 2: close direct DB reads of market tables, and per-user limits on market endpoints). The migration and the deploy each need a separate OK. Layer 3 (email confirmation + Turnstile CAPTCHA) needs the user's Cloudflare setup and is deferred.
+- L15 (2026-10-23, T12 map):
+  - A read-only explorer mapped 14 user/anon read paths to the 13 market tables, fixed by 10 switch points (`on-catalog`, `on-schedules` = the ledger-core choke point, `on-payments`, `currency-views` fx/cedears, `ledger-now` loadLastCloses, `derived-series`, `fx-rates`, `trade-record`, `ticker-catalog`, plus the 3 public routes).
+  - There are no views, and no RPC called by a non-service client reads these tables.
+  - Pre-existing bug: `derived-series` backfills upsert `on_price_history` (rava) and `on_flow_history` (bonistas) with the user client, which RLS denies.
+  - Fallout check: switching `loadSchedules` alone broke 14 tests in 10 files, because fixtures inject market rows through the user client.
+  - The `pg_stat_statements` baseline shows `authenticated` and `anon` reading all 13 tables. After the code deploy and before 049, their deltas must be 0.
