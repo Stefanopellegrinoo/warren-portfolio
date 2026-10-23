@@ -136,3 +136,14 @@ Owner actions (outside the code): rotate the Redis password found in public git 
   - Fallout check: switching `loadSchedules` alone broke 14 tests in 10 files, because fixtures inject market rows through the user client.
   - The `pg_stat_statements` baseline shows `authenticated` and `anon` reading all 13 tables. After the code deploy and before 049, their deltas must be 0.
 - L16 (2026-10-23, T12-T13): the suite is 197 files / 1994 tests, `tsc` is clean and lint shows 0 errors. The independent verifier is running, with focus on cross-tenant safety for every `createServiceClient()` use.
+- L17 (2026-10-23, T12-T13 verification):
+  - The independent verifier passed with no blockers.
+    - P1, cross-tenant: every `createServiceClient()` touches only the 13 market tables, and the harness's service fake throws on any of the 24 user tables without ever tripping.
+    - P3: with the revoke simulated, 19/19 routes are identical to baseline. Negative control: the baseline code under the revoke breaks all 19.
+    - P4: 049 on an offline postgres is idempotent, leaves user-table policies untouched, and FK inserts referencing `ons` still work.
+    - P5: S13 401s and limits hold.
+    - P6: build OK.
+  - Advisory 1 fixed in this batch: a memory leak, because `createServiceClient()` started a never-stopped 30 s auto-refresh timer, and T12 creates 1-5 clients per request. It now uses `persistSession: false, autoRefreshToken: false` (RED → GREEN; suite 198 / 1995).
+  - Advisory 2, a behavior change to confirm with the user: the derived-series Rava and bonistas backfills now really write `on_price_history` and `on_flow_history`. They were silently denied before (L15).
+  - Advisory 4: apply 049 without its BEGIN/COMMIT through `apply_migration`, as with 048.
+  - Others are noted: `loadFlowRows` is dead code; the rollback restores only SELECT.
