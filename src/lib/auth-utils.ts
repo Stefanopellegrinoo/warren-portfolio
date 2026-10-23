@@ -75,7 +75,6 @@ export function validateAuthCode(code: string | null): { valid: boolean; error?:
         metadata: {
           reason: 'invalid_format',
           length: code.length,
-          preview: code.substring(0, 20),
         },
       },
     }
@@ -103,7 +102,6 @@ export async function exchangeCodeForSession(
       console.error('[Auth] Session exchange failed:', {
         message: error.message,
         status: error.status,
-        code_preview: code.substring(0, 20),
       })
 
       return {
@@ -126,7 +124,6 @@ export async function exchangeCodeForSession(
 
     console.error('[Auth] Code exchange exception:', {
       error: errorMsg,
-      code_preview: code.substring(0, 20),
       stack: err instanceof Error ? err.stack : undefined,
     })
 
@@ -258,9 +255,16 @@ export function parseCallbackParams(url: string): {
   const urlObj = new URL(url)
   const code = urlObj.searchParams.get('code')
   const rawNext = urlObj.searchParams.get('next') || '/dashboard'
-  // Only allow relative paths — reject anything that could redirect off-site
-  const next = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/dashboard'
   const origin = urlObj.origin
+  // Resolve against our origin and keep it only if it stays there: a prefix check
+  // misses `/\evil.com` and `/<tab>/evil.com`, which browsers resolve off-site.
+  let next = '/dashboard'
+  try {
+    const target = new URL(rawNext, origin)
+    if (target.origin === origin) next = target.pathname + target.search + target.hash
+  } catch {
+    // unparsable target: keep the default
+  }
 
   return {
     code,
