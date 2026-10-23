@@ -25,6 +25,13 @@ describe('046_ledger_only_writes.sql', () => {
     expect(fn('process_transaction_atomic')).toMatch(/p_date DATE, p_ticker TEXT DEFAULT NULL, p_operation TEXT DEFAULT NULL, p_quantity NUMERIC DEFAULT NULL, p_price NUMERIC DEFAULT NULL, p_commission NUMERIC DEFAULT 0, p_notes TEXT DEFAULT NULL, p_asset_type TEXT DEFAULT 'ACCION', p_moneda TEXT DEFAULT 'USD', p_user_id UUID DEFAULT NULL, p_trade_currency TEXT DEFAULT NULL, p_trade_quantity NUMERIC DEFAULT NULL, p_trade_price NUMERIC DEFAULT NULL, p_trade_commission NUMERIC DEFAULT NULL, p_cedear_ratio NUMERIC DEFAULT NULL, p_fx_mep NUMERIC DEFAULT NULL, p_fx_ccl NUMERIC DEFAULT NULL, p_fx_date DATE DEFAULT NULL, p_fx_source TEXT DEFAULT NULL/i)
   })
 
+  it('serializes sales of one ticker per user and re-checks the total held from the ledger', () => {
+    const body = fn('process_transaction_atomic')
+    expect(body).toMatch(/pg_advisory_xact_lock\(hashtext\(v_user_id::text \|\| ':' \|\| v_ticker\)\)/)
+    expect(body).toMatch(/SELECT SUM\(quantity\) FROM transactions WHERE user_id = v_user_id AND UPPER\(TRIM\(ticker\)\) = v_ticker/)
+    expect(body.indexOf('pg_advisory_xact_lock')).toBeLessThan(body.indexOf('INSERT INTO transactions'))
+  })
+
   it('a DIVIDENDO without quantity (the cash form) is a cash-only movement of p_price', () => {
     expect(fn('process_transaction_atomic')).toMatch(/v_operation = 'DIVIDENDO' AND p_quantity IS NULL/i)
   })

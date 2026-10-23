@@ -104,6 +104,21 @@ BEGIN
     RAISE EXCEPTION 'Ticker Required';
   END IF;
 
+  -- The app validates every sale against the ledger core (dates included) before calling
+  -- this function, but that check and this insert are not one transaction. 044 serialized
+  -- sales with FOR UPDATE on the stored position; with no stored state, sales of one ticker
+  -- by one user are serialized here, and the total held is re-checked from the ledger itself
+  -- (sales are stored negative), so two simultaneous sales cannot both pass.
+  IF v_operation = 'VENTA' THEN
+    PERFORM pg_advisory_xact_lock(hashtext(v_user_id::text || ':' || v_ticker));
+    IF COALESCE((
+      SELECT SUM(quantity) FROM transactions
+      WHERE user_id = v_user_id AND UPPER(TRIM(ticker)) = v_ticker AND operation IN ('COMPRA', 'VENTA')
+    ), 0) - ABS(p_quantity) < -0.0001 THEN
+      RAISE EXCEPTION 'Insufficient position: cannot sell % %', ABS(p_quantity), v_ticker;
+    END IF;
+  END IF;
+
   INSERT INTO transactions (
     user_id, date, ticker, operation, quantity, price, commission,
     notes, avg_cost_after, asset_type, moneda,

@@ -7,10 +7,12 @@
  * no NEW oversell is accepted: an account whose ledger is already inconsistent can still be
  * corrected, it just cannot be made worse.
  *
- * ponytail: validate-then-insert is not atomic. Two concurrent sales of the same ticker by the
- * same user can both pass and together oversell; the core then sells only what was held and
- * the reconciliation gate reports it. A per-user advisory lock in the RPC closes it if it ever
- * matters.
+ * This check and the insert are not one transaction, so process_transaction_atomic (046)
+ * serializes sales of one ticker per user with an advisory lock and re-checks the total held
+ * from the ledger: two concurrent sales cannot both pass.
+ * ponytail: the RPC's re-check is on the total, not per date; a concurrent edit that makes an
+ * earlier-dated sale oversell is caught only by this dated check. Move the dated check into
+ * SQL if that ever matters.
  *
  * WORKER-SAFE: relative value imports only (the import worker validates through here).
  */
