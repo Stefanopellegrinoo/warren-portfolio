@@ -8,6 +8,8 @@ import { requireUser, isAuthFailure } from '@/lib/api-auth'
 
 export const dynamic = 'force-dynamic'
 
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+
 export async function POST(req: NextRequest) {
   try {
     const authResult = await requireUser()
@@ -39,6 +41,7 @@ export async function POST(req: NextRequest) {
       const formData = await req.formData()
       const file = formData.get('file') as File | null
       if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 })
+      if (file.size > MAX_UPLOAD_BYTES) return NextResponse.json({ error: 'File too large (max 5 MB)' }, { status: 413 })
 
       const buffer = await file.arrayBuffer()
       const XLSX = await import('xlsx')
