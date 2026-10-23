@@ -1,5 +1,5 @@
 import type { Quote } from '@/types'
-import { applyCostFallback } from './portfolio-valuation'
+import { applyValuationRule } from './portfolio-valuation'
 
 /**
  * Position valuation for the statistics endpoints.
@@ -7,11 +7,8 @@ import { applyCostFallback } from './portfolio-valuation'
  * A position with no usable quote is marked at its OWN average cost — zero
  * P&L — never at zero value. Valuing at 0 fabricates a -100% loss: it drags
  * openPnl, elects the position as "biggest loser" and paints a fake crash in
- * every chart. The missing-quote rule itself is single-sourced in
- * applyCostFallback (portfolio-valuation.ts) — the same rule the snapshot
- * writers use. One extra statistics-only tier lives here: a position with no
- * price AND no usable cost falls back to its invested amount, keeping it
- * visible in allocation and still never -100%.
+ * every chart. The valuation rule is single-sourced in applyValuationRule
+ * (portfolio-valuation.ts): live quote, else last close, else own cost (S3).
  */
 
 interface PositionLike {
@@ -41,15 +38,12 @@ export interface StatTotals {
 
 export function enrichPositionsForStats(
   positions: PositionLike[],
-  quotes: Map<string, Quote>
+  quotes: Map<string, Quote>,
+  lastCloses: Map<string, number> = new Map()
 ): { positions: StatPosition[]; totals: StatTotals } {
-  // Single-sourced missing-quote rule: no quote or price <= 0 → synthetic
-  // quote at avg_cost (when usable). unpricedTickers doubles as the `priced`
-  // flag source, so the flag reflects the ORIGINAL quotes, not the fallback.
-  const { quotes: effective, unpricedCount, unpricedTickers } = applyCostFallback(
-    positions,
-    quotes
-  )
+  // unpricedTickers doubles as the `priced` flag source, so the flag reflects
+  // the ORIGINAL quotes, not the fallback.
+  const { quotes: effective, unpricedCount, unpricedTickers } = applyValuationRule(positions, quotes, lastCloses)
   const unpriced = new Set(unpricedTickers)
 
   let totalMarketValue = 0
@@ -58,8 +52,7 @@ export function enrichPositionsForStats(
   const enriched: StatPosition[] = positions.map((pos) => {
     const price = Number(effective.get(pos.ticker)?.price)
 
-    // No quote and no usable cost: fall back to the invested amount itself —
-    // still neutral, still visible in allocation, still never -100%.
+    // No usable price at all (cost 0): the invested amount, which is then 0 too.
     const market_value = price > 0 ? price * pos.quantity : pos.total_invested
     const pnl = market_value - pos.total_invested
 

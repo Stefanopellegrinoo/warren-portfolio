@@ -51,24 +51,7 @@ describe('postTransaction', () => {
     expect(body.confirmTicker).toBe(true)
   })
 
-  it('carries the retroactive warning through on the success arm', async () => {
-    const warning = {
-      code: 'RETROACTIVE_ENTRY',
-      entryDate: '2026-07-02',
-      staleSnapshots: ['2026-07-23'],
-    }
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      status: 201,
-      json: async () => ({ id: 'tx-1', warnings: [warning] }),
-    }))
-
-    const result = await postTransaction({ ticker: 'DNCBD' })
-
-    expect(result).toEqual({ ok: true, warnings: [warning] })
-  })
-
-  it('reports ok with no warnings when the response carries none', async () => {
+  it('reports ok on a 201', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       status: 201,
@@ -77,6 +60,6 @@ describe('postTransaction', () => {
 
     const result = await postTransaction({ ticker: 'AAPL' })
 
-    expect(result).toEqual({ ok: true, warnings: undefined })
+    expect(result).toEqual({ ok: true })
   })
 })

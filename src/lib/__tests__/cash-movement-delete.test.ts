@@ -63,16 +63,16 @@ describe('deleteCashMovement — transaction-linked guard', () => {
     expect(deletesOn(supabase.calls, 'cash_movements')).toHaveLength(0)
   })
 
-  it('deletes a manual movement (transaction_id NULL) and rebuilds the balance', async () => {
+  it('deletes a manual movement (transaction_id NULL) and touches no stored balance', async () => {
     // Arrange
     const supabase = fakeSupabase({ movement: { id: 'm2', transaction_id: null }, movements: [] })
 
     // Act
-    const balance = await deleteCashMovement(supabase as never, 'u1', 'm2')
+    await deleteCashMovement(supabase as never, 'u1', 'm2')
 
-    // Assert
+    // Assert — the balance is the ledger core's (T5.1): nothing else is written
     expect(deletesOn(supabase.calls, 'cash_movements')).toHaveLength(1)
-    expect(balance).toBeTruthy()
+    expect(supabase.calls.map(c => c.table)).not.toContain('cash_balance')
   })
 
   it('throws when the movement does not exist for this user', async () => {

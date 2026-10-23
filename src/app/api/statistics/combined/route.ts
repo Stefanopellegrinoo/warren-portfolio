@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { fetchQuotes } from '@/lib/yahoo-finance'
 import { fetchONQuotes } from '@/lib/data912-client'
 import { getCachedRoute, cacheRoute } from '@/lib/redis'
-import type { Position, ONPosition } from '@/types'
+import { getFullPortfolio } from '@/lib/portfolio-engine'
+import { enrichPositionsForStats } from '@/lib/position-stats'
+import { loadLastCloses } from '@/lib/ledger-now'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 
 export const dynamic = 'force-dynamic'
@@ -19,67 +21,26 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(cachedStats)
     }
 
-    // Fetch stock positions
-    const { data: stockPositions } = await supabase
-      .from('positions')
-      .select('*')
-      .eq('user_id', user.id)
+    // Everything from the ledger core (never the stored tables), valued by the one
+    // rule (S3): live quote, else last close, else cost — a missing quote is never 0.
+    const portfolio = await getFullPortfolio(supabase, user.id)
+    const stockPositions = portfolio.stockPositions
+    const onPositions = portfolio.onPositions
+    const stockQuotes = await fetchQuotes(stockPositions.map(p => p.ticker))
+    const onQuotes = await fetchONQuotes(onPositions.map(p => p.ticker))
 
-    const stockTickers = (stockPositions || []).map((p: Position) => p.ticker)
-    const stockQuotes = await fetchQuotes(stockTickers)
+    const stocks = enrichPositionsForStats(stockPositions, stockQuotes).totals
+    const ons = enrichPositionsForStats(onPositions, onQuotes, await loadLastCloses(supabase, onPositions, onQuotes)).totals
+    const stocksValue = stocks.totalMarketValue
+    const stocksOpenPnl = stocks.openPnl
+    const onsValue = ons.totalMarketValue
+    const onsOpenPnl = ons.openPnl
 
-    let stocksValue = 0
-    let stocksOpenPnl = 0
-    for (const pos of (stockPositions || [])) {
-      const quote = stockQuotes.get(pos.ticker)
-      if (quote) {
-        const mv = quote.price * pos.quantity
-        stocksValue += mv
-        stocksOpenPnl += (mv - pos.total_invested)
-      }
-    }
-
-    // Fetch stock closed trades
-    const { data: stockClosedTrades } = await supabase
-      .from('closed_trades')
-      .select('pnl')
-      .eq('user_id', user.id)
-    const stocksRealizedPnl = (stockClosedTrades || []).reduce((s: number, t: any) => s + (t.pnl || 0), 0)
-
-    // Fetch ON positions
-    const { data: onPositions } = await supabase
-      .from('on_positions')
-      .select('*')
-      .eq('user_id', user.id)
-
-    const onTickers = (onPositions || []).map((p: ONPosition) => p.ticker)
-    const onQuotes = await fetchONQuotes(onTickers)
-
-    let onsValue = 0
-    let onsOpenPnl = 0
-    for (const pos of (onPositions || [])) {
-      const quote = onQuotes.get(pos.ticker)
-      if (quote) {
-        const mv = quote.price * pos.quantity
-        onsValue += mv
-        onsOpenPnl += (mv - pos.total_invested)
-      }
-    }
-
-    // Fetch ON closed trades
-    const { data: onClosedTrades } = await supabase
-      .from('on_closed_trades')
-      .select('pnl')
-      .eq('user_id', user.id)
-    const onsRealizedPnl = (onClosedTrades || []).reduce((s: number, t: any) => s + (t.pnl || 0), 0)
-
-    // Fetch real cash balance
-    const { data: cashData } = await supabase
-      .from('cash_balance')
-      .select('balance')
-      .eq('user_id', user.id)
-      .maybeSingle()
-    const cashBalance = cashData?.balance ?? 0
+    const stockClosedTrades = portfolio.stockClosedTrades
+    const onClosedTrades = portfolio.onClosedTrades
+    const stocksRealizedPnl = stockClosedTrades.reduce((s, t) => s + t.pnl, 0)
+    const onsRealizedPnl = onClosedTrades.reduce((s, t) => s + t.pnl, 0)
+    const cashBalance = portfolio.cashBalance
 
     const totalValue = stocksValue + onsValue + cashBalance
 
@@ -95,16 +56,16 @@ export async function GET(req: NextRequest) {
         openPnl: stocksOpenPnl,
         realizedPnl: stocksRealizedPnl,
         totalPnl: stocksOpenPnl + stocksRealizedPnl,
-        positionCount: (stockPositions || []).length,
-        closedTradesCount: (stockClosedTrades || []).length,
+        positionCount: stockPositions.length,
+        closedTradesCount: stockClosedTrades.length,
       },
       ons: {
         value: onsValue,
         openPnl: onsOpenPnl,
         realizedPnl: onsRealizedPnl,
         totalPnl: onsOpenPnl + onsRealizedPnl,
-        positionCount: (onPositions || []).length,
-        closedTradesCount: (onClosedTrades || []).length,
+        positionCount: onPositions.length,
+        closedTradesCount: onClosedTrades.length,
       },
     }
 

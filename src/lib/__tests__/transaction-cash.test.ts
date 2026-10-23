@@ -30,11 +30,10 @@ describe('buildCashMovementForTransaction', () => {
     expect(movement).toEqual({ type: 'DIVIDENDO', amount: 20 })
   })
 
-  it('CUPON → type CUPON, amount = qty·price', () => {
-    const movement = buildCashMovementForTransaction({
-      operation: 'CUPON', quantity: 500, price: 1, commission: 0,
-    })
-    expect(movement).toEqual({ type: 'CUPON', amount: 500 })
+  it('CUPON is no transaction operation any more (coupons are automatic, S4/S10) → null', () => {
+    expect(
+      buildCashMovementForTransaction({ operation: 'CUPON' as never, quantity: 500, price: 1, commission: 0 })
+    ).toBeNull()
   })
 
   it('returns null for operations that do not move cash through a transaction', () => {

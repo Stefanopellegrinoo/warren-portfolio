@@ -7,7 +7,6 @@ import ShareList from '@/components/charts/ShareList'
 import { AXIS, GRID, TOOLTIP, GAIN, LOSS, signed, axisSigned } from '@/components/charts/tokens'
 import { SectionHead } from '@/components/resumen/ui'
 import { formatUSD, formatPct, formatNumber } from '@/lib/utils'
-import type { SeriesProvenance } from '@/lib/series-provenance'
 
 export interface StatData {
   /** Null below MIN_INTERVALS_DRAWDOWN — "Sin datos suficientes", never 0. */
@@ -35,7 +34,6 @@ export interface StatData {
   drawdownIntervals?: number
   /** Which asset universe these metrics were computed over. */
   universe?: string
-  provenance?: SeriesProvenance
   drawdownIntervalsSkipped?: number
   monthlyStdDev: number | null
   winnersCount: number

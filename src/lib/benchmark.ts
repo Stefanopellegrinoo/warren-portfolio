@@ -74,7 +74,6 @@ export async function fetchBenchmarkComparison(
 
   let ccl: DailyBar[] | undefined
   if (inArs) {
-    // getHistoricalCCL swallows its own errors and returns an empty map.
     const rates = await getHistoricalCCL(from, to)
     if (rates.size === 0) throw new Error('No historical CCL available')
     ccl = [...rates].map(([date, close]) => ({ date, close: Number(close) }))

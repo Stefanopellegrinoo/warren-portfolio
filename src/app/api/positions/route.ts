@@ -3,6 +3,7 @@ import { fetchQuotesWithFallback } from '@/lib/yahoo-finance'
 import { fetchONQuotesWithFallback } from '@/lib/data912-client'
 import { getFullPortfolio } from '@/lib/portfolio-engine'
 import { valuePortfolio } from '@/lib/portfolio-valuation'
+import { loadLastCloses } from '@/lib/ledger-now'
 import { getRedis, ensureRedisConnected } from '@/lib/redis'
 import type { Position, ONPosition } from '@/types'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
@@ -47,7 +48,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 2. Fetch all portfolio data in parallel
+    // 2. The portfolio now, from the ledger core (never the stored tables)
     const portfolio = await getFullPortfolio(supabase, user.id)
 
     // Get last refresh timestamp
@@ -62,8 +63,7 @@ export async function GET(req: NextRequest) {
       // Still return cash balance even if no positions
       const { positions, onPositions, summary } = valuePortfolio(
         { positions: [], onPositions: [], cashBalance: portfolio.cashBalance, realized: 0, onRealized: 0 },
-        { stockQuotes: new Map(), onQuotes: new Map() },
-        { missingQuotePolicy: 'drop' }
+        { stockQuotes: new Map(), onQuotes: new Map() }
       )
       const views = await currencyViews(supabase, user.id, { positions, onPositions, cashBalance: portfolio.cashBalance })
       return NextResponse.json({ positions, onPositions, summary, lastRefresh, ...views })
@@ -78,7 +78,7 @@ export async function GET(req: NextRequest) {
       onTickers.length > 0 ? fetchONQuotesWithFallback(onTickers) : Promise.resolve(new Map()),
     ])
 
-    // 4. Calculate realized P&L from closed trades
+    // 4. Realized P&L from the ledger core's sales
     const stockRealizedPnl = portfolio.stockClosedTrades.reduce(
       (sum: number, t: { pnl: number }) => sum + (t.pnl ?? 0), 0
     )
@@ -86,9 +86,8 @@ export async function GET(req: NextRequest) {
       (sum: number, t: { pnl: number }) => sum + (t.pnl ?? 0), 0
     )
 
-    // 5. Calculate complete portfolio summary — canonical entry, policy 'drop':
-    // quotes pass through untouched, unpriced positions fall out of the totals
-    // exactly as before (no displayed dashboard number changes).
+    // 5. Complete portfolio summary — one valuation rule (S3): live quote, else
+    // last close, else the position's own cost. Unpriced positions are counted.
     const { positions, onPositions, summary, unpricedCount, unpricedTickers } = valuePortfolio(
       {
         positions: portfolio.stockPositions,
@@ -98,7 +97,7 @@ export async function GET(req: NextRequest) {
         onRealized: onRealizedPnl,
       },
       { stockQuotes, onQuotes },
-      { missingQuotePolicy: 'drop' }
+      await loadLastCloses(supabase, portfolio.onPositions, onQuotes)
     )
 
     // 6. NEVER cache from the API route — the worker is the single source of truth.

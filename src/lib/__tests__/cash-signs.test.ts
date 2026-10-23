@@ -41,11 +41,11 @@ describe('cashDelta', () => {
   })
 })
 
-describe('rebuildCashBalance accumulation', () => {
-  // The pre-existing rebuildCashBalance test feeds `movements: []`, so nothing
-  // verified the loop's arithmetic before this extraction. This locks it.
+describe('ledger cash accumulation', () => {
+  // The cash of every screen is the ledger core's (T5.1 removed rebuildCashBalance);
+  // this locks the sum over a mixed run of credits and debits.
   it('sums a mixed run of credits and debits', async () => {
-    const { rebuildCashBalance } = await import('../cash-engine')
+    const { ledgerAt } = await import('../ledger-core')
     const movements = [
       { type: 'DEPOSITO', amount: 1000, date: '2022-02-01' },
       { type: 'COMPRA', amount: 400, date: '2022-02-09' },
@@ -54,24 +54,7 @@ describe('rebuildCashBalance accumulation', () => {
       { type: 'DIVIDENDO', amount: 25, date: '2022-07-01' },
     ]
 
-    let upserted: any = null
-    const supabase = {
-      from: (table: string) => ({
-        select: () => ({
-          eq: () => ({
-            order: () => ({ order: () => ({ data: movements, error: null }) }),
-          }),
-        }),
-        upsert: (row: any) => {
-          upserted = row
-          return { select: () => ({ single: () => ({ data: row, error: null }) }) }
-        },
-      }),
-    }
-
-    await rebuildCashBalance(supabase as any, '00000000-0000-0000-0000-000000000001')
-
     // 1000 - 400 + 150 - 50 + 25
-    expect(upserted.balance).toBeCloseTo(725, 10)
+    expect(ledgerAt([], movements, '9999-12-31').cash).toBeCloseTo(725, 10)
   })
 })

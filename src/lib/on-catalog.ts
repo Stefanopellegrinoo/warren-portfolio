@@ -9,7 +9,7 @@ import { isOnTermsStale } from './on-terms-health'
 import type { OverrideRow } from './on-terms'
 import { fetchAllData912Quotes } from './data912-client'
 import { argentinaDate } from './utils'
-import { getCCLRateInfo, type CclRateInfo } from './currency'
+import { getCCLRateInfo, type DollarInfo } from './currency'
 
 const PAGE = 1000 // PostgREST default max rows per request
 const PRICE_CACHE_MS = 5 * 60_000
@@ -149,7 +149,7 @@ let cclInflight: Promise<CclRate | null> | null = null
  * Implicit CCL for the implied cable price. Never blocks the page: 3s timeout, 5 min cache,
  * 45s negative cache. Rejects a missing rate and any rate older than 24h.
  */
-export function getOnCcl(source: () => Promise<CclRateInfo | null> = getCCLRateInfo, timeoutMs = CCL_TIMEOUT_MS): Promise<CclRate | null> {
+export function getOnCcl(source: () => Promise<DollarInfo | null> = getCCLRateInfo, timeoutMs = CCL_TIMEOUT_MS): Promise<CclRate | null> {
   if (cclCache && Date.now() - cclCache.at < (cclCache.value ? CCL_CACHE_MS : CCL_FAILURE_CACHE_MS)) return Promise.resolve(cclCache.value)
   cclInflight ??= (async () => {
     let value: CclRate | null = null

@@ -14,7 +14,6 @@ export interface PortfolioChartPoint {
   snapshot_date: string
   value: number
   invested: number
-  source?: 'live' | 'estimated'
 }
 
 type Period = '30' | '90' | '180' | '365' | 'all'
@@ -29,18 +28,6 @@ interface Props {
 
 const longDate = (iso: string) =>
   new Date(iso + 'T12:00:00').toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
-
-/** Index runs of reconstructed points, to shade them. */
-function estimatedRuns(data: PortfolioChartPoint[]) {
-  const runs: { from: number; to: number }[] = []
-  data.forEach((p, i) => {
-    if (p.source !== 'estimated') return
-    const last = runs[runs.length - 1]
-    if (last && last.to === i - 1) last.to = i
-    else runs.push({ from: i, to: i })
-  })
-  return runs
-}
 
 /** Value against invested capital, same drawing as the Resumen chart. */
 export default function PortfolioChart({ data, period, onPeriodChange, loading = false }: Props) {
@@ -61,7 +48,6 @@ export default function PortfolioChart({ data, period, onPeriodChange, loading =
   const height = width && width < 560 ? 180 : 220
   const chart = !loading && width && data.length >= 2 ? buildChart(data, width, height) : null
   const point = active !== null ? data[active] : null
-  const runs = estimatedRuns(data)
   const label = RANGES.find(r => r.days === period)?.id ?? period
 
   function onKeyDown(e: React.KeyboardEvent) {
@@ -88,7 +74,6 @@ export default function PortfolioChart({ data, period, onPeriodChange, loading =
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-ink-3" aria-hidden="true">
           <span><i className="mr-1.5 inline-block w-3.5 border-t-2 border-accent align-middle" />Valor</span>
           <span><i className="mr-1.5 inline-block w-3.5 border-t border-dashed border-ink-3 align-middle" />Invertido</span>
-          {runs.length > 0 && <span><i className="mr-1.5 inline-block h-2.5 w-3.5 bg-warn-soft align-middle" />Estimado</span>}
         </div>
       </div>
 
@@ -96,7 +81,7 @@ export default function PortfolioChart({ data, period, onPeriodChange, loading =
         {loading && <span className="block animate-pulse rounded bg-surface-2" style={{ height }} aria-label="Cargando historia" role="status" />}
 
         {!loading && data.length < 2 && (
-          <p className="py-8 text-sm text-ink-3">Todavía no hay historia suficiente para este período. Los valores diarios se guardan solos.</p>
+          <p className="py-8 text-sm text-ink-3">Todavía no hay historia suficiente para este período.</p>
         )}
 
         {chart && (
@@ -118,10 +103,6 @@ export default function PortfolioChart({ data, period, onPeriodChange, loading =
               onPointerLeave={() => setActive(null)}
               className="block overflow-visible"
             >
-              {runs.map(r => (
-                <rect key={r.from} x={chart.xAt(r.from)} width={Math.max(chart.xAt(r.to) - chart.xAt(r.from), 2)}
-                  y={PLOT.top} height={height - PLOT.top - PLOT.bottom} fill="var(--warn-soft)" />
-              ))}
               {chart.yTicks.map(t => (
                 <g key={t.label}>
                   <line x1={PLOT.left} x2={width} y1={t.y} y2={t.y} stroke="var(--line)" />
@@ -154,16 +135,12 @@ export default function PortfolioChart({ data, period, onPeriodChange, loading =
                 <span className={point.value - point.invested >= 0 ? 'text-ok' : 'text-danger'}>
                   {formatNumber(point.value - point.invested, { sign: true })} sobre lo invertido
                 </span>
-                {point.source === 'estimated' && <span className="block text-warn">Valor estimado, no medido</span>}
               </div>
             )}
           </>
         )}
       </div>
 
-      {runs.length > 0 && !loading && (
-        <p className="mt-2 text-[13px] text-ink-3">El tramo sombreado es estimado a partir de las operaciones, no medido.</p>
-      )}
     </div>
   )
 }

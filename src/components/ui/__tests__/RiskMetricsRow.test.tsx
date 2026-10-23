@@ -16,4 +16,10 @@ describe('RiskMetricsRow', () => {
     const html = renderToStaticMarkup(<RiskMetricsRow data={{ sharpeRatio: null, annualizedVol: null, maxDrawdown: null }} />)
     expect(html.match(/Sin datos suficientes/g)).toHaveLength(3)
   })
+
+  it('states the scope as the whole portfolio, ONs included (S9)', () => {
+    const html = renderToStaticMarkup(<RiskMetricsRow data={{ sharpeRatio: null, annualizedVol: null, maxDrawdown: null }} />)
+    expect(html).toContain('Calculado sobre toda la cartera: acciones, ONs y caja.')
+    expect(html).not.toContain('quedan afuera')
+  })
 })

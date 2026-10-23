@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import AddTransactionModal from '@/components/ui/AddTransactionModal'
 import ImportModal from '@/components/ui/ImportModal'
 import UnpricedNotice from '@/components/ui/UnpricedNotice'
-import ReconciliationBanner, { type ReconciliationResult } from '@/components/ui/ReconciliationBanner'
 import SummaryHeader from '@/components/resumen/SummaryHeader'
 import ValueSection from '@/components/resumen/ValueSection'
 import HoldingsList from '@/components/resumen/HoldingsList'
@@ -51,7 +50,6 @@ export default function DashboardPage() {
   const [cedears, setCedears] = useState<string[]>([])
   const [cedearRatios, setCedearRatios] = useState<Record<string, number>>({})
   const [names, setNames] = useState<Record<string, string>>({})
-  const [reconciliation, setReconciliation] = useState<ReconciliationResult | null>(null)
   const [showAddTx, setShowAddTx] = useState(false)
   const [quickSell, setQuickSell] = useState<QuickSell | null>(null)
   const [showImport, setShowImport] = useState(false)
@@ -104,8 +102,6 @@ export default function DashboardPage() {
     fetch('/api/activos').then(r => (r.ok ? r.json() : [])).then((list: { ticker: string; nombre: string }[]) => {
       setNames(Object.fromEntries(list.filter(a => a.nombre && a.nombre.trim().toUpperCase() !== a.ticker.toUpperCase()).map(a => [a.ticker, a.nombre])))
     }).catch(() => {})
-    // A failed reconciliation check shows nothing: a broken checker must not alarm the user.
-    fetch('/api/reconciliation').then(r => (r.ok ? r.json() : null)).then(setReconciliation).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -163,10 +159,9 @@ export default function DashboardPage() {
         onToggleRefresh={() => setAutoRefresh(a => !a)}
         onImport={() => setShowImport(true)}
         onNew={() => { setQuickSell(null); setShowAddTx(true) }}
-        {...(views && { currency, onCurrency: chooseCurrency })}
+        {...(views && { currency, onCurrency: chooseCurrency, fx: { mep: views.fx.mep, ccl: views.fx.ccl } })}
       />
 
-      <ReconciliationBanner result={reconciliation} />
       <UnpricedNotice count={data?.unpricedCount} tickers={data?.unpricedTickers} />
 
       {loadError && !summary && (

@@ -17,6 +17,10 @@ const mockRedis = {
 }
 vi.mock('ioredis', () => ({ default: class { constructor() { Object.assign(this, mockRedis) } } }))
 vi.mock('@/lib/supabase-server', () => ({ createServiceClient: vi.fn(), createServerClientInstance: vi.fn() }))
+// Today's dollar is live (odd/tasks/nucleo-ledger.md T1.2); fx_rates only serves trade dates.
+const liveDollar = vi.fn(async (kind: string): Promise<unknown> =>
+  ({ rate: kind === 'mep' ? 1500 : 1600, asOf: '2026-10-21T20:00:00.000Z', source: 'live' }))
+vi.mock('../currency', () => ({ getDollarInfo: (kind: string) => liveDollar(kind) }))
 
 const local = new Map<string, Quote>([['local:AAPL', { ticker: 'AAPL', price: 28_420, change: 0, changePercent: 0.0121, previousClose: 28_420 }]])
 vi.mock('../yahoo-finance', () => ({
@@ -44,10 +48,16 @@ function db(tables: Record<string, Record<string, unknown>[]>, failing: string[]
   }
 }
 
-const positions = [{ user_id: 'u1', ticker: 'AAPL', quantity: 0.5, avg_cost: 320, total_invested: 160 }]
+const positions = [{
+  id: 'AAPL', user_id: 'u1', ticker: 'AAPL', quantity: 0.5, avg_cost: 320, total_invested: 160,
+  first_bought: '2026-05-04', last_updated: '2026-05-04', version: 0,
+}]
 const tables = {
-  positions,
-  cash_balance: [{ user_id: 'u1', balance: 100 }],
+  // The ledger behind `positions` and a cash of 100 (T4.2b: the summary reads the ledger core).
+  cash_movements: [
+    { user_id: 'u1', type: 'DEPOSITO', amount: 260, date: '2026-05-01' },
+    { user_id: 'u1', type: 'COMPRA', amount: 160, date: '2026-05-04' },
+  ],
   cedears: [{ ticker: 'AAPL', ratio: 20 }],
   fx_rates: [
     { date: '2026-10-21', kind: 'mep', buy: 1490, sell: 1510 },
@@ -71,7 +81,6 @@ function writtenPayload() {
 const before = JSON.parse(JSON.stringify(valuePortfolio(
   { positions: positions as never, onPositions: [], cashBalance: 100, realized: 0, onRealized: 0 },
   { stockQuotes, onQuotes: new Map() },
-  { missingQuotePolicy: 'drop' },
 )))
 
 beforeEach(() => {
@@ -107,7 +116,7 @@ describe('cacheUserSummaries with the currency views', () => {
 
   it('a failure loading the views still writes the summary, without `currencies`', async () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    vi.mocked(createServiceClient).mockReturnValue(db(tables, ['transactions']) as never)
+    vi.mocked(createServiceClient).mockReturnValue(db(tables, ['cedears']) as never)
 
     await cacheUserSummaries(stockQuotes, new Map())
 
@@ -139,8 +148,9 @@ describe('cacheUserSummaries with the currency views', () => {
     expect(ko.source).toBe('estimated')
   })
 
-  it('no reference FX for today: no views, the summary is unchanged', async () => {
-    vi.mocked(createServiceClient).mockReturnValue(db({ ...tables, fx_rates: [] }) as never)
+  it('no dollar for today: no views, the summary is unchanged', async () => {
+    vi.mocked(createServiceClient).mockReturnValue(db(tables) as never)
+    liveDollar.mockResolvedValueOnce(null).mockResolvedValueOnce(null)
 
     await cacheUserSummaries(stockQuotes, new Map())
 

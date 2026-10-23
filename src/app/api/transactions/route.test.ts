@@ -46,52 +46,6 @@ const validBody = {
   assetType: 'CEDEAR',
 }
 
-/**
- * Minimal PostgREST chain matching `fetchSnapshotSeries` — the canonical,
- * paginated read path `retroactiveWarnings` now routes through:
- * .select('*').eq().gte().order().range() resolves to `result` on the FIRST
- * `.range()` call and an empty page on any further one, so a single-page
- * stub still terminates the pagination loop correctly.
- *
- * Records the table name and each call's arguments so a test can assert the
- * query shape — not just that SOME response came back — and so a route that
- * stops calling the warning helper leaves `calls.table` unset, which fails
- * every test built on top of this rather than passing silently. Keeping this
- * property was the whole point of an earlier fix round (see
- * `src/lib/api/__tests__/retroactive-warning.test.ts` for the pagination
- * regression this shape itself guards against).
- */
-function stubSnapshots(result: { data: unknown[] | null; error: unknown }) {
-  const calls: { table?: string; select?: string; eq?: [string, unknown]; gte?: [string, unknown]; range?: [number, number] } = {}
-  let served = false
-  const chain: Record<string, unknown> = {}
-  chain.select = (columns: string) => {
-    calls.select = columns
-    return chain
-  }
-  chain.eq = (column: string, value: unknown) => {
-    calls.eq = [column, value]
-    return chain
-  }
-  chain.gte = (column: string, value: unknown) => {
-    calls.gte = [column, value]
-    return chain
-  }
-  chain.order = () => chain
-  chain.range = (from: number, to: number) => {
-    calls.range = [from, to]
-    if (served) return Promise.resolve({ data: [], error: null })
-    served = true
-    return Promise.resolve(result)
-  }
-  ;(userClient as Record<string, unknown>).from = (table: string) => {
-    calls.table = table
-    if (table !== 'portfolio_snapshots') throw new Error(`unexpected table ${table}`)
-    return chain
-  }
-  return calls
-}
-
 beforeEach(() => {
   vi.clearAllMocks()
   mockRequireUser.mockResolvedValue({ user: { id: 'user-1' }, supabase: userClient })
@@ -100,14 +54,8 @@ beforeEach(() => {
   mockInvalidate.mockResolvedValue(undefined)
   mockUpsertIdentity.mockResolvedValue(undefined)
   mockCreateServiceClient.mockReturnValue(serviceClient)
-  // Every 201 response now reaches retroactiveWarnings. Without a default
-  // `.from`, `userClient` (a plain object with no Supabase client behind it)
-  // throws a TypeError there, which the helper swallows — so these
-  // ticker-identity tests would stay green while silently exercising a
-  // catch-and-log branch that logs on every run. Route through a real
-  // "no snapshots, no warnings" path instead, so the suite stays pristine
-  // under any reporter, verbose included.
-  stubSnapshots({ data: [], error: null })
+  // The route answers from the write alone: any table read is a regression.
+  ;(userClient as Record<string, unknown>).from = vi.fn(() => { throw new Error('unexpected table read') })
 })
 
 describe('POST /api/transactions — ticker identity gate', () => {
@@ -239,72 +187,36 @@ describe('POST /api/transactions — ticker identity gate', () => {
   })
 })
 
-// ── Retroactive-entry warning ────────────────────────────────────────────────
+// ── Late loads (S2: the history derives from the ledger and rewrites itself) ──
 
-describe('POST /api/transactions — retroactive-entry warning', () => {
+describe('POST /api/transactions — late load', () => {
   beforeEach(() => {
     mockGetCatalogued.mockResolvedValue({ ticker: 'UN', yahoo_symbol: 'UN' })
   })
 
-  it('attaches a warning naming the measured rows already written', async () => {
-    const calls = stubSnapshots({ data: [{ snapshot_date: '2026-07-23', source: 'live' }], error: null })
+  it('answers 201 with the created row only: no warnings, no snapshot read', async () => {
     const { POST } = await import('./route')
 
     const res = await POST(makeRequest({ ...validBody, date: '2026-07-02' }))
-    const body = await res.json()
 
     expect(res.status).toBe(201)
-    expect(body.warnings).toEqual([
-      { code: 'RETROACTIVE_ENTRY', entryDate: '2026-07-02', staleSnapshots: ['2026-07-23'] },
-    ])
-    expect(calls.table).toBe('portfolio_snapshots')
-    expect(calls.select).toBe('*')
-    expect(calls.eq).toEqual(['user_id', 'user-1'])
-    expect(calls.gte).toEqual(['snapshot_date', '2026-07-02'])
-    expect(calls.range).toEqual([0, 999])
+    expect(await res.json()).toEqual({ id: 'tx-1' })
+    expect((userClient as Record<string, unknown>).from).not.toHaveBeenCalled()
+    expect(mockInvalidate).toHaveBeenCalledWith('user-1')
   })
+})
 
-  it('omits warnings entirely when no measured row went stale', async () => {
-    const calls = stubSnapshots({ data: [], error: null })
+describe('POST /api/transactions — the core refuses a sale of more than held (T5.1)', () => {
+  it('answers 400 with the Spanish reason, not the old 500', async () => {
     const { POST } = await import('./route')
+    const { OversellError } = await import('@/lib/ledger-write')
+    mockGetCatalogued.mockResolvedValue({ ticker: 'UN' })
+    mockProcessTransaction.mockRejectedValue(new OversellError({ kind: 'oversell', ticker: 'UN', date: '2026-04-15', requested: 2000, held: 1769 }))
 
-    const res = await POST(makeRequest(validBody))
-    const body = await res.json()
+    const res = await POST(makeRequest({ ...validBody, operation: 'VENTA', quantity: 2000 }))
 
-    expect(res.status).toBe(201)
-    expect(body.warnings).toBeUndefined()
-    // The empty result is the helper's real "nothing stale" answer, not the
-    // absence of a call: the query shape proves the route actually reached
-    // retroactiveWarnings for this scenario too.
-    expect(calls.table).toBe('portfolio_snapshots')
-    expect(calls.select).toBe('*')
-    expect(calls.eq).toEqual(['user_id', 'user-1'])
-    expect(calls.gte).toEqual(['snapshot_date', validBody.date])
-    expect(calls.range).toEqual([0, 999])
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('No podés vender 2000 UN el 2026-04-15: a esa fecha tenías 1769.')
+    expect(mockInvalidate).not.toHaveBeenCalled()
   })
-
-  it('still returns 201 when the snapshot read fails', async () => {
-    // The transaction is already committed. Failing here would report a write
-    // that happened as a write that did not.
-    const calls = stubSnapshots({ data: null, error: { message: 'connection reset' } })
-    const { POST } = await import('./route')
-
-    const res = await POST(makeRequest({ ...validBody, date: '2026-07-02' }))
-    const body = await res.json()
-
-    expect(res.status).toBe(201)
-    expect(body.warnings).toBeUndefined()
-    expect(mockProcessTransaction).toHaveBeenCalledOnce()
-    // Proves the query was actually attempted and reached the error branch,
-    // not that the helper was never invoked in the first place.
-    expect(calls.table).toBe('portfolio_snapshots')
-    expect(calls.select).toBe('*')
-    expect(calls.eq).toEqual(['user_id', 'user-1'])
-    expect(calls.gte).toEqual(['snapshot_date', '2026-07-02'])
-  })
-
-  // The 1000-row pagination behaviour itself (the failure mode this stub's
-  // shape guards against — see the module docblock on `retroactive-warning.ts`)
-  // is pinned directly against `retroactiveWarnings` in
-  // `src/lib/api/__tests__/retroactive-warning.test.ts`, not re-derived here.
 })

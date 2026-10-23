@@ -7,7 +7,7 @@ export default function MiCarteraPage() {
       <PageHeader
         back={{ href: '/ons', label: 'Volver al listado' }}
         title="Mi cartera de ONs"
-        intro="Los cobros futuros de las ONs que tenés hoy: calendario mensual, ingreso anual, vencimientos y TIR al precio actual. Solo lectura."
+        intro="Los cobros futuros de las ONs que tenés hoy: calendario mensual, ingreso anual, vencimientos y TIR al precio actual. Abajo, los pagos que ya cobraste: se calculan solos y podés corregir el monto que pagó el broker."
       />
       <MyPortfolio />
     </div>

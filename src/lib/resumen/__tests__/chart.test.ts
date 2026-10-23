@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { buildChart, nearestIndex, historyNote, RANGES, type HistoryPoint } from '../chart'
+import { buildChart, nearestIndex, HISTORY_NOTE, RANGES, type HistoryPoint } from '../chart'
 
-const pt = (d: string, value: number, invested = 100, source: 'live' | 'estimated' = 'live'): HistoryPoint =>
-  ({ snapshot_date: d, value, invested, source })
+const pt = (d: string, value: number, invested = 100): HistoryPoint =>
+  ({ snapshot_date: d, value, invested })
 
 describe('RANGES', () => {
   it('maps each period to the API days parameter', () => {
@@ -51,18 +51,8 @@ describe('nearestIndex', () => {
   })
 })
 
-describe('historyNote', () => {
-  it('says what the series includes', () => {
-    expect(historyNote([pt('2026-10-01', 1), pt('2026-10-02', 1)])).toBe('Acciones y caja. Las ONs no tienen historia todavía.')
-  })
-
-  it('discloses estimated days', () => {
-    const pts = Array.from({ length: 10 }, (_, i) => pt(`2026-10-${10 + i}`, 1, 1, i < 3 ? 'estimated' : 'live'))
-    expect(historyNote(pts)).toBe('Acciones y caja. Las ONs no tienen historia todavía. 3 de 10 días son estimados.')
-  })
-
-  it('uses the singular for one estimated day', () => {
-    const pts = [pt('2026-10-01', 1, 1, 'estimated'), pt('2026-10-02', 1)]
-    expect(historyNote(pts)).toBe('Acciones y caja. Las ONs no tienen historia todavía. 1 de 2 días es estimado.')
+describe('HISTORY_NOTE', () => {
+  it('says the series is the whole portfolio, ONs included (S9)', () => {
+    expect(HISTORY_NOTE).toBe('Toda la cartera: acciones, ONs y caja.')
   })
 })

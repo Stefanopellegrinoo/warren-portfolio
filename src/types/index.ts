@@ -114,24 +114,6 @@ export interface Cashflow {
   created_at: string
 }
 
-export interface PortfolioSnapshot {
-  id: string
-  user_id: string
-  snapshot_date: string
-  total_value: number
-  total_invested: number
-  pnl: number
-  pnl_pct: number
-  /** 'live' = measured by the daily job; 'estimated' = reconstructed by the backfill. */
-  source?: 'live' | 'estimated'
-  /** Per-asset-class breakdown. Absent on rows written before migration 034. */
-  stocks_value?: number
-  stocks_invested?: number
-  ons_value?: number
-  ons_invested?: number
-  cash_value?: number
-}
-
 export interface Quote {
   ticker: string
   price: number
@@ -210,7 +192,8 @@ export interface Cedear extends Activo {
 // ON (OBLIGACIONES NEGOCIABLES) TYPES
 // ═══════════════════════════════════════════════════════════════════════════
 
-export type ONOperation = 'COMPRA' | 'VENTA' | 'CUPON'
+// No CUPON: coupons and amortizations come from the bond schedule (odd/tasks/nucleo-ledger.md S4, S10).
+export type ONOperation = 'COMPRA' | 'VENTA'
 
 export interface ONPosition {
   id: string
@@ -253,7 +236,7 @@ export interface ONClosedTrade {
 // CASH TRACKING TYPES
 // ═══════════════════════════════════════════════════════════════════════════
 
-export type CashMovementType = 'DEPOSITO' | 'RETIRO' | 'CUPON' | 'DIVIDENDO' | 'COMPRA' | 'VENTA'
+export type CashMovementType = 'DEPOSITO' | 'RETIRO' | 'DIVIDENDO' | 'COMPRA' | 'VENTA'
 
 export interface CashBalance {
   id: string
@@ -281,7 +264,7 @@ export interface CashMovementInput {
   amount: number
   description?: string
   ticker?: string
-  transaction_id?: string  // Links to transactions.id (for COMPRA/VENTA), null for manual/CUPON/DIVIDENDO
+  transaction_id?: string  // Links to transactions.id (for COMPRA/VENTA), null for manual DEPOSITO/RETIRO/DIVIDENDO
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

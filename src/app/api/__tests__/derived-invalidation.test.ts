@@ -42,18 +42,20 @@ vi.mock('bullmq', () => ({
 }))
 vi.mock('@/lib/portfolio-engine', () => ({
   processTransaction: async () => { h.events.push('write'); return { ok: true } },
-  rebuildPosition: async () => { h.events.push('write') },
   processTransactionBatch: async () => h.batch,
 }))
 vi.mock('@/lib/on-engine', () => ({
   processONTransaction: async () => { h.events.push('write'); return { ok: true } },
-  rebuildONPosition: async () => { h.events.push('write') },
+}))
+// The core's reads (validation, the cash answered after a write) are not under test here.
+vi.mock('@/lib/ledger-write', () => ({ assertNoNewOversell: async () => undefined }))
+vi.mock('@/lib/ledger-now', () => ({
+  loadPortfolioNow: async () => ({ stockPositions: [], onPositions: [], stockClosedTrades: [], onClosedTrades: [], cashBalance: 0 }),
 }))
 vi.mock('@/lib/cash-engine', async importOriginal => {
   const real = await importOriginal<typeof import('@/lib/cash-engine')>()
   return {
     ...real,
-    rebuildCashBalance: async () => { h.events.push('write') },
     adjustCashBalance: async () => { h.events.push('write'); return { movement: null, delta: 0, balance: null } },
     deleteCashMovement: async () => { h.events.push('write') },
   }
@@ -118,7 +120,7 @@ describe('REQ-6 write paths invalidate the derived history', () => {
     expectInvalidatedAfterWrite()
   })
 
-  it('DELETE /api/cash/movements/[id] (a CUPON movement leaves the ledger)', async () => {
+  it('DELETE /api/cash/movements/[id] (a manual movement leaves the ledger)', async () => {
     const { DELETE } = await import('../cash/movements/[id]/route')
     expect((await DELETE(req('DELETE'), { params: { id: ID } })).status).toBe(200)
     expectInvalidatedAfterWrite()

@@ -6,10 +6,9 @@
  * two paths drift apart, so it lives here once.
  */
 import type { ResolveResult } from '../ticker-identity'
-import type { RetroactiveWarning } from './retroactive-warning'
 
 export type PostTransactionResult =
-  | { ok: true; warnings?: RetroactiveWarning[] }
+  | { ok: true }
   | { ok: false; kind: 'needs-confirmation'; resolution: ResolveResult }
   | { ok: false; kind: 'error'; message: string }
 
@@ -23,9 +22,7 @@ export async function postTransaction(
   })
 
   if (res.ok) {
-    // A malformed success body is still a success: the row was written.
-    const created = await res.json().catch(() => null)
-    return { ok: true, warnings: created?.warnings }
+    return { ok: true }
   }
 
   let body: any = null

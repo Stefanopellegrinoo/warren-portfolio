@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { fetchData912Prices } from '@/lib/data912-client'
 import { fetchQuotes, cachePrice } from '@/lib/yahoo-finance'
-import type { ONPosition } from '@/types'
+import { getFullPortfolio } from '@/lib/portfolio-engine'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 
 export const dynamic = 'force-dynamic'
@@ -11,18 +11,9 @@ export async function GET() {
   if (isAuthFailure(authResult)) return authResult.error
   const { supabase, user } = authResult
 
-  // 1. Get ON tickers that user has positions in
-  const { data: positions } = await supabase
-    .from('on_positions')
-    .select('ticker')
-    .eq('user_id', user.id)
-
-  const tickers: string[] = Array.from(
-    new Set(
-      ((positions as Pick<ONPosition, 'ticker'>[] | null) || [])
-        .map((p: Pick<ONPosition, 'ticker'>) => String(p.ticker))
-    )
-  )
+  // 1. The ON tickers the user holds, from the ledger core
+  const { onPositions } = await getFullPortfolio(supabase, user.id)
+  const tickers = onPositions.map(p => p.ticker)
 
   if (tickers.length === 0) {
     return NextResponse.json({ quotes: {} })

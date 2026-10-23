@@ -8,14 +8,14 @@ const h = vi.hoisted(() => ({
 
 vi.mock('bullmq', () => ({ Worker: class { constructor(_n: string, p: never) { h.processor = p } on() {} } }))
 vi.mock('../queue', () => ({
-  PRICE_QUEUE_NAME: 'q', PRICE_REPEAT_JOB_NAME: 'r', SNAPSHOT_JOB_NAME: 's', TICKER_AUDIT_JOB_NAME: 't', ON_TERMS_JOB_NAME: 'on-terms-ingest', FX_RATES_JOB_NAME: 'fx-rates-ingest',
+  PRICE_QUEUE_NAME: 'q', PRICE_REPEAT_JOB_NAME: 'r', NIGHTLY_JOB_NAME: 's', TICKER_AUDIT_JOB_NAME: 't', ON_TERMS_JOB_NAME: 'on-terms-ingest', FX_RATES_JOB_NAME: 'fx-rates-ingest',
 }))
 vi.mock('../yahoo-finance', () => ({ fetchQuotesFromYahoo: vi.fn(), cachePrice: vi.fn(), fetchQuotes: vi.fn(async () => new Map()) }))
 vi.mock('../data912-client', () => ({ fetchData912Prices: vi.fn() }))
 vi.mock('../supabase-server', () => ({ createServiceClient: () => ({ marker: 'svc' }) }))
 vi.mock('../redis', () => ({ getRedis: () => null }))
 vi.mock('../summary-cache', () => ({ cacheUserSummaries: vi.fn() }))
-vi.mock('../portfolio-snapshots', () => ({ snapshotAllUsers: vi.fn(), splitQuotesByAssetClass: () => ({ stockQuotes: new Map(), onQuotes: new Map() }) }))
+vi.mock('../portfolio-valuation', () => ({ splitQuotesByAssetClass: () => ({ stockQuotes: new Map(), onQuotes: new Map() }) }))
 vi.mock('../import-worker', () => ({ startImportWorker: vi.fn() }))
 vi.mock('../signals-worker', () => ({ startSignalsWorker: vi.fn() }))
 vi.mock('../job-health', () => ({ beat: vi.fn(), alertJobFailure: vi.fn(), recordRefresh: vi.fn() }))

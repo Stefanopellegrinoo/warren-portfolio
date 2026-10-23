@@ -12,14 +12,14 @@
  */
 
 import { Worker } from 'bullmq'
-import { PRICE_QUEUE_NAME, PRICE_REPEAT_JOB_NAME, SNAPSHOT_JOB_NAME, TICKER_AUDIT_JOB_NAME, ON_TERMS_JOB_NAME, FX_RATES_JOB_NAME } from './queue'
+import { PRICE_QUEUE_NAME, PRICE_REPEAT_JOB_NAME, NIGHTLY_JOB_NAME, TICKER_AUDIT_JOB_NAME, ON_TERMS_JOB_NAME, FX_RATES_JOB_NAME } from './queue'
 import { fetchQuotesFromYahoo, cachePrice, fetchQuotes } from './yahoo-finance'
 import { fetchData912Prices, refreshLocalPrices } from './data912-client'
 import { createServiceClient } from './supabase-server'
 import { getRedis } from './redis'
 import { cacheUserSummaries } from './summary-cache'
 import { captureOnPriceHistory } from './on-price-history'
-import { snapshotAllUsers, splitQuotesByAssetClass } from './portfolio-snapshots'
+import { splitQuotesByAssetClass } from './portfolio-valuation'
 import { isMarketOpen, argentinaDate } from './utils'
 import { startImportWorker } from './import-worker'
 import { startSignalsWorker } from './signals-worker'
@@ -29,6 +29,7 @@ import { ensureRedisAndScheduleJobs, resolveStartupOutcome } from './worker-star
 import { auditTickerIdentities } from './ticker-audit'
 import { ingestOnTerms } from './on-terms-ingest'
 import { ingestFxRates } from './fx-rates'
+import { loadHeldStockTickers, loadPortfolioNow } from './ledger-now'
 
 const REDIS_URL = process.env.REDIS_URL
 
@@ -54,17 +55,12 @@ async function getAllTickers(): Promise<string[]> {
   const supabase = getSupabase()
   if (!supabase) return []
 
-  const { data, error } = await supabase
-    .from('positions')
-    .select('ticker')
-
-  if (error) {
-    console.error('[Worker] Error fetching positions:', error)
+  try {
+    return await loadHeldStockTickers(supabase)
+  } catch (error) {
+    console.error('[Worker] Error reading held tickers from the ledger:', error)
     return []
   }
-
-  const tickerSet = new Set((data || []).map((p: any) => p.ticker) as string[])
-  return Array.from(tickerSet)
 }
 
 /**
@@ -223,25 +219,20 @@ async function getUserTickers(userId: string): Promise<{ stock: string[]; on: st
   const supabase = getSupabase()
   if (!supabase) return { stock: [], on: [] }
 
-  const [stockRes, onRes] = await Promise.all([
-    supabase.from('positions').select('ticker').eq('user_id', userId),
-    supabase.from('on_positions').select('ticker').eq('user_id', userId),
-  ])
-
-  const stock: string[] = Array.from(new Set((stockRes.data || []).map((p: any) => p.ticker as string)))
-  const on: string[] = Array.from(new Set((onRes.data || []).map((p: any) => p.ticker as string)))
+  // The ledger core, not the stored positions (odd/tasks/nucleo-ledger.md T4.2b).
+  const now = await loadPortfolioNow(supabase, userId, argentinaDate())
+  const stock = now.stockPositions.map(p => p.ticker)
+  const on = now.onPositions.map(p => p.ticker)
   return { stock, on }
 }
 
 /**
- * Nightly job: capture the ON feed, then snapshot every user.
- *
- * Capture runs FIRST and is isolated: its failure is reported but must never
- * stop the snapshots. Both use the Argentine calendar day, not UTC: the job
- * runs at 02:00 UTC precisely so it closes the local day, and by then the UTC
- * date is already tomorrow.
+ * Nightly job: capture the day's ON closes into on_price_history (market data
+ * the derived history values ONs with). It uses the Argentine calendar day, not
+ * UTC: the job runs at 02:00 UTC precisely so it closes the local day, and by
+ * then the UTC date is already tomorrow. A failure is reported, never thrown.
  */
-export async function runSnapshotJob(): Promise<void> {
+export async function runNightlyJob(): Promise<void> {
   const date = argentinaDate()
 
   try {
@@ -259,14 +250,6 @@ export async function runSnapshotJob(): Promise<void> {
       .then(r => { if (!r?.ok) console.error('[Worker] Telegram alert not delivered:', r?.error) })
       .catch(e => console.error('[Worker] Telegram alert failed:', e))
   }
-
-  // Value the day on whatever prices we have — LKP from Redis is enough,
-  // and snapshotAllUsers falls back to cost for anything still missing.
-  const [stock, on] = await Promise.all([getAllTickers(), getAllONTickers()])
-  const allPrices = await fetchQuotes([...stock, ...on])
-  const { stockQuotes, onQuotes } = splitQuotesByAssetClass(allPrices, on)
-
-  await snapshotAllUsers(stockQuotes, onQuotes, date)
 }
 
 // ── Worker ──────────────────────────────────────────────
@@ -285,8 +268,8 @@ const worker = new Worker(
       return
     }
 
-    if (job.name === SNAPSHOT_JOB_NAME) {
-      await runSnapshotJob()
+    if (job.name === NIGHTLY_JOB_NAME) {
+      await runNightlyJob()
       return
     }
 

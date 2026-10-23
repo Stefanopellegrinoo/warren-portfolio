@@ -1,111 +1,98 @@
-import { fetchRawQuotes } from './yahoo-finance'
-import { fetchDailyBars } from './historical-prices'
 import { getRedis, isRedisReady } from './redis'
-
-const REDIS_KEY_CCL = 'currency:ccl'
-const REDIS_KEY_CCL_LKP = 'currency:ccl:lkp'  // last-known rate, refreshed on each fresh fetch
-const CACHE_TTL = 3600 // 1 hour
-const LKP_TTL = 30 * 24 * 3600 // 30 days: Redis is noeviction, every key must expire
+import { createServiceClient } from './supabase-server'
+import { FX_SERIES, type FxKind } from './fx-rates'
+import { argentinaDate } from './utils'
 
 /**
- * Implicit Dolar CCL (GGAL ADR vs GGAL.BA, 1 ADR = 10 local shares).
- * Returns null when no real rate exists (Yahoo down, Redis empty): callers MUST NOT
- * price ARS quotes with an invented number, they skip them instead.
+ * The app's one dollar series (odd/tasks/nucleo-ledger.md T1.2): today is live from
+ * dolarapi.com, closed days come from fx_rates (argentinadatos, same provider), and
+ * the rate of a moment is the mid of buy and sell, as getFxRate uses.
  */
-export async function getCCLRate(): Promise<number | null> {
-  return (await getCCLRateInfo())?.rate ?? null
-}
 
-export interface CclRateInfo {
+const LIVE_URL = 'https://dolarapi.com/v1/dolares/'
+const CACHE_TTL = 60 // seconds: "ask every time", one fetch per minute at most
+const LKP_TTL = 30 * 24 * 3600 // Redis is noeviction, every key must expire
+const FETCH_TIMEOUT_MS = 5_000
+const PAGE = 1000 // PostgREST row cap per request
+
+export interface DollarInfo {
   rate: number
-  /** ISO instant the rate was observed: live = now, cache/lkp = now minus the Redis key's age. */
+  /** ISO instant the provider last updated the rate. */
   asOf: string
   source: 'live' | 'cache' | 'lkp'
 }
 
-async function redisAgeMs(key: string, ttlSeconds: number): Promise<number> {
-  let left = NaN
-  try { left = Number(await getRedis()?.ttl(key)) } catch { /* age unknown: report 0, never fail a cache hit */ }
-  return Number.isFinite(left) && left >= 0 ? Math.max(0, ttlSeconds - left) * 1000 : 0
+async function readKey(key: string): Promise<{ rate: number; asOf: string } | null> {
+  if (!isRedisReady()) return null
+  const raw = await getRedis()?.get(key)
+  return raw ? JSON.parse(raw) : null
+}
+
+async function fetchLive(kind: FxKind): Promise<{ rate: number; asOf: string }> {
+  const res = await fetch(LIVE_URL + FX_SERIES[kind], { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
+  if (!res.ok) throw new Error(`dolarapi ${FX_SERIES[kind]}: HTTP ${res.status}`)
+  const d = await res.json()
+  if (!(d.compra > 0 && d.venta > 0)) throw new Error(`dolarapi ${FX_SERIES[kind]}: no buy/sell`)
+  return { rate: (d.compra + d.venta) / 2, asOf: d.fechaActualizacion }
 }
 
 /**
- * Lookup order: 1h cache, live Yahoo, 30-day last-known. Says how old the rate is and where it
- * came from, so a caller that prices bonds can refuse a long-lived last-known rate.
- * Returns null when nothing real exists; there is no hardcoded fallback.
+ * Lookup order: 1-minute cache, live dolarapi, 30-day last-known. Returns null when
+ * nothing real exists: callers MUST NOT convert with an invented number.
  */
-export async function getCCLRateInfo(): Promise<CclRateInfo | null> {
-  const at = (ageMs: number) => new Date(Date.now() - ageMs).toISOString()
-  if (isRedisReady()) {
-    const cached = await getRedis()?.get(REDIS_KEY_CCL)
-    if (cached) return { rate: parseFloat(cached), asOf: at(await redisAgeMs(REDIS_KEY_CCL, CACHE_TTL)), source: 'cache' }
-  }
+export async function getDollarInfo(kind: FxKind): Promise<DollarInfo | null> {
+  const key = `currency:${kind}`
+  const cached = await readKey(key)
+  if (cached) return { ...cached, source: 'cache' }
   try {
-    const quotes = await fetchRawQuotes(['GGAL', 'BCBA:GGAL'])
-    const adr = quotes.get('GGAL')
-    const local = quotes.get('BCBA:GGAL')
-    if (adr && local) {
-      const ccl = (local.price * 10) / adr.price
-      if (isRedisReady()) {
-        const redis = getRedis()
-        await redis?.setex(REDIS_KEY_CCL, CACHE_TTL, ccl.toString())
-        await redis?.setex(REDIS_KEY_CCL_LKP, LKP_TTL, ccl.toString())
-      }
-      return { rate: ccl, asOf: at(0), source: 'live' }
+    const live = await fetchLive(kind)
+    if (isRedisReady()) {
+      const value = JSON.stringify(live)
+      await getRedis()?.setex(key, CACHE_TTL, value)
+      await getRedis()?.setex(`${key}:lkp`, LKP_TTL, value)
     }
+    return { ...live, source: 'live' }
   } catch (err) {
-    console.error('[Currency] Error calculating CCL rate:', err)
+    console.error(`[Currency] live ${kind} failed:`, err)
   }
-  if (isRedisReady()) {
-    const lkp = await getRedis()?.get(REDIS_KEY_CCL_LKP)
-    if (lkp) return { rate: parseFloat(lkp), asOf: at(await redisAgeMs(REDIS_KEY_CCL_LKP, LKP_TTL)), source: 'lkp' }
-  }
-  console.error('[Currency] No CCL rate available (live fetch failed, no LKP in Redis)')
+  const lkp = await readKey(`${key}:lkp`)
+  if (lkp) return { ...lkp, source: 'lkp' }
+  console.error(`[Currency] No ${kind} rate available (live failed, no last-known)`)
   return null
 }
 
+export async function getCCLRateInfo(): Promise<DollarInfo | null> {
+  return getDollarInfo('ccl')
+}
+
+export async function getCCLRate(): Promise<number | null> {
+  return (await getDollarInfo('ccl'))?.rate ?? null
+}
+
 /**
- * Fetches historical CCL rates for a given period.
- * Returns a Map<DateString, CCLRate>
+ * Closed-day rates of `kind` from fx_rates, date → mid, before today (Argentina): today's
+ * row is still moving, today is getDollarInfo. Throws on a read failure.
  */
-export async function getHistoricalCCL(startDate: Date, endDate: Date = new Date()): Promise<Map<string, number>> {
-  // endDate in the key too: start-only froze the map for 24h, so later closes were divided by a stale CCL.
-  const cacheKey = `currency:h-ccl:${startDate.toISOString().split('T')[0]}:${endDate.toISOString().split('T')[0]}`
-  
-  if (isRedisReady()) {
-    const cached = await getRedis()?.get(cacheKey)
-    if (cached) {
-      const parsed = JSON.parse(cached)
-      return new Map(Object.entries(parsed))
-    }
-  }
-
+export async function getHistoricalDollar(kind: FxKind, startDate: Date, endDate: Date = new Date()): Promise<Map<string, number>> {
+  const day = (d: Date) => d.toISOString().slice(0, 10)
+  const supabase = createServiceClient()
   const rates = new Map<string, number>()
-  try {
-    // Raw bars, not fetchHistoricalQuotes: that one converts 'BCBA:' tickers by
-    // calling getHistoricalCCL, which recursed forever from here.
-    const [adr, local] = await Promise.all([
-      fetchDailyBars('GGAL', startDate, endDate),
-      fetchDailyBars('GGAL.BA', startDate, endDate)
-    ])
-
-    // Build adr map
-    const adrMap = new Map<string, number>()
-    adr.forEach(q => adrMap.set(q.date, q.close))
-
-    local.forEach(q => {
-      const adrClose = adrMap.get(q.date)
-      if (adrClose) {
-        rates.set(q.date, (q.close * 10) / adrClose)
-      }
-    })
-
-    if (isRedisReady() && rates.size > 0) {
-      await getRedis()?.setex(cacheKey, 86400, JSON.stringify(Object.fromEntries(rates)))
-    }
-  } catch (err) {
-    console.error('[Currency] Error fetching historical CCL:', err)
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from('fx_rates')
+      .select('date, buy, sell')
+      .eq('kind', kind)
+      .gte('date', day(startDate))
+      .lte('date', day(endDate))
+      .lt('date', argentinaDate())
+      .order('date')
+      .range(from, from + PAGE - 1)
+    if (error) throw new Error(`fx_rates read: ${error.message}`)
+    for (const r of data ?? []) rates.set(r.date, (Number(r.buy) + Number(r.sell)) / 2)
+    if (!data || data.length < PAGE) return rates
   }
+}
 
-  return rates
+export async function getHistoricalCCL(startDate: Date, endDate: Date = new Date()): Promise<Map<string, number>> {
+  return getHistoricalDollar('ccl', startDate, endDate)
 }

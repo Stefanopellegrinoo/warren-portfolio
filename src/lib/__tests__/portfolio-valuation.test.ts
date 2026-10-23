@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { Quote } from '@/types'
-import { applyCostFallback, valuePortfolio } from '../portfolio-valuation'
-import { calculatePortfolioSummary } from '../portfolio-engine'
+import { applyValuationRule, splitQuotesByAssetClass, valuePortfolio } from '../portfolio-valuation'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -15,14 +14,14 @@ function position(ticker: string, quantity: number, avgCost: number) {
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
-describe('applyCostFallback', () => {
+describe('applyValuationRule', () => {
   it('leaves a priced position untouched and reports zero unpriced', () => {
     // Arrange
     const positions = [position('AAPL', 10, 15)]
     const quotes = new Map([['AAPL', quote('AAPL', 20)]])
 
     // Act
-    const result = applyCostFallback(positions, quotes)
+    const result = applyValuationRule(positions, quotes)
 
     // Assert
     expect(result.quotes.get('AAPL')?.price).toBe(20)
@@ -36,7 +35,7 @@ describe('applyCostFallback', () => {
     const quotes = new Map<string, Quote>()
 
     // Act
-    const result = applyCostFallback(positions, quotes)
+    const result = applyValuationRule(positions, quotes)
 
     // Assert — priced at cost, zero day-change, counted and named
     expect(result.quotes.get('AAPL')).toEqual({
@@ -56,7 +55,7 @@ describe('applyCostFallback', () => {
     const quotes = new Map([['AAPL', quote('AAPL', 0)]])
 
     // Act
-    const result = applyCostFallback(positions, quotes)
+    const result = applyValuationRule(positions, quotes)
 
     // Assert
     expect(result.quotes.get('AAPL')?.price).toBe(15)
@@ -70,7 +69,7 @@ describe('applyCostFallback', () => {
     const quotes = new Map<string, Quote>()
 
     // Act
-    const result = applyCostFallback(positions, quotes)
+    const result = applyValuationRule(positions, quotes)
 
     // Assert — no fabricated quote, but the gap is surfaced
     expect(result.quotes.has('GHOST')).toBe(false)
@@ -84,7 +83,7 @@ describe('applyCostFallback', () => {
     const quotes = new Map<string, Quote>()
 
     // Act
-    applyCostFallback(positions, quotes)
+    applyValuationRule(positions, quotes)
 
     // Assert — caller's map untouched (immutability contract)
     expect(quotes.size).toBe(0)
@@ -104,9 +103,9 @@ describe('valuePortfolio', () => {
   const stockQuotes = new Map<string, Quote>()
   const onQuotes = new Map([['MGCRD', quote('MGCRD', 10)]])
 
-  it("policy 'avg_cost' marks the unpriced position at its own cost", () => {
+  it('marks an unpriced position at its own cost (S3, last tier)', () => {
     // Act
-    const result = valuePortfolio(inputs, { stockQuotes, onQuotes }, { missingQuotePolicy: 'avg_cost' })
+    const result = valuePortfolio(inputs, { stockQuotes, onQuotes })
 
     // Assert — AAPL at cost (150) + MGCRD at market (50) + cash (100)
     expect(result.summary.total_market_value).toBe(300)
@@ -115,29 +114,22 @@ describe('valuePortfolio', () => {
     expect(result.unpricedTickers).toEqual(['AAPL'])
   })
 
-  it("policy 'drop' excludes the unpriced position from the totals, exactly like today", () => {
-    // Act
-    const result = valuePortfolio(inputs, { stockQuotes, onQuotes }, { missingQuotePolicy: 'drop' })
+  it('marks an unpriced position at its last close before its cost (S3, middle tier)', () => {
+    // Act — AAPL has no quote but last closed at 18
+    const result = valuePortfolio(inputs, { stockQuotes, onQuotes }, new Map([['AAPL', 18]]))
 
-    // Assert — AAPL contributes neither value nor invested; still counted
-    expect(result.summary.total_market_value).toBe(150) // 50 ON + 100 cash
-    expect(result.summary.total_invested).toBe(40)
-    expect(result.unpricedCount).toBe(1)
+    // Assert — AAPL 10 × 18 + MGCRD 50 + cash 100
+    expect(result.summary.total_market_value).toBe(330)
+    expect(result.summary.stocks.pnl).toBe(30)
     expect(result.unpricedTickers).toEqual(['AAPL'])
   })
 
-  it("policy 'drop' is byte-identical to calling the engine with untouched quotes", () => {
-    // Act
-    const viaValuation = valuePortfolio(inputs, { stockQuotes, onQuotes }, { missingQuotePolicy: 'drop' })
-    const direct = calculatePortfolioSummary(
-      inputs.positions, inputs.onPositions, stockQuotes, onQuotes,
-      inputs.cashBalance, inputs.realized, inputs.onRealized
-    )
+  it('prefers the live quote over the last close (S3, first tier)', () => {
+    // Act — MGCRD is quoted at 10 and last closed at 9
+    const result = valuePortfolio(inputs, { stockQuotes, onQuotes }, new Map([['MGCRD', 9]]))
 
-    // Assert — the entire engine output passes through unchanged
-    expect(viaValuation.summary).toEqual(direct.summary)
-    expect(viaValuation.positions).toEqual(direct.positions)
-    expect(viaValuation.onPositions).toEqual(direct.onPositions)
+    // Assert
+    expect(result.summary.ons.market_value).toBe(50)
   })
 
   it('splits a FLAT quote map by ON-position membership, not by ticker name', () => {
@@ -148,7 +140,7 @@ describe('valuePortfolio', () => {
     ])
 
     // Act
-    const result = valuePortfolio(inputs, flat, { missingQuotePolicy: 'drop' })
+    const result = valuePortfolio(inputs, flat)
 
     // Assert — AAPL priced as stock (200), MGCRD as ON (50), + 100 cash
     expect(result.summary.total_market_value).toBe(350)
@@ -157,11 +149,56 @@ describe('valuePortfolio', () => {
     expect(result.unpricedCount).toBe(0)
   })
 
-  it("never mutates the caller's quote maps under 'avg_cost'", () => {
+  it("never mutates the caller's quote maps", () => {
     // Act
-    valuePortfolio(inputs, { stockQuotes, onQuotes }, { missingQuotePolicy: 'avg_cost' })
+    valuePortfolio(inputs, { stockQuotes, onQuotes })
 
     // Assert — the synthetic AAPL cost quote landed in a copy, not here
     expect(stockQuotes.has('AAPL')).toBe(false)
+  })
+})
+
+describe('splitQuotesByAssetClass', () => {
+  it('classifies a stock whose ticker ends in D as a stock, not an ON', () => {
+    // Arrange — JD (JD.com) is a real CEDEAR the portfolio holds. Classifying by
+    // the "D" suffix would route it to Data912 pricing and drop it from the
+    // stock totals entirely.
+    const all = new Map([
+      ['JD', quote('JD', 42)],
+      ['MGCRD', quote('MGCRD', 100)],
+    ])
+
+    // Act — ON membership comes from the ON tables, not from the name
+    const { stockQuotes, onQuotes } = splitQuotesByAssetClass(all, ['MGCRD'])
+
+    // Assert
+    expect(stockQuotes.has('JD')).toBe(true)
+    expect(onQuotes.has('JD')).toBe(false)
+    expect(onQuotes.has('MGCRD')).toBe(true)
+    expect(stockQuotes.has('MGCRD')).toBe(false)
+  })
+
+  it('matches ON membership case-insensitively', () => {
+    // Arrange
+    const all = new Map([['cs50d', quote('cs50d', 104)]])
+
+    // Act
+    const { stockQuotes, onQuotes } = splitQuotesByAssetClass(all, [' CS50D '])
+
+    // Assert — the quote keeps its original casing but lands in the ON bucket
+    expect(onQuotes.has('cs50d')).toBe(true)
+    expect(stockQuotes.size).toBe(0)
+  })
+
+  it('treats an unknown ticker as a stock', () => {
+    // Arrange
+    const all = new Map([['AAPL', quote('AAPL', 200)]])
+
+    // Act
+    const { stockQuotes, onQuotes } = splitQuotesByAssetClass(all, [])
+
+    // Assert
+    expect(stockQuotes.has('AAPL')).toBe(true)
+    expect(onQuotes.size).toBe(0)
   })
 })

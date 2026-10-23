@@ -19,7 +19,7 @@ import type { BarsResult } from '../bars-cache'
 import type { DeriveInput } from '../derive-history'
 
 const TODAY = '2026-03-10'
-const FLAGS = { negativeCash: null, costMarkedStocks: [], vanished: [], onAggregateMarkDates: [], onRecordedDates: [], onExactCloseDates: [], todayUnpriced: [], failure: null }
+const FLAGS = { negativeCash: null, costMarkedStocks: [], todayUnpriced: [], failure: null }
 const tx = (over: Record<string, unknown> = {}) => ({
   ticker: 'AAA', operation: 'COMPRA', quantity: 10, price: 50, commission: 0,
   date: '2026-03-02', asset_type: 'ACCION', created_at: null, ...over,
@@ -62,6 +62,9 @@ function deps(over: Record<string, any> = {}) {
     getBars: vi.fn(async (symbols: string[]) => new Map(symbols.map(s => [s, ok()]))),
     getHistoricalCCL: vi.fn(async () => new Map<string, number>()),
     fetchQuotes: vi.fn(async (_tickers: string[]) => new Map([['AAA', quote('AAA', 70)]])),
+    loadSchedules: vi.fn(async () => new Map()),
+    backfillOnPriceHistory: vi.fn(async () => 0),
+    backfillPastFlows: vi.fn(async () => 0),
     ...over,
   }
 }
@@ -78,25 +81,26 @@ beforeEach(() => {
 })
 
 describe('getDerivedSeries', () => {
-  it('returns snapshot-shaped rows, today last as live, and caches them with the version CAS', async () => {
+  it('returns snapshot-shaped rows, today last, and caches them (with the income) under the version CAS', async () => {
     store.set('summary:version:u1', '7')
     const res = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, deps())
 
     expect(res.degraded).toBe(false)
-    expect(res.rows.at(-1)).toMatchObject({ snapshot_date: TODAY, source: 'live', user_id: 'u1' })
+    expect(res.rows.at(-1)).toMatchObject({ snapshot_date: TODAY, user_id: 'u1' })
+    expect(res.rows.some(r => 'source' in r)).toBe(false)
     expect(res.rows.length).toBeGreaterThan(2)
     expect(redisMock.eval).toHaveBeenCalledTimes(1)
     const args = redisMock.eval.mock.calls[0] as unknown[]
     expect(args.slice(0, 6)).toEqual([SUMMARY_SETEX_LUA, 2, 'derived:v1:u1', 'summary:version:u1', '7', DERIVED_TTL])
     expect(DERIVED_TTL).toBe(900)
-    expect(JSON.parse(args[6] as string)).toMatchObject({ asOf: TODAY })
+    expect(JSON.parse(args[6] as string)).toMatchObject({ asOf: TODAY, income: [] })
     expect(redisMock.set).not.toHaveBeenCalled()
     expect(redisMock.setex).not.toHaveBeenCalled()
   })
 
   it('serves a same-day hit filtered by range without touching the database', async () => {
     const first = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, deps())
-    store.set('derived:v1:u1', JSON.stringify({ asOf: TODAY, rows: first.rows, flags: first.flags }))
+    store.set('derived:v1:u1', JSON.stringify({ asOf: TODAY, rows: first.rows, flags: first.flags, income: first.income }))
 
     const log: string[] = []
     const hit = await getDerivedSeries(fakeSupabase({}, log), 'u1', { fromDate: '2026-03-05' }, deps())
@@ -107,16 +111,12 @@ describe('getDerivedSeries', () => {
     expect(hit.degraded).toBe(false)
   })
 
-  it('skipCache neither reads nor writes derived:v1 (shadow compare)', async () => {
-    const first = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, deps())
-    store.set('derived:v1:u1', JSON.stringify({ asOf: TODAY, rows: [], flags: first.flags }))
-    redisMock.eval.mockClear()
+  it('ignores an entry cached before the core (no income field): it recomputes', async () => {
+    store.set('derived:v1:u1', JSON.stringify({ asOf: TODAY, rows: [], flags: FLAGS }))
     const log: string[] = []
-
-    const res = await getDerivedSeries(fakeSupabase(tables(), log), 'u1', {}, deps({ skipCache: true }))
+    const res = await getDerivedSeries(fakeSupabase(tables(), log), 'u1', {}, deps())
     expect(log).toContain('transactions')
-    expect(res.rows.length).toBeGreaterThan(2)
-    expect(redisMock.eval).not.toHaveBeenCalled()
+    expect(res.rows.length).toBeGreaterThan(0)
   })
 
   it('ignores a hit from another day', async () => {
@@ -169,7 +169,7 @@ describe('getDerivedSeries', () => {
 
   it('treats a partial derivation (flags.failure) as degraded and uncacheable', async () => {
     const derive = vi.fn((i: DeriveInput) => ({
-      rows: [], flags: { negativeCash: null, costMarkedStocks: [], vanished: [], onAggregateMarkDates: [], onRecordedDates: [], onExactCloseDates: [], todayUnpriced: [], failure: 'boom' },
+      rows: [], flags: { ...FLAGS, failure: 'boom' }, income: [],
     }))
     const res = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, deps({ derive }))
     expect(res.degraded).toBe(true)
@@ -178,7 +178,7 @@ describe('getDerivedSeries', () => {
 
   it('a stock held today with no quote is degraded and never cached; an unpriced ON alone is not', async () => {
     const withUnpriced = (todayUnpriced: string[]) => deps({
-      derive: vi.fn(() => ({ rows: [], flags: { ...FLAGS, todayUnpriced } })),
+      derive: vi.fn(() => ({ rows: [], flags: { ...FLAGS, todayUnpriced }, income: [] })),
     })
     const onTx = tx({ ticker: 'ONX', asset_type: 'ON', quantity: 100, price: 1 })
 
@@ -200,17 +200,22 @@ describe('getDerivedSeries', () => {
     expect(res.degraded).toBe(false)
   })
 
-  it('a transactions or cash read failure THROWS', async () => {
-    await expect(getDerivedSeries(fakeSupabase(tables({ transactions: { error: { message: 'x' } } })), 'u1', {}, deps())).rejects.toThrow()
-    await expect(getDerivedSeries(fakeSupabase(tables({ cash_movements: { error: { message: 'x' } } })), 'u1', {}, deps())).rejects.toThrow()
+  it('a transactions, cash or payment-override read failure THROWS', async () => {
+    for (const table of ['transactions', 'cash_movements', 'on_payment_overrides']) {
+      await expect(getDerivedSeries(fakeSupabase(tables({ [table]: { error: { message: 'x' } } })), 'u1', {}, deps())).rejects.toThrow()
+    }
   })
 
-  it('on_price_history or marks read failure -> still answers, degraded, not cached', async () => {
+  it('on_price_history or schedules read failure -> still answers, degraded, not cached', async () => {
     const onTx = tx({ ticker: 'AERBD', asset_type: 'ON', quantity: 100, price: 100 })
-    for (const failing of ['on_price_history', 'portfolio_snapshots']) {
-      const res = await getDerivedSeries(
-        fakeSupabase(tables({ transactions: { data: [onTx] }, [failing]: { error: { message: 'x' } } })), 'u1', {}, deps()
-      )
+    const prices = await getDerivedSeries(
+      fakeSupabase(tables({ transactions: { data: [onTx] }, on_price_history: { error: { message: 'x' } } })), 'u1', {}, deps()
+    )
+    const schedules = await getDerivedSeries(
+      fakeSupabase(tables({ transactions: { data: [onTx] } })), 'u1', {},
+      deps({ loadSchedules: vi.fn(async () => { throw new Error('on_terms: x') }) })
+    )
+    for (const res of [prices, schedules]) {
       expect(res.degraded).toBe(true)
       expect(res.rows.length).toBeGreaterThan(0)
     }
@@ -220,7 +225,7 @@ describe('getDerivedSeries', () => {
   it('catalog symbol wins; without the catalog it falls back to the exchange-normalized ticker; bars are keyed by portfolio ticker', async () => {
     const d = deps()
     let seen!: DeriveInput
-    const derive = vi.fn((i: DeriveInput) => { seen = i; return { rows: [], flags: FLAGS } })
+    const derive = vi.fn((i: DeriveInput) => { seen = i; return { rows: [], flags: FLAGS, income: [] } })
     await getDerivedSeries(
       fakeSupabase(tables({
         transactions: { data: [tx({ ticker: 'aaa ' }), tx({ ticker: 'BCBA:ZZZ' })] },
@@ -240,7 +245,7 @@ describe('getDerivedSeries', () => {
 
   it('S13: passes bars un-split-adjusted; S12.1: .BA bars go through the CCL, only when one is held', async () => {
     let seen!: DeriveInput
-    const derive = vi.fn((i: DeriveInput) => { seen = i; return { rows: [], flags: FLAGS } })
+    const derive = vi.fn((i: DeriveInput) => { seen = i; return { rows: [], flags: FLAGS, income: [] } })
     const split = deps({
       getBars: vi.fn(async (s: string[]) => new Map(s.map(x => [x, ok([bar('2026-03-02', 25)], { splits: [{ date: '2026-03-04', numerator: 2, denominator: 1 }] })]))),
     })
@@ -265,10 +270,12 @@ describe('getDerivedSeries', () => {
     expect(bad.degraded).toBe(true)
   })
 
-  it('feeds ON closes (held ON tickers only) and live marks to the engine, and asks quotes for every traded ticker', async () => {
+  it('feeds ON closes, schedules and payment overrides to the core, never portfolio_snapshots, and asks quotes for every traded ticker', async () => {
     let seen!: DeriveInput
-    const derive = vi.fn((i: DeriveInput) => { seen = i; return { rows: [], flags: FLAGS } })
-    const d = deps()
+    const derive = vi.fn((i: DeriveInput) => { seen = i; return { rows: [], flags: FLAGS, income: [] } })
+    const schedule = new Map([['AERBD', [{ date: '2026-03-05', ren: 2, amo: 0 }]]])
+    const d = deps({ loadSchedules: vi.fn(async () => schedule) })
+    const log: string[] = []
     const filters: string[] = []
     await getDerivedSeries(
       fakeSupabase(tables({
@@ -277,23 +284,64 @@ describe('getDerivedSeries', () => {
           { ticker: 'AERBD', price_date: '2026-03-03', close: '101.5' },
           { ticker: 'AERBD', price_date: '2026-03-04', close: '102' },
         ] },
-        portfolio_snapshots: { data: [
-          { snapshot_date: '2026-03-03', ons_value: '10150', ons_invested: '10000' },
-          { snapshot_date: '2026-03-04', ons_value: null, ons_invested: '10000' },
-        ] },
-      }), [], filters), 'u1', {}, { ...d, derive }
+        on_payment_overrides: { data: [{ ticker: 'aerbd', pay_date: '2026-03-05', kind: 'coupon', amount: null }] },
+      }), log, filters), 'u1', {}, { ...d, derive }
     )
+    expect(log).not.toContain('portfolio_snapshots')
     expect(filters).toEqual(expect.arrayContaining([
-      'portfolio_snapshots.eq(user_id,u1)', 'portfolio_snapshots.eq(source,live)',
-      'on_price_history.in(ticker,AERBD)', 'on_price_history.gte(price_date,2026-03-02)',
+      'on_price_history.in(ticker,AERBD)', 'on_price_history.gte(price_date,2026-03-01)', 'on_payment_overrides.eq(user_id,u1)',
     ]))
     expect(seen.onPricesByTicker.get('AERBD')).toEqual([bar('2026-03-03', 101.5), bar('2026-03-04', 102)])
     expect([...seen.onPricesByTicker.keys()]).toEqual(['AERBD'])
-    expect(seen.onMarks.get('2026-03-03')).toEqual({ ons_value: 10150, ons_invested: 10000 })
-    expect(seen.onMarks.has('2026-03-04')).toBe(false)
+    expect(d.loadSchedules.mock.calls[0].slice(1)).toEqual([['AERBD'], TODAY])
+    expect(seen.schedules).toBe(schedule)
+    expect(seen.overrides).toEqual([{ ticker: 'AERBD', date: '2026-03-05', kind: 'coupon', amount: null }])
     expect(d.getBars.mock.calls[0][0]).toEqual(['AAA'])
     expect(d.fetchQuotes.mock.calls[0][0].sort()).toEqual(['AAA', 'AERBD'])
     expect(seen.today).toBe(TODAY)
+  })
+
+  it('backfills a held ON whose closes do not reach its first trade, once a day, then re-reads its closes', async () => {
+    redisMock.set.mockResolvedValueOnce('OK').mockResolvedValue(null)
+    const d = deps()
+    const log: string[] = []
+    const sb = fakeSupabase(tables({
+      transactions: { data: [
+        tx({ ticker: 'AERBD', asset_type: 'ON', quantity: 100, price: 100, date: '2026-03-02' }),
+        tx({ ticker: 'COVD', asset_type: 'ON', quantity: 100, price: 100, date: '2026-03-02' }),
+      ] },
+      on_price_history: { data: [{ ticker: 'COVD', price_date: '2026-03-04', close: '99' }] },
+      on_terms: { data: [{ isin: 'ARX1', ticker_o: 'AERBO', ticker_d: 'AERBD' }] },
+    }), log)
+
+    await getDerivedSeries(sb, 'u1', {}, d)
+    expect(redisMock.set).toHaveBeenCalledWith('onbackfill:v1:AERBD', '1', 'EX', 86400, 'NX')
+    expect(d.backfillOnPriceHistory.mock.calls.map(c => c.slice(1))).toEqual([['AERBD', '2026-03-02', TODAY]])
+    expect(d.backfillPastFlows.mock.calls.map(c => c.slice(1))).toEqual([['ARX1', 'AERBO', TODAY]])
+    expect(log.filter(t => t === 'on_price_history')).toHaveLength(2)
+
+    store.clear()
+    await getDerivedSeries(sb, 'u1', {}, d)
+    expect(d.backfillOnPriceHistory).toHaveBeenCalledTimes(1)
+  })
+
+  it('a failed on-demand backfill is logged and the read still answers, not degraded', async () => {
+    redisMock.set.mockResolvedValue('OK')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const d = deps({
+      backfillOnPriceHistory: vi.fn(async () => { throw new Error('Rava 503') }),
+      backfillPastFlows: vi.fn(async () => { throw new Error('bonistas 503') }),
+    })
+    const res = await getDerivedSeries(fakeSupabase(tables({
+      transactions: { data: [tx(), tx({ ticker: 'AERBD', asset_type: 'ON', quantity: 100, price: 100 })] },
+      on_terms: { data: [{ isin: 'ARX1', ticker_o: 'AERBO', ticker_d: 'AERBD' }] },
+    })), 'u1', {}, d)
+    expect(d.backfillOnPriceHistory).toHaveBeenCalledTimes(1)
+    expect(d.backfillPastFlows).toHaveBeenCalledTimes(1)
+    expect(res.degraded).toBe(false)
+    expect(res.rows.at(-1)!.ons_value).toBeCloseTo(10000, 6)
+    expect(warn.mock.calls.map(c => String(c[0])).join('|')).toMatch(/Rava backfill failed.*\|.*bonistas backfill failed/)
+    warn.mockRestore()
   })
 
   it('W2b: a symbol with no bars and unknown splits (fallback path) is degraded and not cached', async () => {

@@ -41,14 +41,22 @@ describe('CashMovementSchema', () => {
     expect(() => CashMovementSchema.parse(data)).toThrow()
   })
 
-  it('accepts optional ticker for CUPON/DIVIDENDO', () => {
+  it('accepts optional ticker for DIVIDENDO', () => {
     const data = {
       date: '2024-01-01',
-      type: 'CUPON',
+      type: 'DIVIDENDO',
       amount: 50,
-      ticker: 'AL30' // ← OPCIONAL PERO ESPERADO
+      ticker: 'AAPL' // ← OPCIONAL PERO ESPERADO
     }
     expect(() => CashMovementSchema.parse(data)).not.toThrow()
+  })
+
+  it('rejects CUPON: ON coupons are automatic now (S4, S10)', () => {
+    expect(() => CashMovementSchema.parse({ date: '2024-01-01', type: 'CUPON', amount: 50, ticker: 'AL30' })).toThrow()
+  })
+
+  it('still accepts RETIRO', () => {
+    expect(() => CashMovementSchema.parse({ date: '2024-01-01', type: 'RETIRO', amount: 50 })).not.toThrow()
   })
 
   it('rejects invalid type', () => {

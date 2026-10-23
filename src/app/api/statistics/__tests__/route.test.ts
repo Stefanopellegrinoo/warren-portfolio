@@ -14,6 +14,15 @@ vi.mock('@/lib/redis', () => ({
   cacheRoute: (...args: unknown[]) => mockCacheRoute(...args),
 }))
 
+const mockGetDerivedSeries = vi.fn()
+vi.mock('@/lib/derived-series', () => ({
+  getDerivedSeries: (...args: unknown[]) => mockGetDerivedSeries(...args),
+}))
+/** The derived series the route reads: rows plus the core's automatic ON payments. */
+const mockSeries = (rows: unknown[], income: unknown[] = [], degraded = false) =>
+  mockGetDerivedSeries.mockResolvedValue({ rows, income, degraded, flags: {} })
+
+// Tripwire: statistics no longer read portfolio_snapshots.
 const mockFetchSnapshotSeries = vi.fn()
 vi.mock('@/lib/snapshot-series', () => ({
   fetchSnapshotSeries: (...args: unknown[]) => mockFetchSnapshotSeries(...args),
@@ -35,36 +44,17 @@ vi.mock('@/lib/cash-flows', () => ({
   fetchIncomeMovements: (...args: unknown[]) => mockFetchIncomeMovements(...args),
 }))
 
+const mockFetchBenchmarkComparison = vi.fn()
+vi.mock('@/lib/benchmark', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/benchmark')>()),
+  fetchBenchmarkComparison: (...args: unknown[]) => mockFetchBenchmarkComparison(...args),
+}))
+
 const { GET } = await import('../route')
 
-function snap(date: string, source?: 'live' | 'estimated') {
-  return {
-    id: `id-${date}`,
-    user_id: 'u1',
-    snapshot_date: date,
-    total_value: 1000,
-    total_invested: 900,
-    pnl: 100,
-    pnl_pct: 0.111,
-    ...(source ? { source } : {}),
-  }
-}
-
-/** The route reads several tables; each returns an empty set unless overridden. */
-function fakeSupabase() {
-  const empty = { data: [], error: null }
-  return {
-    from: vi.fn(() => ({
-      select: vi.fn(() => ({
-        eq: vi.fn(() => ({
-          is: vi.fn(() => ({ in: vi.fn(() => empty) })),
-          order: vi.fn(() => empty),
-          ...empty,
-        })),
-      })),
-    })),
-  }
-}
+const { ledgerSupabase, trade } = await import('@/lib/__tests__/fixtures/ledger-supabase')
+/** An empty ledger; the fake throws on any stored derived table (T4.2b). */
+const fakeSupabase = (tables = {}) => ledgerSupabase(tables)
 
 // The route reads `req.nextUrl.searchParams` (universe param), which only
 // exists on a real NextRequest — a plain Request cast to the type has no
@@ -83,10 +73,33 @@ beforeEach(() => {
   mockRequireUser.mockResolvedValue({ supabase: fakeSupabase(), user: { id: 'u1' } })
   mockGetCachedRoute.mockResolvedValue(null)
   mockCacheRoute.mockResolvedValue(undefined)
-  mockFetchSnapshotSeries.mockResolvedValue([])
+  mockSeries([])
   mockFetchFlowTransactions.mockResolvedValue([])
   mockFetchExternalFlows.mockResolvedValue([])
   mockFetchIncomeMovements.mockResolvedValue([])
+})
+
+describe('GET /api/statistics — allocation and trade stats from the ledger core', () => {
+  it('values allocation at cost without a quote and realizes a sale the stored table missed (L8)', async () => {
+    mockRequireUser.mockResolvedValue({
+      supabase: fakeSupabase({ transactions: [
+        trade(),
+        trade({ ticker: 'VIST', quantity: 100, price: 43.64, date: '2026-03-02' }),
+        trade({ ticker: 'VIST', operation: 'VENTA', quantity: 57.333333, price: 64.8508, date: '2026-04-09' }),
+      ] }),
+      user: { id: 'u1' },
+    })
+
+    const body = await (await GET(request())).json()
+
+    expect(body.realizedPnl).toBeCloseTo(1216.09, 2)
+    expect(body.totalTrades).toBe(1)
+    expect(body.avgHoldingDays).toBe(38)
+    expect(body.cumulativePnl).toMatchObject([{ date: '2026-04-09', ticker: 'VIST' }])
+    expect(body.allocation.map((a: any) => a.name)).toEqual(['VIST', 'AAPL'])
+    expect(body.totalPortfolioValue).toBeCloseTo(1000 + 42.666667 * 43.64, 2)
+    expect(body.unpricedPositions).toBe(2)
+  })
 })
 
 describe('GET /api/statistics — which universes need the transaction list', () => {
@@ -95,11 +108,6 @@ describe('GET /api/statistics — which universes need the transaction list', ()
   // empty transaction list — which is exactly what shipped, and what no unit
   // test could see. Narrowing this condition back to `stocks || ons` returns
   // the General tab to a fabricated -10% day.
-  it('fetches transactions for measurable — ON trades cross ITS boundary', async () => {
-    await GET(makeRequest('/api/statistics?universe=measurable'))
-    expect(mockFetchFlowTransactions).toHaveBeenCalledTimes(1)
-  })
-
   it('fetches transactions for stocks and for ons', async () => {
     await GET(makeRequest('/api/statistics?universe=stocks'))
     expect(mockFetchFlowTransactions).toHaveBeenCalledTimes(1)
@@ -114,25 +122,25 @@ describe('GET /api/statistics — which universes need the transaction list', ()
 
   it('passes the fetched transactions through to the risk computation', async () => {
     // Discriminates "fetched" from "fetched and used": an ON purchase inside
-    // the measurable universe must move the metrics. Without the flow the
-    // 25,125 purchase reads as a loss; with it, the interval is flat.
-    const breakdown = (date: string, stocks: number, cash: number) => ({
-      snapshot_date: date, total_value: stocks + cash, total_invested: stocks,
-      stocks_value: stocks, stocks_invested: stocks,
-      ons_value: 0, ons_invested: 0, cash_value: cash, source: 'live' as const,
+    // the ons universe must move the metrics. Without the flow the 25,000
+    // purchase reads as a gain then nothing; with it, the interval is flat.
+    const breakdown = (date: string, ons: number) => ({
+      snapshot_date: date, total_value: 130000, total_invested: 100000,
+      stocks_value: 100000, stocks_invested: 100000,
+      ons_value: ons, ons_invested: ons, cash_value: 30000 - ons,
     })
     // Three points, because maxDrawdown needs MIN_INTERVALS_DRAWDOWN = 2.
-    mockFetchSnapshotSeries.mockResolvedValue([
-      breakdown('2026-07-01', 100000, 30000),
-      breakdown('2026-07-02', 100000, 5000),
-      breakdown('2026-07-03', 100000, 5000),
+    mockSeries([
+      breakdown('2026-07-01', 30000),
+      breakdown('2026-07-02', 5000),
+      breakdown('2026-07-03', 5000),
     ])
     mockFetchFlowTransactions.mockResolvedValue([
-      { date: '2026-07-02', operation: 'COMPRA', quantity: 250, price: 100, commission: 0, asset_type: 'ON' },
+      { date: '2026-07-02', operation: 'VENTA', quantity: -250, price: 100, commission: 0, asset_type: 'ON' },
     ])
 
-    const body = await (await GET(makeRequest('/api/statistics?universe=measurable'))).json()
-    // 130,000 -> 105,000 with a -25,000 declared outflow is a flat interval.
+    const body = await (await GET(makeRequest('/api/statistics?universe=ons'))).json()
+    // 30,000 -> 5,000 with a -25,000 declared outflow (the sale) is a flat interval.
     expect(body.maxDrawdown).toBe(0)
   })
 
@@ -145,7 +153,7 @@ describe('GET /api/statistics — which universes need the transaction list', ()
     // route that fetched it and threw the result away — e.g. reverted to
     // `const externalFlows: ExternalFlow[] = []` — would leave every other
     // test here green.
-    mockFetchSnapshotSeries.mockResolvedValue([
+    mockSeries([
       { snapshot_date: '2026-07-01', total_value: 100000, total_invested: 100000 },
       { snapshot_date: '2026-07-02', total_value: 75000, total_invested: 100000 },
       { snapshot_date: '2026-07-03', total_value: 75000, total_invested: 100000 },
@@ -159,40 +167,29 @@ describe('GET /api/statistics — which universes need the transaction list', ()
   })
 })
 
-describe('GET /api/statistics — provenance', () => {
-  // Provenance is now computed over the requested universe's metric rows.
-  // `total` needs only total_value/total_invested — the same shape `snap()`
-  // has always produced — so these tests request it explicitly rather than
-  // relying on the `measurable` default, which needs the per-asset-class
-  // breakdown fields these fixtures don't set.
-  it('reports how much of the series was reconstructed', async () => {
-    mockFetchSnapshotSeries.mockResolvedValue([
-      snap('2026-04-10', 'estimated'),
-      snap('2026-04-11', 'estimated'),
-      snap('2026-07-27', 'live'),
-    ])
-
-    const res = await GET(makeRequest('/api/statistics?universe=total'))
-    const body = await res.json()
-
-    expect(body.provenance).toEqual({
-      totalDays: 3,
-      liveDays: 1,
-      estimatedDays: 2,
-      hasEstimated: true,
-      firstDate: '2026-04-10',
-      lastDate: '2026-07-27',
-    })
+describe('GET /api/statistics — derived series', () => {
+  it('reads the derived series, never portfolio_snapshots', async () => {
+    await GET(request())
+    expect(mockGetDerivedSeries).toHaveBeenCalledWith(expect.anything(), 'u1')
+    expect(mockFetchSnapshotSeries).not.toHaveBeenCalled()
   })
 
-  it('reports an all-measured series without raising a flag', async () => {
-    mockFetchSnapshotSeries.mockResolvedValue([snap('2026-07-27', 'live'), snap('2026-07-28')])
+  it('keeps the response shape, minus the retired provenance block', async () => {
+    const body = await (await GET(request())).json()
+    expect(Object.keys(body).sort()).toEqual([
+      'allPnLs', 'allocation', 'annualizedVol', 'arsExposure', 'avgHoldingDays', 'avgLoss', 'avgWin', 'benchmark',
+      'benchmarkError', 'biggestLoser', 'biggestWinner', 'cumulativePnl', 'drawdownIntervals', 'drawdownIntervalsSkipped',
+      'losersCount', 'maxDrawdown', 'maxHoldingDays', 'minHoldingDays', 'monthlyReturns', 'monthlyStdDev', 'openPnl',
+      'profitFactor', 'realizedPnl', 'returnIntervals', 'sharpeRatio', 'totalPortfolioValue', 'totalTrades',
+      'universe', 'unpricedPositions', 'usdExposure', 'winRate', 'winnersCount',
+    ])
+  })
 
-    const res = await GET(makeRequest('/api/statistics?universe=total'))
-    const body = await res.json()
-
-    expect(body.provenance.hasEstimated).toBe(false)
-    expect(body.provenance.liveDays).toBe(2)
+  it('serves a degraded series without caching it', async () => {
+    mockSeries([], [], true)
+    const res = await GET(request())
+    expect(res.status).toBe(200)
+    expect(mockCacheRoute).not.toHaveBeenCalled()
   })
 
   it('bumps the cache key so a stale v3 payload cannot serve without income declared', async () => {
@@ -201,26 +198,34 @@ describe('GET /api/statistics — provenance', () => {
     // for 300s and read a coupon as a fabricated gain or loss.
     await GET(request())
 
-    expect(mockGetCachedRoute).toHaveBeenCalledWith('statistics:v4:u1:measurable')
-    expect(mockCacheRoute).toHaveBeenCalledWith('statistics:v4:u1:measurable', expect.anything(), 300)
+    expect(mockGetCachedRoute).toHaveBeenCalledWith('statistics:v4:u1:total')
+    expect(mockCacheRoute).toHaveBeenCalledWith('statistics:v4:u1:total', expect.anything(), 300)
   })
 })
 
 describe('GET /api/statistics — universe parameter', () => {
-  it('defaults to measurable and carries v4 + universe in the cache key', async () => {
+  it('defaults to the whole portfolio (S9) and carries v4 + universe in the cache key', async () => {
     const res = await GET(makeRequest('/api/statistics'))
     expect(res.status).toBe(200)
-    expect(mockGetCachedRoute).toHaveBeenCalledWith('statistics:v4:u1:measurable')
+    expect(mockGetCachedRoute).toHaveBeenCalledWith('statistics:v4:u1:total')
     const body = await res.json()
-    expect(body.universe).toBe('measurable')
+    expect(body.universe).toBe('total')
+  })
+
+  it('treats the retired measurable universe as the whole portfolio (old clients and cached URLs)', async () => {
+    const res = await GET(makeRequest('/api/statistics?universe=measurable'))
+    expect(res.status).toBe(200)
+    expect(mockGetCachedRoute).toHaveBeenCalledWith('statistics:v4:u1:total')
+    expect((await res.json()).universe).toBe('total')
+    expect(mockFetchFlowTransactions).not.toHaveBeenCalled()
   })
 
   it('accepts each valid universe in the key', async () => {
-    for (const u of ['total', 'measurable', 'stocks', 'ons']) {
+    for (const u of ['total', 'stocks', 'ons']) {
       vi.clearAllMocks()
       mockRequireUser.mockResolvedValue({ supabase: fakeSupabase(), user: { id: 'u1' } })
       mockGetCachedRoute.mockResolvedValue(null)
-      mockFetchSnapshotSeries.mockResolvedValue([])
+      mockSeries([])
       mockFetchExternalFlows.mockResolvedValue([])
       mockFetchIncomeMovements.mockResolvedValue([])
       const res = await GET(makeRequest(`/api/statistics?universe=${u}`))
@@ -232,17 +237,18 @@ describe('GET /api/statistics — universe parameter', () => {
   it('rejects an unknown universe with 400 instead of silently defaulting', async () => {
     const res = await GET(makeRequest('/api/statistics?universe=banana'))
     expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('Invalid universe. Allowed: total, stocks, ons')
     expect(mockCacheRoute).not.toHaveBeenCalled()
   })
 
   it('below-threshold data returns null metrics, never 0', async () => {
-    mockFetchSnapshotSeries.mockResolvedValue([
+    mockSeries([
       { snapshot_date: '2026-07-01', total_value: 1000, total_invested: 800,
         stocks_value: 600, stocks_invested: 500, ons_value: 300, ons_invested: 300,
-        cash_value: 100, source: 'live' },
+        cash_value: 100 },
       { snapshot_date: '2026-07-02', total_value: 1010, total_invested: 800,
         stocks_value: 610, stocks_invested: 500, ons_value: 300, ons_invested: 300,
-        cash_value: 100, source: 'live' },
+        cash_value: 100 },
     ])
     const res = await GET(makeRequest('/api/statistics'))
     const body = await res.json()
@@ -252,54 +258,11 @@ describe('GET /api/statistics — universe parameter', () => {
   })
 })
 
-describe('GET /api/statistics — provenance is universe-scoped', () => {
-  it('measurable (default): drops a row missing the breakdown from provenance, not just from the risk metrics', async () => {
-    // Regression guard: reverting the route's provenance expression back to
-    // `summarizeProvenance(validSnapshots)` would count both rows here and
-    // still pass under `?universe=total` (identity projection — nothing
-    // dropped) — that's what the two provenance tests above hit. This test
-    // pins the DEFAULT `measurable` universe, where the second row (no
-    // breakdown fields) must be dropped from the "N días" note the same way
-    // it is dropped from the risk metrics rendered beside it.
-    mockFetchSnapshotSeries.mockResolvedValue([
-      { snapshot_date: '2026-07-01', total_value: 1000, total_invested: 900,
-        stocks_value: 600, stocks_invested: 500, ons_value: 300, ons_invested: 300,
-        cash_value: 100, source: 'live' },
-      { snapshot_date: '2026-07-02', total_value: 1010, total_invested: 910 },
-    ])
-
-    const res = await GET(makeRequest('/api/statistics'))
-    const body = await res.json()
-
-    expect(body.provenance.totalDays).toBe(1)
-  })
-
-  it('ons: excludes estimated rows from provenance, matching the measured-only metrics rule', async () => {
-    // metricsRows() drops estimated rows for the ons universe BEFORE
-    // projection — provenance must be computed over that same filtered set,
-    // or the "M reconstruidos" note would claim a reconstructed day the
-    // Sharpe/vol/drawdown figures beside it never used.
-    mockFetchSnapshotSeries.mockResolvedValue([
-      { snapshot_date: '2026-07-01', total_value: 1000, total_invested: 900,
-        ons_value: 300, ons_invested: 300, source: 'estimated' },
-      { snapshot_date: '2026-07-02', total_value: 1010, total_invested: 900,
-        ons_value: 310, ons_invested: 300, source: 'live' },
-    ])
-
-    const res = await GET(makeRequest('/api/statistics?universe=ons'))
-    const body = await res.json()
-
-    expect(body.provenance.totalDays).toBe(1)
-    expect(body.provenance.estimatedDays).toBe(0)
-  })
-})
-
 describe('GET /api/statistics — income reaches the risk computation', () => {
   /** 22 live days so the A3 annualized threshold (20 intervals) is cleared.
    *  Everything is flat except day 10, when the ONs pay a coupon: ons_value
-   *  falls by 8,300 and cash rises by 8,300, permanently. So `measurable`
-   *  (stocks + cash) is 120,000 for nine days and 128,300 after — one jump,
-   *  and it is pure accounting.
+   *  falls by 8,300 and cash rises by 8,300, permanently. So `total` stays at
+   *  228,300 and `ons` falls once — pure accounting either way.
    *
    *  Assert on annualizedVol, NOT maxDrawdown: a series that only ever rises
    *  has zero drawdown whether or not the jump is declared, so a drawdown
@@ -315,7 +278,6 @@ describe('GET /api/statistics — income reaches the risk computation', () => {
         stocks_value: 100000, stocks_invested: 100000,
         ons_value: paid ? 91700 : 100000, ons_invested: 100000,
         cash_value: paid ? 28300 : 20000,
-        source: 'live' as const,
       }
     })
   const COUPON = [{ date: COUPON_DAY, type: 'CUPON' as const, amount: 8300 }]
@@ -334,33 +296,12 @@ describe('GET /api/statistics — income reaches the risk computation', () => {
         stocks_value: paid ? 91700 : 100000, stocks_invested: 100000,
         ons_value: 100000, ons_invested: 100000,
         cash_value: paid ? 28300 : 20000,
-        source: 'live' as const,
       }
     })
   const DIVIDEND = [{ date: COUPON_DAY, type: 'DIVIDENDO' as const, amount: 8300 }]
 
-  it('declares the coupon as an inflow to measurable — the jump is not volatility', async () => {
-    mockFetchSnapshotSeries.mockResolvedValue(series())
-    mockFetchIncomeMovements.mockResolvedValue(COUPON)
-
-    const body = await (await GET(makeRequest('/api/statistics?universe=measurable'))).json()
-    expect(body.returnIntervals).toBe(21)
-    expect(body.annualizedVol).toBe(0)
-  })
-
-  it('WITHOUT the coupon declared the same series manufactures volatility', async () => {
-    mockFetchSnapshotSeries.mockResolvedValue(series())
-    mockFetchIncomeMovements.mockResolvedValue([])
-
-    const body = await (await GET(makeRequest('/api/statistics?universe=measurable'))).json()
-    // One undeclared +6.92% day across 21 intervals, annualized by sqrt(252).
-    // THIS is the assertion that discriminates: if it ever agrees with the
-    // test above, the wiring is dead and nothing else will say so.
-    expect(body.annualizedVol).toBeGreaterThan(0.2)
-  })
-
   it('declares the coupon as an outflow from ons — the price fall is not a loss', async () => {
-    mockFetchSnapshotSeries.mockResolvedValue(series())
+    mockSeries(series())
     mockFetchIncomeMovements.mockResolvedValue(COUPON)
 
     const body = await (await GET(makeRequest('/api/statistics?universe=ons'))).json()
@@ -368,7 +309,7 @@ describe('GET /api/statistics — income reaches the risk computation', () => {
   })
 
   it('without the coupon declared, ons records the payment as a drawdown', async () => {
-    mockFetchSnapshotSeries.mockResolvedValue(series())
+    mockSeries(series())
     mockFetchIncomeMovements.mockResolvedValue([])
 
     const body = await (await GET(makeRequest('/api/statistics?universe=ons'))).json()
@@ -379,11 +320,11 @@ describe('GET /api/statistics — income reaches the risk computation', () => {
   it('declares the dividend as an outflow from stocks — the price fall is not a loss', async () => {
     // Pins income wiring for `stocks` specifically. Narrowing route.ts's
     // universe guard to exclude `stocks` (income keeps fetching for
-    // measurable/ons but stops for stocks) would leave every OTHER test in
+    // ons but stops for stocks) would leave every OTHER test in
     // this file green — this is the one that would catch it, because it
     // asserts the VALUE the fetched income produces, not just that the fetch
     // was called.
-    mockFetchSnapshotSeries.mockResolvedValue(stockSeries())
+    mockSeries(stockSeries())
     mockFetchIncomeMovements.mockResolvedValue(DIVIDEND)
 
     const body = await (await GET(makeRequest('/api/statistics?universe=stocks'))).json()
@@ -391,7 +332,7 @@ describe('GET /api/statistics — income reaches the risk computation', () => {
   })
 
   it('without the dividend declared, stocks records the payment as a drawdown', async () => {
-    mockFetchSnapshotSeries.mockResolvedValue(stockSeries())
+    mockSeries(stockSeries())
     mockFetchIncomeMovements.mockResolvedValue([])
 
     const body = await (await GET(makeRequest('/api/statistics?universe=stocks'))).json()
@@ -399,34 +340,65 @@ describe('GET /api/statistics — income reaches the risk computation', () => {
     expect(body.maxDrawdown).toBeLessThan(-0.08)
   })
 
+  const coreIncome = (kind: 'coupon' | 'amortization') =>
+    [{ ticker: 'XD', date: COUPON_DAY, kind, amount: 8300, source: 'schedule' }]
+
+  it('an automatic coupon or amortization is neither a gain nor a loss of the whole portfolio (S9)', async () => {
+    // Inside `total` the ON leg and the cash leg move together; only deposits
+    // and withdrawals cross its boundary, so nothing about the payment is declared.
+    for (const kind of ['coupon', 'amortization'] as const) {
+      mockSeries(series(), coreIncome(kind))
+      const body = await (await GET(makeRequest('/api/statistics?universe=total'))).json()
+      expect(body.returnIntervals).toBe(21)
+      expect(body.annualizedVol).toBe(0)
+      expect(body.maxDrawdown).toBe(0)
+    }
+  })
+
+  it('declares an automatic amortization from the core as capital leaving ons — not a loss', async () => {
+    mockSeries(series(), coreIncome('amortization'))
+    const body = await (await GET(makeRequest('/api/statistics?universe=ons'))).json()
+    expect(body.maxDrawdown).toBe(0)
+    expect(body.drawdownIntervalsSkipped).toBe(0)
+  })
+
   it('fetches income for every universe except total', async () => {
     await GET(makeRequest('/api/statistics?universe=total'))
     expect(mockFetchIncomeMovements).not.toHaveBeenCalled()
-    await GET(makeRequest('/api/statistics?universe=measurable'))
-    expect(mockFetchIncomeMovements).toHaveBeenCalledTimes(1)
     await GET(makeRequest('/api/statistics?universe=stocks'))
-    expect(mockFetchIncomeMovements).toHaveBeenCalledTimes(2)
+    expect(mockFetchIncomeMovements).toHaveBeenCalledTimes(1)
     await GET(makeRequest('/api/statistics?universe=ons'))
-    expect(mockFetchIncomeMovements).toHaveBeenCalledTimes(3)
+    expect(mockFetchIncomeMovements).toHaveBeenCalledTimes(2)
   })
 
   it('returns 500 when the income fetch fails — an empty list would fabricate a gain', async () => {
     mockFetchIncomeMovements.mockRejectedValue(new Error('boom'))
-    const res = await GET(makeRequest('/api/statistics?universe=measurable'))
+    const res = await GET(makeRequest('/api/statistics?universe=ons'))
     expect(res.status).toBe(500)
   })
 
   it('uses the v4 cache key', async () => {
-    await GET(makeRequest('/api/statistics?universe=measurable'))
-    expect(mockCacheRoute.mock.calls[0][0]).toBe('statistics:v4:u1:measurable')
-    expect(mockGetCachedRoute.mock.calls[0][0]).toBe('statistics:v4:u1:measurable')
+    await GET(makeRequest('/api/statistics?universe=ons'))
+    expect(mockCacheRoute.mock.calls[0][0]).toBe('statistics:v4:u1:ons')
+    expect(mockGetCachedRoute.mock.calls[0][0]).toBe('statistics:v4:u1:ons')
   })
 })
 
 describe('GET /api/statistics — benchmark param', () => {
+  it('compares the TWR of the derived series against the benchmark', async () => {
+    mockFetchBenchmarkComparison.mockResolvedValue({ id: 'SPY' })
+    mockSeries([
+      { snapshot_date: '2026-07-01', total_value: 100, total_invested: 100 },
+      { snapshot_date: '2026-07-02', total_value: 110, total_invested: 100 },
+    ])
+    const body = await (await GET(makeRequest('/api/statistics?universe=total&benchmark=SPY'))).json()
+    expect(body.benchmarkError).toBe(false)
+    expect(mockFetchBenchmarkComparison.mock.calls[0][1].map((p: { date: string }) => p.date)).toEqual(['2026-07-01', '2026-07-02'])
+  })
+
   it('rejects a benchmark outside the whitelist with 400, before any fetch', async () => {
     const res = await GET(makeRequest('/api/statistics?universe=total&benchmark=%5EGSPC%3Bevil'))
     expect(res.status).toBe(400)
-    expect(mockFetchSnapshotSeries).not.toHaveBeenCalled()
+    expect(mockGetDerivedSeries).not.toHaveBeenCalled()
   })
 })

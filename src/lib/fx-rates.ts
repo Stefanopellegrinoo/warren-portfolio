@@ -11,7 +11,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 export type FxKind = 'mep' | 'ccl'
 
 const BASE = 'https://api.argentinadatos.com/v1/cotizaciones/dolares'
-const SERIES: Record<FxKind, string> = { mep: 'bolsa', ccl: 'contadoconliqui' }
+export const FX_SERIES: Record<FxKind, string> = { mep: 'bolsa', ccl: 'contadoconliqui' }
 const CHUNK = 1000
 const FETCH_TIMEOUT_MS = 20_000
 
@@ -22,7 +22,7 @@ interface ArgentinaDatosRow {
 }
 
 async function fetchSeries(kind: FxKind, fetchFn: typeof fetch) {
-  const name = SERIES[kind]
+  const name = FX_SERIES[kind]
   const res = await fetchFn(`${BASE}/${name}`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
   if (!res.ok) throw new Error(`argentinadatos ${name}: HTTP ${res.status}`)
   const rows = (await res.json()) as ArgentinaDatosRow[]
