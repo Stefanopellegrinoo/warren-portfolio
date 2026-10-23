@@ -1,4 +1,4 @@
-export interface HistoryPoint { snapshot_date: string; value: number; invested: number; source?: 'live' | 'estimated' }
+export interface HistoryPoint { snapshot_date: string; value: number; invested: number }
 
 export const RANGES = [
   { id: '1M', days: '30' },
@@ -60,9 +60,4 @@ export function nearestIndex(clientX: number, left: number, width: number, count
   return Math.min(Math.max(i, 0), count - 1)
 }
 
-export function historyNote(points: HistoryPoint[]): string {
-  const base = 'Acciones y caja. Las ONs no tienen historia todavía.'
-  const estimated = points.filter(p => p.source === 'estimated').length
-  if (estimated === 0) return base
-  return `${base} ${estimated} de ${points.length} días ${estimated === 1 ? 'es estimado' : 'son estimados'}.`
-}
+export const HISTORY_NOTE = 'Toda la cartera: acciones, ONs y caja.'

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { cn, formatNumber } from '@/lib/utils'
-import { buildChart, historyNote, nearestIndex, PLOT, RANGES, type HistoryPoint, type RangeId } from '@/lib/resumen/chart'
+import { buildChart, HISTORY_NOTE, nearestIndex, PLOT, RANGES, type HistoryPoint, type RangeId } from '@/lib/resumen/chart'
 
 type Load = { status: 'loading' } | { status: 'error' } | { status: 'ready'; points: HistoryPoint[] }
 
@@ -22,7 +22,7 @@ export default function ValueChart() {
   const fetchHistory = useCallback((r: RangeId) => {
     latest.current = r
     const days = RANGES.find(x => x.id === r)!.days
-    fetch(`/api/portfolio-history?days=${days}&universe=measurable`)
+    fetch(`/api/portfolio-history?days=${days}&universe=total`)
       .then(res => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
       .then((d: { data?: HistoryPoint[] }) => { if (latest.current === r) setLoad({ status: 'ready', points: d.data ?? [] }) })
       .catch(() => { if (latest.current === r) setLoad({ status: 'error' }) })
@@ -148,7 +148,7 @@ export default function ValueChart() {
         )}
       </div>
 
-      {load.status === 'ready' && points.length > 0 && <p className="mt-2 text-[13px] text-ink-3">{historyNote(points)}</p>}
+      {load.status === 'ready' && points.length > 0 && <p className="mt-2 text-[13px] text-ink-3">{HISTORY_NOTE}</p>}
     </div>
   )
 }

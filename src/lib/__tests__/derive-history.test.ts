@@ -224,15 +224,34 @@ describe('deriveHistory — automatic ON payments from the schedule (S4)', () =>
     })
   })
 
-  it('a coupon does not read as a gain in the measurable TWR once declared through ledgerFlows', () => {
-    const { rows, income } = deriveHistory(base([{ date: '2026-03-05', ren: 2, amo: 0 }], {
-      movements: [mv('DEPOSITO', 11000, '2026-03-01'), mv('COMPRA', 10000, '2026-03-02')],
-    }))
-    const flows = ledgerFlows(income)
-    const inputs = { externalFlows: [], transactions: [], income: flows.income }
-    const declared = computeUniverseTwr(rows.slice(0, -1), 'measurable', inputs)
-    const undeclared = computeUniverseTwr(rows.slice(0, -1), 'measurable', { ...inputs, income: [] })
-    expect(declared.series.at(-1)!.twrIndex).toBeCloseTo(1, 9)
-    expect(undeclared.series.at(-1)!.twrIndex).toBeGreaterThan(1.1)
+  it('a close from before a payment is taken ex-payment once the payment is made, so the total does not jump', () => {
+    // The bond stops trading on 03-04 and pays on 03-05: its last close still includes what was paid.
+    const stale = bars([['2026-03-02', 100], ['2026-03-03', 100], ['2026-03-04', 100]])
+    for (const { flow, after } of [{ flow: { date: '2026-03-05', ren: 2, amo: 0 }, after: 98 }, { flow: { date: '2026-03-05', ren: 0, amo: 50 }, after: 50 }]) {
+      const r = byDate(deriveHistory(base([flow], { onPricesByTicker: new Map([['XD', stale]]) })).rows)
+      expect(r.get('2026-03-04').ons_value).toBeCloseTo(10000, 6)
+      // No market day after 03-04 has a bar, so the next row is today's, with no live quote.
+      expect(r.get(TODAY).ons_value).toBeCloseTo(after * 100, 6)
+      expect(r.get(TODAY).total_value).toBeCloseTo(r.get('2026-03-04').total_value, 6)
+    }
+  })
+
+  it('a coupon or an amortization is neither a gain nor a loss of the whole portfolio (S9)', () => {
+    // The market quotes the bond ex-payment (per 100 original VN): 2 less after
+    // the coupon, half after the 50% amortization. The cash rises by the same
+    // amount on the same day, so `total` does not move — and it ignores the
+    // payment flows even when they are handed to it.
+    const cases = [
+      { flow: { date: '2026-03-05', ren: 2, amo: 0 }, after: 98 },
+      { flow: { date: '2026-03-05', ren: 0, amo: 50 }, after: 50 },
+    ]
+    for (const { flow, after } of cases) {
+      const quotes = bars([['2026-03-02', 100], ['2026-03-03', 100], ['2026-03-04', 100], ['2026-03-05', after], ['2026-03-06', after], ['2026-03-09', after]])
+      const { rows, income } = deriveHistory(base([flow], { onPricesByTicker: new Map([['XD', quotes]]) }))
+      const flows = ledgerFlows(income)
+      expect(income).toHaveLength(1)
+      const twr = computeUniverseTwr(rows, 'total', { externalFlows: [], transactions: flows.transactions, income: flows.income })
+      expect(twr.series.at(-1)!.twrIndex).toBeCloseTo(1, 9)
+    }
   })
 })

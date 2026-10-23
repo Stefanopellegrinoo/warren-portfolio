@@ -42,7 +42,7 @@ const UNIVERSE_BY_TAB: Record<TabType, Universe> = {
   ons: 'ons',
 }
 
-const TAB_LABEL: Record<TabType, string> = { general: 'General', stocks: 'Acciones', ons: 'ONs' }
+const TAB_LABEL: Record<TabType, string> = { general: 'Toda la cartera', stocks: 'Acciones', ons: 'ONs' }
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
@@ -59,8 +59,7 @@ export default function StatisticsPage() {
   const [stocksData, setStocksData] = useState<StatData | null>(null)
   const [onsData, setOnsData] = useState<StatData | null>(null)
   const [combinedData, setCombinedData] = useState<CombinedData | null>(null)
-  // General-tab risk, over the MEASURABLE base (stocks + cash) — a different
-  // universe from the full-portfolio chart above it. Design A2.
+  // General-tab risk, over the whole portfolio — the same universe as its chart (S9).
   const [generalRisk, setGeneralRisk] = useState<StatData | null>(null)
   const [loading, setLoading] = useState(true)
   const [historyPeriod, setHistoryPeriod] = useState<'30' | '90' | '180' | '365' | 'all'>('90')
@@ -74,7 +73,7 @@ export default function StatisticsPage() {
           fetch('/api/statistics?universe=stocks'),
           fetch('/api/statistics/ons'),
           fetch('/api/statistics/combined'),
-          fetch('/api/statistics?universe=measurable')
+          fetch('/api/statistics?universe=total')
         ])
 
         const [stocks, ons, combined, general] = await Promise.all([
@@ -191,11 +190,7 @@ export default function StatisticsPage() {
 
       {!loading && combinedData && (
         <div className="grid gap-10">
-          {/* ON history mixes cost (≤07-22) and market (≥07-23) valuations, a fake +2.7pp jump.
-              Only stocks + cash replay to the dollar, so General compares `measurable`, ONs not at all. */}
-          {activeTab !== 'ons' && (
-            <BenchmarkComparison universe={activeTab === 'general' ? 'measurable' : UNIVERSE_BY_TAB[activeTab]} />
-          )}
+          {activeTab !== 'ons' && <BenchmarkComparison universe={UNIVERSE_BY_TAB[activeTab]} />}
 
           {activeTab === 'general' && (
             <>
@@ -215,7 +210,7 @@ export default function StatisticsPage() {
                 </KpiCard>
               </dl>
 
-              {/* Risk over the measurable base — scope stated on screen (A2) */}
+              {/* Risk over the whole portfolio — scope stated on screen */}
               <RiskMetricsRow data={generalRisk} />
 
               <section aria-labelledby="h-composicion">

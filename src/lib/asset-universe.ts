@@ -11,10 +11,10 @@
  * The subtle rule (spec A1 plus its two corrections): each universe uses the
  * flows that cross ITS OWN boundary. Buying stock with cash is +10,000 of
  * stocks_value in a stocks-only series — a "gain" that isn't — so for `stocks`
- * that purchase is a flow. For `measurable` (stocks + cash) a STOCK purchase
- * is internal, but an ON purchase is NOT — ONs are outside it — and neither
- * is an ON COUPON, which arrives as cash from an asset the universe does not
- * contain. Income is the mirror of a trade: it LEAVES the class that paid it.
+ * that purchase is a flow. `total` (stocks + ONs + cash, the default since S9 of
+ * odd/tasks/nucleo-ledger.md) contains every class, so only deposits and
+ * withdrawals cross it. Income is the mirror of a trade: it LEAVES the class
+ * that paid it.
  *
  * A row missing a field its universe needs is DROPPED, never coerced to 0:
  * null means "not known", zero would assert "this class was worth nothing".
@@ -29,12 +29,21 @@ import {
 import { computeReturnStats } from './return-stats'
 import { computeTwrSeries, type TwrSeries } from './twr-series'
 
-export type Universe = 'total' | 'measurable' | 'stocks' | 'ons'
+export type Universe = 'total' | 'stocks' | 'ons'
 
-export const UNIVERSES: readonly Universe[] = ['total', 'measurable', 'stocks', 'ons']
+export const UNIVERSES: readonly Universe[] = ['total', 'stocks', 'ons']
 
 export function isUniverse(value: string): value is Universe {
   return (UNIVERSES as readonly string[]).includes(value)
+}
+
+/** The `universe` query parameter of the history and statistics routes: absent
+ *  is the whole portfolio, and the retired `measurable` (stocks + cash) is read
+ *  as the whole portfolio too, so an old client or a cached URL keeps working.
+ *  Anything else is null — the caller answers 400. */
+export function parseUniverse(raw: string | null): Universe | null {
+  if (raw === null || raw === 'measurable') return 'total'
+  return isUniverse(raw) ? raw : null
 }
 
 export interface ProjectableSnapshot {
@@ -43,7 +52,6 @@ export interface ProjectableSnapshot {
   total_invested: number
   /** Open P&L of positions (excludes cash) — value − pnl = cost + cash. */
   pnl?: number | null
-  source?: 'live' | 'estimated'
   stocks_value?: number | null
   stocks_invested?: number | null
   ons_value?: number | null
@@ -55,7 +63,6 @@ export interface ProjectedPoint {
   snapshot_date: string
   value: number
   invested: number
-  source?: 'live' | 'estimated'
 }
 
 function finiteOrNull(v: number | null | undefined): number | null {
@@ -77,14 +84,6 @@ function projectRow(s: ProjectableSnapshot, universe: Universe): ProjectedPoint 
       invested = value !== null && pnl !== null ? value - pnl : finiteOrNull(s.total_invested)
       break
     }
-    case 'measurable': {
-      const stocks = finiteOrNull(s.stocks_value)
-      const cash = finiteOrNull(s.cash_value)
-      const stocksInvested = finiteOrNull(s.stocks_invested)
-      value = stocks !== null && cash !== null ? stocks + cash : null
-      invested = stocksInvested !== null && cash !== null ? stocksInvested + cash : null
-      break
-    }
     case 'stocks':
       value = finiteOrNull(s.stocks_value)
       invested = finiteOrNull(s.stocks_invested)
@@ -101,9 +100,7 @@ function projectRow(s: ProjectableSnapshot, universe: Universe): ProjectedPoint 
       return null
   }
   if (value === null || invested === null) return null
-  const point: ProjectedPoint = { snapshot_date: s.snapshot_date, value, invested }
-  if (s.source) point.source = s.source
-  return point
+  return { snapshot_date: s.snapshot_date, value, invested }
 }
 
 /** Projects a snapshot series onto one universe's value for the CHART.
@@ -158,9 +155,8 @@ export interface UniverseFlowInputs {
 const STOCK_ASSET_TYPES = new Set(['ACCION', 'CEDEAR'])
 
 /** COMPRA moves cost INTO the traded universe; VENTA moves proceeds OUT.
- *  The commission is borne by the traded universe in both directions —
- *  the same way `measurable` sees a buy (internal, so only the commission
- *  changes its value). Returns null for rows this function refuses to
+ *  The commission is borne by the traded universe in both directions.
+ *  Returns null for rows this function refuses to
  *  interpret: fail closed, never guess. */
 function tradeFlowAmount(t: FlowTransaction): number | null {
   const commission = t.commission ?? 0
@@ -181,19 +177,13 @@ function tradeFlowAmount(t: FlowTransaction): number | null {
   // TRADE — income has its own boundary logic in netIncome/universeFlows,
   // fed from cash_movements. This refusal is load-bearing since migration 035
   // widened the `transactions.operation` CHECK to admit CUPON: a CUPON row is
-  // now reachable here, and if this function ever interpreted it, `measurable`
-  // would net the trade flow against the income flow to exactly zero — silently
-  // reinstating the fabricated gain this branch exists to remove. Mutation-
-  // verified 2026-07-30: making this return `gross` for CUPON left all 860
-  // pre-existing tests green; the test below is the one that catches it.
+  // now reachable here, and interpreting it would declare the payment twice.
   return null
 }
 
 /** Sibling routers normalize before comparing (`scripts/backfill-snapshots.ts`,
- *  migrations 019/031 apply UPPER without TRIM). Doing it here matters more
- *  than it does there: for the class universes an unrecognised type merely
- *  drops a flow, but for `measurable` it silently means "internal", which
- *  reinstates the fabricated loss the ON-boundary fix removed. */
+ *  migrations 019/031 apply UPPER without TRIM); an unrecognised type would
+ *  silently drop the trade's flow from its class universe. */
 const normalizedAssetType = (t: FlowTransaction): string | null => {
   if (typeof t.asset_type !== 'string') return null
   const normalized = t.asset_type.trim().toUpperCase()
@@ -257,17 +247,11 @@ function toFlows(netByDate: Map<string, number>): ExternalFlow[] {
  *  are stocks ending in D).
  *
  *  An unclassifiable asset_type (null, blank) is excluded from `stocks` and
- *  `ons`, where exclusion means "drop this flow" — fail closed. It CANNOT
- *  fail closed for `measurable`: there, excluding a trade is indistinguishable
- *  from declaring it internal, and if it was really an ON trade its value
- *  leaves the universe unaccounted. Nothing here can tell those apart, which
- *  is exactly why the comparison is normalized rather than raw.
+ *  `ons`, where exclusion means "drop this flow" — fail closed.
  *
  *  Income leaves the class that paid it, by the same boundary logic as
- *  trades — with ONE exception. A CUPON enters `measurable`, since the ONs
- *  that paid it sit outside; a DIVIDENDO leaves `stocks` (`−amount`) but is
- *  INTERNAL to `measurable`, which contains stocks and cash both. Both are
- *  internal to `total`. The exception is the `ons` leg of a CUPON: it is NOT
+ *  trades — with ONE exception. A DIVIDENDO leaves `stocks` (`−amount`); both
+ *  income types are internal to `total`. The exception is the `ons` leg of a CUPON: it is NOT
  *  declared as a flow, because whether ons_value actually fell depends on how
  *  the leg was marked, which the row does not record. That day is skipped by
  *  computeUniverseRiskMetrics instead. Routed by `IncomeMovement.type`,
@@ -284,18 +268,6 @@ export function universeFlows(
   if (universe === 'total') return externalFlows
 
   const net = new Map<string, number>()
-
-  if (universe === 'measurable') {
-    // stocks + cash. A STOCK trade and a DIVIDENDO are both internal — each
-    // moves value between two things that are inside. ONs are OUTSIDE, so an
-    // ON purchase takes cash out and an ON COUPON brings cash in.
-    for (const f of externalFlows) {
-      net.set(f.date, (net.get(f.date) ?? 0) + (Number(f.amount) || 0))
-    }
-    netTradeFlows(isOnTrade, transactions, net, -1)
-    netIncome(income, 'CUPON', net, 1)
-    return toFlows(net)
-  }
 
   if (universe === 'ons') {
     // NO coupon flow here, deliberately. A `−amount` would be a bet on how
@@ -319,23 +291,6 @@ export function universeFlows(
 export const MIN_INTERVALS_ANNUALIZED = 20
 export const MIN_INTERVALS_DRAWDOWN = 2
 
-/** The snapshot rows whose projection feeds a universe's METRICS — the chart
- *  may legitimately show more. ONs metrics use measured rows only: an
- *  estimated ons_value is a cost mark, not a measurement, and volatility
- *  over that flat line is the fake calm this design exists to kill
- *  (user ruling 2026-07-29). */
-export function metricsRows(
-  snapshots: ProjectableSnapshot[],
-  universe: Universe
-): ProjectableSnapshot[] {
-  // Canonical provenance polarity: a row with NO source counts as live
-  // (migration 033: not null default 'live'; series-provenance.ts rule —
-  // never invent a third state). User ruling 2026-07-30.
-  return universe === 'ons'
-    ? snapshots.filter((s) => s.source !== 'estimated')
-    : snapshots
-}
-
 export interface UniverseRiskMetrics {
   maxDrawdown: number | null
   annualizedVol: number | null
@@ -354,16 +309,14 @@ function universeReturnInputs(
   universe: Universe,
   inputs: UniverseFlowInputs
 ) {
-  const rows = metricsRows(snapshots, universe)
-  const points = projectSeries(rows, universe)
+  const points = projectSeries(snapshots, universe)
   const flows = universeFlows(universe, inputs)
   // In `ons` a coupon day is not measured at all — see universeFlows. Only
-  // this universe: `measurable` depends on cash_value, which genuinely rises
-  // on the payment date under any mark convention, so there the flow is right
-  // and every interval stays measured.
+  // this universe: `total` holds the cash the payment lands in, so there the
+  // two legs cancel and every interval stays measured.
   const options =
     universe === 'ons' ? { unmeasurableDates: couponDates(inputs.income) } : {}
-  return { rows, points, flows, options }
+  return { points, flows, options }
 }
 
 /** Cumulative time-weighted return curve of a universe (same inputs as the metrics). */
@@ -381,7 +334,7 @@ export function computeUniverseRiskMetrics(
   universe: Universe,
   inputs: UniverseFlowInputs
 ): UniverseRiskMetrics {
-  const { rows, points, flows, options } = universeReturnInputs(snapshots, universe, inputs)
+  const { points, flows, options } = universeReturnInputs(snapshots, universe, inputs)
 
   const drawdown = computeFlowAdjustedMaxDrawdown(points, flows, options)
   const returnSeries = computeFlowAdjustedReturns(points, flows, options)
@@ -397,6 +350,6 @@ export function computeUniverseRiskMetrics(
     drawdownIntervals: drawdown.intervalsUsed,
     drawdownIntervalsSkipped: drawdown.intervalsSkipped,
     pointsUsed: points.length,
-    pointsDropped: rows.length - points.length,
+    pointsDropped: snapshots.length - points.length,
   }
 }
