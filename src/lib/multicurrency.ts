@@ -3,10 +3,11 @@
  * positions, peso-line prices and FX in; three amounts per figure out. Rules:
  * "Stage C decisions" in odd/tasks/multimoneda.md.
  *
- * - Cost: each lot in pesos from its trade record and the FX of its trade date,
- *   then in MEP / cable with that same FX. One moving weighted average per
- *   currency: a sale leaves it unchanged, a full close resets it.
- * - Realized: sale proceeds, dividends and coupons with the FX of their date.
+ * - Holdings, cost, realized and ON payments are the ledger core's (ledger-core.ts):
+ *   each row is priced in pesos from its trade record and the FX of its trade date,
+ *   then in MEP / cable with that same FX, and the core runs once per currency.
+ * - Realized: sale results, dividends and coupons with the FX of their date (an ON
+ *   amortization is capital returned, not income).
  * - Value today in pesos: CEDEARs and local shares by their peso-line price, ONs
  *   by their MEP value × today's MEP, anything else by the engine USD-CCL value
  *   × today's CCL (estimated). MEP and cable are that ÷ today's rate.
@@ -16,6 +17,9 @@
  */
 import type { Quote } from '@/types'
 import type { FxLookup } from './trade-record-backfill'
+import type { FlowOverride } from './ledger-core'
+import type { FlowRow } from './on-flow-history'
+import { ledgerNowFrom, NO_DATE_CUTOFF } from './ledger-now'
 
 export type Currency = 'ARS' | 'MEP' | 'CCL'
 export interface Amounts { ARS: number; MEP: number; CCL: number }
@@ -45,9 +49,9 @@ export interface TickerLedger {
   quantity: number
   /** Cost basis of the open quantity. */
   cost: Amounts
-  /** Result of the sales. */
+  /** Result of the sales only. */
   realized: Amounts
-  /** Dividends and coupons. */
+  /** Dividends and coupons (ledger rows and automatic ON coupons); an amortization is capital, not income. */
   income: Amounts
   /** Some lot had no FX for its date and was converted with today's. */
   costEstimated: boolean
@@ -100,7 +104,7 @@ export interface EnginePosition {
 }
 
 const ZERO: Amounts = { ARS: 0, MEP: 0, CCL: 0 }
-const CLOSED_QTY = 0.0001 // same threshold as the engine (rebuildClosedTrades)
+const CLOSED_QTY = 0.0001 // quantity tolerance between the core and the valued position
 const LOCAL_PREFIX = 'BCBA:'
 
 const inCurrencies = (ars: number, fx: Fx): Amounts => ({ ARS: ars, MEP: ars / fx.mep, CCL: ars / fx.ccl })
@@ -145,35 +149,61 @@ function rowInPesos(t: LedgerTrade, fxAt: FxLookup, today: Fx) {
   return { gross, commission, fx, estimated: mep === null || ccl === null }
 }
 
-const byTradeOrder = (a: LedgerTrade, b: LedgerTrade) =>
-  a.date.localeCompare(b.date) || (a.created_at ?? '').localeCompare(b.created_at ?? '')
+/** Today's state with automatic ON payments up to `today` (ledger-now's ledgerNowFrom). */
+export interface OnPayments { schedules: Map<string, FlowRow[]>; overrides: FlowOverride[]; today: string }
+const NO_PAYMENTS: OnPayments = { schedules: new Map(), overrides: [], today: NO_DATE_CUTOFF }
+const CURRENCIES: Currency[] = ['ARS', 'MEP', 'CCL']
+const norm = (t: string) => t.trim().toUpperCase()
 
-/** Replays every row, per ticker, in trade order. */
-export function replayLedger(trades: LedgerTrade[], fxAt: FxLookup, today: Fx): Map<string, TickerLedger> {
+/**
+ * The ledger core, once per currency: every row priced in that currency with the FX of its
+ * date, so order, normalization, clamping, closing and ON payments are the core's own.
+ * Per ticker, realized is sale results only and income is kept apart.
+ */
+export function ledgerInCurrencies(trades: LedgerTrade[], fxAt: FxLookup, today: Fx, payments: OnPayments = NO_PAYMENTS): Map<string, TickerLedger> {
+  const rows = trades.map(t => ({ t, ...rowInPesos(t, fxAt, today) }))
+  const [ars, mep, ccl] = CURRENCIES.map(c => {
+    const converted = rows.map(({ t, gross, commission, fx }) => {
+      const per = c === 'ARS' ? 1 : c === 'MEP' ? fx.mep : fx.ccl
+      const qty = Math.abs(t.quantity)
+      return {
+        ticker: t.ticker, operation: t.operation, quantity: t.quantity, date: t.date, asset_type: t.asset_type,
+        created_at: t.created_at ?? null, price: qty > 0 ? gross / qty / per : 0, commission: commission / per,
+      }
+    })
+    return ledgerNowFrom({ trades: converted, movements: [], overrides: payments.overrides }, payments.schedules, payments.today)
+  })
+
+  // The three runs see the same events, so holdings and realized trades line up by index.
   const out = new Map<string, TickerLedger>()
-  for (const t of [...trades].sort(byTradeOrder)) {
-    const s = out.get(t.ticker) ?? { quantity: 0, cost: ZERO, realized: ZERO, income: ZERO, costEstimated: false }
-    const { gross, commission, fx, estimated } = rowInPesos(t, fxAt, today)
-    const qty = Math.abs(t.quantity)
-
-    if (t.operation === 'COMPRA') {
-      s.cost = add(s.cost, inCurrencies(gross + commission, fx))
-      s.quantity += qty
-      s.costEstimated ||= estimated
-    } else if (t.operation === 'VENTA' && s.quantity > 0 && qty > 0) {
-      const sold = Math.min(qty, s.quantity)
-      const released = scale(s.cost, sold / s.quantity)
-      const proceeds = inCurrencies(gross * (sold / qty) - commission, fx)
-      s.realized = add(s.realized, sub(proceeds, released))
-      s.cost = sub(s.cost, released)
-      s.quantity -= sold
-      s.costEstimated ||= estimated
-      if (s.quantity <= CLOSED_QTY) { s.quantity = 0; s.cost = ZERO; s.costEstimated = false }
-    } else if (t.operation === 'DIVIDENDO' || t.operation === 'CUPON') {
-      s.income = add(s.income, inCurrencies(gross, fx))
-    }
-    out.set(t.ticker, s)
+  const entry = (ticker: string) => {
+    if (!out.has(ticker)) out.set(ticker, { quantity: 0, cost: ZERO, realized: ZERO, income: ZERO, costEstimated: false })
+    return out.get(ticker)!
   }
+  ars.realized.forEach((r, i) => {
+    const e = entry(r.ticker)
+    e.realized = add(e.realized, { ARS: r.pnl, MEP: mep.realized[i].pnl, CCL: ccl.realized[i].pnl })
+  })
+  for (const { t, gross, fx } of rows) {
+    if (t.operation !== 'DIVIDENDO' && t.operation !== 'CUPON') continue
+    const e = entry(norm(t.ticker))
+    e.income = add(e.income, inCurrencies(gross, fx))
+  }
+  // Automatic ON coupons are paid in dollars MEP: the FX of the payment date, else today's.
+  for (const i of ars.income) {
+    if (i.kind !== 'coupon') continue
+    const fx: Fx = { mep: fxAt(i.date, 'mep')?.rate ?? today.mep, ccl: fxAt(i.date, 'ccl')?.rate ?? today.ccl }
+    const e = entry(i.ticker)
+    e.income = add(e.income, inCurrencies(i.amount * fx.mep, fx))
+  }
+  ars.holdings.forEach((h, i) => {
+    const e = entry(h.ticker)
+    e.quantity = h.quantity
+    e.cost = { ARS: h.costBasis, MEP: mep.holdings[i].costBasis, CCL: ccl.holdings[i].costBasis }
+    // A lot of the open position (bought or sold since it opened) converted with today's FX.
+    e.costEstimated = rows.some(r => r.estimated && norm(r.t.ticker) === h.ticker && r.t.date.slice(0, 10) >= h.firstBought
+      && (r.t.operation === 'COMPRA' || r.t.operation === 'VENTA'))
+  })
   return out
 }
 
@@ -210,9 +240,11 @@ export function buildCurrencyViews(input: {
   local: ReadonlyMap<string, Quote>
   fx: { mep: { rate: number; date: string }; ccl: { rate: number; date: string } }
   fxAt: FxLookup
+  /** ON schedules and the user's payment corrections; none = no automatic payments. */
+  payments?: OnPayments
 }): CurrencyViews {
   const fx: Fx = { mep: input.fx.mep.rate, ccl: input.fx.ccl.rate }
-  const ledger = replayLedger(input.trades, input.fxAt, fx)
+  const ledger = ledgerInCurrencies(input.trades, input.fxAt, fx, input.payments)
   // An Argentine broker's dollar balance is dólar MEP (local dollars), not cable.
   const cash = { ARS: input.cashBalance * fx.mep, MEP: input.cashBalance, CCL: (input.cashBalance * fx.mep) / fx.ccl }
 
@@ -225,7 +257,7 @@ export function buildCurrencyViews(input: {
     ...input.onPositions.map(p => ({ ...p, kind: 'on' as const })),
   ]
   for (const p of held) {
-    const l = ledger.get(p.ticker)
+    const l = ledger.get(norm(p.ticker))
     const cost = l?.cost ?? ZERO
     const qtyMismatch = !l || Math.abs(l.quantity - p.quantity) > CLOSED_QTY
     const v = valuePosition(p, { ratios: input.ratios, local: input.local, fx })
