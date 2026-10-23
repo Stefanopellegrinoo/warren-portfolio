@@ -3,6 +3,7 @@ import { getMarketDataProvider, MarketDataError } from '@/lib/market-data'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { getCachedRoute, cacheRoute } from '@/lib/redis'
 import { rateLimit, tooManyRequests } from '@/lib/rate-limit'
+import { serverError } from '@/lib/api/errors'
 
 const CACHE_TTL_SECONDS = 600
 // q becomes a Redis key and Redis runs noeviction: an unbounded q could fill it (S5).
@@ -64,11 +65,11 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ results })
   } catch (err) {
-    if (err instanceof MarketDataError) {
+    // A 404 or 429 tells the user something; a provider failure is internal (S6).
+    if (err instanceof MarketDataError && errorToStatus(err) !== 500) {
       console.error(`[/api/ticker/search] ${err.code}: ${err.message}`)
       return NextResponse.json({ error: err.message }, { status: errorToStatus(err) })
     }
-    console.error('[/api/ticker/search]', err)
-    return NextResponse.json({ error: 'Failed to search tickers' }, { status: 500 })
+    return serverError('/api/ticker/search', err)
   }
 }

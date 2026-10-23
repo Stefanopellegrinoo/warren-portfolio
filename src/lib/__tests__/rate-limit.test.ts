@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const counters = new Map<string, number>()
 const ttls = new Map<string, number>()
 let execFails = false
+let execHangs = false
 const fakeRedis = {
   multi: () => {
     const ops: Array<() => [null, unknown]> = []
@@ -29,6 +30,7 @@ const fakeRedis = {
       },
       exec: async () => {
         if (execFails) throw new Error('OOM command not allowed')
+        if (execHangs) return new Promise<never>(() => {})
         return ops.map((op) => op())
       },
     }
@@ -47,6 +49,7 @@ beforeEach(() => {
   counters.clear()
   ttls.clear()
   execFails = false
+  execHangs = false
   ensureRedisConnected.mockReset().mockResolvedValue(true)
   vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
@@ -71,6 +74,17 @@ describe('rateLimit', () => {
     execFails = true
 
     expect(await rateLimit('rl:test', 0, 60)).toBe(true)
+    expect(console.warn).toHaveBeenCalled()
+  })
+
+  // Every authenticated route runs the limiter: a hung Redis (packets dropped, no reset)
+  // must not hang the whole API, since the client has no command timeout.
+  it('allows the request within a second when Redis hangs', async () => {
+    execHangs = true
+    const started = Date.now()
+
+    expect(await rateLimit('rl:test', 0, 60)).toBe(true)
+    expect(Date.now() - started).toBeLessThan(1000)
     expect(console.warn).toHaveBeenCalled()
   })
 })

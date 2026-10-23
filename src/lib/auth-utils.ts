@@ -261,7 +261,9 @@ export function parseCallbackParams(url: string): {
   let next = '/dashboard'
   try {
     const target = new URL(rawNext, origin)
-    if (target.origin === origin) next = target.pathname + target.search + target.hash
+    const path = target.pathname + target.search + target.hash
+    // Check the value the route resolves again: dot segments (`/..//evil.com`) collapse to `//evil.com`.
+    if (target.origin === origin && new URL(path, origin).origin === origin) next = path
   } catch {
     // unparsable target: keep the default
   }

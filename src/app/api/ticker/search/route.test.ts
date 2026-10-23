@@ -149,13 +149,14 @@ describe('GET /api/ticker/search', () => {
     expect(mockGetCachedRoute).toHaveBeenLastCalledWith('ticker-search:app')
   })
 
-  it('returns 500 when provider throws PROVIDER_UNAVAILABLE', async () => {
+  it('returns a generic 500 when provider throws PROVIDER_UNAVAILABLE, without the provider text (S6)', async () => {
     mockSearchTickers.mockRejectedValue(
-      new MarketDataError('PROVIDER_UNAVAILABLE', 'Yahoo down')
+      new MarketDataError('PROVIDER_UNAVAILABLE', 'getaddrinfo ENOTFOUND query2.finance.yahoo.com')
     )
     const { GET } = await import('./route')
     const res = await GET(makeRequest({ q: 'app' }))
     expect(res.status).toBe(500)
+    expect(JSON.stringify(await res.json())).not.toContain('yahoo')
   })
 
   it('returns 429 when provider throws RATE_LIMITED', async () => {

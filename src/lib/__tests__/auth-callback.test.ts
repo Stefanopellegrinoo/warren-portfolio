@@ -17,8 +17,15 @@ describe('parseCallbackParams: next', () => {
     ['//evil.com'],
     ['https://evil.com/dashboard'],
     ['javascript:alert(1)'],
+    // Dot segments collapse to `//evil.com`, which the route would resolve as a host.
+    ['/..//evil.com'],
+    ['/.//evil.com'],
+    ['/a/..//evil.com'],
+    ['/%2e%2e//evil.com'],
   ])('falls back to /dashboard for an off-site target %j', (raw) => {
     expect(nextFor(raw)).toBe('/dashboard')
+    // The route redirects to new URL(next, origin): that must stay on our origin.
+    expect(new URL(nextFor(raw), ORIGIN).origin).toBe(ORIGIN)
   })
 
   it('keeps a same-origin path with its query', () => {
