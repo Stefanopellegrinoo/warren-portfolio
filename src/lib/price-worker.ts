@@ -29,6 +29,7 @@ import { ensureRedisAndScheduleJobs, resolveStartupOutcome } from './worker-star
 import { auditTickerIdentities } from './ticker-audit'
 import { ingestOnTerms } from './on-terms-ingest'
 import { ingestFxRates } from './fx-rates'
+import { loadHeldStockTickers, loadPortfolioNow } from './ledger-now'
 
 const REDIS_URL = process.env.REDIS_URL
 
@@ -54,17 +55,12 @@ async function getAllTickers(): Promise<string[]> {
   const supabase = getSupabase()
   if (!supabase) return []
 
-  const { data, error } = await supabase
-    .from('positions')
-    .select('ticker')
-
-  if (error) {
-    console.error('[Worker] Error fetching positions:', error)
+  try {
+    return await loadHeldStockTickers(supabase)
+  } catch (error) {
+    console.error('[Worker] Error reading held tickers from the ledger:', error)
     return []
   }
-
-  const tickerSet = new Set((data || []).map((p: any) => p.ticker) as string[])
-  return Array.from(tickerSet)
 }
 
 /**
@@ -223,13 +219,10 @@ async function getUserTickers(userId: string): Promise<{ stock: string[]; on: st
   const supabase = getSupabase()
   if (!supabase) return { stock: [], on: [] }
 
-  const [stockRes, onRes] = await Promise.all([
-    supabase.from('positions').select('ticker').eq('user_id', userId),
-    supabase.from('on_positions').select('ticker').eq('user_id', userId),
-  ])
-
-  const stock: string[] = Array.from(new Set((stockRes.data || []).map((p: any) => p.ticker as string)))
-  const on: string[] = Array.from(new Set((onRes.data || []).map((p: any) => p.ticker as string)))
+  // The ledger core, not the stored positions (odd/tasks/nucleo-ledger.md T4.2b).
+  const now = await loadPortfolioNow(supabase, userId, argentinaDate())
+  const stock = now.stockPositions.map(p => p.ticker)
+  const on = now.onPositions.map(p => p.ticker)
   return { stock, on }
 }
 

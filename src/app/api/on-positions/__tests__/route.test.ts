@@ -21,70 +21,8 @@ const { GET } = await import('../route')
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/**
- * The columns `on_positions` actually has, queried from the live DB
- * (2026-08-01). There is no `created_at` — the table stamps `first_bought`
- * and `last_updated` instead (migration 003).
- */
-const ON_POSITION_COLUMNS = new Set([
-  'id',
-  'user_id',
-  'ticker',
-  'quantity',
-  'avg_cost',
-  'total_invested',
-  'first_bought',
-  'last_updated',
-  'version',
-])
-
-const position = (ticker: string) => ({
-  id: `id-${ticker}`,
-  user_id: 'u1',
-  ticker,
-  quantity: 200,
-  avg_cost: 100,
-  total_invested: 20000,
-  first_bought: '2026-04-01',
-  last_updated: '2026-04-01T17:30:20.194+00:00',
-  version: 1,
-})
-
-/**
- * Chainable fake that rejects an unknown ORDER BY column the way PostgREST
- * does — code 42703, no rows. Ordering by a column the table lacks is not a
- * silent no-op there: it fails the whole request.
- */
-function fakeSupabase(rows: unknown[]) {
-  const orders: Array<{ column: string; ascending?: boolean }> = []
-  const builder: any = {
-    select: () => builder,
-    eq: () => builder,
-    order: (column: string, opts: { ascending?: boolean } = {}) => {
-      orders.push({ column, ...opts })
-      return builder
-    },
-    range: (from: number, to: number) => {
-      const unknown = orders.find((o) => !ON_POSITION_COLUMNS.has(o.column))
-      if (unknown) {
-        return Promise.resolve({
-          data: null,
-          count: null,
-          error: {
-            code: '42703',
-            message: `column on_positions.${unknown.column} does not exist`,
-          },
-        })
-      }
-      return Promise.resolve({
-        data: rows.slice(from, to + 1),
-        count: rows.length,
-        error: null,
-      })
-    },
-  }
-  return { client: { from: () => builder } as any, orders }
-}
+const { ledgerSupabase, trade } = await import('@/lib/__tests__/fixtures/ledger-supabase')
+const on = (ticker: string, over: Record<string, unknown> = {}) => trade({ ticker, asset_type: 'ON', quantity: 200, price: 100, ...over })
 
 const req = new Request('http://test.local/api/on-positions') as unknown as NextRequest
 
@@ -95,45 +33,29 @@ beforeEach(() => {
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe('GET /api/on-positions', () => {
-  it('returns the positions instead of 500ing on a column the table does not have', async () => {
-    // Measured against the live DB 2026-08-01: ordering by created_at returns
-    // `42703 column on_positions.created_at does not exist`, so this route
-    // answered 500 for every user, always.
-    const { client } = fakeSupabase([position('CS50D'), position('YM42D')])
-    mockRequireUser.mockResolvedValue({ supabase: client, user: { id: 'u1' } })
+  it('returns the open ON positions from the ledger core in the paginated shape', async () => {
+    const supabase = ledgerSupabase({ transactions: [
+      on('YM42D'), on('CS50D'), on('MGCRD'), on('MGCRD', { operation: 'VENTA', date: '2026-01-06' }), trade(),
+    ] })
+    mockRequireUser.mockResolvedValue({ supabase, user: { id: 'u1' } })
 
     const res = await GET(req)
     const body = await res.json()
 
     expect(res.status).toBe(200)
-    expect(body.data).toHaveLength(2)
-    expect(body.pagination.total).toBe(2)
+    expect(body.data.map((p: any) => p.ticker)).toEqual(['CS50D', 'YM42D'])
+    expect(body.data[0]).toMatchObject({ user_id: 'u1', ticker: 'CS50D', quantity: 200, avg_cost: 100, total_invested: 20000, first_bought: '2026-01-05' })
+    expect(body.pagination).toEqual({ page: 1, limit: 50, total: 2, totalPages: 1 })
   })
 
-  it('orders by a column on_positions actually has', async () => {
-    const { client, orders } = fakeSupabase([position('CS50D')])
-    mockRequireUser.mockResolvedValue({ supabase: client, user: { id: 'u1' } })
+  it('pages over a stable ticker order', async () => {
+    const supabase = ledgerSupabase({ transactions: [on('YM42D'), on('CS50D')] })
+    mockRequireUser.mockResolvedValue({ supabase, user: { id: 'u1' } })
 
-    await GET(req)
+    const body = await (await GET(new Request('http://test.local/api/on-positions?page=2&limit=1') as never)).json()
 
-    expect(orders.length).toBeGreaterThan(0)
-    for (const o of orders) {
-      expect(ON_POSITION_COLUMNS.has(o.column)).toBe(true)
-    }
-  })
-
-  it('breaks ties on a unique column so a paginated row cannot repeat or vanish', async () => {
-    // The bulk import writes every row in one statement, so `last_updated`
-    // ties across the whole table. Postgres does not promise a stable order
-    // for equal keys, and this route is paginated: an unstable sort can serve
-    // the same position on two pages and drop another entirely.
-    const { client, orders } = fakeSupabase([position('CS50D')])
-    mockRequireUser.mockResolvedValue({ supabase: client, user: { id: 'u1' } })
-
-    await GET(req)
-
-    expect(orders.length).toBeGreaterThanOrEqual(2)
-    expect(orders[orders.length - 1].column).toBe('ticker')
+    expect(body.data.map((p: any) => p.ticker)).toEqual(['YM42D'])
+    expect(body.pagination).toEqual({ page: 2, limit: 1, total: 2, totalPages: 2 })
   })
 })
 

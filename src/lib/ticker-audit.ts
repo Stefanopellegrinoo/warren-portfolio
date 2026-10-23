@@ -12,6 +12,7 @@
  */
 import { resolveTickerIdentity } from './ticker-identity'
 import { listCatalogued, stampChecked } from './ticker-catalog'
+import { loadHeldStockTickers } from './ledger-now'
 
 export type AuditFinding =
   | { kind: 'UNCATALOGUED'; ticker: string }
@@ -21,12 +22,7 @@ export async function auditTickerIdentities(
   supabase: any,
   now: string = new Date().toISOString()
 ): Promise<AuditFinding[]> {
-  const { data: positions, error } = await supabase.from('positions').select('ticker')
-  if (error) throw new Error(error.message)
-
-  const held = Array.from(
-    new Set((positions ?? []).map((p: any) => String(p.ticker).toUpperCase().trim()))
-  ) as string[]
+  const held = await loadHeldStockTickers(supabase)
 
   const catalog = new Map((await listCatalogued(supabase)).map(r => [r.ticker.toUpperCase().trim(), r]))
   const findings: AuditFinding[] = []

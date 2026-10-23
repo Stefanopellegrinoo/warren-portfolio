@@ -3,6 +3,7 @@ import { loadUserPortfolios } from './user-portfolios'
 import { getRedis, SUMMARY_CACHE_TTL } from './redis'
 import { createServiceClient } from './supabase-server'
 import { currencyViewsFor, loadCurrencyContext } from './currency-views'
+import { loadLastCloses } from './ledger-now'
 
 /**
  * Lua compare-and-set used by cacheUserSummaries to avoid overwriting a summary
@@ -62,8 +63,8 @@ export async function setSummaryIfVersion(
 }
 
 /**
- * For every user with active positions or cash, calculates and caches their
- * summary in Redis. This makes the Dashboard sub-10ms.
+ * For every user with active positions or cash (from the ledger core), calculates
+ * and caches their summary in Redis. This makes the Dashboard sub-10ms.
  *
  * stockQuotes: prices from Yahoo Finance
  * onQuotes: prices from Data912 (may be empty if Data912 not configured)
@@ -112,7 +113,7 @@ export async function cacheUserSummaries(
         onRealized: portfolio.onRealized,
       },
       { stockQuotes, onQuotes },
-      { missingQuotePolicy: 'drop' }
+      await loadLastCloses(supabase, portfolio.onPositions, onQuotes)
     )
 
     const currencies = currencyCtx

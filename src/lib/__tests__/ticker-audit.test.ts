@@ -10,14 +10,11 @@ vi.mock('../ticker-catalog', () => ({
   stampChecked: (...a: unknown[]) => mockStampChecked(...a),
 }))
 
-/** Supabase stub serving only the `positions` table. */
+import { ledgerSupabase, trade } from './fixtures/ledger-supabase'
+
+/** The ledger holding each ticker (T4.2b: the stored positions are never read). */
 function supabaseWithPositions(tickers: string[]) {
-  return {
-    from: (table: string) => {
-      if (table !== 'positions') throw new Error(`unexpected table ${table}`)
-      return { select: async () => ({ data: tickers.map(t => ({ ticker: t })), error: null }) }
-    },
-  } as any
+  return ledgerSupabase({ transactions: tickers.map(ticker => trade({ ticker })) })
 }
 
 const NOW = '2026-07-27T03:00:00.000Z'
@@ -28,6 +25,18 @@ beforeEach(() => {
 })
 
 describe('auditTickerIdentities', () => {
+  it('audits only the stocks still held, from the ledger core', async () => {
+    const { auditTickerIdentities } = await import('../ticker-audit')
+    mockListCatalogued.mockResolvedValue([])
+    const sb = ledgerSupabase({ transactions: [
+      trade({ ticker: 'HELD' }),
+      trade({ ticker: 'SOLD' }), trade({ ticker: 'SOLD', operation: 'VENTA', date: '2026-01-06' }),
+      trade({ ticker: 'ONA', asset_type: 'ON' }),
+    ] })
+
+    expect(await auditTickerIdentities(sb, NOW)).toEqual([{ kind: 'UNCATALOGUED', ticker: 'HELD' }])
+  })
+
   it('flags an open position with no catalog row', async () => {
     const { auditTickerIdentities } = await import('../ticker-audit')
     mockListCatalogued.mockResolvedValue([])

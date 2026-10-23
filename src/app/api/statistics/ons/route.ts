@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import { fetchONQuotes } from '@/lib/data912-client'
 import { getCachedRoute, cacheRoute } from '@/lib/redis'
 import { normalizeError } from '@/lib/errors'
-import type { ONPosition, ONClosedTrade } from '@/types'
+import { getFullPortfolio } from '@/lib/portfolio-engine'
+import { loadLastCloses } from '@/lib/ledger-now'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { enrichPositionsForStats } from '@/lib/position-stats'
 import { computeTradeStats } from '@/lib/trade-stats'
@@ -29,39 +30,25 @@ export async function GET() {
       return NextResponse.json(cachedStats)
     }
 
-    // 1. Get ON Positions
-    const { data: positions, error: posErr } = await supabase
-      .from('on_positions')
-      .select('*')
-      .eq('user_id', user.id)
+    // 1. ON positions and realized sales from the ledger core (never the stored tables)
+    const portfolio = await getFullPortfolio(supabase, user.id)
+    const positions = portfolio.onPositions
+    const quotes = await fetchONQuotes(positions.map(p => p.ticker))
+    const closed = portfolio.onClosedTrades
+    const realizedPnl = closed.reduce((sum, t) => sum + t.pnl, 0)
 
-    if (posErr) throw normalizeError(posErr)
-
-    const tickers = (positions || []).map((p: ONPosition) => p.ticker)
-    const quotes = await fetchONQuotes(tickers)
-
-    // 2. Get ON Closed Trades
-    const { data: closed, error: closedErr } = await supabase
-      .from('on_closed_trades')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('close_date', { ascending: true })
-
-    if (closedErr) throw normalizeError(closedErr)
-
-    const realizedPnl = (closed || []).reduce((sum: number, t: ONClosedTrade) => sum + (t.pnl || 0), 0)
-
-    // Missing quotes are marked at cost (zero P&L), NEVER at 0 — a zero
-    // valuation fabricates a -100% loss in every aggregate below.
+    // One valuation rule (S3): live quote, else last close, else cost — NEVER 0,
+    // a zero valuation fabricates a -100% loss in every aggregate below.
     const { positions: enrichedPositions, totals } = enrichPositionsForStats(
-      (positions || []) as ONPosition[],
-      quotes
+      positions,
+      quotes,
+      await loadLastCloses(supabase, positions, quotes)
     )
     const totalPortfolioValue = totals.totalMarketValue
     const openPnl = totals.openPnl
 
     const winningPositions = enrichedPositions.filter((p) => p.pnl > 0).length
-    const winRate = positions?.length ? winningPositions / positions.length : 0
+    const winRate = positions.length ? winningPositions / positions.length : 0
 
     // Allocation
     const allocation = enrichedPositions
@@ -76,7 +63,7 @@ export async function GET() {
     // All PnLs (for bar chart)
     const allPnLs = [
       ...enrichedPositions.map((p: any) => ({ ticker: p.ticker, pnl: p.pnl, pnl_pct: p.pnl_pct, status: 'OPEN' })),
-      ...(closed || []).map((t: ONClosedTrade) => ({
+      ...closed.map((t) => ({
         ticker: t.ticker,
         pnl: t.pnl,
         pnl_pct: t.pnl_pct,
@@ -89,11 +76,11 @@ export async function GET() {
 
     // Closed-trade statistics from the tested pure module: win rate, profit
     // factor (gross/gross), holding periods and monthly P&L.
-    const tradeStats = computeTradeStats(closed || [])
+    const tradeStats = computeTradeStats(closed)
 
     // Cumulative P&L
     let cumPnl = 0
-    const cumulativePnl = (closed || []).map((t: ONClosedTrade) => {
+    const cumulativePnl = closed.map((t) => {
       cumPnl += t.pnl || 0
       return {
         date: t.close_date,

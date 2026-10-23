@@ -82,7 +82,14 @@ const mockFrom = vi.fn().mockImplementation((table: string) => {
       update: mockUpdate,
     }
   }
-  if (table === 'positions') return { select: async () => ({ data: mockPositionRows, error: null }) }
+  // Held tickers come from the ledger core (odd/tasks/nucleo-ledger.md T4.2b): one buy per held row.
+  if (table === 'transactions' || table === 'cash_movements' || table === 'on_payment_overrides') {
+    const rows = table !== 'transactions' ? [] : mockPositionRows.map((r: any) => ({
+      user_id: 'u1', operation: 'COMPRA', quantity: 1, price: 1, commission: 0, date: '2026-01-01', asset_type: 'ACCION', created_at: null, ...r,
+    }))
+    const q: any = { select: () => q, order: () => q, range: async () => ({ data: rows, error: null }) }
+    return q
+  }
   if (table === 'ons') return { select: async () => ({ data: mockOnRows, error: null }) }
   return {}
 })

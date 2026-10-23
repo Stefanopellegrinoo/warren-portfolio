@@ -51,22 +51,9 @@ const ONS_ROWS = [
     stocks_value: 600, stocks_invested: 500, ons_value: 319, ons_invested: 300, cash_value: 100 },
 ]
 
-/** The route reads on_positions and on_closed_trades; each returns an empty
- *  set unless overridden. Transactions come from fetchFlowTransactions, which
- *  is mocked above — the fake cannot model its paginated call chain. */
-function fakeSupabase() {
-  const empty = { data: [], error: null }
-  return {
-    from: vi.fn(() => ({
-      select: vi.fn(() => ({
-        eq: vi.fn(() => ({
-          order: vi.fn(() => empty),
-          ...empty,
-        })),
-      })),
-    })),
-  }
-}
+const { ledgerSupabase, trade } = await import('@/lib/__tests__/fixtures/ledger-supabase')
+/** An empty ledger; the fake throws on any stored derived table (T4.2b). */
+const fakeSupabase = (tables = {}) => ledgerSupabase(tables)
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -76,6 +63,27 @@ beforeEach(() => {
   mockSeries([])
   mockFetchFlowTransactions.mockResolvedValue([])
   mockFetchIncomeMovements.mockResolvedValue([])
+})
+
+describe('GET /api/statistics/ons — positions and trades from the ledger core', () => {
+  it('values an unquoted ON at its last close and counts its realized sale', async () => {
+    const on = (over: Record<string, unknown>) => trade({ ticker: 'ONA', asset_type: 'ON', quantity: 10, price: 95, ...over })
+    mockRequireUser.mockResolvedValue({
+      supabase: fakeSupabase({
+        transactions: [on({}), on({ operation: 'VENTA', quantity: 4, price: 100, date: '2026-01-10' })],
+        on_price_history: [{ ticker: 'ONA', price_date: '2026-01-20', close: 98 }],
+      }),
+      user: { id: 'u1' },
+    })
+
+    const body = await (await GET()).json()
+
+    expect(body.totalPortfolioValue).toBeCloseTo(6 * 98)
+    expect(body.openPnl).toBeCloseTo(6 * 3)
+    expect(body.realizedPnl).toBeCloseTo(20)
+    expect(body.allPnLs.map((p: any) => p.status)).toEqual(['CLOSED', 'OPEN'])
+    expect(body.avgHoldingDays).toBe(5)
+  })
 })
 
 describe('GET /api/statistics/ons — computed risk metrics', () => {

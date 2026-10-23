@@ -13,6 +13,7 @@ import { PERIOD_MONTHS } from './byma-educa'
 import { ledgerAt, type FlowOverride, type LedgerTrade, type PaymentKind } from './ledger-core'
 import { scheduleGaps, type FlowRow, type GapTerms } from './on-flow-history'
 import { loadSchedules } from './on-schedules'
+import { loadOverrides } from './ledger-now'
 
 export interface PaymentLine {
   ticker: string
@@ -105,16 +106,12 @@ async function readAll<T>(build: () => any): Promise<T[]> {
 
 /** Reads THROW: a payment list built from half a ledger is wrong, not partial. */
 export async function loadPayments(sb: SupabaseClient, userId: string, today: string) {
-  const [trades, rawOverrides] = await Promise.all([
+  const [trades, overrides] = await Promise.all([
     readAll<LedgerTrade>(() => sb.from('transactions')
       .select('ticker, operation, quantity, price, commission, date, asset_type, created_at').eq('user_id', userId)),
-    readAll<{ ticker: string; pay_date: string; kind: PaymentKind; amount: number | string | null }>(() => sb.from('on_payment_overrides')
-      .select('ticker, pay_date, kind, amount').eq('user_id', userId)),
+    loadOverrides(sb, userId),
   ])
   const onTrades = trades.filter(t => String(t.asset_type ?? '').toUpperCase() === 'ON')
-  const overrides = rawOverrides.map((o): FlowOverride => ({
-    ticker: norm(o.ticker), date: String(o.pay_date).slice(0, 10), kind: o.kind, amount: o.amount == null ? null : Number(o.amount),
-  }))
   const tickers = [...new Set(onTrades.map(t => norm(t.ticker)))]
   if (tickers.length === 0) return { payments: [], missing: [] }
 

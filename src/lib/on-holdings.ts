@@ -1,9 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Holding } from './on-my-portfolio'
+import { loadPortfolioNow } from './ledger-now'
+import { argentinaDate } from './utils'
 
-/** The signed-in user's open ON positions (READ ONLY, through their own RLS-scoped client). quantity = VN / 100. */
-export async function loadOnHoldings(sb: SupabaseClient, userId: string): Promise<Holding[]> {
-  const { data, error } = await sb.from('on_positions').select('ticker, quantity').eq('user_id', userId).gt('quantity', 0)
-  if (error) throw new Error(`on_positions: ${error.message}`)
-  return (data ?? []).map((r: { ticker: string; quantity: number | string }) => ({ ticker: r.ticker, quantity: Number(r.quantity) }))
+/** The signed-in user's open ON positions from the ledger core (READ ONLY, RLS-scoped client). quantity = VN / 100. */
+export async function loadOnHoldings(sb: SupabaseClient, userId: string, today: string = argentinaDate()): Promise<Holding[]> {
+  const { onPositions } = await loadPortfolioNow(sb, userId, today)
+  return onPositions.map(p => ({ ticker: p.ticker, quantity: p.quantity }))
 }

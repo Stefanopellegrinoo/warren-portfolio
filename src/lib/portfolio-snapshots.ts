@@ -3,6 +3,7 @@ import { fetchQuotes } from './yahoo-finance'
 import { loadUserPortfolios, type UserPortfolioInputs } from './user-portfolios'
 import type { Quote } from '@/types'
 import { splitQuotesByAssetClass, valuePortfolio } from './portfolio-valuation'
+import { loadPortfolioNow } from './ledger-now'
 
 export { splitQuotesByAssetClass }
 
@@ -46,8 +47,7 @@ export function buildSnapshotRow(
       realized: portfolio.realized,
       onRealized: portfolio.onRealized,
     },
-    { stockQuotes, onQuotes },
-    { missingQuotePolicy: 'avg_cost' }
+    { stockQuotes, onQuotes }
   )
 
   return {
@@ -131,25 +131,11 @@ export async function computeLiveSnapshotRow(
   userId: string,
   snapshotDate: string
 ): Promise<SnapshotRow | null> {
-  const [stockRes, onRes, closedRes, onClosedRes, cashRes] = await Promise.all([
-    supabase.from('positions').select('*').eq('user_id', userId),
-    supabase.from('on_positions').select('*').eq('user_id', userId),
-    supabase.from('closed_trades').select('pnl').eq('user_id', userId),
-    supabase.from('on_closed_trades').select('pnl').eq('user_id', userId),
-    supabase.from('cash_balance').select('balance').eq('user_id', userId),
-  ])
-
-  // A partial read failure must never silently degrade to an understated
-  // row — that wrong row gets upserted into portfolio_snapshots via
-  // snapshotUser and poisons Max Drawdown.
-  const failedRes = [stockRes, onRes, closedRes, onClosedRes, cashRes].find((r) => r.error)
-  if (failedRes) {
-    throw new Error(`[Snapshot] read failed for user ${userId}: ${failedRes.error.message}`)
-  }
-
-  const positions = stockRes.data ?? []
-  const onPositions = onRes.data ?? []
-  const cashBalance = cashRes.data?.[0]?.balance ?? 0
+  // From the ledger core; a failed read throws (T4.2b) — a wrong row upserted here poisons Max Drawdown.
+  const now = await loadPortfolioNow(supabase, userId, snapshotDate)
+  const positions = now.stockPositions
+  const onPositions = now.onPositions
+  const cashBalance = now.cashBalance
 
   if (positions.length === 0 && onPositions.length === 0 && cashBalance === 0) {
     return null
@@ -169,8 +155,8 @@ export async function computeLiveSnapshotRow(
       userId,
       positions,
       onPositions,
-      realized: (closedRes.data ?? []).reduce((s: number, t: any) => s + (t.pnl || 0), 0),
-      onRealized: (onClosedRes.data ?? []).reduce((s: number, t: any) => s + (t.pnl || 0), 0),
+      realized: now.stockClosedTrades.reduce((s, t) => s + t.pnl, 0),
+      onRealized: now.onClosedTrades.reduce((s, t) => s + t.pnl, 0),
       cashBalance,
     },
     stockQuotes,

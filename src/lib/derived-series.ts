@@ -33,7 +33,8 @@ import { loadSchedules } from './on-schedules'
 import { backfillOnPriceHistory } from './rava-history'
 import { backfillPastFlows } from './bonistas-flows'
 import type { FlowRow } from './on-flow-history'
-import type { FlowOverride, Income, LedgerMovement, LedgerTrade } from './ledger-core'
+import type { Income, LedgerMovement, LedgerTrade } from './ledger-core'
+import { loadOverrides } from './ledger-now'
 
 export interface SeriesRange {
   /** Inclusive YYYY-MM-DD lower bound. */
@@ -202,12 +203,7 @@ export async function getDerivedSeries(
     () => supabase.from('cash_movements').select('type, amount, date').eq('user_id', userId),
     ['id']
   )
-  const overrides = (await readAll<{ ticker: string; pay_date: string; kind: FlowOverride['kind']; amount: number | string | null }>(
-    () => supabase.from('on_payment_overrides').select('ticker, pay_date, kind, amount').eq('user_id', userId),
-    ['id']
-  )).map((o): FlowOverride => ({
-    ticker: norm(o.ticker), date: String(o.pay_date).slice(0, 10), kind: o.kind, amount: o.amount == null ? null : Number(o.amount),
-  }))
+  const overrides = await loadOverrides(supabase, userId)
 
   let degraded = false
   // The history starts at the first ledger date: a trade, or a deposit before it.
