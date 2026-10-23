@@ -103,3 +103,12 @@ Owner actions (outside the code): rotate the Redis password found in public git 
   - From the recheck:
     - Calls queued during a hang still run once Redis returns; the window TTL bounds the effect.
     - The first connection on a cold start may exceed 250 ms and let one request through.
+- L10 (2026-10-23, deploy of #21):
+  - The user merged PR #21 (`! gh pr merge 21 --merge`), and CI master test, image and deploy all succeeded.
+  - Live on https://warren.fratellipastas.com with a forged cookie for a non-existent user:
+    - `/api/quote` 401 (it was 200 before the deploy);
+    - `/api/positions` 401;
+    - `/api/transactions/import/status` 401.
+  - Also live: no cookie 401, `/_next/image` 404 (it was 200), `/auth/login` 200, `/api/health` ok (redis, supabase and worker fresh).
+  - PR #22 was retargeted to `master` and is mergeable, with 13 commits.
+  - Not verified by me: a real logged-in session on prod, since I have no credentials. The user should open the app once; the independent verifier covered valid sessions with the real libraries.
