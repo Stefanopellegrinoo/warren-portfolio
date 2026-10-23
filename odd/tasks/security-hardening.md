@@ -25,8 +25,8 @@ Specs S1-S11 come from the 2026-10-23 audit (two read-only audits plus live chec
 - [x] T2 · S2 · inline · import status owner check + 5 MB upload cap · `d755548` (RED 3/4 → GREEN 4/4)
 - [x] T3 · S3 · inline · `images.unoptimized: true` · `897a3b4` (no test: one config line; guard read in `next/dist/server/next-server.js:166`)
 - [x] T4 · S4 · inline · migration 048 function grants · `9e65eea` (RED ENOENT → GREEN 7/7). APPLIED to prod 2026-10-23 (L5)
-- [ ] T5 · S5 · inline · rate limit + input caps, plus review advisories L4 (a) `content-length` pre-check and (b) 503 on Auth outage
-- [ ] T6 · S6 · inline · generic 500s
+- [ ] T5 · S5 · delegated (writer trigger (a): parallel with T6, disjoint surfaces) · rate limit + input caps, plus review advisories L4 (a) `content-length` pre-check and (b) 503 on Auth outage
+- [ ] T6 · S6 · delegated (writer trigger (a): parallel with T5) · generic 500s
 - [ ] T7 · S7 · inline · same-origin redirect
 - [ ] T8 · S8 · inline · security headers (needs browser check)
 - [ ] T9 · S9 · inline · compose port + CI permissions (needs a server-side check by the user)
@@ -47,3 +47,6 @@ Owner actions (outside the code): rotate the Redis password found in public git 
   - Before deploy, a live probe on prod with a forged cookie for a non-existent user id: `GET /api/quote?tickers=AAPL` returned 200, without a cookie 401, and `/_next/image` returned 200.
   - 048 was applied with `apply_migration` (statements without BEGIN/COMMIT, since the tool is already transactional) and checked with `has_function_privilege`: anon executes none of the four; `authenticated` executes only `process_transaction_atomic`; `service_role` executes all four; `update_setup_performance_atomic` shows `prosecdef=f` and `search_path=public, pg_temp`.
   - The two SECURITY DEFINER advisor lints are gone. These remain: mutable search_path on five INVOKER functions (low) and leaked-password protection (owner action).
+- L6 (2026-10-23, user): "Ahora no lo puedo hacer. Segui con todo esto" (PR #21 stays unmerged for now; continue T5 onward).
+  - Delivery decision: PR #21 stays the reviewed urgent slice. T5+ go on `security/hardening-2`, stacked on `security/hardening`, and its PR is retargeted to `master` once #21 merges. This follows the stacked-to-main pattern without asking, since the user is away. It is recorded here so it can be changed.
+  - Evidence for T5 and T9: the largest watchlist has 6 items. The `warren-cloudflared` tunnel runs with `--network host` and targets `http://localhost:3033`, so binding the app to 127.0.0.1 keeps the tunnel working. The Oracle Security List does not open 3033 (memory `migracion-oracle-y-ci`), so the bind is defense in depth.
