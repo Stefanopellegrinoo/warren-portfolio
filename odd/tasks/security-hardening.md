@@ -122,3 +122,4 @@ Owner actions (outside the code): rotate the Redis password found in public git 
     - A spoofed `x-forwarded-for` still gets 429, so the key is the real client IP from Cloudflare, not `unknown`.
   - Chromium on the live `/auth/login`: 0 CSP violations and no page errors.
   - Open: T10b (Next 15, user decision) and the owner actions in the header.
+- L12 (2026-10-23, user): "Anda todo bien." The user logged in with a real account on prod after #21 and #22, which closes the one check left open in L10.
