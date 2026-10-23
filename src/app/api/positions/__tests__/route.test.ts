@@ -4,8 +4,12 @@ import type { NextRequest } from 'next/server'
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
 const mockRequireUser = vi.fn()
+// Market tables are read with the service role (odd/tasks/security-hardening.md S12): the service
+// client serves the same fixture the session does.
+const h = vi.hoisted(() => ({ market: null as any }))
+vi.mock('@/lib/supabase-server', () => ({ createServiceClient: () => h.market }))
 vi.mock('@/lib/api-auth', () => ({
-  requireUser: () => mockRequireUser(),
+  requireUser: async () => { const r = await mockRequireUser(); h.market = r?.supabase; return r },
   isAuthFailure: (r: any) => 'error' in r,
 }))
 

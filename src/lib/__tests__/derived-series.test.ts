@@ -13,7 +13,7 @@ vi.mock('../redis', () => ({
   getRedis: vi.fn(() => (redisUp ? redisMock : null)),
 }))
 
-import { getDerivedSeries, DERIVED_TTL } from '../derived-series'
+import { getDerivedSeries as getDerivedSeriesImpl, DERIVED_TTL } from '../derived-series'
 import { SUMMARY_SETEX_LUA } from '../summary-cache'
 import type { BarsResult } from '../bars-cache'
 import type { DeriveInput } from '../derive-history'
@@ -55,6 +55,12 @@ function fakeSupabase(tables: Tables, log: string[] = [], filters: string[] = []
     },
   } as any
 }
+
+// Market tables are read and backfilled with the service role (odd/tasks/security-hardening.md
+// S12): the fixture each test passes is what the service client serves.
+const hm = vi.hoisted(() => ({ market: null as any }))
+vi.mock('../supabase-server', () => ({ createServiceClient: () => hm.market }))
+const getDerivedSeries: typeof getDerivedSeriesImpl = (sb, userId, range, d) => { hm.market = sb; return getDerivedSeriesImpl(sb, userId, range, d) }
 
 function deps(over: Record<string, any> = {}) {
   return {

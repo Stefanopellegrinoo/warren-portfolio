@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const mockRequireUser = vi.fn()
-vi.mock('@/lib/api-auth', () => ({ requireUser: () => mockRequireUser(), isAuthFailure: (r: any) => 'error' in r }))
+// Market tables are read with the service role (odd/tasks/security-hardening.md S12): the service
+// client serves the same fixture the session does.
+const h = vi.hoisted(() => ({ market: null as any }))
+vi.mock('@/lib/supabase-server', () => ({ createServiceClient: () => h.market }))
+vi.mock('@/lib/api-auth', () => ({ requireUser: async () => { const r = await mockRequireUser(); h.market = r?.supabase; return r }, isAuthFailure: (r: any) => 'error' in r }))
 vi.mock('@/lib/redis', () => ({ getCachedRoute: async () => null, cacheRoute: async () => {} }))
 const mockStockQuotes = vi.fn()
 vi.mock('@/lib/yahoo-finance', () => ({ fetchQuotes: (...a: unknown[]) => mockStockQuotes(...a) }))

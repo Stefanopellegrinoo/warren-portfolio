@@ -1,5 +1,11 @@
-import { describe, it, expect } from 'vitest'
-import { loadSchedules } from '../on-schedules'
+import { describe, it, expect, vi } from 'vitest'
+import { loadSchedules as loadSchedulesImpl } from '../on-schedules'
+
+// Schedules are market data, read with the service role (odd/tasks/security-hardening.md S12):
+// the fixture each test passes is what the service client serves.
+const h = vi.hoisted(() => ({ market: null as any }))
+vi.mock('../supabase-server', () => ({ createServiceClient: () => h.market }))
+const loadSchedules: typeof loadSchedulesImpl = (sb, tickers, today) => { h.market = sb; return loadSchedulesImpl(sb, tickers, today) }
 
 type Row = Record<string, unknown>
 

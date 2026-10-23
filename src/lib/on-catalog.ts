@@ -1,5 +1,6 @@
 // Server-side read path for the ON explorer/detail: catalog + raw flows + curated
-// overrides + events + daily check + sovereign curve (all public-read tables) and
+// overrides + events + daily check + sovereign curve (market tables, read with the
+// service role: anon/authenticated have no SELECT on them, S12) and
 // the live data912 D-line price, analysed per request (R3.10). Read-only: nothing
 // derived is written anywhere, and the only cache is the 5-min data912 fetch.
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -10,6 +11,7 @@ import type { OverrideRow } from './on-terms'
 import { fetchAllData912Quotes } from './data912-client'
 import { argentinaDate } from './utils'
 import { getCCLRateInfo, type DollarInfo } from './currency'
+import { createServiceClient } from './supabase-server'
 
 const PAGE = 1000 // PostgREST default max rows per request
 const PRICE_CACHE_MS = 5 * 60_000
@@ -33,8 +35,8 @@ export interface CatalogResult {
 export const QUIET_SESSION_ZERO_RATIO = 0.6 // >= this share of D lines with v=0: pre-open, weekend or holiday
 
 let priceCache: { at: number; feed: PriceFeed | null } | null = null
-// Safe to share across requests ONLY because the catalog tables are public-read (RLS USING true).
-// If they ever become per-user, key this cache by user.
+// Safe to share across requests ONLY because the catalog is the same for every user (read with
+// the service role, never with the caller's session). If it ever becomes per-user, key this cache by user.
 let catalogCache: { at: number; data: CatalogTables } | null = null
 let priceInflight: Promise<PriceFeed | null> | null = null
 let catalogInflight: Promise<CatalogTables> | null = null
@@ -194,10 +196,10 @@ const readTable = (sb: SupabaseClient, table: string, orders: string[], filter?:
   })
 
 /** The whole public catalog, cached ~60s in-process (shared by list and detail; failures are never cached). */
-async function readCatalog(sb: SupabaseClient): Promise<CatalogTables> {
+async function readCatalog(): Promise<CatalogTables> {
   if (catalogCache && Date.now() - catalogCache.at < CATALOG_CACHE_MS) return catalogCache.data
   // Single flight; a failed refresh serves the last-good snapshot (never caching the failure).
-  catalogInflight ??= refreshCatalog(sb)
+  catalogInflight ??= refreshCatalog(createServiceClient())
     .catch((e) => {
       if (catalogCache) return catalogCache.data
       throw e
@@ -226,10 +228,11 @@ function lineOf(feed: PriceFeed, ticker: string | null): Line | undefined {
   return ticker && px !== undefined ? { px, v: feed.volumes?.get(ticker) ?? null } : undefined
 }
 
-export async function loadOnAnalyses(sb: SupabaseClient, opts: LoadOptions = {}): Promise<CatalogResult> {
+/** `_sb` is kept for callers; the catalog is market data, read with the service role (S12). */
+export async function loadOnAnalyses(_sb: SupabaseClient, opts: LoadOptions = {}): Promise<CatalogResult> {
   const now = opts.now ?? new Date()
   const today = argentinaDate(now)
-  const [tables, feed, ccl] = await Promise.all([readCatalog(sb), (opts.getPrices ?? getOnPrices)(), (opts.getCcl ?? (() => getOnCcl()))()])
+  const [tables, feed, ccl] = await Promise.all([readCatalog(), (opts.getPrices ?? getOnPrices)(), (opts.getCcl ?? (() => getOnCcl()))()])
   // Scope by ISIN in memory; the sovereign curve is global and is never scoped.
   const terms = opts.isin ? tables.terms.filter((r) => r.isin === opts.isin) : tables.terms
   const asOf = tables.terms.map((t) => t.as_of as string).sort().pop() ?? null
@@ -274,11 +277,14 @@ export interface PricePoint {
 
 const HISTORY_DAYS = 365
 
-/** Closes of the D line, oldest first. History is secondary: any failure yields an empty chart, not an error. */
-export async function loadPriceHistory(sb: SupabaseClient, tickerD: string | null): Promise<PricePoint[]> {
+/**
+ * Closes of the D line, oldest first, read with the service role (S12; `_sb` is kept for callers).
+ * History is secondary: any failure yields an empty chart, not an error.
+ */
+export async function loadPriceHistory(_sb: SupabaseClient, tickerD: string | null): Promise<PricePoint[]> {
   if (!tickerD) return []
   try {
-    const { data, error } = await sb
+    const { data, error } = await createServiceClient()
       .from('on_price_history')
       .select('price_date, close')
       .eq('ticker', tickerD)

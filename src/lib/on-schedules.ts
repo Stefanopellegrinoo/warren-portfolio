@@ -4,20 +4,27 @@
  * A ticker resolves to its ISIN through on_terms (D, then C, then O line). A bond no
  * longer in on_terms (matured, delisted) gets no schedule; scheduleGaps then asks the
  * user for its payments (S8).
+ *
+ * on_terms, on_flow_history and on_cashflows are market tables: anon/authenticated have no
+ * SELECT on them (odd/tasks/security-hardening.md S12), so they are read with the service
+ * role. This is the one choke point every ledger-core path goes through.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { loadFlowRowsMany, mergeFlowHistory, type FlowRow } from './on-flow-history'
+import { createServiceClient } from './supabase-server'
 
 // ponytail: backward-derived flows (deriveBackwardFlows) are not merged here yet; bonistas
 // covers ~24 months and older gaps are asked from the user. Add them when a user needs older history.
 
 const SAFE_TICKER = /^[A-Z0-9]+$/
 
-export async function loadSchedules(sb: SupabaseClient, tickers: string[], today: string): Promise<Map<string, FlowRow[]>> {
+/** `_sb` is kept for callers; the schedules are market data, read with the service role. */
+export async function loadSchedules(_sb: SupabaseClient, tickers: string[], today: string): Promise<Map<string, FlowRow[]>> {
   const wanted = [...new Set(tickers.map(t => t.trim().toUpperCase()))].filter(t => SAFE_TICKER.test(t))
   const out = new Map<string, FlowRow[]>()
   if (wanted.length === 0) return out
 
+  const sb = createServiceClient()
   const list = wanted.join(',')
   const { data: terms, error } = await sb
     .from('on_terms')

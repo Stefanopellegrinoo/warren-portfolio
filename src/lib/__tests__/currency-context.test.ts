@@ -3,11 +3,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const getDollarInfo = vi.fn()
 vi.mock('../currency', () => ({ getDollarInfo: (...a: unknown[]) => getDollarInfo(...a) }))
 
-const { loadCurrencyContext } = await import('../currency-views')
-
 const supabase = {
   from: () => ({ select: () => ({ range: async () => ({ data: [{ ticker: 'AAPL', ratio: 20 }], error: null }) }) }),
 } as any
+// cedears is a market table, read with the service role (odd/tasks/security-hardening.md S12).
+vi.mock('../supabase-server', () => ({ createServiceClient: () => supabase }))
+
+const { loadCurrencyContext } = await import('../currency-views')
 
 beforeEach(() => getDollarInfo.mockReset())
 

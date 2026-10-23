@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from 'next/server'
 
 const mockGetFxRate = vi.fn()
 vi.mock('@/lib/fx-rates', () => ({ getFxRate: (...a: unknown[]) => mockGetFxRate(...a) }))
+const service = { __client: 'service' }
+vi.mock('@/lib/supabase-server', () => ({ createServiceClient: () => service }))
 const mockRequireUser = vi.fn()
 vi.mock('@/lib/api-auth', () => ({
   requireUser: () => mockRequireUser(),
@@ -25,8 +27,10 @@ describe('GET /api/fx', () => {
     const res = await GET(get('?date=2026-10-19'))
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ mep: { rate: 1550.8, date: '2026-10-17' }, ccl: { rate: 1636.55, date: '2026-10-17' } })
-    expect(mockGetFxRate).toHaveBeenCalledWith(supabase, '2026-10-19', 'mep')
-    expect(mockGetFxRate).toHaveBeenCalledWith(supabase, '2026-10-19', 'ccl')
+    // fx_rates is readable only by the service role (S12), never with the user's client.
+    expect(mockGetFxRate).toHaveBeenCalledWith(service, '2026-10-19', 'mep')
+    expect(mockGetFxRate).toHaveBeenCalledWith(service, '2026-10-19', 'ccl')
+    expect(mockGetFxRate).not.toHaveBeenCalledWith(supabase, expect.anything(), expect.anything())
   })
 
   it('returns 400 on a bad date', async () => {

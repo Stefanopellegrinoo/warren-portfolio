@@ -46,7 +46,12 @@ export async function ingestFxRates(
   return { mep: mep.length, ccl: ccl.length }
 }
 
-/** The rate of a date, or of the last day before it with one (weekends, holidays). */
+/**
+ * The rate of a date, or of the last day before it with one (weekends, holidays).
+ * fx_rates is a market table with no anon/authenticated SELECT (odd/tasks/security-hardening.md
+ * S12): pass the service client. This module reaches the browser bundle through trade-record,
+ * so it must not import supabase-server itself.
+ */
 export async function getFxRate(
   supabase: SupabaseClient,
   date: string,

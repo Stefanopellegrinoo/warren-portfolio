@@ -1,13 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
-  getCataloguedTicker,
-  listCatalogued,
+  getCataloguedTicker as getCataloguedTickerImpl,
+  listCatalogued as listCataloguedImpl,
   upsertTickerIdentity,
   stampChecked,
   UNRESOLVED_NAME,
 } from '../ticker-catalog'
-// Note: no vi.mock here — these functions take the Supabase client as an
-// argument, so a plain stub exercises the real implementation.
+// The writes take the Supabase client as an argument, so a plain stub exercises
+// the real implementation. The reads use the service role (S12): the stub each
+// test passes is what the mocked service client serves.
+const h = vi.hoisted(() => ({ market: null as any }))
+vi.mock('../supabase-server', () => ({ createServiceClient: () => h.market }))
+const getCataloguedTicker: typeof getCataloguedTickerImpl = (sb, t) => { h.market = sb; return getCataloguedTickerImpl(sb, t) }
+const listCatalogued: typeof listCataloguedImpl = (sb) => { h.market = sb; return listCataloguedImpl(sb) }
 
 /**
  * `select()` has to serve two shapes: `.eq().maybeSingle()` for a single-row

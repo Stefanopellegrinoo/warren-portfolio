@@ -13,7 +13,8 @@
  *   2. The catalog WRITE must use `createServiceClient()`. Migration 032 grants
  *      INSERT/UPDATE on `ticker_identity` TO service_role only, so writing with
  *      the request-scoped anon client is denied by RLS and jams the gate shut
- *      for every new ticker.
+ *      for every new ticker. Since S12 (odd/tasks/security-hardening.md) the
+ *      READ uses it too: `authenticated` has no SELECT on market tables.
  *
  * So this file mocks only the collaborators that are genuinely out of scope
  * (auth, the portfolio engine, Redis, Yahoo resolution, the client factory) and
@@ -185,7 +186,7 @@ describe('POST /api/transactions — real ticker-catalog against a failing Supab
 })
 
 describe('POST /api/transactions — real ticker-catalog, client split', () => {
-  it('reads with the request-scoped client and writes with the service client', async () => {
+  it('reads and writes ticker_identity with the service client, never with the user session (S12)', async () => {
     const { POST } = await import('./route')
 
     const res = await POST(makeRequest({ ...validBody, confirmTicker: true }))
@@ -197,15 +198,15 @@ describe('POST /api/transactions — real ticker-catalog, client split', () => {
     expect(read).toBeDefined()
     expect(write).toBeDefined()
 
-    // Assert on the INSTANCES, not on call counts: swapping either direction
-    // (read on the service client, or write on the user client) fails here.
-    expect(read.client).toBe(userClient)
+    // Assert on the INSTANCES, not on call counts: either call moving back to
+    // the user session fails here.
+    expect(read.client).toBe(serviceClient)
     expect(write.client).toBe(serviceClient)
-    expect(write.client).not.toBe(read.client)
-    expect(mockCreateServiceClient).toHaveBeenCalledTimes(1)
+    expect(catalogCalls.filter((c) => c.client === userClient)).toEqual([])
+    expect(mockCreateServiceClient).toHaveBeenCalledTimes(2)
   })
 
-  it('never touches the service client when the ticker is already catalogued', async () => {
+  it('never writes the catalog when the ticker is already catalogued', async () => {
     const { POST } = await import('./route')
     readResult = {
       data: {
@@ -222,7 +223,8 @@ describe('POST /api/transactions — real ticker-catalog, client split', () => {
 
     expect(res.status).toBe(201)
     expect(writes()).toHaveLength(0)
-    expect(mockCreateServiceClient).not.toHaveBeenCalled()
+    expect(mockCreateServiceClient).toHaveBeenCalledTimes(1) // the read only
+    expect(reads()[0].client).toBe(serviceClient)
     expect(mockResolve).not.toHaveBeenCalled()
   })
 })

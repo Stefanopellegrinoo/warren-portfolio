@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { loadOnAnalyses, loadPriceHistory, getOnPrices, getOnCcl, resetOnCaches, type PriceFeed } from './on-catalog'
+import { loadOnAnalyses as loadOnAnalysesImpl, loadPriceHistory as loadPriceHistoryImpl, getOnPrices, getOnCcl, resetOnCaches, type PriceFeed } from './on-catalog'
+
+// The catalog is market data, read with the service role (odd/tasks/security-hardening.md S12):
+// the fixture each test passes is what the service client serves.
+const h = vi.hoisted(() => ({ market: null as any }))
+vi.mock('./supabase-server', () => ({ createServiceClient: () => h.market }))
+const loadOnAnalyses: typeof loadOnAnalysesImpl = (sb, opts) => { h.market = sb; return loadOnAnalysesImpl(sb, opts) }
+const loadPriceHistory: typeof loadPriceHistoryImpl = (sb, t) => { h.market = sb; return loadPriceHistoryImpl(sb, t) }
 
 beforeEach(() => resetOnCaches())
 

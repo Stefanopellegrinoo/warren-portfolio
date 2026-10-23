@@ -4,7 +4,8 @@
  * payments the bond's own calendar says had to exist while the user held it but no source
  * covers, with an estimate when one can be made. The app never invents those: it asks.
  *
- * `buildPayments` is pure; `loadPayments` reads the ledger with the user's client (RLS).
+ * `buildPayments` is pure; `loadPayments` reads the ledger with the user's client (RLS) and
+ * on_terms, a market table, with the service role (odd/tasks/security-hardening.md S12).
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { normalizeError } from './errors'
@@ -14,6 +15,7 @@ import { ledgerAt, type FlowOverride, type LedgerTrade, type PaymentKind } from 
 import { scheduleGaps, type FlowRow, type GapTerms } from './on-flow-history'
 import { loadSchedules } from './on-schedules'
 import { loadOverrides } from './ledger-now'
+import { createServiceClient } from './supabase-server'
 
 export interface PaymentLine {
   ticker: string
@@ -117,7 +119,7 @@ export async function loadPayments(sb: SupabaseClient, userId: string, today: st
 
   const [schedules, termsRes] = await Promise.all([
     loadSchedules(sb, tickers, today),
-    sb.from('on_terms').select('ticker_d, est, frequency, issue_date, accrual_start, residual_pct, coupon_rate').in('ticker_d', tickers),
+    createServiceClient().from('on_terms').select('ticker_d, est, frequency, issue_date, accrual_start, residual_pct, coupon_rate').in('ticker_d', tickers),
   ])
   if (termsRes.error) throw normalizeError(termsRes.error)
   const terms = (termsRes.data ?? []).map((r: any): PaymentTerms => ({
