@@ -23,7 +23,20 @@ vi.mock('@/lib/queue', () => ({
   addPriceUpdateJob: (...args: any[]) => mockFns.addPriceUpdateJob(...args),
 }))
 
-vi.mock('@/lib/supabase-server', () => ({ createServiceClient: () => ({ from: () => ({ upsert: async () => ({ error: null }) }) }) }))
+// The service client takes the `ons` upsert and the market reads (S12: schedules read on_terms
+// and the flows with the service role). These tests hold no market rows: every read is empty.
+vi.mock('@/lib/supabase-server', () => ({
+  createServiceClient: () => ({
+    from: () => {
+      const b: any = {
+        select: () => b, or: () => b, in: () => b, order: () => b,
+        upsert: async () => ({ error: null }),
+        then: (res: any, rej: any) => Promise.resolve({ data: [], error: null }).then(res, rej),
+      }
+      return b
+    },
+  }),
+}))
 
 const held = { id: 'b1', user_id: 'user-1', ticker: 'AL30D', operation: 'COMPRA', quantity: 100, price: 70, commission: 0, date: '2023-12-01', asset_type: 'ON', created_at: '2023-12-01T10:00:00Z' }
 

@@ -15,6 +15,7 @@ import type { ClosedTrade, ONPosition, Position, Quote } from '@/types'
 import { normalizeError } from './errors'
 import { addDays, toMs } from './ar-calendar'
 import { loadSchedules } from './on-schedules'
+import { createServiceClient } from './supabase-server'
 import type { FlowRow } from './on-flow-history'
 import {
   ledgerAt, type AssetKind, type FlowOverride, type Holding, type LedgerMovement, type LedgerState,
@@ -174,19 +175,22 @@ export async function loadPortfolioNow(sb: SupabaseClient, userId: string, today
 /**
  * Last recorded ON closes for the positions that have no live quote, taken since the
  * position was bought (S3: before its first trade, the purchase price stands). Stocks get
- * none here.
+ * none here. on_price_history is a market table, read with the service role
+ * (odd/tasks/security-hardening.md S12); `_sb` is kept for callers.
  */
 // ponytail: a stock without a live quote goes straight to cost: its last close needs Yahoo
 // bars + the CCL (derived-series). The Redis LKP quote already holds the last traded price;
 // add bars here if stocks with no LKP quote become common. The ex-payment adjustment
 // derive-history applies to a stale ON close is not applied here either.
 export async function loadLastCloses(
-  sb: SupabaseClient,
+  _sb: SupabaseClient,
   onPositions: Array<{ ticker: string; first_bought: string | null }>,
   quotes: Map<string, Quote>
 ): Promise<Map<string, number>> {
   const out = new Map<string, number>()
   const unpriced = onPositions.filter(p => !(Number(quotes.get(p.ticker)?.price) > 0))
+  if (unpriced.length === 0) return out
+  const sb = createServiceClient()
   await Promise.all(unpriced.map(async p => {
     try {
       const { data, error } = await sb.from('on_price_history').select('close')

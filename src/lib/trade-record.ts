@@ -67,7 +67,10 @@ export function deriveCedearEngineValues(t: {
  * Builds the engine input and the trade record for a CEDEAR ticket: the ratio
  * from `cedears`, and any FX the client did not send from `fx_rates` for the
  * trade date (with its fallback date). An FX the client sent is one the user
- * edited, so the record says `user`.
+ * edited, so the record says `user`. Both are market tables with no
+ * anon/authenticated SELECT (odd/tasks/security-hardening.md S12): pass the
+ * service client. AddTransactionModal bundles this file into the browser, so it
+ * must not import supabase-server itself.
  */
 export async function recordCedearTrade(
   supabase: SupabaseClient,

@@ -15,7 +15,9 @@
  * read, a partial derivation) is returned but never cached.
  *
  * Ledger reads (transactions, cash_movements, overrides) THROW on failure — a history built
- * from half a ledger is wrong, not degraded.
+ * from half a ledger is wrong, not degraded. They use the caller's client (RLS); market tables
+ * (on_price_history, on_terms, on_flow_history, ticker_identity) have no anon/authenticated
+ * SELECT and are read and backfilled with the service role (odd/tasks/security-hardening.md S12).
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { normalizeError } from './errors'
@@ -35,6 +37,7 @@ import { backfillPastFlows } from './bonistas-flows'
 import type { FlowRow } from './on-flow-history'
 import type { Income, LedgerMovement, LedgerTrade } from './ledger-core'
 import { loadOverrides } from './ledger-now'
+import { createServiceClient } from './supabase-server'
 
 export interface SeriesRange {
   /** Inclusive YYYY-MM-DD lower bound. */
@@ -149,7 +152,7 @@ async function claimBackfill(ticker: string): Promise<boolean> {
  * then last close) covers the gap. Returns whether any price backfill ran.
  */
 async function backfillMissing(
-  supabase: SupabaseClient, tickers: string[], firstTrade: Map<string, string>, today: string, deps: DerivedDeps
+  market: SupabaseClient, tickers: string[], firstTrade: Map<string, string>, today: string, deps: DerivedDeps
 ): Promise<boolean> {
   const claimed: string[] = []
   for (const t of tickers) if (await claimBackfill(t)) claimed.push(t)
@@ -157,7 +160,7 @@ async function backfillMissing(
 
   const terms = new Map<string, { isin: string; ticker_o: string | null }>()
   try {
-    const { data, error } = await supabase.from('on_terms').select('isin, ticker_o, ticker_d').in('ticker_d', claimed)
+    const { data, error } = await market.from('on_terms').select('isin, ticker_o, ticker_d').in('ticker_d', claimed)
     if (error) throw normalizeError(error)
     for (const r of data ?? []) terms.set(norm(r.ticker_d), r)
   } catch (err) {
@@ -166,14 +169,14 @@ async function backfillMissing(
 
   for (const t of claimed) {
     try {
-      await (deps.backfillOnPriceHistory ?? backfillOnPriceHistory)(supabase, t, firstTrade.get(t)!, today)
+      await (deps.backfillOnPriceHistory ?? backfillOnPriceHistory)(market, t, firstTrade.get(t)!, today)
     } catch (err) {
       console.warn(`[Derived] Rava backfill failed for ${t}:`, err instanceof Error ? err.message : err)
     }
     const term = terms.get(t)
     if (!term?.ticker_o) continue
     try {
-      await (deps.backfillPastFlows ?? backfillPastFlows)(supabase, term.isin, term.ticker_o, today)
+      await (deps.backfillPastFlows ?? backfillPastFlows)(market, term.isin, term.ticker_o, today)
     } catch (err) {
       console.warn(`[Derived] bonistas backfill failed for ${t}:`, err instanceof Error ? err.message : err)
     }
@@ -252,19 +255,20 @@ export async function getDerivedSeries(
   const onPricesByTicker = new Map<string, DailyBar[]>()
   let schedules = new Map<string, FlowRow[]>()
   if (onTickers.length > 0) {
+    const market = createServiceClient()
     const firstTrade = new Map<string, string>()
     for (const t of transactions.filter(isOn)) {
       const d = String(t.date).slice(0, 10)
       if (!firstTrade.has(norm(t.ticker)) || d < firstTrade.get(norm(t.ticker))!) firstTrade.set(norm(t.ticker), d)
     }
     try {
-      let prices = await readOnPrices(supabase, onTickers, firstDate)
+      let prices = await readOnPrices(market, onTickers, firstDate)
       const missing = onTickers.filter(t => {
         const earliest = prices.filter(p => norm(p.ticker) === t).map(p => String(p.price_date).slice(0, 10)).sort()[0]
         return !earliest || earliest > addDays(firstTrade.get(t)!, COVERED_WITHIN_DAYS)
       })
-      if (missing.length > 0 && (await backfillMissing(supabase, missing, firstTrade, today, deps))) {
-        prices = await readOnPrices(supabase, onTickers, firstDate)
+      if (missing.length > 0 && (await backfillMissing(market, missing, firstTrade, today, deps))) {
+        prices = await readOnPrices(market, onTickers, firstDate)
       }
       for (const p of prices) {
         const list = onPricesByTicker.get(norm(p.ticker)) ?? []

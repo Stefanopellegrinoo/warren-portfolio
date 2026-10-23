@@ -10,7 +10,10 @@ let deletes: string[]
 /** The user's ledger, as the core's sale validation reads it (T5.1). */
 let ledger: Record<string, unknown>[]
 
-const db = {
+// After migration 049 the user client is denied the market tables (S12); only the
+// service client reads cedears and fx_rates.
+const MARKET = new Set(['cedears', 'fx_rates'])
+const makeClient = (role: 'user' | 'service') => ({
   from(table: string) {
     const filters: Record<string, unknown> = {}
     let pendingUpdate: Record<string, unknown> | null = null
@@ -29,13 +32,17 @@ const db = {
       return { data: original, error: null }
     }
     chain.maybeSingle = async () => {
+      if (role === 'user' && MARKET.has(table)) return { data: null, error: { code: '42501', message: `permission denied for table ${table}` } }
       if (table === 'cedears') return { data: filters.ticker === 'AAPL' ? { ratio: 20 } : null, error: null }
       if (table === 'fx_rates') return { data: filters.kind === 'mep' ? { date: '2026-03-02', buy: 1400, sell: 1400 } : { date: '2026-03-02', buy: 1500, sell: 1500 }, error: null }
       throw new Error(`unexpected table ${table}`)
     }
     return chain
   },
-}
+})
+const db = makeClient('user')
+const market = makeClient('service')
+vi.mock('@/lib/supabase-server', () => ({ createServiceClient: () => market }))
 vi.mock('@/lib/api-auth', () => ({
   requireUser: vi.fn(async () => ({ user: { id: 'user-1' }, supabase: db })),
   isAuthFailure: () => false,

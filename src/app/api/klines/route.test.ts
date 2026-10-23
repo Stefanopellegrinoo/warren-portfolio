@@ -28,6 +28,12 @@ vi.mock('@/lib/cache', () => ({
   cached: (key: string, ttl: number, fetcher: () => Promise<unknown>) => mockCached(key, ttl, fetcher),
 }))
 
+const mockRateLimit = vi.fn()
+vi.mock('@/lib/rate-limit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/rate-limit')>()),
+  rateLimit: (...a: unknown[]) => mockRateLimit(...a),
+}))
+
 function makeRequest(params: Record<string, string>) {
   const url = new URL('http://localhost/api/klines')
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v))
@@ -41,6 +47,19 @@ describe('GET /api/klines', () => {
     vi.clearAllMocks()
     mockRequireUser.mockResolvedValue({ user: { id: 'user-1' }, supabase: {} })
     mockIsAuthFailure.mockReturnValue(false)
+    mockRateLimit.mockResolvedValue(true)
+  })
+
+  // T13 (odd/tasks/security-hardening.md S13)
+  it('returns 429 once the user is over 60 klines calls per 60 s', async () => {
+    const { GET } = await import('./route')
+    mockRateLimit.mockResolvedValue(false)
+
+    const res = await GET(makeRequest({ ticker: 'AAPL', interval: '1d' }))
+
+    expect(mockRateLimit).toHaveBeenCalledWith('rl:klines:user-1', 60, 60)
+    expect(res.status).toBe(429)
+    expect(mockGetCandles).not.toHaveBeenCalled()
   })
 
   function daysBack(from: Date): number {

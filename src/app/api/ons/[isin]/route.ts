@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { loadOnAnalyses, loadPriceHistory } from '@/lib/on-catalog'
+import { rateLimit, tooManyRequests } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
+
+// Per-user limit (S13).
+const ROUTE_LIMIT = 60
+const ROUTE_WINDOW_SEC = 60
 
 const ISIN = /^[A-Z]{2}[A-Z0-9]{9}\d$/
 
@@ -10,6 +15,9 @@ const ISIN = /^[A-Z]{2}[A-Z0-9]{9}\d$/
 export async function GET(_req: Request, { params }: { params: { isin: string } }) {
   const auth = await requireUser()
   if (isAuthFailure(auth)) return auth.error
+  if (!(await rateLimit(`rl:ons-detail:${auth.user.id}`, ROUTE_LIMIT, ROUTE_WINDOW_SEC))) {
+    return tooManyRequests(ROUTE_WINDOW_SEC)
+  }
 
   const isin = params.isin.toUpperCase()
   if (!ISIN.test(isin)) return NextResponse.json({ error: 'ISIN inválido' }, { status: 400 })

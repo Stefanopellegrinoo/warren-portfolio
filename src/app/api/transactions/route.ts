@@ -69,16 +69,17 @@ export async function POST(req: NextRequest) {
     const isTicket = raw && typeof raw === 'object' && 'tradeCurrency' in raw
     const { confirmTicker, ...parsed } = isTicket ? validateBody(CedearTradeSchema, raw) : validateBody(TransactionSchema, raw)
     // Derived before the identity gate so an unknown CEDEAR fails before the
-    // catalog is written.
-    const body = 'tradeCurrency' in parsed ? await recordCedearTrade(supabase, parsed) : parsed
+    // catalog is written. cedears and fx_rates are market tables: service role (S12).
+    const body = 'tradeCurrency' in parsed ? await recordCedearTrade(createServiceClient(), parsed) : parsed
 
     // Identity gate. ONs are exempt: Data912 prices them and Yahoo has no such
     // instrument, so resolution would fail for every legitimate ON.
     // An ABSENT assetType is a stock, not an exemption.
     if (body.assetType !== 'ON') {
-      // READ on the request-scoped client: migration 032's SELECT policy grants
-      // `authenticated` read, and keeping the read user-scoped means a broken
-      // session cannot silently look like "already catalogued".
+      // ticker_identity is a market table, read with the service role (S12:
+      // `authenticated` has no SELECT on it). A broken read still cannot look
+      // like "already catalogued": getCataloguedTicker throws on any error, and
+      // the session itself was verified by requireUser above.
       const catalogued = await getCataloguedTicker(supabase, body.ticker)
 
       if (!catalogued) {

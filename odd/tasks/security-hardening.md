@@ -17,6 +17,8 @@ Specs S1-S11 come from the 2026-10-23 audit (two read-only audits plus live chec
 - S8 (headers): CSP, frame-ancestors, nosniff, Referrer-Policy, HSTS and Permissions-Policy are set, `X-Powered-By` is removed, and the PWA does not cache `/api/*`.
 - S9 (infra): the app port is bound to 127.0.0.1, and the CI token has least privilege.
 - S10 (framework): Next.js is moved to a patched release. This is a separate decision because Next 15 means React 19.
+- S12 (market data, direct DB): "Lo que no quiero es que otra persona me robe los endpoints con los datos del mercado" → nobody, anonymous or signed in, can read the market/reference tables directly through Supabase with the public key. Only the server reads them (service role), behind `requireUser` and the rate limits. The app stays open to anyone: "si quiero que la app la use cualquiera". Evidence 2026-10-23: with the anon key from the public JS bundle and no login, PostgREST returned on_terms 260 rows, on_flow_history 1531, on_price_history 2288, on_cashflows 1519, on_yield_checks 721, activos 329 and cedears 325. transactions returned 0 (RLS).
+- S13 (market data, API): every endpoint that serves market data has a per-user (or per-IP when public) limit, and no endpoint hands the whole curated dataset to an anonymous caller.
 - S11 (xlsx): `xlsx@0.18.5`, which has prototype-pollution and ReDoS advisories, is replaced or upgraded.
 
 ## Tasks
@@ -31,6 +33,8 @@ Specs S1-S11 come from the 2026-10-23 audit (two read-only audits plus live chec
 - [x] T8 · S8 · inline · security headers · `f4131e1` (RED → GREEN 4/4; browser check L7)
 - [x] T9 · S9 · inline · compose port + CI permissions + actions pinned to SHAs · `fecea5e` (no unit test: config; `docker compose config` OK) · Risk item 5: check the site after the deploy
 - [x] T10a · S10 · inline · Next 14.1.0 → 14.2.35. This is the last 14.x and still uses React 18. It fixes CVE-2025-29927 (middleware bypass), the cache-poisoning and Server Actions SSRF advisories, and several DoS advisories. Risk item 5 · `6f78c1f` (suite 195/1957 green, tsc clean, prod build OK)
+- [x] T12 · S12 · delegated (writer trigger (b): parent context backstop) · server reads market tables with the service role; migration 049 revokes anon/authenticated SELECT · Risk item 2 · `73ccc9b` (049, offline-validated, NOT applied) + `e9cdf2e` (code; fx + CEDEAR-edit routes by the parent; RED 11/12 → GREEN)
+- [x] T13 · S13 · delegated after T12 (writer trigger (b); its route tests overlap T12) · per-user limits on the remaining market endpoints; anonymous catalog routes reviewed · `3ee5343` (RED 15/49 → GREEN 49/49) · Risk item 3: activos/cedears/ons-search now return 401 to anonymous callers, as requested
 - [ ] T10b · S10 · pending user decision · Next 15.5.x: the remaining advisories are only fixed there, and it needs React 19.
 - [x] T11 · S11 · inline · `xlsx` 0.18.5 → SheetJS 0.20.3 from the official CDN tarball. npm has no fixed release. The only user is `transactions/import/route.ts:47`. Risk item 5 · `c827c6e` (round-trip parse with `cellDates` OK; the lockfile keeps sha512 integrity)
 
@@ -112,3 +116,39 @@ Owner actions (outside the code): rotate the Redis password found in public git 
   - Also live: no cookie 401, `/_next/image` 404 (it was 200), `/auth/login` 200, `/api/health` ok (redis, supabase and worker fresh).
   - PR #22 was retargeted to `master` and is mergeable, with 13 commits.
   - Not verified by me: a real logged-in session on prod, since I have no credentials. The user should open the app once; the independent verifier covered valid sessions with the real libraries.
+- L11 (2026-10-23, deploy of #22):
+  - The user merged PR #22, and CI master test, image and deploy all succeeded.
+  - The site loads through the tunnel with the loopback-bound port: health 200, login 200, `/` and `/dashboard` 307 to login.
+  - Live headers: CSP, X-Frame-Options, nosniff, Referrer-Policy, HSTS and Permissions-Policy, and no X-Powered-By.
+  - A forged cookie gets 401, and `/_next/image` 404.
+  - Per-IP limit on `/api/activos`: exactly 60×200, then 429 with `Retry-After: 60`.
+    - A client-set `cf-connecting-ip` is rejected by Cloudflare with 403.
+    - A spoofed `x-forwarded-for` still gets 429, so the key is the real client IP from Cloudflare, not `unknown`.
+  - Chromium on the live `/auth/login`: 0 CSP violations and no page errors.
+  - Open: T10b (Next 15, user decision) and the owner actions in the header.
+- L12 (2026-10-23, user): "Anda todo bien." The user logged in with a real account on prod after #21 and #22, which closes the one check left open in L10.
+- L13 (2026-10-23, user): "Pero si quiero que la app la use cualquiera. Lo que no quiero es que otra persona me robe los endpoints con los datos del mercado"
+- L14 (2026-10-23, user): "Ok" (to layers 1 and 2: close direct DB reads of market tables, and per-user limits on market endpoints). The migration and the deploy each need a separate OK. Layer 3 (email confirmation + Turnstile CAPTCHA) needs the user's Cloudflare setup and is deferred.
+- L15 (2026-10-23, T12 map):
+  - A read-only explorer mapped 14 user/anon read paths to the 13 market tables, fixed by 10 switch points (`on-catalog`, `on-schedules` = the ledger-core choke point, `on-payments`, `currency-views` fx/cedears, `ledger-now` loadLastCloses, `derived-series`, `fx-rates`, `trade-record`, `ticker-catalog`, plus the 3 public routes).
+  - There are no views, and no RPC called by a non-service client reads these tables.
+  - Pre-existing bug: `derived-series` backfills upsert `on_price_history` (rava) and `on_flow_history` (bonistas) with the user client, which RLS denies.
+  - Fallout check: switching `loadSchedules` alone broke 14 tests in 10 files, because fixtures inject market rows through the user client.
+  - The `pg_stat_statements` baseline shows `authenticated` and `anon` reading all 13 tables. After the code deploy and before 049, their deltas must be 0.
+- L16 (2026-10-23, T12-T13): the suite is 197 files / 1994 tests, `tsc` is clean and lint shows 0 errors. The independent verifier is running, with focus on cross-tenant safety for every `createServiceClient()` use.
+- L17 (2026-10-23, T12-T13 verification):
+  - The independent verifier passed with no blockers.
+    - P1, cross-tenant: every `createServiceClient()` touches only the 13 market tables, and the harness's service fake throws on any of the 24 user tables without ever tripping.
+    - P3: with the revoke simulated, 19/19 routes are identical to baseline. Negative control: the baseline code under the revoke breaks all 19.
+    - P4: 049 on an offline postgres is idempotent, leaves user-table policies untouched, and FK inserts referencing `ons` still work.
+    - P5: S13 401s and limits hold.
+    - P6: build OK.
+  - Advisory 1 fixed in this batch: a memory leak, because `createServiceClient()` started a never-stopped 30 s auto-refresh timer, and T12 creates 1-5 clients per request. It now uses `persistSession: false, autoRefreshToken: false` (RED → GREEN; suite 198 / 1995).
+  - Advisory 2, a behavior change to confirm with the user: the derived-series Rava and bonistas backfills now really write `on_price_history` and `on_flow_history`. They were silently denied before (L15).
+  - Advisory 4: apply 049 without its BEGIN/COMMIT through `apply_migration`, as with 048.
+  - Others are noted: `loadFlowRows` is dead code; the rollback restores only SELECT.
+- L18 (2026-10-23, T12-T13 native review): lineage `review-76eb98e5939e54ee` (lenses risk and resilience) was approved and acknowledged. It left 3 informational warnings:
+  - R1, the derived-series backfills write shared ON tables with the service role. This is the same as L17 advisory 2: the values come from external feeds, not from the user, and are throttled. It stays pending the user's confirmation.
+  - R4, the rollback restores only SELECT. Already noted in L17.
+  - R4, the worker imports `supabase-server`. Checked and dismissed: `price-worker`, `summary-cache` and `user-portfolios` already imported it before this change, the 5 worker modules load under `tsx` outside Next, and the worker container has `SUPABASE_SERVICE_ROLE_KEY`.
+  - Next step: push `security/market-data`, open a PR, and have the user merge and deploy. Then check pg_stat_statements deltas, and apply 049 only with an explicit OK.

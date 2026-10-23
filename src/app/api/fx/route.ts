@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { DateSchema } from '@/lib/schemas/common'
 import { getFxRate } from '@/lib/fx-rates'
+import { createServiceClient } from '@/lib/supabase-server'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,7 +20,9 @@ export async function GET(req: NextRequest) {
   if (!date.success) return NextResponse.json({ error: 'date must be a valid YYYY-MM-DD' }, { status: 400 })
 
   try {
-    const [mep, ccl] = await Promise.all([getFxRate(auth.supabase, date.data, 'mep'), getFxRate(auth.supabase, date.data, 'ccl')])
+    // fx_rates is readable only by the service role (odd/tasks/security-hardening.md S12).
+    const market = createServiceClient()
+    const [mep, ccl] = await Promise.all([getFxRate(market, date.data, 'mep'), getFxRate(market, date.data, 'ccl')])
     if (!mep && !ccl) return NextResponse.json({ error: 'No hay cotización para esa fecha.' }, { status: 404 })
     return NextResponse.json({ mep, ccl })
   } catch (err) {

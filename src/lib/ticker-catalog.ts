@@ -3,8 +3,13 @@
  *
  * Reads and writes only — no Yahoo access, so it can be tested against a plain
  * Supabase stub. Resolution lives in ticker-identity.ts.
+ *
+ * ticker_identity is a market table: anon/authenticated have no SELECT on it
+ * (odd/tasks/security-hardening.md S12), so the reads use the service role and
+ * ignore the client they are given (kept for callers).
  */
 import type { ResolveResult } from './ticker-identity'
+import { createServiceClient } from './supabase-server'
 
 export interface CatalogRow {
   ticker: string
@@ -19,9 +24,9 @@ export const UNRESOLVED_NAME = '(no instrument found on Yahoo)'
 
 const COLUMNS = 'ticker, yahoo_symbol, confirmed_name, exchange, last_checked_at'
 
-export async function getCataloguedTicker(supabase: any, ticker: string): Promise<CatalogRow | null> {
+export async function getCataloguedTicker(_supabase: any, ticker: string): Promise<CatalogRow | null> {
   const clean = ticker.toUpperCase().trim()
-  const { data, error } = await supabase
+  const { data, error } = await createServiceClient()
     .from('ticker_identity')
     .select(COLUMNS)
     .eq('ticker', clean)
@@ -34,8 +39,8 @@ export async function getCataloguedTicker(supabase: any, ticker: string): Promis
   return (data as CatalogRow) ?? null
 }
 
-export async function listCatalogued(supabase: any): Promise<CatalogRow[]> {
-  const { data, error } = await supabase.from('ticker_identity').select(COLUMNS)
+export async function listCatalogued(_supabase: any): Promise<CatalogRow[]> {
+  const { data, error } = await createServiceClient().from('ticker_identity').select(COLUMNS)
   if (error) throw new Error(error.message)
   return (data ?? []) as CatalogRow[]
 }

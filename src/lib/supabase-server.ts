@@ -168,7 +168,10 @@ export function createServerClientInstance() {
 export function createServiceClient() {
   return createSupabaseClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    // No session to keep: with the defaults supabase-js starts a 30 s refresh timer
+    // that is never stopped, so every per-request client would stay in memory.
+    { auth: { persistSession: false, autoRefreshToken: false } }
   );
 }
 

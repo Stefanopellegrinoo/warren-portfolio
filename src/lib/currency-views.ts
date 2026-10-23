@@ -3,6 +3,10 @@
  * CEDEAR ratios and the cached peso-line prices. Used by the worker's summary
  * cache and by /api/positions when it has to compute the summary itself.
  *
+ * cedears and fx_rates are market tables, read with the service role (anon/authenticated
+ * have no SELECT on them, odd/tasks/security-hardening.md S12); the ledger stays on the
+ * caller's client (RLS).
+ *
  * WORKER-SAFE: relative value imports only (runs under tsx).
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -15,6 +19,7 @@ import { fxLookupFrom } from './trade-record-backfill'
 import { loadOverrides, onTickersOf } from './ledger-now'
 import { loadSchedules } from './on-schedules'
 import { argentinaDate } from './utils'
+import { createServiceClient } from './supabase-server'
 
 const LEDGER_COLUMNS =
   'ticker, date, created_at, operation, asset_type, quantity, price, commission, ' +
@@ -45,7 +50,8 @@ async function selectAll<T>(page: (from: number, to: number) => PromiseLike<{ da
  * every user. null when a rate is missing: then no view is built, and the
  * Resumen keeps showing the USD figures.
  */
-export async function loadCurrencyContext(supabase: SupabaseClient): Promise<CurrencyContext | null> {
+export async function loadCurrencyContext(_supabase: SupabaseClient): Promise<CurrencyContext | null> {
+  const market = createServiceClient()
   const rate = async (kind: FxKind) => {
     const live = await getDollarInfo(kind)
     return live && { rate: live.rate, date: argentinaDate(new Date(live.asOf)) }
@@ -53,7 +59,7 @@ export async function loadCurrencyContext(supabase: SupabaseClient): Promise<Cur
   const [mep, ccl, cedears] = await Promise.all([
     rate('mep'),
     rate('ccl'),
-    selectAll<{ ticker: string; ratio: number }>((a, b) => supabase.from('cedears').select('ticker, ratio').range(a, b)),
+    selectAll<{ ticker: string; ratio: number }>((a, b) => market.from('cedears').select('ticker, ratio').range(a, b)),
   ])
   if (!mep || !ccl) return null
   const ratios = new Map<string, number>()
@@ -91,8 +97,9 @@ export async function currencyViewsFor(
   let fxRows: { date: string; kind: FxKind; buy: number; sell: number }[] = []
   if (missing.length > 0) {
     const from = new Date(Date.parse(missing[0]) - FX_FALLBACK_DAYS * 86_400_000).toISOString().slice(0, 10)
+    const market = createServiceClient()
     fxRows = await selectAll((a, b) =>
-      supabase.from('fx_rates').select('date, kind, buy, sell').gte('date', from).lte('date', missing[missing.length - 1])
+      market.from('fx_rates').select('date, kind, buy, sell').gte('date', from).lte('date', missing[missing.length - 1])
         .order('date', { ascending: true }).range(a, b))
   }
 

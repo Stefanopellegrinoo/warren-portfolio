@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClientInstance } from '@/lib/supabase-server'
+import { createServiceClient } from '@/lib/supabase-server'
 import { getAvailableCorporateBonds } from '@/lib/data912-client'
-import { rateLimit, tooManyRequests, clientIp } from '@/lib/rate-limit'
+import { requireUser, isAuthFailure } from '@/lib/api-auth'
+import { rateLimit, tooManyRequests } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
-// Public, unauthenticated: limited per IP, and `limit` is clamped (S5).
-const IP_LIMIT = 60
-const IP_WINDOW_SEC = 60
+// Signed-in users only, limited per user (S13); `limit` is clamped (S5).
+const ROUTE_LIMIT = 60
+const ROUTE_WINDOW_SEC = 60
 const DEFAULT_LIMIT = 10
 const MAX_LIMIT = 50
 
@@ -26,12 +27,14 @@ const MAX_LIMIT = 50
  * 5. NO auto-insert - bonds are only saved when user creates a transaction
  */
 export async function GET(req: NextRequest) {
-  if (!(await rateLimit(`rl:ons-search:${clientIp(req)}`, IP_LIMIT, IP_WINDOW_SEC))) {
-    return tooManyRequests(IP_WINDOW_SEC)
+  const authResult = await requireUser()
+  if (isAuthFailure(authResult)) return authResult.error
+  if (!(await rateLimit(`rl:ons-search:${authResult.user.id}`, ROUTE_LIMIT, ROUTE_WINDOW_SEC))) {
+    return tooManyRequests(ROUTE_WINDOW_SEC)
   }
   try {
-    const supabase = createServerClientInstance()
-    // No auth required for search - public endpoint
+    // `ons` is readable only by the service role (S12).
+    const supabase = createServiceClient()
 
     const { searchParams } = new URL(req.url)
     const query = searchParams.get('q')?.toUpperCase().trim() || ''

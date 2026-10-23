@@ -9,6 +9,12 @@ vi.mock('@/lib/api-auth', () => ({
 const mockLoad = vi.fn()
 vi.mock('@/lib/on-catalog', () => ({ loadOnAnalyses: (...a: unknown[]) => mockLoad(...a) }))
 
+const mockRateLimit = vi.fn()
+vi.mock('@/lib/rate-limit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/rate-limit')>()),
+  rateLimit: (...a: unknown[]) => mockRateLimit(...a),
+}))
+
 const { GET } = await import('../route')
 
 const analysis = { row: { isin: 'AR0000000001', tickerO: 'TSTAO', ytmPct: 6.1 }, detail: { schedule: [{ date: '2027-01-01' }], accrued: 1 } }
@@ -16,12 +22,25 @@ const analysis = { row: { isin: 'AR0000000001', tickerO: 'TSTAO', ytmPct: 6.1 },
 beforeEach(() => {
   mockRequireUser.mockReset()
   mockLoad.mockReset()
+  mockRateLimit.mockReset().mockResolvedValue(true)
 })
 
 describe('GET /api/ons', () => {
   it('requires a session', async () => {
     mockRequireUser.mockResolvedValue({ error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) })
     expect((await GET()).status).toBe(401)
+    expect(mockLoad).not.toHaveBeenCalled()
+  })
+
+  // T13 (odd/tasks/security-hardening.md S13): the whole catalog in one response gets a tighter limit.
+  it('returns 429 once the user is over 20 catalog calls per 60 s', async () => {
+    mockRequireUser.mockResolvedValue({ supabase: {}, user: { id: 'u' } })
+    mockRateLimit.mockResolvedValue(false)
+
+    const res = await GET()
+
+    expect(mockRateLimit).toHaveBeenCalledWith('rl:ons-catalog:u', 20, 60)
+    expect(res.status).toBe(429)
     expect(mockLoad).not.toHaveBeenCalled()
   })
 

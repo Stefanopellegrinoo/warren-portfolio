@@ -11,7 +11,20 @@ vi.mock('../cache', () => ({ invalidateCacheKey: vi.fn() }))
 vi.mock('../yahoo-finance', () => ({ fetchQuotesWithFallback: vi.fn(async () => new Map()) }))
 vi.mock('../data912-client', () => ({ fetchONQuotesWithFallback: vi.fn(async () => new Map()) }))
 vi.mock('../queue', () => ({ addPriceUpdateJob: vi.fn(async () => undefined), addRefreshSummaryJob: vi.fn(async () => undefined) }))
-vi.mock('../supabase-server', () => ({ createServiceClient: () => ({ from: () => ({ upsert: async () => ({ error: null }) }) }) }))
+// The service client takes the `ons` upsert and the market reads (S12: schedules read on_terms
+// and the flows with the service role). These tests hold no market rows: every read is empty.
+vi.mock('../supabase-server', () => ({
+  createServiceClient: () => ({
+    from: () => {
+      const b: any = {
+        select: () => b, or: () => b, in: () => b, order: () => b,
+        upsert: async () => ({ error: null }),
+        then: (res: any, rej: any) => Promise.resolve({ data: [], error: null }).then(res, rej),
+      }
+      return b
+    },
+  }),
+}))
 vi.mock('../utils', async orig => ({ ...(await orig<object>()), argentinaDate: () => '2026-10-22' }))
 
 import { processTransaction, processTransactionBatch } from '../portfolio-engine'

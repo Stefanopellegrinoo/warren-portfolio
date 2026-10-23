@@ -6,6 +6,7 @@ import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { normalizeError } from '@/lib/errors'
 import { buildCashMovementForTransaction, signedQuantity } from '@/lib/transaction-cash'
 import { recordCedearTrade, TradeRecordError } from '@/lib/trade-record'
+import { createServiceClient } from '@/lib/supabase-server'
 import { CedearTradeSchema } from '@/lib/schemas/transaction'
 import { assertNoNewOversell } from '@/lib/ledger-write'
 
@@ -109,7 +110,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const raw = await req.json()
     let fields: Record<string, unknown>
     if (raw && typeof raw === 'object' && 'tradeCurrency' in raw) {
-      const t = await recordCedearTrade(supabase, validateBody(CedearTradeSchema, { ...raw, ticker: originalTx.ticker }))
+      // cedears and fx_rates are readable only by the service role (S12).
+      const t = await recordCedearTrade(createServiceClient(), validateBody(CedearTradeSchema, { ...raw, ticker: originalTx.ticker }))
       const r = t.tradeRecord
       fields = {
         date: t.date,

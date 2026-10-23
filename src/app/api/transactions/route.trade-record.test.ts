@@ -6,13 +6,20 @@ vi.mock('@/lib/portfolio-engine', () => ({ processTransaction: (...a: unknown[])
 vi.mock('@/lib/redis', () => ({ invalidateUserCache: vi.fn(async () => undefined) }))
 vi.mock('@/lib/ticker-identity', () => ({ resolveTickerIdentity: vi.fn() }))
 vi.mock('@/lib/ticker-catalog', () => ({ getCataloguedTicker: vi.fn(async () => ({ ticker: 'AAPL' })), upsertTickerIdentity: vi.fn() }))
-vi.mock('@/lib/supabase-server', () => ({ createServiceClient: vi.fn() }))
+// cedears and fx_rates are market tables (S12): the route reads them with the service client.
+vi.mock('@/lib/supabase-server', () => ({ createServiceClient: vi.fn(() => marketClient) }))
 
 const fx: Record<string, { date: string; buy: number; sell: number }> = {
   mep: { date: '2026-10-20', buy: 1440, sell: 1460 },
   ccl: { date: '2026-10-20', buy: 1490, sell: 1510 },
 }
+// The session has no SELECT on market tables: any read through it fails the test.
 const userClient = {
+  from(table: string) {
+    throw new Error(`market table read with the user session: ${table}`)
+  },
+}
+const marketClient = {
   from(table: string) {
     const filters: Record<string, unknown> = {}
     const chain: Record<string, unknown> = {}
