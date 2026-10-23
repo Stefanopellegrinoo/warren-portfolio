@@ -1,20 +1,23 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { createServerClientInstance } from '@/lib/supabase-server'
+import { NextResponse } from 'next/server'
+import { createServiceClient } from '@/lib/supabase-server'
 import { normalizeError } from '@/lib/errors'
-import { rateLimit, tooManyRequests, clientIp } from '@/lib/rate-limit'
+import { requireUser, isAuthFailure } from '@/lib/api-auth'
+import { rateLimit, tooManyRequests } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
-// Public, unauthenticated: limited per IP (S5).
-const IP_LIMIT = 60
-const IP_WINDOW_SEC = 60
+// Signed-in users only, limited per user; the table is readable only by the service role (S13).
+const ROUTE_LIMIT = 60
+const ROUTE_WINDOW_SEC = 60
 
-export async function GET(req: NextRequest) {
-  if (!(await rateLimit(`rl:cedears:${clientIp(req)}`, IP_LIMIT, IP_WINDOW_SEC))) {
-    return tooManyRequests(IP_WINDOW_SEC)
+export async function GET() {
+  const authResult = await requireUser()
+  if (isAuthFailure(authResult)) return authResult.error
+  if (!(await rateLimit(`rl:cedears:${authResult.user.id}`, ROUTE_LIMIT, ROUTE_WINDOW_SEC))) {
+    return tooManyRequests(ROUTE_WINDOW_SEC)
   }
   try {
-    const supabase = createServerClientInstance()
+    const supabase = createServiceClient()
     
     const { data, error } = await supabase
       .from('cedears')

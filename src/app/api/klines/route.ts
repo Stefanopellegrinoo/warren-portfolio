@@ -4,6 +4,7 @@ import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { cached } from '@/lib/cache'
 import type { CandleInterval } from '@/lib/market-data'
 import { serverError } from '@/lib/api/errors'
+import { rateLimit, tooManyRequests } from '@/lib/rate-limit'
 
 // Days of history per interval when the caller sends no `days`. Intraday limits
 // are Yahoo's (15m: 60 days, 1h: 730 days); null = full history.
@@ -17,6 +18,8 @@ const DEFAULT_DAYS: Record<CandleInterval, number | null> = {
 // The chart re-polls every 30 s for its live bars, so every interval
 // shares one short TTL.
 const CANDLES_TTL = 30
+const ROUTE_LIMIT = 60
+const ROUTE_WINDOW_SEC = 60
 
 function isInterval(v: string): v is CandleInterval {
   return v in DEFAULT_DAYS
@@ -48,6 +51,9 @@ export async function GET(req: NextRequest) {
 
   const authResult = await requireUser()
   if (isAuthFailure(authResult)) return authResult.error
+  if (!(await rateLimit(`rl:klines:${authResult.user.id}`, ROUTE_LIMIT, ROUTE_WINDOW_SEC))) {
+    return tooManyRequests(ROUTE_WINDOW_SEC)
+  }
 
   const days = daysParam != null ? parseInt(daysParam, 10) : DEFAULT_DAYS[interval]
   const from = days != null

@@ -1,10 +1,17 @@
-// T5 (odd/tasks/security-hardening.md S5): the public catalog is limited per IP.
+// T5 (S5) + T13 (S13, odd/tasks/security-hardening.md): the catalog needs a session,
+// is limited per user, and reads the table with the service role.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
 
 const mockOrder = vi.fn()
 const mockFrom = vi.fn(() => ({ select: () => ({ order: mockOrder }) }))
-vi.mock('@/lib/supabase-server', () => ({ createServerClientInstance: () => ({ from: mockFrom }) }))
+vi.mock('@/lib/supabase-server', () => ({ createServiceClient: () => ({ from: mockFrom }) }))
+
+const mockRequireUser = vi.fn()
+vi.mock('@/lib/api-auth', () => ({
+  requireUser: () => mockRequireUser(),
+  isAuthFailure: (r: object) => 'error' in r,
+}))
 
 const mockRateLimit = vi.fn()
 vi.mock('@/lib/rate-limit', async (importOriginal) => ({
@@ -13,28 +20,39 @@ vi.mock('@/lib/rate-limit', async (importOriginal) => ({
 }))
 
 const { GET } = await import('./route')
-const request = () => new NextRequest('http://localhost/api/activos', { headers: { 'cf-connecting-ip': '1.2.3.4' } })
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mockRequireUser.mockResolvedValue({ supabase: {}, user: { id: 'user-1' } })
   mockRateLimit.mockResolvedValue(true)
   mockOrder.mockResolvedValue({ data: [{ ticker: 'AAPL', nombre: 'Apple' }], error: null })
 })
 
 describe('GET /api/activos', () => {
-  it('returns the catalog', async () => {
-    const res = await GET(request())
+  it('returns the catalog read with the service role', async () => {
+    const res = await GET()
 
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual([{ ticker: 'AAPL', nombre: 'Apple' }])
+    expect(mockFrom).toHaveBeenCalledWith('activos')
   })
 
-  it('returns 429 once the IP is over 60 requests per 60 s', async () => {
+  it('returns 401 without a session and reads nothing', async () => {
+    mockRequireUser.mockResolvedValue({ error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) })
+
+    const res = await GET()
+
+    expect(res.status).toBe(401)
+    expect(mockRateLimit).not.toHaveBeenCalled()
+    expect(mockFrom).not.toHaveBeenCalled()
+  })
+
+  it('returns 429 once the user is over 60 requests per 60 s', async () => {
     mockRateLimit.mockResolvedValue(false)
 
-    const res = await GET(request())
+    const res = await GET()
 
-    expect(mockRateLimit).toHaveBeenCalledWith('rl:activos:1.2.3.4', 60, 60)
+    expect(mockRateLimit).toHaveBeenCalledWith('rl:activos:user-1', 60, 60)
     expect(res.status).toBe(429)
     expect(mockFrom).not.toHaveBeenCalled()
   })
