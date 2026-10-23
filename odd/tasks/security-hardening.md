@@ -33,8 +33,8 @@ Specs S1-S11 come from the 2026-10-23 audit (two read-only audits plus live chec
 - [x] T8 · S8 · inline · security headers · `f4131e1` (RED → GREEN 4/4; browser check L7)
 - [x] T9 · S9 · inline · compose port + CI permissions + actions pinned to SHAs · `fecea5e` (no unit test: config; `docker compose config` OK) · Risk item 5: check the site after the deploy
 - [x] T10a · S10 · inline · Next 14.1.0 → 14.2.35. This is the last 14.x and still uses React 18. It fixes CVE-2025-29927 (middleware bypass), the cache-poisoning and Server Actions SSRF advisories, and several DoS advisories. Risk item 5 · `6f78c1f` (suite 195/1957 green, tsc clean, prod build OK)
-- [ ] T12 · S12 · delegated (writer trigger (b): parent context backstop) · server reads market tables with the service role; migration 049 revokes anon/authenticated SELECT · Risk item 2
-- [ ] T13 · S13 · delegated after T12 (writer trigger (b); its route tests overlap T12) · per-user limits on the remaining market endpoints; anonymous catalog routes reviewed
+- [x] T12 · S12 · delegated (writer trigger (b): parent context backstop) · server reads market tables with the service role; migration 049 revokes anon/authenticated SELECT · Risk item 2 · `73ccc9b` (049, offline-validated, NOT applied) + `e9cdf2e` (code; fx + CEDEAR-edit routes by the parent; RED 11/12 → GREEN)
+- [x] T13 · S13 · delegated after T12 (writer trigger (b); its route tests overlap T12) · per-user limits on the remaining market endpoints; anonymous catalog routes reviewed · `3ee5343` (RED 15/49 → GREEN 49/49) · Risk item 3: activos/cedears/ons-search now return 401 to anonymous callers, as requested
 - [ ] T10b · S10 · pending user decision · Next 15.5.x: the remaining advisories are only fixed there, and it needs React 19.
 - [x] T11 · S11 · inline · `xlsx` 0.18.5 → SheetJS 0.20.3 from the official CDN tarball. npm has no fixed release. The only user is `transactions/import/route.ts:47`. Risk item 5 · `c827c6e` (round-trip parse with `cellDates` OK; the lockfile keeps sha512 integrity)
 
@@ -135,3 +135,4 @@ Owner actions (outside the code): rotate the Redis password found in public git 
   - Pre-existing bug: `derived-series` backfills upsert `on_price_history` (rava) and `on_flow_history` (bonistas) with the user client, which RLS denies.
   - Fallout check: switching `loadSchedules` alone broke 14 tests in 10 files, because fixtures inject market rows through the user client.
   - The `pg_stat_statements` baseline shows `authenticated` and `anon` reading all 13 tables. After the code deploy and before 049, their deltas must be 0.
+- L16 (2026-10-23, T12-T13): the suite is 197 files / 1994 tests, `tsc` is clean and lint shows 0 errors. The independent verifier is running, with focus on cross-tenant safety for every `createServiceClient()` use.
