@@ -3,8 +3,9 @@ import { DateSchema, PositiveNumberSchema } from './common'
 
 export const CashMovementSchema = z.object({
   date: DateSchema,
-  type: z.enum(['DEPOSITO', 'RETIRO', 'CUPON', 'DIVIDENDO'], {
-    message: 'Type must be DEPOSITO, RETIRO, CUPON, or DIVIDENDO',
+  // No CUPON: ON coupons are automatic, and corrected in ONs → Mi cartera (odd/tasks/nucleo-ledger.md S10).
+  type: z.enum(['DEPOSITO', 'RETIRO', 'DIVIDENDO'], {
+    message: 'Type must be DEPOSITO, RETIRO, or DIVIDENDO',
   }),
   amount: PositiveNumberSchema.max(1_000_000, {
     message: 'Amount cannot exceed $1,000,000',

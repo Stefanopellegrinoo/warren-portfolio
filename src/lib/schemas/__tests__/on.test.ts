@@ -59,16 +59,20 @@ describe('ONTransactionSchema', () => {
     expect(() => ONTransactionSchema.parse(data)).toThrow()
   })
 
-  it('accepts CUPON operation without quantity/price', () => {
+  it('rejects CUPON: ON coupons are automatic now (S4, S10)', () => {
     const data = {
       date: '2024-01-01',
       ticker: 'AL30',
       operation: 'CUPON',
-      quantity: 0, // CUPON puede tener cantidad cero
-      price: 0,
+      quantity: 10,
+      price: 1,
       commission: 0
     }
-    expect(() => ONTransactionSchema.parse(data)).toThrow() // PositiveNumberSchema rechaza cero
+    expect(() => ONTransactionSchema.parse(data)).toThrow()
+  })
+
+  it('still accepts VENTA', () => {
+    expect(() => ONTransactionSchema.parse({ date: '2024-01-01', ticker: 'AL30', operation: 'VENTA', quantity: 10, price: 1500 })).not.toThrow()
   })
 
   it('rejects negative commission', () => {

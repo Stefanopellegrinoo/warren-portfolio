@@ -4,7 +4,8 @@ import { DateSchema, PositiveNumberSchema, TickerSchema } from './common'
 export const ONTransactionSchema = z.object({
   date: DateSchema,
   ticker: TickerSchema,
-  operation: z.enum(['COMPRA', 'VENTA', 'CUPON']),
+  // No CUPON: coupons and amortizations come from the bond schedule (odd/tasks/nucleo-ledger.md S4, S10).
+  operation: z.enum(['COMPRA', 'VENTA']),
   quantity: PositiveNumberSchema.max(100_000, {
     message: 'Quantity cannot exceed 100,000',
   }),
