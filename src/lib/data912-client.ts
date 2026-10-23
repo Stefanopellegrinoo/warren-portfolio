@@ -39,10 +39,13 @@ function normalizePriceToUSD(rawPrice: number): number {
   return rawPrice  // NO CONVERSION — already in ×100 format
 }
 
+// A hung data912 must not hold a request (or a worker run) open forever (S5).
+const DATA912_TIMEOUT_MS = 8_000
+
 /**
  * Fetch ALL corporate bond quotes from data912.com
  */
-export async function fetchAllData912Quotes(signal?: AbortSignal): Promise<Data912RawQuote[]> {
+export async function fetchAllData912Quotes(signal: AbortSignal = AbortSignal.timeout(DATA912_TIMEOUT_MS)): Promise<Data912RawQuote[]> {
   try {
     const response = await fetch('https://data912.com/live/arg_corp', {
       signal,

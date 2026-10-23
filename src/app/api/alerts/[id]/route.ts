@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { z } from 'zod'
+import { serverError } from '@/lib/api/errors'
 
 const updateSchema = z.object({
   active: z.boolean().optional(),
@@ -40,7 +41,7 @@ export async function PATCH(
     .eq('user_id', user.id)
     .select()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return serverError('API /alerts/[id]', error)
 
   if (!data || data.length === 0) {
     return NextResponse.json({ error: 'Alert not found' }, { status: 404 })
@@ -65,7 +66,7 @@ export async function DELETE(
     .eq('id', alertId)
     .eq('user_id', user.id)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return serverError('API /alerts/[id]', error)
 
   return new NextResponse(null, { status: 204 })
 }

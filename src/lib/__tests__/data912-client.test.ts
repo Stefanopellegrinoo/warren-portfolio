@@ -51,7 +51,7 @@ afterEach(() => {
 
 // ── Import after mocks are set up ────────────────────────────────────────────
 
-const { fetchONQuotesWithFallback } = await import('../data912-client')
+const { fetchONQuotesWithFallback, fetchAllData912Quotes, getAvailableCorporateBonds } = await import('../data912-client')
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -211,5 +211,25 @@ describe('fetchONQuotesWithFallback — DB last_price tertiary fallback', () => 
     expect(result.get('AERBD')?.change).toBe(0)
     // DB tier only asked for the ticker Data912 could not provide
     expect(mockIn).toHaveBeenCalledWith('ticker', ['AERBD'])
+  })
+})
+
+// T5 (odd/tasks/security-hardening.md S5): a hung data912 must not hold the request open.
+describe('fetchAllData912Quotes — upstream timeout', () => {
+  it('aborts the data912 call after 8 s when the caller gives no signal', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout')
+
+    await getAvailableCorporateBonds()
+
+    expect(timeout).toHaveBeenCalledWith(8_000)
+    expect(mockGlobalFetch.mock.calls[0][1].signal).toBe(timeout.mock.results[0].value)
+  })
+
+  it("keeps a caller's own signal", async () => {
+    const signal = new AbortController().signal
+
+    await fetchAllData912Quotes(signal)
+
+    expect(mockGlobalFetch.mock.calls[0][1].signal).toBe(signal)
   })
 })

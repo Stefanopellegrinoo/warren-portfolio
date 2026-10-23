@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
 import { MarketDataError } from '@/lib/market-data/types'
+import { GENERIC_ERROR } from '@/lib/api/errors'
 
 // ── Mock provider ────────────────────────────────────────────────────────────
 const mockGetCandles = vi.fn()
@@ -144,9 +145,12 @@ describe('GET /api/klines', () => {
   it('returns 500 when provider throws PROVIDER_UNAVAILABLE', async () => {
     const { GET } = await import('./route')
     mockGetCandles.mockRejectedValue(new MarketDataError('PROVIDER_UNAVAILABLE', 'Yahoo down'))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
 
     const res = await GET(makeRequest({ ticker: 'AAPL', interval: '1d' }))
     expect(res.status).toBe(500)
+    // S6: the provider's text is logged, never echoed.
+    expect(await res.json()).toEqual({ error: GENERIC_ERROR })
   })
 
   it('returns 429 when provider throws RATE_LIMITED', async () => {

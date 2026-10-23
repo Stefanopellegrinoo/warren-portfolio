@@ -3,6 +3,7 @@ import { validateQueryParams, validationErrorResponse } from '@/lib/api/validati
 import { CashMovementQuerySchema } from '@/lib/schemas/cash'
 import { PaginatedResponse } from '@/lib/schemas/common'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
+import { serverError } from '@/lib/api/errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,9 +30,7 @@ export async function GET(req: NextRequest) {
 
     const { data: movements, error, count } = await query
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    if (error) return serverError('API /cash/movements', error)
 
     // Calculate pagination metadata
     const page = Math.floor(offset / limit) + 1

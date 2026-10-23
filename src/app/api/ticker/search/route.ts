@@ -2,8 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getMarketDataProvider, MarketDataError } from '@/lib/market-data'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { getCachedRoute, cacheRoute } from '@/lib/redis'
+import { rateLimit, tooManyRequests } from '@/lib/rate-limit'
+import { serverError } from '@/lib/api/errors'
 
 const CACHE_TTL_SECONDS = 600
+// q becomes a Redis key and Redis runs noeviction: an unbounded q could fill it (S5).
+const MAX_Q_LENGTH = 64
+const ROUTE_LIMIT = 60
+const ROUTE_WINDOW_SEC = 60
 
 // Map MarketDataError codes to HTTP status codes
 function errorToStatus(err: MarketDataError): number {
@@ -19,6 +25,9 @@ function errorToStatus(err: MarketDataError): number {
 export async function GET(req: NextRequest) {
   const authResult = await requireUser()
   if (isAuthFailure(authResult)) return authResult.error
+  if (!(await rateLimit(`rl:ticker-search:${authResult.user.id}`, ROUTE_LIMIT, ROUTE_WINDOW_SEC))) {
+    return tooManyRequests(ROUTE_WINDOW_SEC)
+  }
 
   const { searchParams } = req.nextUrl
   const rawQ = searchParams.get('q')
@@ -31,6 +40,9 @@ export async function GET(req: NextRequest) {
 
   if (q.length < 2) {
     return NextResponse.json({ error: 'q must be at least 2 characters' }, { status: 400 })
+  }
+  if (q.length > MAX_Q_LENGTH) {
+    return NextResponse.json({ error: `q must be at most ${MAX_Q_LENGTH} characters` }, { status: 400 })
   }
 
   const cacheKey = `ticker-search:${q}`
@@ -53,11 +65,11 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ results })
   } catch (err) {
-    if (err instanceof MarketDataError) {
+    // A 404 or 429 tells the user something; a provider failure is internal (S6).
+    if (err instanceof MarketDataError && errorToStatus(err) !== 500) {
       console.error(`[/api/ticker/search] ${err.code}: ${err.message}`)
       return NextResponse.json({ error: err.message }, { status: errorToStatus(err) })
     }
-    console.error('[/api/ticker/search]', err)
-    return NextResponse.json({ error: 'Failed to search tickers' }, { status: 500 })
+    return serverError('/api/ticker/search', err)
   }
 }

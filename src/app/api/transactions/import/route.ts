@@ -9,12 +9,20 @@ import { requireUser, isAuthFailure } from '@/lib/api-auth'
 export const dynamic = 'force-dynamic'
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+// The 5 MB file plus multipart overhead. Checked from the header because
+// req.formData() / req.json() buffer the whole body before any other check runs.
+const MAX_BODY_BYTES = MAX_UPLOAD_BYTES + 1024 * 1024
 
 export async function POST(req: NextRequest) {
   try {
     const authResult = await requireUser()
     if (isAuthFailure(authResult)) return authResult.error
     const { user } = authResult
+
+    // ponytail: a chunked body without content-length skips this; the 5 MB file check still runs after parsing.
+    if (Number(req.headers.get('content-length') ?? 0) > MAX_BODY_BYTES) {
+      return NextResponse.json({ error: 'Request too large (max 5 MB)' }, { status: 413 })
+    }
 
     const contentType = req.headers.get('content-type') ?? ''
     let transactions: TransactionInput[] = []

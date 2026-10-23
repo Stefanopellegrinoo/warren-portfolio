@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
 import { requireUser, isAuthFailure } from "@/lib/api-auth"
+import { serverError } from "@/lib/api/errors"
 import type { ChartDrawing } from "@/lib/types/drawings"
 
 const querySchema = z.object({
@@ -65,7 +66,7 @@ export async function GET(req: NextRequest) {
     .eq("ticker", parsed.data.ticker.toUpperCase())
     .order("created_at", { ascending: true })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return serverError("API /drawings", error)
   return NextResponse.json((data ?? []).map(rowToDrawing))
 }
 
@@ -100,7 +101,7 @@ export async function POST(req: NextRequest) {
     .select()
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return serverError("API /drawings", error)
   return NextResponse.json(rowToDrawing(data), { status: 201 })
 }
 
@@ -120,6 +121,6 @@ export async function DELETE(req: NextRequest) {
     .eq("user_id", user.id)
     .eq("ticker", ticker.toUpperCase())
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return serverError("API /drawings", error)
   return new NextResponse(null, { status: 204 })
 }

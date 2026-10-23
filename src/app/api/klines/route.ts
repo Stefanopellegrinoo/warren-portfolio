@@ -3,6 +3,7 @@ import { getMarketDataProvider, MarketDataError } from '@/lib/market-data'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { cached } from '@/lib/cache'
 import type { CandleInterval } from '@/lib/market-data'
+import { serverError } from '@/lib/api/errors'
 
 // Days of history per interval when the caller sends no `days`. Intraday limits
 // are Yahoo's (15m: 60 days, 1h: 730 days); null = full history.
@@ -63,11 +64,11 @@ export async function GET(req: NextRequest) {
     )
     return NextResponse.json(candles)
   } catch (err) {
-    if (err instanceof MarketDataError) {
+    // A 404 or 429 tells the user something; a provider failure is internal (S6).
+    if (err instanceof MarketDataError && errorToStatus(err) !== 500) {
       console.error(`[/api/klines] ${err.code}: ${err.message}`)
       return NextResponse.json({ error: err.message }, { status: errorToStatus(err) })
     }
-    console.error('[/api/klines]', err)
-    return NextResponse.json({ error: 'Failed to fetch klines' }, { status: 500 })
+    return serverError('/api/klines', err)
   }
 }

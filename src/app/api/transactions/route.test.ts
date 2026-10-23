@@ -220,3 +220,45 @@ describe('POST /api/transactions — the core refuses a sale of more than held (
     expect(mockInvalidate).not.toHaveBeenCalled()
   })
 })
+
+describe('POST /api/transactions — 500s are generic, domain errors keep their text (S6)', () => {
+  beforeEach(() => {
+    mockGetCatalogued.mockResolvedValue({ ticker: 'UN' })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  it('a database failure answers the generic message, never its text', async () => {
+    const { POST } = await import('./route')
+    const { normalizeError } = await import('@/lib/errors')
+    const { GENERIC_ERROR } = await import('@/lib/api/errors')
+    mockProcessTransaction.mockRejectedValue(normalizeError({ code: '42P01', message: 'relation "transactions" does not exist' }))
+
+    const res = await POST(makeRequest(validBody))
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: GENERIC_ERROR })
+  })
+
+  it('a RAISE EXCEPTION from process_transaction_atomic (P0001) keeps its message and its 500', async () => {
+    const { POST } = await import('./route')
+    const { normalizeError } = await import('@/lib/errors')
+    const message = 'Transaction failed: Insufficient position: cannot sell 2000 UN (SQLSTATE: P0001)'
+    mockProcessTransaction.mockRejectedValue(normalizeError({ code: 'P0001', message }))
+
+    const res = await POST(makeRequest({ ...validBody, operation: 'VENTA', quantity: 2000 }))
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: message })
+  })
+
+  it('the import-in-progress guard keeps its message and its 500', async () => {
+    const { POST } = await import('./route')
+    const message = 'Hay una importación masiva en curso para este usuario. Por favor, espere a que finalice para realizar cambios manuales.'
+    mockProcessTransaction.mockRejectedValue(new Error(message))
+
+    const res = await POST(makeRequest(validBody))
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: message })
+  })
+})

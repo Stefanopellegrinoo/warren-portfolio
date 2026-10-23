@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
+import { serverError } from '@/lib/api/errors'
 
 export async function GET(req: NextRequest) {
   const auth = await requireUser()
@@ -17,7 +18,7 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await query.order('created_at', { ascending: false })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return serverError('API /price-alerts', error)
 
   return NextResponse.json({ alerts: data ?? [] })
 }
@@ -57,7 +58,7 @@ export async function POST(req: NextRequest) {
     .select()
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return serverError('API /price-alerts', error)
 
   return NextResponse.json({ alert: data }, { status: 201 })
 }

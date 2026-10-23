@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { invalidateUserCache } from '@/lib/redis'
+import { serverError } from '@/lib/api/errors'
 
 const VALID_OPERATORS = ['crosses_above', 'crosses_below'] as const
 
@@ -98,7 +99,7 @@ export async function DELETE(
     .eq('id', alertId)
     .eq('user_id', user.id)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return serverError('API /price-alerts/[id]', error)
 
   return new NextResponse(null, { status: 204 })
 }

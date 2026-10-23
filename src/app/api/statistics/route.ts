@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { fetchQuotes } from '@/lib/yahoo-finance'
 import { getCachedRoute, cacheRoute } from '@/lib/redis'
 import { normalizeError } from '@/lib/errors'
+import { serverError } from '@/lib/api/errors'
 import { getFullPortfolio } from '@/lib/portfolio-engine'
 import { getDerivedSeries } from '@/lib/derived-series'
 import { ledgerFlows } from '@/lib/derive-history'
@@ -219,7 +220,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(responseData)
 
   } catch (err) {
-    console.error(err)
-    return NextResponse.json({ error: normalizeError(err).message }, { status: 500 })
+    return serverError('Statistics', err)
   }
 }

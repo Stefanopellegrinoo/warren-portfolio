@@ -27,7 +27,10 @@ services:
     image: ghcr.io/stefanopellegrinoo/warren-portfolio:latest
     restart: unless-stopped
     ports:
-      - "3033:3000"
+      # Loopback only: the warren-cloudflared tunnel runs with --network host and targets
+      # localhost:3033. Docker's iptables rules bypass ufw, so a bare "3033:3000" would
+      # listen on the public IP and skip Cloudflare.
+      - "127.0.0.1:3033:3000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:

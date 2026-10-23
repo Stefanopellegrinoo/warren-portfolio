@@ -13,6 +13,12 @@ vi.mock('@/lib/api-auth', () => ({
   isAuthFailure: mockIsAuthFailure,
 }))
 
+const mockRateLimit = vi.fn()
+vi.mock('@/lib/rate-limit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/rate-limit')>()),
+  rateLimit: (...a: unknown[]) => mockRateLimit(...a),
+}))
+
 function makeRequest(params: Record<string, string>) {
   const url = new URL('http://localhost/api/tickers/resolve')
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v))
@@ -23,6 +29,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockRequireUser.mockResolvedValue({ user: { id: 'user-1' }, supabase: {} })
   mockIsAuthFailure.mockReturnValue(false)
+  mockRateLimit.mockResolvedValue(true)
 })
 
 describe('GET /api/tickers/resolve', () => {
@@ -76,6 +83,27 @@ describe('GET /api/tickers/resolve', () => {
     const res = await GET(makeRequest({ ticker: 'NVDA' }))
 
     expect(res.status).toBe(401)
+    expect(mockResolve).not.toHaveBeenCalled()
+  })
+
+  // T5 (odd/tasks/security-hardening.md S5)
+  it('returns 429 once the user is over 60 resolutions per 60 s', async () => {
+    const { GET } = await import('./route')
+    mockRateLimit.mockResolvedValue(false)
+
+    const res = await GET(makeRequest({ ticker: 'NVDA' }))
+
+    expect(mockRateLimit).toHaveBeenCalledWith('rl:tickers-resolve:user-1', 60, 60)
+    expect(res.status).toBe(429)
+    expect(mockResolve).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 when the ticker is longer than 64 characters, so it never becomes a cache key', async () => {
+    const { GET } = await import('./route')
+
+    const res = await GET(makeRequest({ ticker: 'A'.repeat(65) }))
+
+    expect(res.status).toBe(400)
     expect(mockResolve).not.toHaveBeenCalled()
   })
 })

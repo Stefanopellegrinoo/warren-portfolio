@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
+import { serverError } from '@/lib/api/errors'
 
 export async function GET(
   req: NextRequest,
@@ -19,7 +20,7 @@ export async function GET(
     .eq('user_id', user.id)
     .maybeSingle()
 
-  if (alertError) return NextResponse.json({ error: alertError.message }, { status: 500 })
+  if (alertError) return serverError('API /alerts/[id]/history', alertError)
   if (!alert) return NextResponse.json({ error: 'Alert not found' }, { status: 404 })
 
   const { data, error } = await supabase
@@ -29,7 +30,7 @@ export async function GET(
     .order('sent_at', { ascending: false })
     .limit(20)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return serverError('API /alerts/[id]/history', error)
 
   return NextResponse.json({ history: data ?? [] })
 }

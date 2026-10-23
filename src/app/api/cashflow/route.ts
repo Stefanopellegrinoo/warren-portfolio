@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import type { Cashflow } from '@/types'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { invalidateUserCache } from '@/lib/redis'
+import { serverError } from '@/lib/api/errors'
 
 const ALLOWED_CATEGORIES = [
   'Alquiler', 'Servicios', 'Supermercado', 'Transporte', 'Salud',
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest) {
     .eq('user_id', user.id)
     .order('date', { ascending: false })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return serverError('API /cashflow', error)
 
   const cashflowData = (data as Cashflow[] | null) ?? []
   const pending = cashflowData.filter((c: Cashflow) => c.status === 'PENDIENTE')
@@ -70,7 +71,7 @@ export async function POST(req: NextRequest) {
     .select()
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return serverError('API /cashflow', error)
   await invalidateUserCache(user.id)
   return NextResponse.json(data, { status: 201 })
 }
@@ -98,7 +99,7 @@ export async function PATCH(req: NextRequest) {
     .select()
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return serverError('API /cashflow', error)
   if (!data) return NextResponse.json({ error: 'No encontrado' }, { status: 404 })
   await invalidateUserCache(user.id)
   return NextResponse.json(data)
@@ -118,7 +119,7 @@ export async function DELETE(req: NextRequest) {
     .eq('id', id)
     .eq('user_id', user.id)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return serverError('API /cashflow', error)
   await invalidateUserCache(user.id)
   return NextResponse.json({ ok: true })
 }

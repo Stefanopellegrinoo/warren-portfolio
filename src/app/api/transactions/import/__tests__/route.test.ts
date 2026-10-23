@@ -41,3 +41,25 @@ describe('POST /api/transactions/import (file upload)', () => {
     expect(read).toHaveBeenCalledOnce()
   })
 })
+
+// T5 (L4 a): the body is refused from its declared size, before anything buffers it.
+describe('POST /api/transactions/import (request size)', () => {
+  it.each(['multipart/form-data; boundary=x', 'application/json'])(
+    'rejects a %s body declared over 6 MB with 413 without reading it',
+    async (contentType) => {
+      const formData = vi.fn()
+      const json = vi.fn()
+
+      const res = await POST({
+        url: 'http://test.local/api/transactions/import',
+        headers: new Headers({ 'content-type': contentType, 'content-length': String(6 * 1024 * 1024 + 1) }),
+        formData,
+        json,
+      } as never)
+
+      expect(res.status).toBe(413)
+      expect(formData).not.toHaveBeenCalled()
+      expect(json).not.toHaveBeenCalled()
+    },
+  )
+})

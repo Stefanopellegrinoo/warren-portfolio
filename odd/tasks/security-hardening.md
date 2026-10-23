@@ -25,13 +25,14 @@ Specs S1-S11 come from the 2026-10-23 audit (two read-only audits plus live chec
 - [x] T2 · S2 · inline · import status owner check + 5 MB upload cap · `d755548` (RED 3/4 → GREEN 4/4)
 - [x] T3 · S3 · inline · `images.unoptimized: true` · `897a3b4` (no test: one config line; guard read in `next/dist/server/next-server.js:166`)
 - [x] T4 · S4 · inline · migration 048 function grants · `9e65eea` (RED ENOENT → GREEN 7/7). APPLIED to prod 2026-10-23 (L5)
-- [ ] T5 · S5 · inline · rate limit + input caps, plus review advisories L4 (a) `content-length` pre-check and (b) 503 on Auth outage
-- [ ] T6 · S6 · inline · generic 500s
-- [ ] T7 · S7 · inline · same-origin redirect
-- [ ] T8 · S8 · inline · security headers (needs browser check)
-- [ ] T9 · S9 · inline · compose port + CI permissions (needs a server-side check by the user)
-- [ ] T10 · S10 · pending decision · Next.js upgrade
-- [ ] T11 · S11 · pending · xlsx
+- [x] T5 · S5 · delegated (writer trigger (a): parallel with T6, disjoint surfaces) · rate limit + input caps, plus review advisories L4 (a) `content-length` pre-check and (b) 503 on Auth outage · `cd274c1` (RED→GREEN per rule, 11 files / 73 tests) · Risk item 3: `requireUser` and `fetchAllData912Quotes` are shared
+- [x] T6 · S6 · delegated (writer trigger (a): parallel with T5) · generic 500s · `33d3e71` (RED 6+1 → GREEN; 18 files / 155 tests) · Risk item 3: the 500 body changes on about 25 routes; domain messages are kept
+- [x] T7 · S7 · inline · same-origin redirect + no OAuth code in logs (L1 "que no haya filtración de tokens") · `ec7c841` (RED 5/10 → GREEN 10/10)
+- [x] T8 · S8 · inline · security headers · `f4131e1` (RED → GREEN 4/4; browser check L7)
+- [x] T9 · S9 · inline · compose port + CI permissions + actions pinned to SHAs · `fecea5e` (no unit test: config; `docker compose config` OK) · Risk item 5: check the site after the deploy
+- [x] T10a · S10 · inline · Next 14.1.0 → 14.2.35. This is the last 14.x and still uses React 18. It fixes CVE-2025-29927 (middleware bypass), the cache-poisoning and Server Actions SSRF advisories, and several DoS advisories. Risk item 5 · `6f78c1f` (suite 195/1957 green, tsc clean, prod build OK)
+- [ ] T10b · S10 · pending user decision · Next 15.5.x: the remaining advisories are only fixed there, and it needs React 19.
+- [x] T11 · S11 · inline · `xlsx` 0.18.5 → SheetJS 0.20.3 from the official CDN tarball. npm has no fixed release. The only user is `transactions/import/route.ts:47`. Risk item 5 · `c827c6e` (round-trip parse with `cellDates` OK; the lockfile keeps sha512 integrity)
 
 Owner actions (outside the code): rotate the Redis password found in public git history (`36a1bd3`, `6e45266`, `b8c2828`) if that Redis still exists. Turn on leaked-password protection in Supabase Auth. Decide whether signups stay open (7 users today).
 
@@ -47,3 +48,67 @@ Owner actions (outside the code): rotate the Redis password found in public git 
   - Before deploy, a live probe on prod with a forged cookie for a non-existent user id: `GET /api/quote?tickers=AAPL` returned 200, without a cookie 401, and `/_next/image` returned 200.
   - 048 was applied with `apply_migration` (statements without BEGIN/COMMIT, since the tool is already transactional) and checked with `has_function_privilege`: anon executes none of the four; `authenticated` executes only `process_transaction_atomic`; `service_role` executes all four; `update_setup_performance_atomic` shows `prosecdef=f` and `search_path=public, pg_temp`.
   - The two SECURITY DEFINER advisor lints are gone. These remain: mutable search_path on five INVOKER functions (low) and leaked-password protection (owner action).
+- L6 (2026-10-23, user): "Ahora no lo puedo hacer. Segui con todo esto" (PR #21 stays unmerged for now; continue T5 onward).
+  - Delivery decision: PR #21 stays the reviewed urgent slice. T5+ go on `security/hardening-2`, stacked on `security/hardening`, and its PR is retargeted to `master` once #21 merges. This follows the stacked-to-main pattern without asking, since the user is away. It is recorded here so it can be changed.
+  - Evidence for T5 and T9: the largest watchlist has 6 items. (continued in L7) The `warren-cloudflared` tunnel runs with `--network host` and targets `http://localhost:3033`, so binding the app to 127.0.0.1 keeps the tunnel working. The Oracle Security List does not open 3033 (memory `migracion-oracle-y-ci`), so the bind is defense in depth.
+- L7 (2026-10-23, T5-T11 evidence):
+  - Seam check after both writers: 195 files / 1957 tests pass, `tsc` is clean, and lint shows 0 errors (38 baselined warnings).
+  - Both writer diffs were checked against their surfaces; nothing fell outside.
+  - The production build (Next 14.2.35) was built in a scratch worktree, because the user's own dev server holds `.next` on :3003, and served on :3077.
+  - `curl` on :3077:
+    - All six headers are present and `X-Powered-By` is gone.
+    - `/_next/image` returns 404.
+    - The forged cookie on `/api/quote` returns 401.
+  - The generated `sw.js` has no `apis` cache.
+  - Chromium headless, forged cookie, 8 pages (login, dashboard, trading, ons, statistics, history, cashflow, strategies):
+    - 0 `securitypolicyviolation` events and 0 CSP console errors.
+    - `/trading` reaches `api.binance.com` and `wss://stream.binance.com:9443`.
+    - A login with a fake email sends `POST /auth/v1/token` to Supabase and gets 400 with no violation.
+  - Not exercised: charts filled with real data, because there was no valid session. Canvas drawing needs no CSP allowance, and recharts inline styles are covered by `style-src 'unsafe-inline'`.
+  - The lockfile churn came from CRLF: `package-lock.json` is CRLF, and npm 11 rewrites it as LF. CRLF was restored, so each dependency diff shows only its real lines.
+  - T6 judgment calls left as is:
+    - klines PROVIDER_UNAVAILABLE 500s are now generic. This includes the deliberate "No historical CCL rate…" message, which is still logged.
+    - Domain P0001 messages keep their status 500; moving them to 4xx is a separate decision.
+    - The engines' import-lock and ON-suffix guards are matched by text (`ENGINE_GUARDS`); a typed error would be the follow-up.
+- L8 (2026-10-23, independent verifier on T5-T11, baseline `security/hardening`):
+  - S5, S8, S9, S10a and S11 PASS; S1 has not regressed.
+  - Blocker B1, S7 regression from `ec7c841`: `next=/..//evil.com` (also `/.//`, `/a/..//`, `/%2e%2e//`) produced the path `//evil.com`, which the route resolves again as a host and redirects to evil.com.
+  - Blocker B2, S6, pre-existing: `ticker/search` answered provider failures with their raw text.
+  - Correction batch `1786dac`:
+    - The callback now checks the final value against the origin.
+    - `ticker/search` follows the klines pattern through `serverError`.
+    - Advisory 1 is folded in: a hung Redis hung every authenticated route through the limiter, which now gives up after 250 ms and allows the request.
+    - RED 6 → GREEN; the suite is 195 files / 1962 tests and `tsc` is clean.
+  - One recheck, limited to these items, is pending.
+  - Remaining advisories, not fixed:
+    - (2) after a Redis outage longer than ~1.2 s, the existing `getRedis` client stops retrying, so limits stay off until the process restarts;
+    - (3) a watchlist with more than 50 Yahoo tickers would get a 400 (the largest today has 6);
+    - (4) `quote` checks the cap before auth, so it returns 400 instead of 401 (cosmetic);
+    - (5) pre-existing: next-pwa's `cross-origin` rule caches Supabase `GET /auth/v1/user` JSON for up to 1 h on the device; this is user metadata, not a token;
+    - (6) pre-existing: the Excel `toISOString()` day shift east of UTC.
+- L9 (2026-10-23, recheck + native review):
+  - The single recheck of `1786dac` passed all three items.
+    - B1: every dot-segment payload now lands on `/dashboard`, with the real callback GET.
+    - B2: `ticker/search` 500s are generic, while 404 and 429 keep their messages.
+    - Hang: with Redis paused, `rateLimit` answers in 251 ms and `requireUser` in 273 ms. After unpausing, counting resumes.
+  - Native review (lineage `review-2f570a5fb2aec185`, lenses risk, resilience and readability, the user granted consent) was approved and acknowledged; authority burned.
+  - Two of its advisories were fixed in `68cba31`: the misplaced JSDoc, and `requireUser` not saying that it rate-limits.
+  - Advisories left as notes:
+    - x-forwarded-for fallback: trusted only behind the tunnel, which S9 enforces.
+    - `ons/search` has its own 500 body instead of `serverError`.
+    - Domain errors kept by `serverError` are not logged.
+    - The `quote` per-user limit of 60/min against polling. Today: one `useQuote` at 15 s plus the watchlist at 30 s.
+    - The rate-limit hang adds up to 250 ms of latency.
+    - Builds now depend on `cdn.sheetjs.com` being reachable.
+  - From the recheck:
+    - Calls queued during a hang still run once Redis returns; the window TTL bounds the effect.
+    - The first connection on a cold start may exceed 250 ms and let one request through.
+- L10 (2026-10-23, deploy of #21):
+  - The user merged PR #21 (`! gh pr merge 21 --merge`), and CI master test, image and deploy all succeeded.
+  - Live on https://warren.fratellipastas.com with a forged cookie for a non-existent user:
+    - `/api/quote` 401 (it was 200 before the deploy);
+    - `/api/positions` 401;
+    - `/api/transactions/import/status` 401.
+  - Also live: no cookie 401, `/_next/image` 404 (it was 200), `/auth/login` 200, `/api/health` ok (redis, supabase and worker fresh).
+  - PR #22 was retargeted to `master` and is mergeable, with 13 commits.
+  - Not verified by me: a real logged-in session on prod, since I have no credentials. The user should open the app once; the independent verifier covered valid sessions with the real libraries.

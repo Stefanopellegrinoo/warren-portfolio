@@ -31,6 +31,12 @@ vi.mock('@/lib/api-auth', () => ({
   isAuthFailure: mockIsAuthFailure,
 }))
 
+const mockRateLimit = vi.fn()
+vi.mock('@/lib/rate-limit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/rate-limit')>()),
+  rateLimit: (...a: unknown[]) => mockRateLimit(...a),
+}))
+
 function makeRequest(params: Record<string, string>) {
   const url = new URL('http://localhost/api/quote')
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v))
@@ -52,6 +58,33 @@ describe('GET /api/quote', () => {
     providerFactoryThrows = false
     mockRequireUser.mockResolvedValue({ user: { id: 'user-1' }, supabase: {} })
     mockIsAuthFailure.mockReturnValue(false)
+    mockRateLimit.mockResolvedValue(true)
+  })
+
+  // T5 (odd/tasks/security-hardening.md S5)
+  it('returns 429 once the user is over 60 quote calls per 60 s', async () => {
+    const { GET } = await import('./route')
+    mockRateLimit.mockResolvedValue(false)
+
+    const res = await GET(makeRequest({ ticker: 'AAPL' }))
+
+    expect(mockRateLimit).toHaveBeenCalledWith('rl:quote:user-1', 60, 60)
+    expect(res.status).toBe(429)
+    expect(mockGetQuote).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 for more than 50 distinct tickers and counts a repeated ticker once', async () => {
+    const { GET } = await import('./route')
+    mockGetQuote.mockResolvedValue(fakeQuote)
+    const fifty = Array.from({ length: 50 }, (_, i) => `T${i}`)
+
+    const over = await GET(makeRequest({ tickers: [...fifty, 'T50'].join(',') }))
+    expect(over.status).toBe(400)
+    expect(mockGetQuote).not.toHaveBeenCalled()
+
+    const atLimit = await GET(makeRequest({ tickers: [...fifty, 't0', 'T1'].join(',') }))
+    expect(atLimit.status).toBe(200)
+    expect(mockGetQuote).toHaveBeenCalledTimes(50)
   })
 
   it('caches each ticker for 15 s so several pollers share one Yahoo call', async () => {

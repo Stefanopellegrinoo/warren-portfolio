@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
+import { serverError } from '@/lib/api/errors'
 
 export async function GET(req: NextRequest) {
   const auth = await requireUser()
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest) {
     .order('fired_at', { ascending: true })
     .limit(200)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return serverError('API /signals', error)
 
   return NextResponse.json(data ?? [])
 }

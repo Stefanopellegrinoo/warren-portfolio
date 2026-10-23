@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { fetchONQuotes } from '@/lib/data912-client'
 import { getCachedRoute, cacheRoute } from '@/lib/redis'
 import { normalizeError } from '@/lib/errors'
+import { serverError } from '@/lib/api/errors'
 import { getFullPortfolio } from '@/lib/portfolio-engine'
 import { loadLastCloses } from '@/lib/ledger-now'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
@@ -165,7 +166,6 @@ export async function GET() {
     return NextResponse.json(responseData)
 
   } catch (err) {
-    console.error(err)
-    return NextResponse.json({ error: normalizeError(err).message }, { status: 500 })
+    return serverError('Statistics ONs', err)
   }
 }

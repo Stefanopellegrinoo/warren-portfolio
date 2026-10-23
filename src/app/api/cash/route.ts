@@ -4,6 +4,7 @@ import { addRefreshSummaryJob } from '@/lib/queue'
 import { validateRequest, validationErrorResponse } from '@/lib/api/validation'
 import { CashMovementSchema } from '@/lib/schemas/cash'
 import { normalizeError } from '@/lib/errors'
+import { serverError } from '@/lib/api/errors'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { getFullPortfolio } from '@/lib/portfolio-engine'
 
@@ -35,12 +36,7 @@ export async function POST(request: Request) {
       return validationErrorResponse(error)
     }
 
-    // Handle other errors
-    const err = normalizeError(error)
-    return NextResponse.json(
-      { error: err.message || 'Unknown error' },
-      { status: 500 }
-    )
+    return serverError('API /cash', error)
   }
 }
 
