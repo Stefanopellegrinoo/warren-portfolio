@@ -13,11 +13,13 @@ interface AuthFailure {
 
 export async function requireUser(): Promise<AuthSuccess | AuthFailure> {
   const supabase = createServerClientInstance()
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session?.user) {
+  // getUser() asks the Auth server to verify the JWT; getSession() trusts the
+  // cookie as-is, so a forged cookie would pass (odd/tasks/security-hardening.md S1).
+  const { data: { user }, error } = await supabase.auth.getUser()
+  if (error || !user) {
     return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   }
-  return { supabase, user: session.user }
+  return { supabase, user }
 }
 
 export function isAuthFailure(result: AuthSuccess | AuthFailure): result is AuthFailure {
