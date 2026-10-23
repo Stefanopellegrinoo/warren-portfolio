@@ -232,7 +232,7 @@ describe('OnDetail: implied cable price', () => {
     expect(html).toContain('implícito · línea O ÷ CCL ($1.000,00)')
     expect(html).toContain('Precio implícito: línea O (pesos) ÷ CCL')
     expect(html).toContain('21/10/2026')
-    expect(html).toContain('mismo método que BYMA (CCL implícito de GGAL)')
+    expect(html).not.toContain('GGAL')
   })
 })
 

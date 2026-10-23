@@ -6,8 +6,8 @@
  * WORKER-SAFE: relative value imports only (runs under tsx).
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { cached } from './cache'
-import { getFxRate, type FxKind } from './fx-rates'
+import type { FxKind } from './fx-rates'
+import { getDollarInfo } from './currency'
 import { fetchQuotes } from './yahoo-finance'
 import { localPriceKey } from './data912-client'
 import { buildCurrencyViews, localSymbol, type CurrencyViews, type EnginePosition, type LedgerTrade } from './multicurrency'
@@ -18,7 +18,6 @@ const LEDGER_COLUMNS =
   'ticker, date, created_at, operation, asset_type, quantity, price, commission, ' +
   'trade_currency, trade_quantity, trade_price, trade_commission, fx_mep, fx_ccl'
 const PAGE = 1000
-const FX_TODAY_TTL = 300
 // A trade-date FX falls back to the previous day with a rate; a week covers any holiday run.
 const FX_FALLBACK_DAYS = 10
 
@@ -40,13 +39,15 @@ async function selectAll<T>(page: (from: number, to: number) => PromiseLike<{ da
 }
 
 /**
- * Today's MEP and CCL (the latest fx_rates row) and the CEDEAR ratios, shared by
+ * Today's MEP and CCL (live, from the app's one dollar series) and the CEDEAR ratios, shared by
  * every user. null when a rate is missing: then no view is built, and the
  * Resumen keeps showing the USD figures.
  */
 export async function loadCurrencyContext(supabase: SupabaseClient): Promise<CurrencyContext | null> {
-  const today = argentinaDate()
-  const rate = (kind: FxKind) => cached(`fx:latest:${today}:${kind}`, FX_TODAY_TTL, () => getFxRate(supabase, today, kind))
+  const rate = async (kind: FxKind) => {
+    const live = await getDollarInfo(kind)
+    return live && { rate: live.rate, date: argentinaDate(new Date(live.asOf)) }
+  }
   const [mep, ccl, cedears] = await Promise.all([
     rate('mep'),
     rate('ccl'),

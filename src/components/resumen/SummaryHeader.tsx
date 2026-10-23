@@ -1,6 +1,7 @@
 import { Plus, Upload } from 'lucide-react'
 import type { Currency } from '@/lib/multicurrency'
 import { CURRENCIES } from '@/lib/resumen/currency'
+import { formatNumber } from '@/lib/utils'
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
@@ -21,10 +22,12 @@ export function CurrencySelector({ value, onChange }: { value: Currency; onChang
   )
 }
 
-export default function SummaryHeader({ marketOpen, autoRefresh, countdown, onToggleRefresh, onImport, onNew, currency, onCurrency }: {
+export default function SummaryHeader({ marketOpen, autoRefresh, countdown, onToggleRefresh, onImport, onNew, currency, onCurrency, fx }: {
   /** The selector shows only when the summary carries the three views. */
   currency?: Currency
   onCurrency?: (c: Currency) => void
+  /** Today's dollar in pesos, from the same live series that converts the figures. */
+  fx?: { mep: number; ccl: number }
   marketOpen: boolean
   autoRefresh: boolean
   countdown: number
@@ -48,6 +51,7 @@ export default function SummaryHeader({ marketOpen, autoRefresh, countdown, onTo
               {autoRefresh ? 'Pausar' : 'Reanudar'}
             </button>
           )}
+          {fx && <span className="block tabular-nums">Dólar MEP $ {formatNumber(fx.mep)} · CCL $ {formatNumber(fx.ccl)}</span>}
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-2 max-[819px]:w-full">

@@ -20,6 +20,11 @@ describe('currency selector in the Resumen header', () => {
     for (const label of ['Pesos', 'Dólar MEP', 'Dólar cable']) expect(html).toContain(label)
   })
 
+  it("shows today's MEP and CCL in pesos when the summary carries them", () => {
+    const text = renderToStaticMarkup(<SummaryHeader {...header} fx={{ mep: 1550.25, ccl: 1638.7 }} />).replace(/<[^>]+>/g, '')
+    expect(text).toContain('Dólar MEP $ 1.550,25 · CCL $ 1.638,70')
+  })
+
   it('is not shown when the summary has no views (unchanged header)', () => {
     expect(renderToStaticMarkup(<SummaryHeader {...header} />)).not.toContain('resumen-currency')
   })

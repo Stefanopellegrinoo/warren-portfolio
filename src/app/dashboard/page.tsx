@@ -163,7 +163,7 @@ export default function DashboardPage() {
         onToggleRefresh={() => setAutoRefresh(a => !a)}
         onImport={() => setShowImport(true)}
         onNew={() => { setQuickSell(null); setShowAddTx(true) }}
-        {...(views && { currency, onCurrency: chooseCurrency })}
+        {...(views && { currency, onCurrency: chooseCurrency, fx: { mep: views.fx.mep, ccl: views.fx.ccl } })}
       />
 
       <ReconciliationBanner result={reconciliation} />
