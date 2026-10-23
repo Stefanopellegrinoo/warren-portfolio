@@ -74,3 +74,59 @@ describe('ledgerAt: cash', () => {
     expect(s.cash).toBe(705)
   })
 })
+
+describe('ledgerAt: automatic ON payments', () => {
+  const on = (op: string, q: number, p: number, date: string) => tx('YM42D', op, op === 'VENTA' ? -q : q, p, date, { asset_type: 'ON' })
+  // 2026-06-02 is a Tuesday: the holder at the close of Monday 06-01 is paid.
+  const schedules = new Map([['YM42D', [{ date: '2026-06-02', ren: 3.5, amo: 0 }, { date: '2026-12-02', ren: 3.5, amo: 25 }]]])
+
+  it('pays the coupon to the holder at the close of the business day before the payment', () => {
+    const s = ledgerAt([on('COMPRA', 200, 100, '2026-04-01')], [], '2026-06-30', { schedules })
+    expect(s.cash).toBeCloseTo(700)
+    expect(s.income).toEqual([{ ticker: 'YM42D', date: '2026-06-02', kind: 'coupon', amount: 700, source: 'schedule' }])
+  })
+
+  it('a buy on the payment day is not paid; a sale on the payment day still is', () => {
+    expect(ledgerAt([on('COMPRA', 200, 100, '2026-06-02')], [], '2026-06-30', { schedules }).income).toEqual([])
+    const sold = ledgerAt([on('COMPRA', 200, 100, '2026-04-01'), on('VENTA', 200, 101, '2026-06-02')], [], '2026-06-30', { schedules })
+    expect(sold.income.map(i => i.amount)).toEqual([700])
+  })
+
+  it('nothing after the date', () => {
+    expect(ledgerAt([on('COMPRA', 200, 100, '2026-04-01')], [], '2026-06-01', { schedules }).income).toEqual([])
+  })
+
+  it('an amortization returns capital: cash in, cost reduced by the amortized share, quantity unchanged', () => {
+    const s = ledgerAt([on('COMPRA', 200, 100, '2026-04-01')], [], '2026-12-31', { schedules })
+    expect(s.income.map(i => [i.kind, i.amount])).toEqual([['coupon', 700], ['coupon', 700], ['amortization', 5000]])
+    expect(s.holdings[0]).toMatchObject({ quantity: 200, costBasis: 15000 })
+    expect(s.cash).toBeCloseTo(6400)
+  })
+
+  it('the user can correct a payment amount or mark it not received', () => {
+    const overrides = [
+      { ticker: 'YM42D', date: '2026-06-02', kind: 'coupon' as const, amount: 690 },
+      { ticker: 'YM42D', date: '2026-12-02', kind: 'coupon' as const, amount: null },
+    ]
+    const s = ledgerAt([on('COMPRA', 200, 100, '2026-04-01')], [], '2026-12-31', { schedules, overrides })
+    expect(s.income.map(i => [i.date, i.kind, i.amount, i.source])).toEqual([
+      ['2026-06-02', 'coupon', 690, 'user'],
+      ['2026-12-02', 'amortization', 5000, 'schedule'],
+    ])
+  })
+
+  it('a payment no source has, entered by the user, is paid if the user held the bond; an amortization lowers the cost', () => {
+    const overrides = [
+      { ticker: 'YM42D', date: '2026-09-01', kind: 'coupon' as const, amount: 100 },
+      { ticker: 'YM42D', date: '2026-09-01', kind: 'amortization' as const, amount: 2000 },
+      { ticker: 'YM42D', date: '2026-03-01', kind: 'coupon' as const, amount: 50 },
+    ]
+    const s = ledgerAt([on('COMPRA', 200, 100, '2026-04-01')], [], '2026-09-30', { schedules, overrides })
+    expect(s.income.map(i => [i.date, i.kind, i.amount, i.source])).toEqual([
+      ['2026-06-02', 'coupon', 700, 'schedule'],
+      ['2026-09-01', 'coupon', 100, 'user'],
+      ['2026-09-01', 'amortization', 2000, 'user'],
+    ])
+    expect(s.holdings[0].costBasis).toBeCloseTo(18000)
+  })
+})

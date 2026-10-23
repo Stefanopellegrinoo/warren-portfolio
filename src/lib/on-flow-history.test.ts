@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import fixture from './__fixtures__/byma-oracle.json'
 import { NON_PERIODIC_FC, PERIOD_MONTHS, accrualStartOf } from './byma-educa'
-import { deriveBackwardFlows, loadFlowRows, mergeFlowHistory, type DerivationInput } from './on-flow-history'
+import { deriveBackwardFlows, loadFlowRows, mergeFlowHistory, scheduleGaps, type DerivationInput } from './on-flow-history'
 
 const CS50: DerivationInput = {
   est: 'Tasa Fija',
@@ -194,5 +194,53 @@ describe('loadFlowRows', () => {
   it('throws on a read error instead of returning a partial schedule', async () => {
     const sb = stub({ on_flow_history: { message: 'boom' }, on_cashflows: [] })
     await expect(loadFlowRows(sb as never, 'X')).rejects.toThrow(/on_flow_history: boom/)
+  })
+})
+
+describe('mergeFlowHistory with bonistas rows', () => {
+  const TODAY = '2026-10-21'
+  const b = (date: string, ren: number, amo = 0) => ({ date, ren, amo, firstSeenAsOf: TODAY, lastSeenAsOf: TODAY, source: 'bonistas' })
+  const h = (date: string, ren: number) => ({ date, ren, amo: 0, firstSeenAsOf: '2026-01-01', lastSeenAsOf: date })
+  const base = { today: TODAY, inCatalog: true, current: [], derived: [] }
+
+  it('a past bonistas row is a confirmed report, not a stale BYMA listing', () => {
+    expect(mergeFlowHistory({ ...base, history: [b('2025-08-25', 4.0469, 12.5)] })).toEqual([
+      { date: '2025-08-25', ren: 4.0469, amo: 12.5, provenance: 'bonistas' },
+    ])
+  })
+
+  it('a bonistas row within 7 days of a BYMA flow is the same payment on another date: BYMA wins', () => {
+    const out = mergeFlowHistory({ ...base, history: [b('2026-06-02', 3.49), h('2026-05-29', 3.4904)] })
+    expect(out.map(f => [f.date, f.provenance])).toEqual([['2026-05-29', 'byma-history']])
+  })
+
+  it('bonistas wins over a derived flow near the same date', () => {
+    const derived = [{ date: '2026-05-31', ren: 3.5, amo: 0, provenance: 'derived' as const }]
+    const out = mergeFlowHistory({ ...base, history: [b('2026-06-02', 3.49)], derived })
+    expect(out.map(f => [f.date, f.provenance])).toEqual([['2026-06-02', 'bonistas']])
+  })
+})
+
+describe('scheduleGaps', () => {
+  const terms = { frequency: 'Semestral', est: 'Tasa Fija', issueDate: '2023-03-10', accrualStart: '2026-09-10', residualPct: 100 }
+  const f = (date: string, amo = 0) => ({ date, ren: 3.975, amo, provenance: 'bonistas' as const })
+
+  it('names every expected payment date in the window that no source covers', () => {
+    const flows = [f('2025-03-10'), f('2025-09-10'), f('2026-03-10'), f('2026-09-10')]
+    expect(scheduleGaps(terms, flows, '2024-01-01', '2026-10-21')).toEqual({ missingDates: ['2024-03-10', '2024-09-10'], unexplainedAmortization: 0 })
+  })
+
+  it('a covered payment a few days off its schedule date is not missing', () => {
+    const flows = [f('2026-03-12'), f('2026-09-08')]
+    expect(scheduleGaps(terms, flows, '2026-01-01', '2026-10-21').missingDates).toEqual([])
+  })
+
+  it('residual below what the known amortizations explain is an unexplained amortization', () => {
+    const flows = [f('2026-03-10', 25)]
+    expect(scheduleGaps({ ...terms, residualPct: 50 }, flows, '2026-01-01', '2026-10-21')).toEqual({ missingDates: ['2026-09-10'], unexplainedAmortization: 25 })
+  })
+
+  it('a bond without periodic coupons expects no dates', () => {
+    expect(scheduleGaps({ ...terms, frequency: 'Vencimiento' }, [], '2024-01-01', '2026-10-21').missingDates).toEqual([])
   })
 })
