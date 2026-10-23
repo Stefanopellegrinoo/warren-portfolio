@@ -147,3 +147,8 @@ Owner actions (outside the code): rotate the Redis password found in public git 
   - Advisory 2, a behavior change to confirm with the user: the derived-series Rava and bonistas backfills now really write `on_price_history` and `on_flow_history`. They were silently denied before (L15).
   - Advisory 4: apply 049 without its BEGIN/COMMIT through `apply_migration`, as with 048.
   - Others are noted: `loadFlowRows` is dead code; the rollback restores only SELECT.
+- L18 (2026-10-23, T12-T13 native review): lineage `review-76eb98e5939e54ee` (lenses risk and resilience) was approved and acknowledged. It left 3 informational warnings:
+  - R1, the derived-series backfills write shared ON tables with the service role. This is the same as L17 advisory 2: the values come from external feeds, not from the user, and are throttled. It stays pending the user's confirmation.
+  - R4, the rollback restores only SELECT. Already noted in L17.
+  - R4, the worker imports `supabase-server`. Checked and dismissed: `price-worker`, `summary-cache` and `user-portfolios` already imported it before this change, the 5 worker modules load under `tsx` outside Next, and the worker container has `SUPABASE_SERVICE_ROLE_KEY`.
+  - Next step: push `security/market-data`, open a PR, and have the user merge and deploy. Then check pg_stat_statements deltas, and apply 049 only with an explicit OK.
