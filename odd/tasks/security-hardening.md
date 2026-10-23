@@ -86,3 +86,20 @@ Owner actions (outside the code): rotate the Redis password found in public git 
     - (4) `quote` checks the cap before auth, so it returns 400 instead of 401 (cosmetic);
     - (5) pre-existing: next-pwa's `cross-origin` rule caches Supabase `GET /auth/v1/user` JSON for up to 1 h on the device; this is user metadata, not a token;
     - (6) pre-existing: the Excel `toISOString()` day shift east of UTC.
+- L9 (2026-10-23, recheck + native review):
+  - The single recheck of `1786dac` passed all three items.
+    - B1: every dot-segment payload now lands on `/dashboard`, with the real callback GET.
+    - B2: `ticker/search` 500s are generic, while 404 and 429 keep their messages.
+    - Hang: with Redis paused, `rateLimit` answers in 251 ms and `requireUser` in 273 ms. After unpausing, counting resumes.
+  - Native review (lineage `review-2f570a5fb2aec185`, lenses risk, resilience and readability, the user granted consent) was approved and acknowledged; authority burned.
+  - Two of its advisories were fixed in `68cba31`: the misplaced JSDoc, and `requireUser` not saying that it rate-limits.
+  - Advisories left as notes:
+    - x-forwarded-for fallback: trusted only behind the tunnel, which S9 enforces.
+    - `ons/search` has its own 500 body instead of `serverError`.
+    - Domain errors kept by `serverError` are not logged.
+    - The `quote` per-user limit of 60/min against polling. Today: one `useQuote` at 15 s plus the watchlist at 30 s.
+    - The rate-limit hang adds up to 250 ms of latency.
+    - Builds now depend on `cdn.sheetjs.com` being reachable.
+  - From the recheck:
+    - Calls queued during a hang still run once Redis returns; the window TTL bounds the effect.
+    - The first connection on a cold start may exceed 250 ms and let one request through.
