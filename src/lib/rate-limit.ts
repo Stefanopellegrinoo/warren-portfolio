@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server'
 import { getRedis, ensureRedisConnected } from '@/lib/redis'
 
+// Every authenticated route waits on this; a local Redis answers in a few ms.
+const REDIS_TIMEOUT_MS = 250
+
 /**
  * Fixed-window rate limit: allows `max` hits per `windowSec` for `key`.
  * Returns true when the request may proceed. The Redis client adds `warren:`.
  */
-// Every authenticated route waits on this; a local Redis answers in a few ms.
-const REDIS_TIMEOUT_MS = 250
-
 export async function rateLimit(key: string, max: number, windowSec: number): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const check = (async () => {

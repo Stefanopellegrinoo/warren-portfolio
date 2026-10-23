@@ -16,6 +16,7 @@ interface AuthFailure {
   error: NextResponse
 }
 
+/** Verifies the session with the Auth server, then applies the per-user rate limit (401 / 503 / 429). */
 export async function requireUser(): Promise<AuthSuccess | AuthFailure> {
   const supabase = createServerClientInstance()
   // getUser() asks the Auth server to verify the JWT; getSession() trusts the
