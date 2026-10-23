@@ -11,12 +11,18 @@ export async function GET(req: NextRequest) {
   try {
     const authResult = await requireUser()
     if (isAuthFailure(authResult)) return authResult.error
+    const { user } = authResult
 
     // Validate query params
     const { jobId } = validateQueryParams(ImportStatusQuerySchema, req.url)
 
     const queue = getImportQueue()
     const job = await Job.fromId(queue, jobId)
+
+    // Job ids are sequential: never show another user's job.
+    if (job && job.data?.userId !== user.id) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    }
 
     if (!job) {
       // Job may have been cleaned up by BullMQ (completed more than keepJobs time ago)
