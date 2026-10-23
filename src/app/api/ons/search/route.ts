@@ -1,15 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClientInstance } from '@/lib/supabase-server'
 import { getAvailableCorporateBonds } from '@/lib/data912-client'
+import { rateLimit, tooManyRequests, clientIp } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
+
+// Public, unauthenticated: limited per IP, and `limit` is clamped (S5).
+const IP_LIMIT = 60
+const IP_WINDOW_SEC = 60
+const DEFAULT_LIMIT = 10
+const MAX_LIMIT = 50
 
 /**
  * Search endpoint for corporate bonds (ONs) - READ ONLY
  * 
  * Query params:
  * - q: search query (ticker or name)
- * - limit: max results (default: 10)
+ * - limit: max results (default: 10, clamped to 1..50)
  * 
  * EXACT flow:
  * 1. User searches for ON (e.g., types "AER" in frontend)
@@ -19,13 +26,17 @@ export const dynamic = 'force-dynamic'
  * 5. NO auto-insert - bonds are only saved when user creates a transaction
  */
 export async function GET(req: NextRequest) {
+  if (!(await rateLimit(`rl:ons-search:${clientIp(req)}`, IP_LIMIT, IP_WINDOW_SEC))) {
+    return tooManyRequests(IP_WINDOW_SEC)
+  }
   try {
     const supabase = createServerClientInstance()
     // No auth required for search - public endpoint
 
     const { searchParams } = new URL(req.url)
     const query = searchParams.get('q')?.toUpperCase().trim() || ''
-    const limit = parseInt(searchParams.get('limit') || '10')
+    const requested = parseInt(searchParams.get('limit') ?? '', 10)
+    const limit = Number.isNaN(requested) ? DEFAULT_LIMIT : Math.min(Math.max(requested, 1), MAX_LIMIT)
 
     if (!query || query.length < 2) {
       return NextResponse.json({ 
@@ -74,11 +85,8 @@ export async function GET(req: NextRequest) {
       count: allResults.length
     })
 
-  } catch (error: any) {
+  } catch (error) {
     console.error('[ON Search] Error:', error)
-    return NextResponse.json(
-      { error: 'Failed to search bonds', details: error.message },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to search bonds' }, { status: 500 })
   }
 }

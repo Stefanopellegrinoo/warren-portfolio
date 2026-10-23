@@ -1,10 +1,18 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createServerClientInstance } from '@/lib/supabase-server'
 import { normalizeError } from '@/lib/errors'
+import { rateLimit, tooManyRequests, clientIp } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
+// Public, unauthenticated: limited per IP (S5).
+const IP_LIMIT = 60
+const IP_WINDOW_SEC = 60
+
+export async function GET(req: NextRequest) {
+  if (!(await rateLimit(`rl:activos:${clientIp(req)}`, IP_LIMIT, IP_WINDOW_SEC))) {
+    return tooManyRequests(IP_WINDOW_SEC)
+  }
   try {
     const supabase = createServerClientInstance()
     

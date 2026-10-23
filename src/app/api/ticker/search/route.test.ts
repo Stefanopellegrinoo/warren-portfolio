@@ -29,6 +29,12 @@ vi.mock('@/lib/redis', () => ({
   cacheRoute: mockCacheRoute,
 }))
 
+const mockRateLimit = vi.fn()
+vi.mock('@/lib/rate-limit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/rate-limit')>()),
+  rateLimit: (...a: unknown[]) => mockRateLimit(...a),
+}))
+
 function makeRequest(params: Record<string, string>) {
   const url = new URL('http://localhost/api/ticker/search')
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v))
@@ -48,6 +54,30 @@ describe('GET /api/ticker/search', () => {
     mockGetCachedRoute.mockResolvedValue(null) // cache miss by default
     mockCacheRoute.mockResolvedValue(undefined)
     mockSearchTickers.mockResolvedValue(fakeResults)
+    mockRateLimit.mockResolvedValue(true)
+  })
+
+  // T5 (odd/tasks/security-hardening.md S5)
+  it('returns 429 once the user is over 60 searches per 60 s', async () => {
+    mockRateLimit.mockResolvedValue(false)
+
+    const { GET } = await import('./route')
+    const res = await GET(makeRequest({ q: 'app' }))
+
+    expect(mockRateLimit).toHaveBeenCalledWith('rl:ticker-search:user-1', 60, 60)
+    expect(res.status).toBe(429)
+    expect(mockSearchTickers).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 when q is longer than 64 characters, so it never becomes a cache key', async () => {
+    const { GET } = await import('./route')
+
+    const over = await GET(makeRequest({ q: 'a'.repeat(65) }))
+    expect(over.status).toBe(400)
+    expect(mockGetCachedRoute).not.toHaveBeenCalled()
+
+    const atLimit = await GET(makeRequest({ q: 'a'.repeat(64) }))
+    expect(atLimit.status).toBe(200)
   })
 
   it('returns 401 when not authenticated', async () => {
