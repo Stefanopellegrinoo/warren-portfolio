@@ -112,3 +112,13 @@ Owner actions (outside the code): rotate the Redis password found in public git 
   - Also live: no cookie 401, `/_next/image` 404 (it was 200), `/auth/login` 200, `/api/health` ok (redis, supabase and worker fresh).
   - PR #22 was retargeted to `master` and is mergeable, with 13 commits.
   - Not verified by me: a real logged-in session on prod, since I have no credentials. The user should open the app once; the independent verifier covered valid sessions with the real libraries.
+- L11 (2026-10-23, deploy of #22):
+  - The user merged PR #22, and CI master test, image and deploy all succeeded.
+  - The site loads through the tunnel with the loopback-bound port: health 200, login 200, `/` and `/dashboard` 307 to login.
+  - Live headers: CSP, X-Frame-Options, nosniff, Referrer-Policy, HSTS and Permissions-Policy, and no X-Powered-By.
+  - A forged cookie gets 401, and `/_next/image` 404.
+  - Per-IP limit on `/api/activos`: exactly 60×200, then 429 with `Retry-After: 60`.
+    - A client-set `cf-connecting-ip` is rejected by Cloudflare with 403.
+    - A spoofed `x-forwarded-for` still gets 429, so the key is the real client IP from Cloudflare, not `unknown`.
+  - Chromium on the live `/auth/login`: 0 CSP violations and no page errors.
+  - Open: T10b (Next 15, user decision) and the owner actions in the header.
