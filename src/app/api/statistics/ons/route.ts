@@ -6,15 +6,11 @@ import type { ONPosition, ONClosedTrade } from '@/types'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { enrichPositionsForStats } from '@/lib/position-stats'
 import { computeTradeStats } from '@/lib/trade-stats'
-import { fetchSnapshotSeries } from '@/lib/snapshot-series'
+import { getDerivedSeries } from '@/lib/derived-series'
+import { ledgerFlows } from '@/lib/derive-history'
 import { fetchFlowTransactions } from '@/lib/flow-transactions'
 import { fetchIncomeMovements } from '@/lib/cash-flows'
-import {
-  computeUniverseRiskMetrics,
-  metricsRows,
-  projectHistory,
-} from '@/lib/asset-universe'
-import { summarizeProvenance } from '@/lib/series-provenance'
+import { computeUniverseRiskMetrics } from '@/lib/asset-universe'
 
 export const dynamic = 'force-dynamic'
 
@@ -114,13 +110,16 @@ export async function GET() {
     const usdExposure = totalPortfolioValue
     const arsExposure = 0
 
-    const snapshots = await fetchSnapshotSeries(supabase, user.id)
+    // The derived series (ledger core + market data) and the core's automatic ON payments:
+    // coupons as CUPON income, amortizations as ON sales.
+    const derived = await getDerivedSeries(supabase, user.id)
+    const automatic = ledgerFlows(derived.income)
 
     let txRows
     let income
     try {
-      txRows = await fetchFlowTransactions(supabase, user.id)
-      income = await fetchIncomeMovements(supabase, user.id)
+      txRows = [...(await fetchFlowTransactions(supabase, user.id)), ...automatic.transactions]
+      income = [...(await fetchIncomeMovements(supabase, user.id)), ...automatic.income]
     } catch (txErr) {
       console.error('[Statistics ONs] flow inputs fetch failed:', normalizeError(txErr).message)
       return NextResponse.json({ error: 'Failed to fetch flow inputs' }, { status: 500 })
@@ -130,7 +129,7 @@ export async function GET() {
     // ON buys/sells from transactions); pass none. Income (coupons/dividends)
     // DOES cross this boundary — a coupon moves value out of the ONs
     // universe into cash, so it must be declared or the payment reads as a loss.
-    const risk = computeUniverseRiskMetrics(snapshots, 'ons', { externalFlows: [], transactions: txRows, income })
+    const risk = computeUniverseRiskMetrics(derived.rows, 'ons', { externalFlows: [], transactions: txRows, income })
 
     const responseData = {
       maxDrawdown: risk.maxDrawdown,
@@ -165,9 +164,6 @@ export async function GET() {
       // interval on the ONs tab — the universe most likely to have one, with 4
       // measured points and one already dropped for its null breakdown.
       drawdownIntervalsSkipped: risk.drawdownIntervalsSkipped,
-      provenance: summarizeProvenance(
-        projectHistory(metricsRows(snapshots, 'ons'), 'ons')
-      ),
       // Lifetime coupons, a NUMBER beside the metrics rather than a series:
       // the ONs chart shows what the bonds are worth, and the income that
       // left the universe is declared as having left.
@@ -176,7 +172,8 @@ export async function GET() {
         .reduce((sum, m) => sum + m.amount, 0),
     }
 
-    await cacheRoute(cacheKey, responseData, 300)
+    // A degraded series (stale bars, a failed side read) is served but never pinned for 5 minutes.
+    if (!derived.degraded) await cacheRoute(cacheKey, responseData, 300)
 
     return NextResponse.json(responseData)
 
