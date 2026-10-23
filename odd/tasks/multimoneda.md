@@ -93,3 +93,14 @@ Branch: `feat/multimoneda`. Delivery: ask-on-risk. Test runner: vitest. Design: 
   - Parent fixed the wrapping of long peso amounts. Note: b30b98b was committed while one test failed (the grep in the chain hid the exit code); fixed in the next commit.
 - L11 (2026-10-22): stage C pushed master 3a24dd1..8a0beba; CI 39817569293 test+image+deploy success. Container freshness not verified (no public route changed in C); the user sees the selector in Resumen if the new version runs.
 - L12 (2026-10-22, user): "ahora en el portfolio dice que tengo 8k masomenos mas … En caja tengo 83.578,96 , creo que aca esta la diff". Found: SPY ratio 20→60 in cedears (fixed in DB with OK); ONs match broker; cash treated as cable inflated MEP view ~4.8k (fixed, commit above); app cash 86.597,42 vs broker 83.578,96 (3.018 data difference, user can adjust).
+- L13 (2026-10-22, session closed by the user: "cerrmos esta sesion"): everything deployed up to master 197b928.
+  - Data fixes done in the DB with the user's OK:
+    - SPY ratio 20→60;
+    - DIS added as a CEDEAR (ratio 12; BYMA symbol DISN);
+    - 7 review rows resolved (VST corrected by the user);
+    - cash adjustments merged into one RETIRO 2.959,36; balance 83.578,96.
+  - Open:
+    - Telegram env in prod;
+    - daily ratio-drift alert;
+    - BYMA symbol mapping (DIS→DISN, BRK-B→BRKB);
+    - ON % / US$ formatting.

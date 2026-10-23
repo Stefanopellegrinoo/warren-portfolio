@@ -17,6 +17,8 @@
     --info: #1d4f8c; --info-soft: #e5edf7; --info-dot: #3b72b8;
     --ok: #2a6630; --ok-soft: #e4efe2; --ok-dot: #3f8c45;
     --neutral: #57514a; --neutral-soft: #ece9e3; --neutral-dot: #8f887e;
+    /* Categorical chart series, fixed order; validated for color-vision deficiency (dataviz validator). */
+    --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a;
     --shadow-pop: 0 1px 2px rgb(28 26 23 / 0.06), 0 8px 24px -6px rgb(28 26 23 / 0.16);
     --shadow-toast: 0 2px 4px rgb(28 26 23 / 0.08), 0 12px 32px -8px rgb(28 26 23 / 0.24);
 
@@ -38,6 +40,7 @@
       --info: #92b8ec; --info-soft: #182639; --info-dot: #5b8fd4;
       --ok: #8fcb8c; --ok-soft: #182a1a; --ok-dot: #5aa65f;
       --neutral: #b6b0a7; --neutral-soft: #2a2825; --neutral-dot: #7a746b;
+      --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70;
       --shadow-pop: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px -6px rgb(0 0 0 / 0.6);
       --shadow-toast: 0 2px 4px rgb(0 0 0 / 0.4), 0 12px 32px -8px rgb(0 0 0 / 0.7);
     }
@@ -54,6 +57,7 @@
     --info: #92b8ec; --info-soft: #182639; --info-dot: #5b8fd4;
     --ok: #8fcb8c; --ok-soft: #182a1a; --ok-dot: #5aa65f;
     --neutral: #b6b0a7; --neutral-soft: #2a2825; --neutral-dot: #7a746b;
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70;
     --shadow-pop: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px -6px rgb(0 0 0 / 0.6);
     --shadow-toast: 0 2px 4px rgb(0 0 0 / 0.4), 0 12px 32px -8px rgb(0 0 0 / 0.7);
   }
@@ -127,3 +131,26 @@
 .glow-amber { box-shadow: 0 0 40px rgba(245, 158, 11, 0.08); }
 .glow-emerald { box-shadow: 0 0 40px rgba(16, 185, 129, 0.08); }
 .text-glow-amber { text-shadow: 0 0 20px rgba(245, 158, 11, 0.4); }
+
+/* Resumen: phone shows every holding, then the rest;
+   wide screens keep holdings in the main column with the rest beside them. */
+/* minmax(0, 1fr): a wide table scrolls inside its box instead of stretching the page. */
+.resumen-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "holdings" "chart" "dist" "moves"; }
+@media (min-width: 820px) {
+  .resumen-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas: "holdings holdings" "chart chart" "dist moves";
+  }
+}
+@media (min-width: 1440px) {
+  .resumen-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+    grid-template-rows: auto 1fr auto;
+    grid-template-areas: "holdings dist" "holdings moves" "chart moves";
+  }
+  /* All columns asked for: the table takes the full width. */
+  .resumen-grid.is-table {
+    grid-template-rows: auto auto 1fr;
+    grid-template-areas: "holdings holdings" "chart dist" "chart moves";
+  }
+}

@@ -1,44 +1,53 @@
+import { TrendingDown, TrendingUp } from 'lucide-react'
 import { formatNumber, formatPct } from '@/lib/utils'
 import type { Headline } from '@/lib/resumen/currency'
-import { SectionHead } from './ui'
-import ValueChart from './ValueChart'
 
 const tone = (n: number) => (n > 0 ? 'text-ok' : n < 0 ? 'text-danger' : 'text-ink')
 
-export default function ValueSection({ figures: f, notes = [] }: { figures: Headline; notes?: string[] }) {
+function Figure({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <section aria-labelledby="h-valor">
-      <SectionHead id="h-valor" title="Valor de la cartera" action={{ href: '/statistics', label: 'Rendimiento' }} />
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 pb-1 pt-5">
-        <strong className="font-serif text-[2rem] font-normal leading-[1.1] tracking-[-0.01em] tabular-nums max-[819px]:text-2xl">
-          {f.prefix} {formatNumber(f.total)}
-        </strong>
-        <span className={`font-medium tabular-nums ${tone(f.dayPnl)}`}>
-          {formatNumber(f.dayPnl, { sign: true })} <span className="whitespace-nowrap">({formatPct(f.dayPnlPct)})</span> <span className="font-normal text-ink-3">{f.dayLabel}</span>
-        </span>
+    <div className="min-w-0">
+      <dt className="text-[13px] text-ink-3">{label}</dt>
+      <dd className="mt-1 text-lg font-semibold tabular-nums leading-tight">{children}</dd>
+    </div>
+  )
+}
+
+/** The answer to "how much do I have and how did today go", above everything else. */
+export default function ValueSection({ figures: f }: { figures: Headline }) {
+  const DayIcon = f.dayPnl < 0 ? TrendingDown : TrendingUp
+  return (
+    <section aria-labelledby="h-valor" className="rounded-lg border border-line bg-surface p-5 lg:p-6">
+      <div className="grid gap-6 min-[1180px]:grid-cols-[minmax(0,1.3fr)_minmax(0,2fr)] min-[1180px]:items-end">
+        <div className="min-w-0">
+          <h2 id="h-valor" className="text-[13px] font-medium text-ink-3">Valor de la cartera</h2>
+          <strong className="mt-1 block font-serif text-[2.5rem] font-normal leading-[1.05] tracking-[-0.015em] tabular-nums max-[480px]:text-[2rem] lg:text-5xl">
+            {f.prefix} {formatNumber(f.total)}
+          </strong>
+          <p className={`mt-3 inline-flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md px-2.5 py-1.5 text-base font-semibold tabular-nums ${f.dayPnl < 0 ? 'bg-danger-soft' : f.dayPnl > 0 ? 'bg-ok-soft' : 'bg-neutral-soft'} ${tone(f.dayPnl)}`}>
+            <DayIcon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden="true" />
+            <span className="whitespace-nowrap">{formatNumber(f.dayPnl, { sign: true })}</span>{' '}
+            <span className="whitespace-nowrap">({formatPct(f.dayPnlPct)})</span>
+            {/* The chip reads as today's move; a screen reader needs the word. */}
+            <span className="sr-only">hoy</span>
+          </p>
+        </div>
+
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-4 border-t border-line pt-5 sm:grid-cols-3 min-[1180px]:border-l min-[1180px]:border-t-0 min-[1180px]:pl-6 min-[1180px]:pt-0">
+          <Figure label="Resultado abierto">
+            <span className={tone(f.openPnl)}>
+              <span className="whitespace-nowrap">{formatNumber(f.openPnl, { sign: true })}</span>{' '}
+              <small className="whitespace-nowrap text-sm font-medium">{formatPct(f.openPnlPct)}</small>
+            </span>
+          </Figure>
+          <Figure label={f.realizedLabel}>
+            <span className={tone(f.realized)}>{formatNumber(f.realized, { sign: true })}</span>
+          </Figure>
+          <div className="col-span-2 sm:col-span-1">
+            <Figure label="Capital invertido">{formatNumber(f.capital)}</Figure>
+          </div>
+        </dl>
       </div>
-      <dl className={`grid grid-cols-3 gap-4 pb-5 pt-3 max-[819px]:grid-cols-2 ${notes.length ? '' : 'border-b border-line'}`}>
-        <div>
-          <dt className="text-[13px] text-ink-3">Resultado abierto</dt>
-          <dd className={`text-base font-medium tabular-nums ${tone(f.openPnl)}`}>
-            {formatNumber(f.openPnl, { sign: true })}<small className="ml-1 whitespace-nowrap text-[13px] font-normal">{formatPct(f.openPnlPct)}</small>
-          </dd>
-        </div>
-        <div>
-          <dt className="text-[13px] text-ink-3">{f.realizedLabel}</dt>
-          <dd className={`text-base font-medium tabular-nums ${tone(f.realized)}`}>{formatNumber(f.realized, { sign: true })}</dd>
-        </div>
-        <div className="max-[819px]:col-span-2">
-          <dt className="text-[13px] text-ink-3">Capital invertido</dt>
-          <dd className="text-base font-medium tabular-nums">{formatNumber(f.capital)}</dd>
-        </div>
-      </dl>
-      {notes.length > 0 && (
-        <div className="grid gap-1 border-b border-line pb-4 text-[13px] text-ink-3">
-          {notes.map(n => <p key={n}>{n}</p>)}
-        </div>
-      )}
-      <ValueChart />
     </section>
   )
 }

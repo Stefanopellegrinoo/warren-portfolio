@@ -1,5 +1,5 @@
 import type { Position, ONPosition, PortfolioSummary } from '@/types'
-import { formatNumber, formatPct } from '@/lib/utils'
+import { formatNumber } from '@/lib/utils'
 import { fmtVn } from '@/lib/on-format'
 import type { Currency, CurrencyViews } from '@/lib/multicurrency'
 
@@ -25,12 +25,38 @@ export interface HoldingRow {
   estimated?: boolean
 }
 
-export interface ReviewItem { ticker: string; name: string | null; tone: 'danger' | 'warn'; chip: string; why: string; href: string }
+export type SortKey = 'ticker' | 'quantity' | 'price' | 'avgCost' | 'invested' | 'value' | 'dayChangePct' | 'pnl' | 'pnlPct' | 'weightPct'
+export interface Sort { key: SortKey; dir: 'asc' | 'desc' }
+export const DEFAULT_SORT: Sort = { key: 'value', dir: 'desc' }
 
-/** Accumulated loss that puts a position in "Para revisar". */
-export const LOSS_THRESHOLD = -0.30
-/** The day's biggest drop is flagged only past this. */
-export const DAY_DROP_THRESHOLD = -0.03
+/** Rows without the figure (no price yet) go last whichever way you sort. */
+export function sortRows(rows: HoldingRow[], sort: Sort): HoldingRow[] {
+  return [...rows].sort((a, b) => {
+    const av = a[sort.key], bv = b[sort.key]
+    if (av === null && bv === null) return 0
+    if (av === null) return 1
+    if (bv === null) return -1
+    const cmp = typeof av === 'string' ? av.localeCompare(bv as string) : (av as number) - (bv as number)
+    return sort.dir === 'asc' ? cmp : -cmp
+  })
+}
+
+/** Same column flips the direction; a new one starts A→Z for names, biggest first for figures. */
+export function nextSort(sort: Sort, key: SortKey): Sort {
+  if (sort.key === key) return { key, dir: sort.dir === 'asc' ? 'desc' : 'asc' }
+  return { key, dir: key === 'ticker' ? 'asc' : 'desc' }
+}
+
+const GROUPS: { kind: HoldingKind; title: string }[] = [
+  { kind: 'stock', title: 'Acciones' },
+  { kind: 'cedear', title: 'CEDEARs' },
+  { kind: 'on', title: 'Obligaciones negociables' },
+]
+
+/** One group per asset type, in a fixed order, keeping the rows' order inside each. */
+export function groupRows(rows: HoldingRow[]): { kind: HoldingKind; title: string; items: HoldingRow[] }[] {
+  return GROUPS.map(g => ({ ...g, items: rows.filter(r => r.kind === g.kind) }))
+}
 
 const num = (x: number | undefined): number | null => (typeof x === 'number' && isFinite(x) ? x : null)
 
@@ -100,47 +126,22 @@ export function buildHoldings(input: {
   return rows.sort((a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity))
 }
 
-export function reviewItems(rows: HoldingRow[]): ReviewItem[] {
-  const losses = rows
-    .filter(r => r.pnlPct !== null && r.pnlPct <= LOSS_THRESHOLD)
-    .sort((a, b) => a.pnlPct! - b.pnlPct!)
-    .map((r): ReviewItem => ({
-      ticker: r.ticker,
-      name: r.name,
-      tone: 'danger',
-      chip: formatPct(r.pnlPct, { digits: 1 }),
-      why: `Pierde ${formatNumber(Math.abs(r.pnl ?? 0), { decimals: 0 })} desde la compra`,
-      href: r.href,
-    }))
-
-  const listed = new Set(losses.map(l => l.ticker))
-  const worstDay = rows
-    .filter(r => r.dayChangePct !== null && r.dayChangePct <= DAY_DROP_THRESHOLD)
-    .sort((a, b) => a.dayChangePct! - b.dayChangePct!)[0]
-
-  if (!worstDay || listed.has(worstDay.ticker)) return losses
-  return [...losses, {
-    ticker: worstDay.ticker,
-    name: worstDay.name,
-    tone: 'warn',
-    chip: `${formatPct(worstDay.dayChangePct, { digits: 1 })} hoy`,
-    why: 'La mayor caída del día en tu cartera',
-    href: worstDay.href,
-  }]
-}
-
 export function distribution(
   summary: PortfolioSummary,
   views?: CurrencyViews | null,
   currency?: Currency,
+  /** The holdings in the same currency; the summary only knows stocks and CEDEARs together. */
+  rows: HoldingRow[] = [],
 ): { label: string; pct: number; value: number }[] {
   const t = views && currency
     ? { total: views.totals.value[currency], stocks: views.totals.stocks[currency], cash: views.totals.cash[currency], ons: views.totals.ons[currency] }
     : { total: summary.total_market_value, stocks: summary.stocks.market_value, cash: summary.cash.balance, ons: summary.ons.market_value }
+  const cedears = rows.reduce((s, r) => s + (r.kind === 'cedear' ? r.value ?? 0 : 0), 0)
   const pct = (v: number) => (t.total > 0 ? (v / t.total) * 100 : 0)
   return [
-    { label: 'Acciones y CEDEARs', value: t.stocks },
-    { label: 'Caja', value: t.cash },
+    { label: 'Acciones', value: t.stocks - cedears },
+    { label: 'CEDEARs', value: cedears },
     { label: 'Obligaciones negociables', value: t.ons },
+    { label: 'Caja', value: t.cash },
   ].map(d => ({ label: d.label, pct: pct(d.value), value: d.value }))
 }

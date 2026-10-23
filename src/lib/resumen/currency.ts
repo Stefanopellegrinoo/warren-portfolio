@@ -1,6 +1,5 @@
 import type { PortfolioSummary } from '@/types'
 import type { Currency, CurrencyViews } from '@/lib/multicurrency'
-import { formatNumber } from '@/lib/utils'
 
 export const CURRENCIES: { id: Currency; label: string; prefix: string }[] = [
   { id: 'ARS', label: 'Pesos', prefix: '$' },
@@ -37,7 +36,6 @@ export interface Headline {
   total: number
   dayPnl: number
   dayPnlPct: number
-  dayLabel: string
   openPnl: number
   openPnlPct: number
   realized: number
@@ -49,7 +47,7 @@ export interface Headline {
 export function headline(summary: PortfolioSummary, views: CurrencyViews | null, currency: Currency): Headline {
   if (!views) {
     return {
-      prefix: 'US$', total: summary.total_market_value, dayPnl: summary.day_pnl, dayPnlPct: summary.day_pnl_pct, dayLabel: 'hoy',
+      prefix: 'US$', total: summary.total_market_value, dayPnl: summary.day_pnl, dayPnlPct: summary.day_pnl_pct,
       openPnl: summary.open_pnl, openPnlPct: summary.open_pnl_pct, realized: summary.realized_pnl, realizedLabel: 'Resultado realizado',
       capital: summary.total_invested + summary.cash.balance,
     }
@@ -58,24 +56,13 @@ export function headline(summary: PortfolioSummary, views: CurrencyViews | null,
   return {
     prefix: CURRENCIES.find(c => c.id === currency)!.prefix,
     total: t.value[currency],
+    // The day's move of each price at today's dollar: the dollar's own move is not in it.
     dayPnl: t.dayChange[currency],
     dayPnlPct: t.dayChangePct[currency],
-    // The day's move of each price at today's dollar: the dollar's own move is not in it.
-    dayLabel: 'hoy, por precio',
     openPnl: t.openPnl[currency],
     openPnlPct: t.openPnlPct[currency],
     realized: t.realized[currency],
     realizedLabel: 'Realizado, con dividendos y cupones',
     capital: t.invested[currency] + t.cash[currency],
   }
-}
-
-export function currencyNotes(views: CurrencyViews | null): string[] {
-  if (!views) return []
-  const notes = [
-    'Los resultados cambian según la moneda: cada operación se convierte con el dólar de su fecha y el valor actual con el de hoy ' +
-      `(MEP $ ${formatNumber(views.fx.mep)}, cable $ ${formatNumber(views.fx.ccl)}).`,
-  ]
-  if (views.estimated) notes.push('Estimado: sin precio en pesos, se usa el precio en dólares por el dólar cable de hoy.')
-  return notes
 }

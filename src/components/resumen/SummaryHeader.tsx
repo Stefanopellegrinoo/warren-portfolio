@@ -38,10 +38,10 @@ export default function SummaryHeader({ marketOpen, autoRefresh, countdown, onTo
     : autoRefresh ? `Mercado abierto. Se actualiza en ${mmss(countdown)}.` : 'Mercado abierto. Actualización en pausa.'
 
   return (
-    <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-      <div>
+    <div className="mb-5 flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
+      <div className="min-w-0">
         <h1 className="font-serif text-[2rem] font-normal leading-tight tracking-[-0.015em] max-[819px]:text-2xl">Tu cartera</h1>
-        <p className="mt-1 text-ink-3">
+        <p className="mt-1 text-[13px] text-ink-3 sm:text-sm">
           <span className="first-letter:uppercase inline-block">{today}</span>. <span aria-live="polite">{status}</span>
           {marketOpen && (
             <button type="button" onClick={onToggleRefresh} className="ml-2 font-medium text-accent-ink underline underline-offset-2 max-[819px]:min-h-11">
@@ -49,15 +49,17 @@ export default function SummaryHeader({ marketOpen, autoRefresh, countdown, onTo
             </button>
           )}
         </p>
-        {currency && onCurrency && <div className="mt-3"><CurrencySelector value={currency} onChange={onCurrency} /></div>}
       </div>
-      <div className="flex gap-2 max-[819px]:w-full">
-        <button type="button" onClick={onImport} className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-line-strong px-4 font-medium hover:bg-hover max-[819px]:min-h-11 max-[819px]:flex-1">
-          <Upload className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />Importar
-        </button>
-        <button type="button" onClick={onNew} className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md bg-primary px-4 font-medium text-primary-on hover:bg-primary-hover max-[819px]:min-h-11 max-[819px]:flex-1">
-          <Plus className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />Nueva operación
-        </button>
+      <div className="flex flex-wrap items-center gap-2 max-[819px]:w-full">
+        {currency && onCurrency && <CurrencySelector value={currency} onChange={onCurrency} />}
+        <div className="flex gap-2 max-[819px]:w-full">
+          <button type="button" onClick={onImport} className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-line-strong px-4 font-medium hover:bg-hover max-[819px]:min-h-11">
+            <Upload className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />Importar
+          </button>
+          <button type="button" onClick={onNew} className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md bg-primary px-4 font-medium text-primary-on hover:bg-primary-hover max-[819px]:min-h-11 max-[819px]:flex-1">
+            <Plus className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />Nueva operación
+          </button>
+        </div>
       </div>
     </div>
   )
