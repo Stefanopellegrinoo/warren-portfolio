@@ -17,6 +17,8 @@ Specs S1-S11 come from the 2026-10-23 audit (two read-only audits plus live chec
 - S8 (headers): CSP, frame-ancestors, nosniff, Referrer-Policy, HSTS and Permissions-Policy are set, `X-Powered-By` is removed, and the PWA does not cache `/api/*`.
 - S9 (infra): the app port is bound to 127.0.0.1, and the CI token has least privilege.
 - S10 (framework): Next.js is moved to a patched release. This is a separate decision because Next 15 means React 19.
+- S12 (market data, direct DB): "Lo que no quiero es que otra persona me robe los endpoints con los datos del mercado" → nobody, anonymous or signed in, can read the market/reference tables directly through Supabase with the public key. Only the server reads them (service role), behind `requireUser` and the rate limits. The app stays open to anyone: "si quiero que la app la use cualquiera". Evidence 2026-10-23: with the anon key from the public JS bundle and no login, PostgREST returned on_terms 260 rows, on_flow_history 1531, on_price_history 2288, on_cashflows 1519, on_yield_checks 721, activos 329 and cedears 325. transactions returned 0 (RLS).
+- S13 (market data, API): every endpoint that serves market data has a per-user (or per-IP when public) limit, and no endpoint hands the whole curated dataset to an anonymous caller.
 - S11 (xlsx): `xlsx@0.18.5`, which has prototype-pollution and ReDoS advisories, is replaced or upgraded.
 
 ## Tasks
@@ -31,6 +33,8 @@ Specs S1-S11 come from the 2026-10-23 audit (two read-only audits plus live chec
 - [x] T8 · S8 · inline · security headers · `f4131e1` (RED → GREEN 4/4; browser check L7)
 - [x] T9 · S9 · inline · compose port + CI permissions + actions pinned to SHAs · `fecea5e` (no unit test: config; `docker compose config` OK) · Risk item 5: check the site after the deploy
 - [x] T10a · S10 · inline · Next 14.1.0 → 14.2.35. This is the last 14.x and still uses React 18. It fixes CVE-2025-29927 (middleware bypass), the cache-poisoning and Server Actions SSRF advisories, and several DoS advisories. Risk item 5 · `6f78c1f` (suite 195/1957 green, tsc clean, prod build OK)
+- [ ] T12 · S12 · inline · server reads market tables with the service role; migration 049 revokes anon/authenticated SELECT · Risk item 2
+- [ ] T13 · S13 · inline · per-user limits on the remaining market endpoints; anonymous catalog routes reviewed
 - [ ] T10b · S10 · pending user decision · Next 15.5.x: the remaining advisories are only fixed there, and it needs React 19.
 - [x] T11 · S11 · inline · `xlsx` 0.18.5 → SheetJS 0.20.3 from the official CDN tarball. npm has no fixed release. The only user is `transactions/import/route.ts:47`. Risk item 5 · `c827c6e` (round-trip parse with `cellDates` OK; the lockfile keeps sha512 integrity)
 
@@ -123,3 +127,5 @@ Owner actions (outside the code): rotate the Redis password found in public git 
   - Chromium on the live `/auth/login`: 0 CSP violations and no page errors.
   - Open: T10b (Next 15, user decision) and the owner actions in the header.
 - L12 (2026-10-23, user): "Anda todo bien." The user logged in with a real account on prod after #21 and #22, which closes the one check left open in L10.
+- L13 (2026-10-23, user): "Pero si quiero que la app la use cualquiera. Lo que no quiero es que otra persona me robe los endpoints con los datos del mercado"
+- L14 (2026-10-23, user): "Ok" (to layers 1 and 2: close direct DB reads of market tables, and per-user limits on market endpoints). The migration and the deploy each need a separate OK. Layer 3 (email confirmation + Turnstile CAPTCHA) needs the user's Cloudflare setup and is deferred.
