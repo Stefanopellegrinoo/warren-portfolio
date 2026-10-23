@@ -32,47 +32,6 @@ export interface FullPortfolio {
 }
 
 /**
- * Legacy pure average cost. The write path and every reader use the ledger core
- * (src/lib/ledger-core.ts) since T5.1; its only caller is portfolio-replay (the snapshot
- * backfill), which T5.2 removes together with this function.
- * 
- * Calculates running weighted average cost correctly:
- * - COMPRA: new_avg = (old_cost_basis + qty*price) / (old_qty + qty)
- * - VENTA:  avg_cost doesn't change — only qty reduces
- * - When qty → 0: position closes, cost basis resets to 0
- */
-export function calculateRunningAvgCost(
-  transactions: Pick<Transaction, 'operation' | 'quantity' | 'price' | 'commission'>[],
-): { avgCost: number; quantity: number; costBasis: number } {
-  let quantity = 0
-  let costBasis = 0
-
-  for (const tx of transactions) {
-    const qty = Math.abs(tx.quantity)
-    const comm = tx.commission || 0
-
-    if (tx.operation === 'COMPRA') {
-      // Net Cost Basis: Include commission
-      costBasis += (qty * tx.price) + comm
-      quantity += qty
-    } else if (tx.operation === 'VENTA') {
-      if (quantity > 0) {
-        const avgCost = costBasis / quantity
-        costBasis -= qty * avgCost
-        quantity -= qty
-        if (quantity < 0.0001) {
-          quantity = 0
-          costBasis = 0
-        }
-      }
-    }
-  }
-
-  const avgCost = quantity > 0.0001 ? costBasis / quantity : 0
-  return { avgCost, quantity, costBasis }
-}
-
-/**
  * Process a new transaction (odd/tasks/nucleo-ledger.md T5.1, S5):
  * 1. A sale is validated by the ledger core on the ledger after the write
  * 2. The RPC inserts the transaction and its linked cash movement — nothing else

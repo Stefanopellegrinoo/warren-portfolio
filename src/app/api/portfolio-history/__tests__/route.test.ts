@@ -22,19 +22,8 @@ vi.mock('@/lib/derived-series', () => ({
   getDerivedSeries: (...args: unknown[]) => mockGetDerivedSeries(...args),
 }))
 
-// Tripwires: the history no longer reads portfolio_snapshots in any form.
-const mockFetchSnapshotSeries = vi.fn()
-vi.mock('@/lib/snapshot-series', () => ({
-  fetchSnapshotSeries: (...args: unknown[]) => mockFetchSnapshotSeries(...args),
-}))
-const mockComputeLiveSnapshotRow = vi.fn()
-const mockSnapshotUser = vi.fn()
-vi.mock('@/lib/portfolio-snapshots', () => ({
-  computeLiveSnapshotRow: (...args: unknown[]) => mockComputeLiveSnapshotRow(...args),
-  snapshotUser: (...args: unknown[]) => mockSnapshotUser(...args),
-}))
-
-const { GET, POST } = await import('../route')
+const route = await import('../route')
+const { GET } = route
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -87,11 +76,9 @@ describe('GET /api/portfolio-history — derived from the ledger core', () => {
     })
   })
 
-  it('never reads portfolio_snapshots: no snapshot series, no live snapshot row, no direct query', async () => {
+  it('never queries a table directly: every row comes from the derived series', async () => {
     mockGetDerivedSeries.mockResolvedValue(series([row(daysAgo(1))]))
     await GET(request())
-    expect(mockFetchSnapshotSeries).not.toHaveBeenCalled()
-    expect(mockComputeLiveSnapshotRow).not.toHaveBeenCalled()
     expect(fakeSupabase.from).not.toHaveBeenCalled()
     expect(mockGetDerivedSeries).toHaveBeenCalledWith(fakeSupabase, 'u1', { fromDate: daysAgo(90) })
   })
@@ -160,12 +147,7 @@ describe('GET /api/portfolio-history — universe parameter', () => {
 })
 
 describe('POST /api/portfolio-history', () => {
-  it('returns a JSON 500 instead of an unhandled rejection when snapshotUser throws', async () => {
-    mockSnapshotUser.mockRejectedValueOnce(new Error('boom'))
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const res = await POST(new Request('http://test.local/api/portfolio-history', { method: 'POST' }) as unknown as NextRequest)
-    expect(res.status).toBe(500)
-    expect(await res.json()).toEqual({ error: 'Internal error' })
-    errSpy.mockRestore()
+  it('no longer exists: there is no snapshot to take, Next answers 405', () => {
+    expect((route as Record<string, unknown>).POST).toBeUndefined()
   })
 })

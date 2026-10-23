@@ -114,24 +114,6 @@ export interface Cashflow {
   created_at: string
 }
 
-export interface PortfolioSnapshot {
-  id: string
-  user_id: string
-  snapshot_date: string
-  total_value: number
-  total_invested: number
-  pnl: number
-  pnl_pct: number
-  /** 'live' = measured by the daily job; 'estimated' = reconstructed by the backfill. */
-  source?: 'live' | 'estimated'
-  /** Per-asset-class breakdown. Absent on rows written before migration 034. */
-  stocks_value?: number
-  stocks_invested?: number
-  ons_value?: number
-  ons_invested?: number
-  cash_value?: number
-}
-
 export interface Quote {
   ticker: string
   price: number

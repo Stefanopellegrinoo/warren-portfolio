@@ -64,10 +64,12 @@ price I have — even if it's stale — instead of breaking the screen.
 
 ## Notes on Concurrency
 
-Positions and cash balance use optimistic locking through a `version` column: a row
-only updates if nobody changed it while the calculation was running, and retries with
-fresh data if it lost the race. Transactions that touch several tables at once go
-through atomic PostgreSQL functions so there's no partial state.
+There is no stored derived state to keep consistent. The ledger (transactions and cash
+movements) is the only source of truth; positions, cost, realized P&L, cash and every
+day of the history are computed from it on read, so a late, edited or deleted operation
+rewrites the past by itself. Writes go through atomic PostgreSQL functions that validate
+and insert ledger rows only, and two sales of the same ticker are serialized with an
+advisory lock so they cannot both pass the "cannot sell more than held" check.
 
 ---
 

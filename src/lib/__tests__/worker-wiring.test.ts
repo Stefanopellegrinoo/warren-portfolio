@@ -20,7 +20,7 @@ vi.mock('bullmq', () => ({
 }))
 vi.mock('../job-health', () => ({ beat: h.beat, alertJobFailure: h.alertJobFailure, recordRefresh: vi.fn() }))
 vi.mock('../queue', () => ({
-  PRICE_QUEUE_NAME: 'price-q', PRICE_REPEAT_JOB_NAME: 'r', SNAPSHOT_JOB_NAME: 's', TICKER_AUDIT_JOB_NAME: 't',
+  PRICE_QUEUE_NAME: 'price-q', PRICE_REPEAT_JOB_NAME: 'r', NIGHTLY_JOB_NAME: 's', TICKER_AUDIT_JOB_NAME: 't',
   IMPORT_QUEUE_NAME: 'import-q',
 }))
 vi.mock('../signals-queue', () => ({ SIGNALS_QUEUE_NAME: 'signals-q' }))
@@ -34,8 +34,7 @@ vi.mock('../yahoo-finance', () => ({
 vi.mock('../data912-client', () => ({ fetchData912Prices: vi.fn() }))
 vi.mock('../supabase-server', () => ({ createServiceClient: () => ({}) }))
 vi.mock('../summary-cache', () => ({ cacheUserSummaries: vi.fn() }))
-vi.mock('../portfolio-snapshots', () => ({
-  snapshotAllUsers: vi.fn(),
+vi.mock('../portfolio-valuation', () => ({
   splitQuotesByAssetClass: () => ({ stockQuotes: new Map(), onQuotes: new Map() }),
 }))
 vi.mock('../portfolio-engine', () => ({ processTransactionBatch: vi.fn() }))

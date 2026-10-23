@@ -24,12 +24,11 @@ Una plataforma web para centralizar y calcular de forma precisa la rentabilidad,
 ## ¿Cómo lo hace? (Arquitectura Técnica)
 Warren funciona bajo una arquitectura orientada a eventos e integridad de datos:
 
-1. **Cálculo de Costo Promedio Ponderado Móvil (FIFO/Average Cost)**: Implementado de forma cronológica secuencial en [portfolio-engine.ts](file:///home/stefano/proyectos/portfolio/warren-portfolio/src/lib/portfolio-engine.ts) y [on-engine.ts](file:///home/stefano/proyectos/portfolio/warren-portfolio/src/lib/on-engine.ts). Resetea contadores y promedios cuando las posiciones se cierran completamente.
-2. **Atomicidad SQL**: Utiliza funciones y RPCs atómicos de PostgreSQL en Supabase (como `process_transaction_atomic` e `import_transactions_atomic`) para garantizar que la inserción de operaciones, movimientos de efectivo e historial ocurran en una única transacción de base de datos sin generar inconsistencias.
-3. **Bloqueo Optimista (Concurrency)**: Utiliza un sistema de control de versiones en base de datos para prevenir colisiones o race conditions ante múltiples actualizaciones simultáneas de una misma posición.
+1. **Núcleo del ledger**: el ledger (`transactions`, `cash_movements` y las correcciones de pagos de ONs) es la única fuente de verdad. Tenencias, costo promedio ponderado, resultado realizado, caja, valor e historial son funciones puras del ledger y los datos de mercado de cada día, calculadas en [ledger-core.ts](src/lib/ledger-core.ts). No se guarda estado derivado: el historial se recalcula en cada lectura, así que una operación cargada tarde, editada o borrada reescribe el pasado.
+2. **Atomicidad SQL**: Utiliza funciones y RPCs atómicos de PostgreSQL en Supabase (como `process_transaction_atomic` e `import_transactions_atomic`) para validar e insertar la operación y su movimiento de efectivo en una única transacción de base de datos. Las ventas de un mismo ticker se serializan con un advisory lock y se validan contra lo que el ledger dice que se tenía a esa fecha.
 4. **Performance & Caching**: Implementa Redis para almacenar caché del resumen del portafolio y estadísticas, con invalidaciones dirigidas e incrementos de versión CAS vía Lua Scripts para evitar lag de datos.
 6. **Resiliencia ante fallos**: Degradación elegante cuando Redis no responde — los workers hacen *fail-fast* (reiniciados automáticamente por Docker) y la cotización de ONs recurre a un fallback de precios en base de datos, evitando quedar sin datos.
-5. **Procesamiento en Segundo Plano**: Usa colas de BullMQ sobre Redis gestionadas por workers independientes ([price-worker.ts](file:///home/stefano/proyectos/portfolio/warren-portfolio/src/lib/price-worker.ts)) para la actualización programada de cotizaciones (Yahoo Finance) e importaciones masivas.
+5. **Procesamiento en Segundo Plano**: Usa colas de BullMQ sobre Redis gestionadas por workers independientes ([price-worker.ts](file:///home/stefano/proyectos/portfolio/warren-portfolio/src/lib/price-worker.ts)) para la actualización programada de cotizaciones (Yahoo Finance), la captura nocturna de precios de cierre de ONs (`on_price_history`) e importaciones masivas.
 
 ---
 
@@ -51,7 +50,7 @@ Warren funciona bajo una arquitectura orientada a eventos e integridad de datos:
 *   Permite modelar portafolios teóricos (setups) y comparar su rendimiento histórico proyectado frente a posiciones reales en un panel de comparación avanzado.
 
 ### 5. Historial y Flujo de Caja
-*   Registro y análisis incremental de operaciones cerradas (`closed_trades`) para ganancias/pérdidas realizadas.
+*   Operaciones cerradas y ganancias/pérdidas realizadas derivadas del ledger en cada lectura.
 *   Gestor de flujos libres de efectivo en el módulo `cashflow` (depósitos, retiros y cobros de dividendos).
 
 ### 6. Importador Masivo (Excel)

@@ -8,7 +8,6 @@ import { postTransaction } from '@/lib/api/post-transaction'
 import { EsNumberInput } from '@/components/ui/es-number-input'
 import type { PostTransactionResult } from '@/lib/api/post-transaction'
 import type { ResolveResult } from '@/lib/ticker-identity'
-import type { RetroactiveWarning } from '@/lib/api/retroactive-warning'
 import { fmtNum } from '@/lib/on-format'
 import { deriveCedearEngineValues, type TradeCurrency } from '@/lib/trade-record'
 
@@ -86,65 +85,6 @@ export function resetFormNavigationState(
 ) {
   setError('')
   setPendingConfirmation(null)
-}
-
-/**
- * Shared success-completion step for every submit path that can carry a
- * retroactive-entry warning (ACCION/CEDEAR via submitGated, the post-409
- * confirm resubmit, and the ON form — four submit paths funneling through
- * three call sites).
- *
- * `onSuccess` ALWAYS runs first, before either branch: the row was already
- * written by the time this runs, so the dashboard behind this modal is stale
- * from that moment on. Only `onClose` is conditional — a warning holds the
- * modal open so the amber panel can name the days it invalidated; closing is
- * deferred to the "Entendido" button instead.
- *
- * `warnings?.[0]` deliberately reads only the FIRST warning: the server
- * helper (`retroactiveWarnings`) returns at most one today, so this is not
- * dropping anything — but if a second warning code is ever added, silently
- * discarding it here is the failure mode to watch for, not a shortcut to
- * "fix" by grabbing all of them without a panel designed to show more than one.
- *
- * Since this is now the single funnel for every path, one shape guard covers
- * all of them: `warning.staleSnapshots` must actually be an array before it
- * is treated as present. The value arrives from `res.json()` typed `any` —
- * PostTransactionResult's `warnings` field is not runtime-validated — so a
- * drifted server shape (e.g. `staleSnapshots` renamed or omitted) would
- * otherwise reach the panel's `.map()` and throw during render, and this
- * modal has no error boundary.
- *
- * Takes the setters as parameters instead of closing over component state so
- * the invariant is unit-testable without a rendering harness, same reasoning
- * as `resetFormNavigationState` above.
- */
-export function completeSubmit(
-  warnings: RetroactiveWarning[] | undefined,
-  onSuccess: () => void,
-  setRetroWarning: (w: RetroactiveWarning) => void,
-  onClose: () => void
-) {
-  onSuccess()
-  const warning = warnings?.[0]
-  if (warning && Array.isArray(warning.staleSnapshots)) { setRetroWarning(warning); return }
-  onClose()
-}
-
-/**
- * The panel used to render one `<li>` per stale date, unbounded — with the
- * ONs measured-only backlog at 28 rows today and growing ~21/month, an entry
- * backdated a few months renders a 40+ item list. This is the always-visible
- * summary line that replaces it; the full list still exists, folded inside a
- * `<details>` the user can expand.
- *
- * Assumes `dates` is already sorted ascending — `staleSnapshots()`
- * (`src/lib/retroactive-entry.ts`) guarantees that, and re-sorting here would
- * silently mask a caller that stopped doing so.
- */
-export function summarizeStaleSnapshots(dates: string[]): string {
-  if (dates.length === 0) return ''
-  if (dates.length === 1) return `1 día medido: ${dates[0]}`
-  return `${dates.length} días medidos, del ${dates[0]} al ${dates[dates.length - 1]}`
 }
 
 // ─────────────────────────────────────────────────────────
@@ -458,7 +398,6 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation>(null)
-  const [retroWarning, setRetroWarning] = useState<RetroactiveWarning | null>(null)
   const dialog = useRef<HTMLDialogElement>(null)
 
   // Native modal dialog: focus trap, Escape and top layer come from the browser.
@@ -620,7 +559,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
     setPendingConfirmation(nextPendingConfirmation(result, payload))
     if (!result.ok && result.kind === 'needs-confirmation') return
     if (!result.ok) throw new Error(result.message)
-    completeSubmit(result.warnings, onSuccess, setRetroWarning, onClose)
+    onSuccess(); onClose()
   }
 
   /**
@@ -651,7 +590,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
         return
       }
       setPendingConfirmation(null)
-      completeSubmit(again.warnings, onSuccess, setRetroWarning, onClose)
+      onSuccess(); onClose()
     } finally {
       setLoading(false)
     }
@@ -710,7 +649,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
       if (!res.ok) {
         throw new Error(payload?.error || 'Error al guardar la operación')
       }
-      completeSubmit(payload?.warnings, onSuccess, setRetroWarning, onClose)
+      onSuccess(); onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido')
     } finally {
@@ -747,8 +686,8 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
   // RENDER
   // ─────────────────────────────────────────────────────────
   const selling = !!initialData
-  const title = retroWarning ? 'Listo' : step === 1 ? 'Nueva operación' : initialData ? `Vender ${initialData.ticker}` : assetClass === 'CASH' ? 'Movimiento de caja' : `Operación con ${CLASS_NAMES[assetClass ?? 'ACCION']}`
-  const subtitle = retroWarning ? 'Revisá el aviso' : step === 1 ? 'Elegí el tipo de activo' : initialData ? 'Confirmá los datos de la venta' : 'Completá los datos'
+  const title = step === 1 ? 'Nueva operación' : initialData ? `Vender ${initialData.ticker}` : assetClass === 'CASH' ? 'Movimiento de caja' : `Operación con ${CLASS_NAMES[assetClass ?? 'ACCION']}`
+  const subtitle = step === 1 ? 'Elegí el tipo de activo' : initialData ? 'Confirmá los datos de la venta' : 'Completá los datos'
   const stockTotal = (stockOp === 'VENTA' ? form.quantity * form.price - (form.commission ?? 0) : form.quantity * form.price + (form.commission ?? 0))
   const onTotal = (onForm.operation === 'VENTA' ? onForm.quantity * onForm.price - (onForm.commission ?? 0) : onForm.quantity * onForm.price + (onForm.commission ?? 0))
 
@@ -762,7 +701,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
     >
       <div className="grid gap-5 p-6 max-[819px]:p-5">
         <div className="flex items-start gap-2">
-          {!retroWarning && step === 2 && (
+          {step === 2 && (
             <button type="button" aria-label="Volver" onClick={() => { setStep(1); resetFormNavigationState(setError, setPendingConfirmation) }} className={`${iconBtnCls} -ml-2`}>
               <ChevronLeft className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />
             </button>
@@ -776,36 +715,8 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
           </button>
         </div>
 
-        {retroWarning && (
-          <>
-            <div role="alert" className="grid gap-2 rounded-md bg-warn-soft px-4 py-3 text-[13px] text-ink">
-              <p className="font-medium text-warn">Operación guardada</p>
-              <p>
-                Tiene fecha <b className="font-medium tabular-nums">{retroWarning.entryDate}</b> y se cargó
-                hoy. Estos días ya se habían medido sin ella, y un día medido no se recalcula:
-              </p>
-              <p className="font-medium tabular-nums">{summarizeStaleSnapshots(retroWarning.staleSnapshots)}</p>
-              {retroWarning.staleSnapshots.length > 1 && (
-                <details>
-                  <summary className="inline-flex min-h-8 cursor-pointer items-center font-medium text-accent-ink">Ver los días</summary>
-                  <ul className="list-disc pl-5 tabular-nums">
-                    {retroWarning.staleSnapshots.map(date => <li key={date}>{date}</li>)}
-                  </ul>
-                </details>
-              )}
-              <p>
-                Tus posiciones y tu efectivo de hoy están bien. Lo que queda desactualizado es el
-                historial medido de esos días.
-              </p>
-            </div>
-            <div className="flex justify-end">
-              <button type="button" onClick={() => { setRetroWarning(null); onClose() }} className={primaryCls}>Entendido</button>
-            </div>
-          </>
-        )}
-
         {/* ── STEP 1: Asset Type Selector ── */}
-        {!retroWarning && step === 1 && (
+        {step === 1 && (
           <ul className="border-y border-line">
             {ASSET_CLASSES.map(ac => (
               <li key={ac.id} className="border-b border-line last:border-b-0">
@@ -827,7 +738,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
         )}
 
         {/* ── STEP 2: Forms ── */}
-        {!retroWarning && step === 2 && assetClass === 'ACCION' && (
+        {step === 2 && assetClass === 'ACCION' && (
           <form onSubmit={handleSubmitAccion} className="grid gap-4">
             <Choice name="tx-op" legend="Operación" options={filteredStockOps} value={stockOp} onChange={setStockOp} />
             {initialData && <Holding held={`${qty(initialData.quantity)} acciones`} price={initialData.price} />}
@@ -886,7 +797,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
           </form>
         )}
 
-        {!retroWarning && step === 2 && assetClass === 'CEDEAR' && (
+        {step === 2 && assetClass === 'CEDEAR' && (
           <form onSubmit={handleSubmitCedear} className="grid gap-4">
             <Choice name="tx-op" legend="Operación" options={filteredStockOps} value={stockOp} onChange={setStockOp} />
             {initialData && (() => {
@@ -960,7 +871,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
           </form>
         )}
 
-        {!retroWarning && step === 2 && assetClass === 'ON' && (
+        {step === 2 && assetClass === 'ON' && (
           <form onSubmit={handleSubmitON} className="grid gap-4">
             <Choice name="tx-op" legend="Operación" options={filteredOnOps} value={onForm.operation} onChange={op => setOnForm(f => ({ ...f, operation: op }))} />
             {/* ON ledger quantity = VN / 100 */}
@@ -1021,7 +932,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
           </form>
         )}
 
-        {!retroWarning && step === 2 && assetClass === 'CASH' && (
+        {step === 2 && assetClass === 'CASH' && (
           <form onSubmit={handleSubmitCash} className="grid gap-4">
             <Choice name="tx-cash" legend="Tipo de movimiento" options={CASH_OPS} value={cashForm.type} onChange={op => setCashForm(f => ({ ...f, type: op }))} />
             <div className={pairCls}>
