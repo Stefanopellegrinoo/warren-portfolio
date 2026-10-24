@@ -45,6 +45,17 @@ describe('patch-drawing-lib', () => {
     expect(src.match(/warrenPointerSize\(t\);/g)).toHaveLength(3)
   })
 
+  it('a touch makes the sizes finger-sized, the mouse brings them back, a dblclick keeps them', () => {
+    const { run, read } = lib('0.6.2')
+    run()
+    // The patched module, run on its own: its size variables after each event.
+    const sizes = new Function(`${read()}; return e => { warrenPointerSize(e); return [et, L, ot, da] }`)() as (e: object) => number[]
+
+    expect(sizes({ pointerType: 'touch' })).toEqual([10, 14, 24, 8])
+    expect(sizes({})).toEqual([10, 14, 24, 8]) // a dblclick is a MouseEvent: no pointer type
+    expect(sizes({ pointerType: 'mouse' })).toEqual([6, 6, 12, 3])
+  })
+
   it('a second install leaves the patched file as it is', () => {
     const { run, read } = lib('0.6.2')
     run()
@@ -72,5 +83,16 @@ describe('patch-drawing-lib', () => {
     expect(result.status).toBe(1)
     expect(result.stderr).toContain('expected "const ot = et + L;" once, found it 0 times')
     expect(read()).not.toContain('warren')
+  })
+
+  it('fails the install with a clear message when the library is not there', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'drawing-lib-'))
+    dirs.push(dir)
+
+    const result = spawnSync(process.execPath, [SCRIPT, join(dir, 'missing')], { encoding: 'utf8' })
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('patch-drawing-lib: lightweight-charts-drawing is not installed')
+    expect(result.stderr).not.toContain('    at ') // a message, not a stack trace
   })
 })
