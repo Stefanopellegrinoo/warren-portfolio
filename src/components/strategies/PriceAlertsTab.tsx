@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Chip, SectionHead } from "@/components/resumen/ui";
 import { formatNumber } from "@/lib/utils";
 import { ErrorNotice, SkeletonRows, ghostButton, iconButton } from "./ui";
+import { PushSettings } from "./PushSettings";
 
 export interface PriceAlert {
   id: string;
@@ -124,6 +125,7 @@ export function PriceAlertsTab() {
   return (
     <section aria-labelledby="h-alertas">
       <SectionHead id="h-alertas" title="Alertas de precio" count={alerts?.length} />
+      <PushSettings />
       {loadError && <div className="pt-3"><ErrorNotice onRetry={load}>No se pudieron cargar las alertas.</ErrorNotice></div>}
       {!loadError && alerts === null && <SkeletonRows label="Cargando alertas" rows={3} />}
       {alerts !== null && alerts.length === 0 && (
@@ -136,7 +138,7 @@ export function PriceAlertsTab() {
         <AlertsList alerts={alerts} busyId={busyId} onDelete={handleDelete} onRearm={handleRearm} />
       )}
       <p className="mt-4 text-[13px] text-ink-3">
-        Las alertas se crean desde Gráficos. Al dispararse dejan de vigilar el precio hasta que las reactivás.
+        Las alertas se crean desde Gráficos. Cuando se disparan te avisamos en los dispositivos donde activaste los avisos, y dejan de vigilar el precio hasta que las reactivás.
       </p>
     </section>
   );
