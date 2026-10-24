@@ -21,7 +21,7 @@ import { DrawingManager, type Drawing } from "lightweight-charts-drawing";
 import { ChevronDown, Eye, EyeOff, Settings2, X } from "lucide-react";
 import { useChartStore, type IndicatorKey } from "@/lib/store/chart-store";
 import { INDICATOR_ORDER, INDICATOR_SPECS } from "@/lib/chart/indicator-specs";
-import { hitTestAlert, type ChartAlert } from "@/lib/chart/alerts";
+import { hitTestAlert, priceDecimals, type ChartAlert } from "@/lib/chart/alerts";
 import { touchDrawing } from "@/lib/chart/touch-drawing";
 import type { Candle, Timeframe } from "@/lib/binance/types";
 import { cn, formatNumber } from "@/lib/utils";
@@ -36,12 +36,18 @@ const TZ = "America/Argentina/Buenos_Aires";
 const INTRADAY: Timeframe[] = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h"];
 const VISIBLE_BARS = 160;
 const DRAG_THRESHOLD_PX = 3;
+// A finger covers more than a mouse pointer: the same sizes as the drawings (scripts/patch-drawing-lib.mjs).
+const TOUCH_HIT_PX = 14;
+const TOUCH_DRAG_PX = 8;
 const LEGEND_OPEN_MAX = 3;
 const TEXT_EDITOR_PX = 224;
 // The text editor stays inside the chart however narrow the screen or close to the edge the text is.
 const editorLeft = (x: number, width: number) => Math.max(8, Math.min(x, width - TEXT_EDITOR_PX - 8));
 
-const priceText = (p: number) => formatNumber(p, { decimals: Math.abs(p) < 1 ? 4 : 2 });
+const priceText = (p: number) => formatNumber(p, { decimals: priceDecimals(p) });
+// An alert keeps the precision the price axis shows: 0,1235 for a coin, not 0,12.
+const roundPrice = (p: number) => Number(p.toFixed(priceDecimals(p)));
+const PHONE = "(max-width: 819px)";
 const asTime = (t: number) => t as UTCTimestamp;
 const PRICE_FORMAT = { type: "custom" as const, formatter: priceText, minMove: 0.0001 };
 
@@ -96,6 +102,7 @@ function syncIndicators(
 	hidden: Record<IndicatorKey, boolean>,
 	config: Parameters<(typeof INDICATOR_SPECS)["ema20"]["lines"]>[1],
 	theme: ChartTheme,
+	phone: boolean,
 ) {
 	const signature = JSON.stringify([enabled, config, theme.ink3]);
 	if (built.signature !== signature) {
@@ -122,9 +129,11 @@ function syncIndicators(
 			);
 			return { key, series };
 		});
-		// The price pane keeps most of the height however many panes there are.
+		// The price pane keeps most of the height however many panes there are; on a phone,
+		// where height is scarce, at least two thirds of it.
 		const panes = chart.panes();
-		panes.forEach((p, i) => p.setStretchFactor(i === 0 ? Math.max(3, panes.length) : 1));
+		const price = phone ? Math.max(3, 2 * (panes.length - 1)) : Math.max(3, panes.length);
+		panes.forEach((p, i) => p.setStretchFactor(i === 0 ? price : 1));
 		built.signature = signature;
 	}
 	for (const { key, series } of built.list) {
@@ -163,7 +172,7 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 
 	// The indicator list starts folded on phones, or when it is long enough to cover the candles.
 	const legendLong = enabled.length > LEGEND_OPEN_MAX;
-	useEffect(() => setLegendOpen(!legendLong && !window.matchMedia("(max-width: 819px)").matches), [legendLong]);
+	useEffect(() => setLegendOpen(!legendLong && !window.matchMedia(PHONE).matches), [legendLong]);
 
 	const data = useCandles(symbol, timeframe);
 	const last = data.candles.at(-1) ?? null;
@@ -236,7 +245,7 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 	useEffect(() => {
 		const chart = chartRef.current;
 		if (!chart || !theme || data.status !== "ready") return;
-		syncIndicators(chart, indicatorsRef.current, data.candles, enabled, hidden, config, theme);
+		syncIndicators(chart, indicatorsRef.current, data.candles, enabled, hidden, config, theme, window.matchMedia(PHONE).matches);
 	}, [data.status, data.candles, enabled, hidden, config, theme, manager]);
 
 	// Alert lines.
@@ -274,11 +283,12 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 				const price = series.coordinateToPrice(y);
 				e.stopPropagation();
 				setAlertMode(false);
-				if (price !== null) create(Math.round(price * 100) / 100);
+				if (price !== null) create(roundPrice(price));
 				return;
 			}
 			if (manager?.tool()) return;
-			const id = hitTestAlert(alerts, y, (p) => series.priceToCoordinate(p));
+			const touch = e.pointerType === "touch";
+			const id = hitTestAlert(alerts, y, (p) => series.priceToCoordinate(p), touch ? TOUCH_HIT_PX : undefined);
 			if (!id) {
 				setSelectedAlert(null);
 				return;
@@ -292,11 +302,11 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 			chart.applyOptions({ handleScroll: false, handleScale: false });
 			const onMovePtr = (ev: PointerEvent) => {
 				const yy = ev.clientY - box.getBoundingClientRect().top;
-				if (!dragged && Math.abs(yy - y) < DRAG_THRESHOLD_PX) return;
+				if (!dragged && Math.abs(yy - y) < (touch ? TOUCH_DRAG_PX : DRAG_THRESHOLD_PX)) return;
 				dragged = true;
 				const p = series.coordinateToPrice(yy);
 				if (p === null) return;
-				price = Math.round(p * 100) / 100;
+				price = roundPrice(p);
 				line?.applyOptions({ price });
 			};
 			const onUp = async () => {
@@ -383,7 +393,8 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 				</div>
 
 				{alertMode && (
-					<p role="status" className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded bg-ink px-3 py-1.5 text-[13px] text-canvas shadow-[var(--shadow-toast)]">
+					// A phone says it, with Cancelar, in its drawing bar; there is no Esc there.
+					<p role="status" className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded bg-ink px-3 py-1.5 text-[13px] text-canvas shadow-[var(--shadow-toast)] max-[819px]:hidden">
 						Tocá el gráfico en el precio de la alerta · Esc para cancelar
 					</p>
 				)}
@@ -397,7 +408,7 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 					>
 						<span className="text-ink">{selected.name}</span>
 						{selected.status === "triggered" && (
-							<button type="button" onClick={() => rearm(selected.id)} className="rounded px-2 py-1 text-accent-ink hover:bg-accent-soft">
+							<button type="button" onClick={() => rearm(selected.id)} className="rounded px-2 py-1 text-accent-ink hover:bg-accent-soft max-[819px]:min-h-11 max-[819px]:px-3">
 								Reactivar
 							</button>
 						)}
@@ -407,11 +418,11 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 								remove(selected.id);
 								setSelectedAlert(null);
 							}}
-							className="rounded px-2 py-1 text-danger hover:bg-danger-soft"
+							className="rounded px-2 py-1 text-danger hover:bg-danger-soft max-[819px]:min-h-11 max-[819px]:px-3"
 						>
 							Eliminar
 						</button>
-						<button type="button" aria-label="Cerrar" onClick={() => setSelectedAlert(null)} className="grid h-7 w-7 place-items-center rounded text-ink-3 hover:bg-hover">
+						<button type="button" aria-label="Cerrar" onClick={() => setSelectedAlert(null)} className="grid h-7 w-7 place-items-center rounded text-ink-3 hover:bg-hover max-[819px]:h-11 max-[819px]:w-11">
 							<X className="h-3.5 w-3.5" aria-hidden />
 						</button>
 					</div>

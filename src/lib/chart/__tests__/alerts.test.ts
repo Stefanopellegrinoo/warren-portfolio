@@ -39,4 +39,8 @@ describe('alertName', () => {
     expect(alertName('AAPL', 'crosses_above', 231.5)).toBe('AAPL cruza por encima de 231,50')
     expect(alertName('GGAL', 'crosses_below', 4.2)).toBe('GGAL cruza por debajo de 4,20')
   })
+
+  it('a price under 1 keeps the four decimals the chart shows', () => {
+    expect(alertName('DOGEUSDT', 'crosses_above', 0.1081)).toBe('DOGEUSDT cruza por encima de 0,1081')
+  })
 })

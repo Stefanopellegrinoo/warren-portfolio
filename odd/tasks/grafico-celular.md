@@ -24,7 +24,7 @@ Branch `feat/chart-mobile` from master 37525ad (the crypto alerts fix is separat
 | T3 Touch drawing: drag places the second point with a live preview | S2 | inline | done: 3 RED→GREEN (drag draws, preview follows, 3-point tool), 4 kept (tap-tap, one-point, brush, mouse); Chromium touch: drag drew the line with the preview midway, finger 12px off selected and moved it | (this commit) |
 | T4 Selected-drawing bar (color, thickness, style, text, lock, delete) and text editor inside the screen | S3 | inline | done: 5 RED→GREEN with the real drawing layer + editor clamp RED→GREEN; Chromium touch at 390 and 320: bar, colors, thickness, style, delete + Deshacer, no page overflow | (this commit) |
 | T5 Tool picker with names, armed-tool hint and Cancelar | S5 | inline | done: 5 RED→GREEN with the real drawing layer, 3 desktop tests kept; Chromium at 390 and 320: list 374/304px wide, no page overflow, fib drawn by dragging from the list | (this commit) |
-| T6 Price pane height on phones; alert precision, buttons and wording | S6, S7 | inline | pending | |
+| T6 Price pane height on phones; alert precision, buttons and wording | S6, S7 | inline | done: 5 RED→GREEN (pane share, coin precision, alert name, finger 12px off an alert line) + 3 kept (desktop panes, 2 decimals, mouse precision); Chromium 390: price pane 336px (was 274), DOGE alert 0.1081 named 0,1081, alert buttons 44px | (this commit) |
 | T7 Save drawings when the app goes to the background | S8 | inline | pending | |
 | T8 Every tool with a finger at 320-430px, desktop unchanged, suite, independent verifier (Risk item 5: install patch, Dockerfile), native review | S9, all | inline + verifier | pending | |
 

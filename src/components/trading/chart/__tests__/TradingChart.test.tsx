@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { createChart } from 'lightweight-charts'
@@ -48,7 +48,7 @@ vi.mock('../useCandles', () => ({
   useCandles: () => ({ status: 'ready', candles: [candle], change: { kind: 'set' }, retry: () => {} }),
 }))
 vi.mock('../useDrawings', () => ({ useDrawings: () => 'ready' }))
-const alertsApi = { alerts: [], create: vi.fn(), move: vi.fn(), rearm: vi.fn(), remove: vi.fn() }
+const alertsApi = { alerts: [] as unknown[], create: vi.fn(), move: vi.fn(), rearm: vi.fn(), remove: vi.fn() }
 vi.mock('../useChartAlerts', () => ({ useChartAlerts: () => alertsApi }))
 vi.mock('../useChartTheme', () => ({
   useChartTheme: () => ({ bg: '#fff', ink: '#000', ink2: '#111', ink3: '#222', line: '#ddd', lineStrong: '#ccc', accent: '#0a0', up: '#0f0', down: '#f00', font: 'sans' }),
@@ -62,7 +62,13 @@ vi.mock('../DrawingTools', () => ({
 
 const { TradingChart } = await import('../TradingChart')
 
-afterEach(() => { vi.clearAllMocks(); document.body.innerHTML = '' })
+afterEach(() => { vi.clearAllMocks(); vi.unstubAllGlobals(); alertsApi.alerts = []; series.priceToCoordinate.mockReturnValue(null); document.body.innerHTML = '' })
+
+const onPhone = (phone: boolean) => vi.stubGlobal('matchMedia', (q: string) => ({ matches: phone && q.includes('max-width'), media: q, addEventListener() {}, removeEventListener() {} }))
+const panes = (n: number) => Array.from({ length: n }, () => ({ setStretchFactor: vi.fn() }))
+// jsdom has no matchMedia: a desktop unless a test says otherwise.
+beforeEach(() => onPhone(false))
+const button = (text: string) => [...document.querySelectorAll('button')].find(b => b.textContent === text)!
 
 async function render(symbol = 'BTCUSDT') {
   const el = document.createElement('div')
@@ -94,6 +100,83 @@ describe('TradingChart text editor', () => {
     expect(input.value).toBe('Soporte')
     expect(input.style.left).toBe('158px') // 390 wide, a 224px editor, 8px from the edge
     expect(input.classList).toContain('max-w-[calc(100%-16px)]')
+    unmount()
+  })
+})
+
+describe('TradingChart price pane on a phone (S6)', () => {
+  it('keeps two thirds of the height for the price with five indicator panes', async () => {
+    onPhone(true)
+    const list = panes(6)
+    chart.panes.mockReturnValue(list as never)
+
+    const { unmount } = await render()
+
+    expect(list[0].setStretchFactor).toHaveBeenLastCalledWith(10)
+    list.slice(1).forEach(p => expect(p.setStretchFactor).toHaveBeenLastCalledWith(1))
+    unmount()
+  })
+
+  it('a desktop keeps the panes as they were', async () => {
+    onPhone(false)
+    const list = panes(6)
+    chart.panes.mockReturnValue(list as never)
+
+    const { unmount } = await render()
+
+    expect(list[0].setStretchFactor).toHaveBeenLastCalledWith(6)
+    unmount()
+  })
+})
+
+describe('TradingChart price alerts (S7)', () => {
+  async function placeAlertAt(price: number) {
+    const { box, unmount } = await render()
+    act(() => button('Alerta').click())
+    series.coordinateToPrice.mockReturnValueOnce(price)
+    act(() => { box.dispatchEvent(new PointerEvent('pointerdown', { clientY: 50, bubbles: true })) })
+    return unmount
+  }
+
+  it('a coin under 1 keeps the four decimals the chart shows', async () => {
+    const unmount = await placeAlertAt(0.123456)
+
+    expect(alertsApi.create).toHaveBeenCalledWith(0.1235)
+    unmount()
+  })
+
+  it('a price over 1 keeps two decimals', async () => {
+    const unmount = await placeAlertAt(80513.2849)
+
+    expect(alertsApi.create).toHaveBeenCalledWith(80513.28)
+    unmount()
+  })
+})
+
+describe('TradingChart alert lines under a finger (S4)', () => {
+  async function pressNearAlert(pointerType: string) {
+    alertsApi.alerts = [{ id: 'a1', ticker: 'BTCUSDT', operator: 'crosses_above', value: 90000, name: 'BTCUSDT cruza por encima de 90.000', status: 'active' }]
+    series.priceToCoordinate.mockReturnValue(100 as never)
+    const { box, unmount } = await render()
+    act(() => {
+      box.dispatchEvent(new PointerEvent('pointerdown', { clientY: 112, pointerType, bubbles: true }))
+      window.dispatchEvent(new PointerEvent('pointerup', { clientY: 112, pointerType }))
+    })
+    await act(async () => {})
+    return { dialog: document.querySelector('[role="dialog"][aria-label="BTCUSDT cruza por encima de 90.000"]'), unmount }
+  }
+
+  it('a finger 12px off the line opens its actions', async () => {
+    const { dialog, unmount } = await pressNearAlert('touch')
+
+    expect(dialog).not.toBeNull()
+    unmount()
+  })
+
+  it('the mouse keeps its precision: 12px off misses the line', async () => {
+    const { dialog, unmount } = await pressNearAlert('mouse')
+
+    expect(dialog).toBeNull()
     unmount()
   })
 })

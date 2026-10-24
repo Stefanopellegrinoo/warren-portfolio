@@ -13,6 +13,9 @@ export interface ChartAlert {
 
 const HIT_TOLERANCE_PX = 6
 
+/** The decimals the chart's price axis shows: four under 1 (a coin), two otherwise. */
+export const priceDecimals = (price: number) => (Math.abs(price) < 1 ? 4 : 2)
+
 /** The alert line under the pointer, or null. Lines off the price range are skipped. */
 export function hitTestAlert(
   alerts: readonly { id: string; value: number }[],
@@ -40,5 +43,5 @@ export function operatorFor(value: number, lastPrice: number): AlertOperator {
 }
 
 export function alertName(ticker: string, operator: AlertOperator, value: number): string {
-  return `${ticker} cruza por ${operator === 'crosses_above' ? 'encima' : 'debajo'} de ${formatNumber(value)}`
+  return `${ticker} cruza por ${operator === 'crosses_above' ? 'encima' : 'debajo'} de ${formatNumber(value, { decimals: priceDecimals(value) })}`
 }
