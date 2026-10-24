@@ -4,6 +4,7 @@ import { normalizeError } from './errors'
 import { createServiceClient } from './supabase-server'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { assertNoNewOversell, pendingTrade, stateAfterWrite } from './ledger-write'
+import { onTickerMessage } from './schemas/transaction'
 
 export interface ONTransactionInput {
   date: string
@@ -51,7 +52,7 @@ export async function processONTransaction(
     const redis = getRedis()
     const isImporting = await redis?.get(`importing:${userId}`)
     if (isImporting) {
-      throw new Error('Hay una importación masiva en curso para este usuario. Por favor, espere a que finalice para realizar cambios manuales.')
+      throw new Error('Hay una importación masiva en curso. Esperá a que termine para cargar operaciones a mano.')
     }
   }
 
@@ -59,7 +60,7 @@ export async function processONTransaction(
 
   // Validation: ON tickers MUST end with 'D' (Dollar-MEP bonds only)
   if (!ticker.endsWith('D')) {
-    throw new Error(`ON tickers must end with 'D' for Dollar-MEP bonds. '${ticker}' is invalid.`)
+    throw new Error(onTickerMessage(ticker))
   }
 
   if (input.operation === 'VENTA') {

@@ -3,6 +3,7 @@ import { getMarketDataProvider, MarketDataError } from '@/lib/market-data'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { cached } from '@/lib/cache'
 import { rateLimit, tooManyRequests } from '@/lib/rate-limit'
+import { GENERIC_ERROR, marketDataMessage, serverError } from '@/lib/api/errors'
 
 // The chart, the watchlist and the top bar poll this every 15–30 s; a short
 // cache keeps them on one Yahoo call per ticker.
@@ -30,10 +31,10 @@ export async function GET(req: NextRequest) {
   const tickers = Array.from(new Set(raw.split(',').map(t => t.trim().toUpperCase()).filter(Boolean)))
 
   if (tickers.length === 0) {
-    return NextResponse.json({ error: 'tickers required' }, { status: 400 })
+    return NextResponse.json({ error: 'Ingresá al menos un ticker' }, { status: 400 })
   }
   if (tickers.length > MAX_TICKERS) {
-    return NextResponse.json({ error: `at most ${MAX_TICKERS} tickers per call` }, { status: 400 })
+    return NextResponse.json({ error: `Se pueden consultar hasta ${MAX_TICKERS} tickers por vez` }, { status: 400 })
   }
 
   const authResult = await requireUser()
@@ -46,8 +47,7 @@ export async function GET(req: NextRequest) {
   try {
     provider = getMarketDataProvider()
   } catch (err) {
-    console.error('[/api/quote]', err)
-    return NextResponse.json({ error: 'Failed to fetch quotes' }, { status: 500 })
+    return serverError('/api/quote', err)
   }
   const settled = await Promise.allSettled(
     tickers.map(async (ticker) => {
@@ -75,8 +75,7 @@ export async function GET(req: NextRequest) {
 
   const err = failures[0].reason
   if (err instanceof MarketDataError) {
-    const message = err.code === 'NOT_FOUND' || err.code === 'RATE_LIMITED' ? err.message : 'Quotes are temporarily unavailable'
-    return NextResponse.json({ error: message }, { status: errorToStatus(err) })
+    return NextResponse.json({ error: marketDataMessage(err.code) }, { status: errorToStatus(err) })
   }
-  return NextResponse.json({ error: 'Failed to fetch quotes' }, { status: 500 })
+  return NextResponse.json({ error: GENERIC_ERROR }, { status: 500 })
 }

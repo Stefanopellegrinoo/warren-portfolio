@@ -7,7 +7,7 @@ vi.mock('@/lib/on-schedules', () => ({
 }))
 vi.mock('@/lib/utils', async (orig) => ({ ...(await orig<object>()), argentinaDate: () => '2026-03-01' }))
 
-const { GET } = await import('../route')
+const { GET, POST } = await import('../route')
 const { ledgerSupabase, trade, movement } = await import('@/lib/__tests__/fixtures/ledger-supabase')
 
 beforeEach(() => vi.clearAllMocks())
@@ -35,5 +35,23 @@ describe('GET /api/cash', () => {
 
     expect((await GET()).status).toBe(500)
     err.mockRestore()
+  })
+})
+
+describe('POST /api/cash', () => {
+  it('a field the schema rejects answers 400 naming that field, in Spanish', async () => {
+    mockRequireUser.mockResolvedValue({ supabase: ledgerSupabase({}), user: { id: 'u1' } })
+    const req = new Request('http://localhost/api/cash', {
+      method: 'POST',
+      body: JSON.stringify({ date: '2026-01-05', type: 'DEPOSITO', amount: -5 }),
+    })
+
+    const res = await POST(req)
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({
+      error: 'El monto tiene que ser mayor a 0',
+      validationErrors: [{ path: 'amount', message: 'El monto tiene que ser mayor a 0' }],
+    })
   })
 })

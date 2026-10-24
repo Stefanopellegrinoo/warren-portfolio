@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { z } from 'zod'
 import { serverError } from '@/lib/api/errors'
+import { firstIssueMessage, INVALID_JSON } from '@/lib/api/validation'
 
 const updateSchema = z.object({
-  active: z.boolean().optional(),
-  channels: z.array(z.enum(['telegram', 'email'])).min(1).optional(),
+  active: z.boolean({ message: 'Indicá si la alerta queda activa' }).optional(),
+  channels: z.array(z.enum(['telegram', 'email'], { message: 'Elegí Telegram o email' })).min(1, 'Elegí al menos un canal de aviso: Telegram o email').optional(),
 })
 
 export async function PATCH(
@@ -22,16 +23,16 @@ export async function PATCH(
   try {
     body = await req.json()
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+    return NextResponse.json({ error: INVALID_JSON }, { status: 400 })
   }
 
   const parsed = updateSchema.safeParse(body)
   if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.message }, { status: 400 })
+    return NextResponse.json({ error: firstIssueMessage(parsed.error) }, { status: 400 })
   }
 
   if (Object.keys(parsed.data).length === 0) {
-    return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
+    return NextResponse.json({ error: 'No hay cambios para guardar' }, { status: 400 })
   }
 
   const { data, error, count } = await supabase
@@ -44,7 +45,7 @@ export async function PATCH(
   if (error) return serverError('API /alerts/[id]', error)
 
   if (!data || data.length === 0) {
-    return NextResponse.json({ error: 'Alert not found' }, { status: 404 })
+    return NextResponse.json({ error: 'No encontramos esa alerta' }, { status: 404 })
   }
 
   return NextResponse.json({ alert: data[0] })

@@ -256,7 +256,7 @@ describe('POST /api/watchlist', () => {
     expect(res.status).toBe(409)
 
     const body = await res.json()
-    expect(body.error).toBe('Already in watchlist')
+    expect(body.error).toBe('Ese ticker ya está en la lista')
   })
 })
 

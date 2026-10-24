@@ -74,7 +74,7 @@ describe('CashMovementSchema', () => {
       type: 'DEPOSITO',
       amount: 0
     }
-    expect(() => CashMovementSchema.parse(data)).toThrow() // PositiveNumberSchema rechaza cero
+    expect(() => CashMovementSchema.parse(data)).toThrow() // positiveNumber rechaza cero
   })
 
   it('accepts amount at maximum boundary', () => {

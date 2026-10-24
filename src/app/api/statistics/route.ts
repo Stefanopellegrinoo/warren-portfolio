@@ -14,7 +14,6 @@ import { computeTradeStats } from '@/lib/trade-stats'
 import { isBenchmarkId, fetchBenchmarkComparison, type BenchmarkComparison } from '@/lib/benchmark'
 import {
   parseUniverse,
-  UNIVERSES,
   computeUniverseRiskMetrics,
   computeUniverseTwr,
   type FlowTransaction,
@@ -34,8 +33,8 @@ export async function GET(req: NextRequest) {
     if (!universe) {
       return NextResponse.json(
         // Bounded message: never echo unbounded user input back, and name the
-        // allowed values so a caller can fix the request from the response.
-        { error: `Invalid universe. Allowed: ${UNIVERSES.join(', ')}` },
+        // allowed values (UNIVERSES: total, stocks, ons) in the user's words.
+        { error: 'Elegí qué ver: toda la cartera, acciones u ONs' },
         { status: 400 }
       )
     }
@@ -44,7 +43,7 @@ export async function GET(req: NextRequest) {
     // matched against the whitelist — never forwarded.
     const rawBenchmark = req.nextUrl.searchParams.get('benchmark')
     if (rawBenchmark && !isBenchmarkId(rawBenchmark)) {
-      return NextResponse.json({ error: 'Invalid benchmark' }, { status: 400 })
+      return NextResponse.json({ error: 'Ese índice de comparación no está disponible' }, { status: 400 })
     }
     const benchmarkId = rawBenchmark && isBenchmarkId(rawBenchmark) ? rawBenchmark : null
 
@@ -80,8 +79,7 @@ export async function GET(req: NextRequest) {
         flowTransactions = [...(await fetchFlowTransactions(supabase, user.id)), ...automatic.transactions]
         income = [...(await fetchIncomeMovements(supabase, user.id)), ...automatic.income]
       } catch (err) {
-        console.error('[Statistics] flow inputs fetch failed:', normalizeError(err).message)
-        return NextResponse.json({ error: 'Failed to fetch flow inputs' }, { status: 500 })
+        return serverError('Statistics', normalizeError(err))
       }
     }
 

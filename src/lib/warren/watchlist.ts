@@ -33,7 +33,8 @@ export async function addSymbolToCurrentWatchlist(symbol: string) {
       return { success: false, mode: 'remote' as const, error: data?.error };
     }
   } catch {
-    toast.error("Error de red al agregar el símbolo");
-    return { success: false, mode: 'remote' as const, error: "Network error" };
+    const error = "No se pudo agregar el ticker. Revisá tu conexión y probá de nuevo.";
+    toast.error(error);
+    return { success: false, mode: 'remote' as const, error };
   }
 }

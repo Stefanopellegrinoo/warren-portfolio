@@ -50,7 +50,6 @@ export async function GET() {
     const { cashBalance } = await getFullPortfolio(supabase, user.id)
     return NextResponse.json({ balance: { user_id: user.id, balance: cashBalance } })
   } catch (err) {
-    console.error('[API /cash] balance failed:', normalizeError(err).message)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('API /cash', normalizeError(err))
   }
 }

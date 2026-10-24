@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { PaginationSchema, DateSchema, PositiveNumberSchema, TickerSchema } from '../common'
+import { PaginationSchema, DateSchema, positiveNumber, TickerSchema } from '../common'
 
 describe('PaginationSchema', () => {
   it('accepts valid pagination params', () => {
@@ -84,17 +84,17 @@ describe('DateSchema', () => {
   })
 })
 
-describe('PositiveNumberSchema', () => {
+describe('positiveNumber', () => {
   it('accepts positive number', () => {
-    expect(() => PositiveNumberSchema.parse(100)).not.toThrow()
+    expect(() => positiveNumber('El monto').parse(100)).not.toThrow()
   })
 
   it('rejects zero', () => {
-    expect(() => PositiveNumberSchema.parse(0)).toThrow()
+    expect(() => positiveNumber('El monto').parse(0)).toThrow()
   })
 
   it('rejects negative number', () => {
-    expect(() => PositiveNumberSchema.parse(-100)).toThrow()
+    expect(() => positiveNumber('El monto').parse(-100)).toThrow()
   })
 })
 

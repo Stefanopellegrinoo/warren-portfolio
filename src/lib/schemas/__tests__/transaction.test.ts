@@ -69,7 +69,7 @@ describe('TransactionSchema', () => {
       price: 2.5,
       commission: 0
     }
-    expect(() => TransactionSchema.parse(data)).toThrow() // PositiveNumberSchema rechaza cero
+    expect(() => TransactionSchema.parse(data)).toThrow() // positiveNumber rechaza cero
   })
 
   it('rejects negative commission', () => {

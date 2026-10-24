@@ -4,6 +4,7 @@ import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { getDerivedSeries } from '@/lib/derived-series'
 import { argentinaDate } from '@/lib/utils'
 import { parseUniverse, projectHistory, type ProjectedPoint } from '@/lib/asset-universe'
+import { serverError } from '@/lib/api/errors'
 
 // GET: the portfolio evolution series, derived from the ledger core
 // (getDerivedSeries) — the same rows the statistics read. It starts at the
@@ -35,7 +36,7 @@ export async function GET(req: NextRequest) {
 
     const universe = parseUniverse(searchParams.get('universe'))
     if (!universe) {
-      return NextResponse.json({ error: 'Invalid universe' }, { status: 400 })
+      return NextResponse.json({ error: 'Elegí qué ver: toda la cartera, acciones u ONs' }, { status: 400 })
     }
 
     // v3: points are projected per-universe via projectHistory (invalidateUserCache
@@ -58,7 +59,6 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(responseData)
   } catch (err) {
-    console.error('[Portfolio History] Error:', err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('Portfolio History', err)
   }
 }

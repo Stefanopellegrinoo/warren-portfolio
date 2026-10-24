@@ -240,7 +240,7 @@ describe('PATCH /api/price-alerts/[id]', () => {
     const res = await PATCH(makePatchRequest(ALERT_ID, { status: 'triggered' }), { params: { id: ALERT_ID } })
 
     expect(res.status).toBe(400)
-    expect((await res.json()).error).toMatch(/status/)
+    expect((await res.json()).error).toBe('Solo se puede reactivar la alerta')
     expect(chain.from).not.toHaveBeenCalled()
   })
 
@@ -264,6 +264,6 @@ describe('PATCH /api/price-alerts/[id]', () => {
 
     expect(res.status).toBe(400)
     const body = await res.json()
-    expect(body.error).toMatch(/operator/)
+    expect(body.error).toBe('Elegí una condición: que el precio suba por encima o baje por debajo del valor')
   })
 })

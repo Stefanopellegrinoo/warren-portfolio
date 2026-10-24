@@ -53,7 +53,6 @@ export async function GET(req: NextRequest) {
       return validationErrorResponse(err)
     }
 
-    console.error(err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('API /cash/movements', err)
   }
 }

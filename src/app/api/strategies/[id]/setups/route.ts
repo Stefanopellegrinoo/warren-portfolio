@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { normalizeError } from '@/lib/errors'
 import type { IndicatorSetup } from '@/types'
+import { serverError } from '@/lib/api/errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,8 +26,7 @@ export async function GET(
 
     return NextResponse.json({ setups: (data ?? []) as IndicatorSetup[] })
   } catch (err: unknown) {
-    console.error(err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('API /strategies/[id]/setups', err)
   }
 }
 
@@ -44,21 +44,21 @@ export async function POST(
     const { name, config } = body
 
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
-      return NextResponse.json({ error: 'name is required' }, { status: 400 })
+      return NextResponse.json({ error: 'Ingresá un nombre para el setup' }, { status: 400 })
     }
 
     if (!config || typeof config !== 'object' || Array.isArray(config)) {
-      return NextResponse.json({ error: 'config is required' }, { status: 400 })
+      return NextResponse.json({ error: 'Falta la configuración del setup' }, { status: 400 })
     }
 
     const configObj = config as Record<string, unknown>
 
     if (!Array.isArray(configObj.indicators)) {
-      return NextResponse.json({ error: 'config.indicators is required and must be an array' }, { status: 400 })
+      return NextResponse.json({ error: 'La configuración del setup no tiene indicadores' }, { status: 400 })
     }
 
     if (!configObj.conditions || typeof configObj.conditions !== 'object') {
-      return NextResponse.json({ error: 'config.conditions is required' }, { status: 400 })
+      return NextResponse.json({ error: 'La configuración del setup no tiene condiciones' }, { status: 400 })
     }
 
     // Verify the strategy belongs to the user before inserting
@@ -70,7 +70,7 @@ export async function POST(
       .single()
 
     if (strategyError || !strategy) {
-      return NextResponse.json({ error: 'Strategy not found or unauthorized' }, { status: 404 })
+      return NextResponse.json({ error: 'No encontramos esa estrategia' }, { status: 404 })
     }
 
     const { data, error } = await supabase
@@ -88,7 +88,6 @@ export async function POST(
 
     return NextResponse.json({ setup: data as IndicatorSetup }, { status: 201 })
   } catch (err: unknown) {
-    console.error(err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('API /strategies/[id]/setups', err)
   }
 }

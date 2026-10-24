@@ -9,6 +9,7 @@ import { recordCedearTrade, TradeRecordError } from '@/lib/trade-record'
 import { createServiceClient } from '@/lib/supabase-server'
 import { CedearTradeSchema } from '@/lib/schemas/transaction'
 import { assertNoNewOversell } from '@/lib/ledger-write'
+import { serverError } from '@/lib/api/errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,11 +22,8 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     // Validate UUID
     try {
       UUIDSchema.parse(params.id)
-    } catch (error: any) {
-      return NextResponse.json(
-        { error: 'Invalid transaction ID', details: error.errors },
-        { status: 400 }
-      )
+    } catch {
+      return NextResponse.json({ error: 'Identificador de operación inválido' }, { status: 400 })
     }
 
     // 1. Get the transaction to know the ticker AND asset type
@@ -37,7 +35,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       .single()
 
     if (getErr || !tx) {
-      return NextResponse.json({ error: 'Transaction not found or unauthorized' }, { status: 404 })
+      return NextResponse.json({ error: 'No encontramos esa operación' }, { status: 404 })
     }
 
     // 2. The core's sale rule: removing a buy must not leave a later sale selling more than held
@@ -71,8 +69,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       return validationErrorResponse(err)
     }
 
-    console.error(err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('Transactions/[id]', err)
   }
 }
 
@@ -85,11 +82,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     // Validate UUID
     try {
       UUIDSchema.parse(params.id)
-    } catch (error: any) {
-      return NextResponse.json(
-        { error: 'Invalid transaction ID', details: error.errors },
-        { status: 400 }
-      )
+    } catch {
+      return NextResponse.json({ error: 'Identificador de operación inválido' }, { status: 400 })
     }
 
     // 1. Get the original transaction to know ticker and asset_type
@@ -101,7 +95,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       .single()
 
     if (getErr || !originalTx) {
-      return NextResponse.json({ error: 'Transaction not found or unauthorized' }, { status: 404 })
+      return NextResponse.json({ error: 'No encontramos esa operación' }, { status: 404 })
     }
 
     // 2. Validate the update payload. A CEDEAR broker ticket (`tradeCurrency`)
@@ -196,7 +190,6 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       return validationErrorResponse(err)
     }
 
-    console.error(err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('Transactions/[id]', err)
   }
 }

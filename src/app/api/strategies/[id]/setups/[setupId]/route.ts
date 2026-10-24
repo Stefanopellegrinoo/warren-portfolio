@@ -20,7 +20,7 @@ export async function PUT(
 
     if (body.name !== undefined) {
       if (typeof body.name !== 'string' || body.name.trim().length === 0) {
-        return NextResponse.json({ error: 'name must be a non-empty string' }, { status: 400 })
+        return NextResponse.json({ error: 'Ingresá un nombre para el setup' }, { status: 400 })
       }
       updates.name = (body.name as string).trim()
     }
@@ -29,7 +29,7 @@ export async function PUT(
       const config = body.config as SetupConfig
       if (typeof config !== 'object' || !Array.isArray(config.indicators) || !config.conditions) {
         return NextResponse.json(
-          { error: 'config must have indicators (array) and conditions' },
+          { error: 'La configuración del setup tiene que tener indicadores y condiciones' },
           { status: 400 }
         )
       }
@@ -41,7 +41,7 @@ export async function PUT(
     }
 
     if (Object.keys(updates).length === 0) {
-      return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
+      return NextResponse.json({ error: 'No hay cambios para guardar' }, { status: 400 })
     }
 
     const { data, error } = await supabase
@@ -55,18 +55,17 @@ export async function PUT(
 
     if (error) {
       if (error.code === 'PGRST116') {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 })
+        return NextResponse.json({ error: 'No encontramos ese setup' }, { status: 404 })
       }
       return serverError('API /strategies/[id]/setups/[setupId]', error)
     }
     if (!data) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 })
+      return NextResponse.json({ error: 'No encontramos ese setup' }, { status: 404 })
     }
 
     return NextResponse.json({ setup: data as IndicatorSetup })
   } catch (err: unknown) {
-    console.error(err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('API /strategies/[id]/setups/[setupId]', err)
   }
 }
 
@@ -89,12 +88,11 @@ export async function DELETE(
 
     if (error) return serverError('API /strategies/[id]/setups/[setupId]', error)
     if (!data || data.length === 0) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 })
+      return NextResponse.json({ error: 'No encontramos ese setup' }, { status: 404 })
     }
 
     return new NextResponse(null, { status: 204 })
   } catch (err: unknown) {
-    console.error(err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('API /strategies/[id]/setups/[setupId]', err)
   }
 }

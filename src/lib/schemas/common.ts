@@ -1,25 +1,31 @@
 import { z } from 'zod'
+import './locale'
 
-// Common schemas used across multiple endpoints
-export const UUIDSchema = z.string().uuid({
-  message: 'Must be a valid UUID',
+// Common schemas used across multiple endpoints. Messages reach the user verbatim
+// (src/lib/api/validation.ts), so each one names its field in plain Spanish.
+export const UUIDSchema = z.string({ message: 'Identificador inválido' }).uuid({
+  message: 'Identificador inválido',
 })
 
-export const DateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, {
-  message: 'Date must be in YYYY-MM-DD format',
+export const DateSchema = z.string({ message: 'Ingresá una fecha' }).regex(/^\d{4}-\d{2}-\d{2}$/, {
+  message: 'La fecha tiene que tener el formato AAAA-MM-DD',
 }).refine((val) => {
   const date = new Date(val);
   return date instanceof Date && !isNaN(date.getTime()) && val === date.toISOString().split('T')[0];
 }, {
-  message: 'Must be a valid calendar date',
+  message: 'La fecha no existe. Revisá el día y el mes.',
 })
 
-export const PositiveNumberSchema = z.number().positive({
-  message: 'Must be a positive number',
+/** A number above zero; `label` names the field with its article ("La cantidad"). */
+export const positiveNumber = (label: string) =>
+  z.number({ message: `${label} tiene que ser un número` }).positive({ message: `${label} tiene que ser mayor a 0` })
+
+export const CommissionSchema = z.number({ message: 'La comisión tiene que ser un número' }).min(0, {
+  message: 'La comisión no puede ser negativa',
 })
 
-export const TickerSchema = z.string().min(1, {
-  message: 'Ticker is required',
+export const TickerSchema = z.string({ message: 'Ingresá el ticker' }).min(1, {
+  message: 'Ingresá el ticker',
 }).transform((val) => val.toUpperCase().trim())
 
 // Pagination schema for list endpoints

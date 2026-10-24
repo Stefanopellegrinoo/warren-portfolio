@@ -253,7 +253,7 @@ describe('POST /api/transactions — 500s are generic, domain errors keep their 
 
   it('the import-in-progress guard keeps its message and its 500', async () => {
     const { POST } = await import('./route')
-    const message = 'Hay una importación masiva en curso para este usuario. Por favor, espere a que finalice para realizar cambios manuales.'
+    const message = 'Hay una importación masiva en curso. Esperá a que termine para cargar operaciones a mano.'
     mockProcessTransaction.mockRejectedValue(new Error(message))
 
     const res = await POST(makeRequest(validBody))

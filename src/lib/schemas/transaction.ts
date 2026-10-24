@@ -1,20 +1,24 @@
 import { z } from 'zod'
-import { DateSchema, PositiveNumberSchema, TickerSchema } from './common'
+import { CommissionSchema, DateSchema, positiveNumber, TickerSchema } from './common'
+
+const OPERATION_MESSAGE = 'Elegí una operación: compra, venta o dividendo'
+
+/** Also thrown by on-engine.ts, whose message src/lib/api/errors.ts lets through. */
+export const onTickerMessage = (ticker: string) =>
+  `El ticker de una ON tiene que terminar en D, la especie en dólar MEP. Revisá ${ticker}.`
 
 // Schema for single transaction (POST /api/transactions)
 export const TransactionSchema = z.object({
   date: DateSchema,
   ticker: TickerSchema,
-  operation: z.enum(['COMPRA', 'VENTA', 'DIVIDENDO'], {
-    message: 'Operation must be COMPRA, VENTA, or DIVIDENDO',
+  operation: z.enum(['COMPRA', 'VENTA', 'DIVIDENDO'], { message: OPERATION_MESSAGE }),
+  quantity: positiveNumber('La cantidad').max(1_000_000, {
+    message: 'La cantidad no puede superar 1.000.000',
   }),
-  quantity: PositiveNumberSchema.max(1_000_000, {
-    message: 'Quantity cannot exceed 1,000,000',
+  price: positiveNumber('El precio').max(1_000_000, {
+    message: 'El precio no puede superar 1.000.000',
   }),
-  price: PositiveNumberSchema.max(1_000_000, {
-    message: 'Price cannot exceed $1,000,000',
-  }),
-  commission: z.number().min(0).optional().default(0),
+  commission: CommissionSchema.optional().default(0),
   notes: z.string().optional(),
   assetType: z.enum(['ACCION', 'CEDEAR', 'ON']).optional(),
   moneda: z.enum(['ARS', 'USD']).optional(),
@@ -29,7 +33,7 @@ export const TransactionSchema = z.object({
     if (!ticker.endsWith('D')) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `ON tickers must end with 'D' for Dollar-MEP bonds. '${ticker}' is invalid.`,
+        message: onTickerMessage(ticker),
         path: ['ticker'],
       })
     }
@@ -43,16 +47,14 @@ export const TransactionSchema = z.object({
 export const CedearTradeSchema = z.object({
   date: DateSchema,
   ticker: TickerSchema,
-  operation: z.enum(['COMPRA', 'VENTA', 'DIVIDENDO'], {
-    message: 'Operation must be COMPRA, VENTA, or DIVIDENDO',
-  }),
+  operation: z.enum(['COMPRA', 'VENTA', 'DIVIDENDO'], { message: OPERATION_MESSAGE }),
   assetType: z.literal('CEDEAR'),
-  tradeCurrency: z.enum(['ARS', 'MEP', 'CCL']),
-  tradeQuantity: PositiveNumberSchema.max(10_000_000, { message: 'Quantity cannot exceed 10,000,000' }),
-  tradePrice: PositiveNumberSchema.max(1_000_000_000, { message: 'Price cannot exceed 1,000,000,000' }),
-  tradeCommission: z.number().min(0).optional().default(0),
-  fxMep: PositiveNumberSchema.optional(),
-  fxCcl: PositiveNumberSchema.optional(),
+  tradeCurrency: z.enum(['ARS', 'MEP', 'CCL'], { message: 'Elegí la moneda: pesos, dólar MEP o dólar cable' }),
+  tradeQuantity: positiveNumber('La cantidad').max(10_000_000, { message: 'La cantidad no puede superar 10.000.000' }),
+  tradePrice: positiveNumber('El precio').max(1_000_000_000, { message: 'El precio no puede superar 1.000.000.000' }),
+  tradeCommission: CommissionSchema.optional().default(0),
+  fxMep: positiveNumber('El dólar MEP').optional(),
+  fxCcl: positiveNumber('El dólar cable').optional(),
   notes: z.string().optional(),
   confirmTicker: z.boolean().optional(),
 })
@@ -62,9 +64,9 @@ export type CedearTradeInput = z.infer<typeof CedearTradeSchema>
 // Schema for bulk import (POST /api/transactions/import with JSON body)
 export const TransactionImportSchema = z.object({
   transactions: z.array(TransactionSchema).min(1, {
-    message: 'At least one transaction is required',
+    message: 'El archivo no tiene operaciones para importar',
   }).max(10_000, {
-    message: 'Cannot import more than 10,000 transactions at once',
+    message: 'Se pueden importar hasta 10.000 operaciones por vez',
   }),
 })
 
@@ -77,5 +79,5 @@ export const TransactionQuerySchema = z.object({
 
 // Schema for import status query params
 export const ImportStatusQuerySchema = z.object({
-  jobId: z.string().min(1, { message: 'jobId is required' }),
+  jobId: z.string({ message: 'Falta el identificador de la importación' }).min(1, { message: 'Falta el identificador de la importación' }),
 })

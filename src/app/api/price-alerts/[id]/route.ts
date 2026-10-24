@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { invalidateUserCache } from '@/lib/redis'
 import { serverError } from '@/lib/api/errors'
+import { INVALID_JSON } from '@/lib/api/validation'
 
 const VALID_OPERATORS = ['crosses_above', 'crosses_below'] as const
 
@@ -19,25 +20,25 @@ export async function PATCH(
   try {
     body = await req.json()
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+    return NextResponse.json({ error: INVALID_JSON }, { status: 400 })
   }
 
   const { name, operator, value, channel, status } = (body ?? {}) as Record<string, unknown>
 
   // Only re-arming is allowed: the worker owns the 'triggered' transition
   if (status !== undefined && status !== 'active') {
-    return NextResponse.json({ error: 'status can only be set to active' }, { status: 400 })
+    return NextResponse.json({ error: 'Solo se puede reactivar la alerta' }, { status: 400 })
   }
 
   if (operator !== undefined && !VALID_OPERATORS.includes(operator as typeof VALID_OPERATORS[number])) {
     return NextResponse.json(
-      { error: `operator must be one of: ${VALID_OPERATORS.join(', ')}` },
+      { error: 'Elegí una condición: que el precio suba por encima o baje por debajo del valor' },
       { status: 400 }
     )
   }
 
   if (value !== undefined && (typeof value !== 'number' || !isFinite(value))) {
-    return NextResponse.json({ error: 'value must be a finite number' }, { status: 400 })
+    return NextResponse.json({ error: 'El valor de la alerta tiene que ser un número' }, { status: 400 })
   }
 
   const patch: Record<string, unknown> = {}
@@ -51,7 +52,7 @@ export async function PATCH(
   }
 
   if (Object.keys(patch).length === 0) {
-    return NextResponse.json({ error: 'No updatable fields provided' }, { status: 400 })
+    return NextResponse.json({ error: 'No hay cambios para guardar' }, { status: 400 })
   }
 
   const { data, error } = await supabase
@@ -63,7 +64,7 @@ export async function PATCH(
     .single()
 
   if (error || !data) {
-    return NextResponse.json({ error: 'Alert not found' }, { status: 404 })
+    return NextResponse.json({ error: 'No encontramos esa alerta' }, { status: 404 })
   }
 
   await invalidateUserCache(user.id)
@@ -90,7 +91,7 @@ export async function DELETE(
     .single()
 
   if (fetchError || !existing) {
-    return NextResponse.json({ error: 'Alert not found' }, { status: 403 })
+    return NextResponse.json({ error: 'No encontramos esa alerta' }, { status: 403 })
   }
 
   const { error } = await supabase

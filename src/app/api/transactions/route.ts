@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
           // precisely the failure this gate exists to prevent.
           console.error('[Transactions] ticker verification unavailable:', err)
           return NextResponse.json(
-            { error: 'Could not verify the ticker right now. Try again shortly.' },
+            { error: 'No se pudo verificar el ticker en este momento. Probá de nuevo en unos minutos.' },
             { status: 503 }
           )
         }

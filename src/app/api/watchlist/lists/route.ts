@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
+import { serverError } from '@/lib/api/errors'
+import { INVALID_JSON } from '@/lib/api/validation'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,8 +25,7 @@ export async function GET(_req: NextRequest) {
     .order('created_at', { ascending: true })
 
   if (error) {
-    console.error('[GET /api/watchlist/lists] Supabase error:', error)
-    return NextResponse.json({ error: 'Failed to fetch watchlists' }, { status: 500 })
+    return serverError('GET /api/watchlist/lists', error)
   }
 
   const lists: Watchlist[] = (data ?? []).map((row: { id: string; name: string; created_at: string; watchlist_items: Array<{ count: number }> }) => ({
@@ -47,13 +48,13 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json()
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+    return NextResponse.json({ error: INVALID_JSON }, { status: 400 })
   }
 
   const name = typeof body.name === 'string' ? body.name.trim() : ''
   if (!name || name.length < 1 || name.length > 50) {
     return NextResponse.json(
-      { error: 'name must be between 1 and 50 characters' },
+      { error: 'El nombre de la lista tiene que tener entre 1 y 50 caracteres' },
       { status: 422 }
     )
   }
@@ -65,13 +66,12 @@ export async function POST(req: NextRequest) {
     .eq('user_id', user.id)
 
   if (countError) {
-    console.error('[POST /api/watchlist/lists] Count error:', countError)
-    return NextResponse.json({ error: 'Failed to check watchlist count' }, { status: 500 })
+    return serverError('POST /api/watchlist/lists', countError)
   }
 
   if ((existing ?? []).length >= 10) {
     return NextResponse.json(
-      { error: 'Maximum of 10 watchlists reached' },
+      { error: 'Llegaste al máximo de 10 listas. Borrá una para crear otra.' },
       { status: 422 }
     )
   }
@@ -83,8 +83,7 @@ export async function POST(req: NextRequest) {
     .single()
 
   if (error) {
-    console.error('[POST /api/watchlist/lists] Insert error:', error)
-    return NextResponse.json({ error: 'Failed to create watchlist' }, { status: 500 })
+    return serverError('POST /api/watchlist/lists', error)
   }
 
   return NextResponse.json({ id: data.id, name: data.name, item_count: 0 }, { status: 201 })

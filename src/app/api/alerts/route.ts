@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { z } from 'zod'
 import { serverError } from '@/lib/api/errors'
+import { firstIssueMessage, INVALID_JSON } from '@/lib/api/validation'
 
 const createSchema = z.object({
-  ticker: z.string().min(1).max(20),
-  setup_id: z.string().uuid(),
-  channels: z.array(z.enum(['telegram', 'email'])).min(1),
+  ticker: z.string({ message: 'Ingresá el ticker' }).min(1, 'Ingresá el ticker').max(20, 'El ticker puede tener hasta 20 caracteres'),
+  setup_id: z.string({ message: 'Elegí un setup' }).uuid('Elegí un setup'),
+  channels: z.array(z.enum(['telegram', 'email'], { message: 'Elegí Telegram o email' })).min(1, 'Elegí al menos un canal de aviso: Telegram o email'),
 })
 
 export async function GET(req: NextRequest) {
@@ -44,12 +45,12 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json()
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+    return NextResponse.json({ error: INVALID_JSON }, { status: 400 })
   }
 
   const parsed = createSchema.safeParse(body)
   if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.message }, { status: 400 })
+    return NextResponse.json({ error: firstIssueMessage(parsed.error) }, { status: 400 })
   }
 
   const { data, error } = await supabase

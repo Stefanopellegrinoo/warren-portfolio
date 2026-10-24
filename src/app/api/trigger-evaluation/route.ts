@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { getRedis, ensureRedisConnected } from '@/lib/redis'
 import { enqueueImmediateEvaluation } from '@/lib/signals-queue'
+import { TOO_MANY_REQUESTS } from '@/lib/rate-limit'
 
 export async function POST() {
   const auth = await requireUser()
@@ -17,7 +18,7 @@ export async function POST() {
       const result = await redis.set(key, '1', 'EX', 60, 'NX')
       if (result !== 'OK') {
         return NextResponse.json(
-          { error: 'Rate limit: 1 request per 60 seconds' },
+          { error: TOO_MANY_REQUESTS },
           { status: 429 }
         )
       }
@@ -32,7 +33,7 @@ export async function POST() {
   const ready = await ensureRedisConnected()
   if (!ready) {
     return NextResponse.json(
-      { error: 'Signal engine temporarily unavailable' },
+      { error: 'Las señales no están disponibles en este momento. Probá de nuevo en unos minutos.' },
       { status: 503 }
     )
   }

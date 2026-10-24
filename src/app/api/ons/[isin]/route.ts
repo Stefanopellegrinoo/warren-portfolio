@@ -25,7 +25,7 @@ export async function GET(_req: Request, { params }: { params: { isin: string } 
   try {
     const { analyses, asOf, stale, prices } = await loadOnAnalyses(auth.supabase, { isin })
     const analysis = analyses[0]
-    if (!analysis) return NextResponse.json({ error: 'ON no encontrada en el catálogo' }, { status: 404 })
+    if (!analysis) return NextResponse.json({ error: 'No encontramos esa ON en el catálogo' }, { status: 404 })
     const history = await loadPriceHistory(auth.supabase, analysis.row.tickerD)
     return NextResponse.json({ analysis, history, asOf, stale, prices })
   } catch (error) {

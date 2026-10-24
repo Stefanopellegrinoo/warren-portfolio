@@ -23,7 +23,7 @@ export const importWorker = new Worker(
     try {
       // 1. Set lock to block price-worker and manual transactions
       if (redis) await redis.setex(`importing:${userId}`, 3600, '1')
-      await job.updateProgress({ percentage: 5, message: 'Initializing import...' })
+      await job.updateProgress({ percentage: 5, message: 'Preparando la importación…' })
 
       // 2. Process the batch with progress tracking (replace handled inside)
       const results = await processTransactionBatch(
@@ -38,14 +38,14 @@ export const importWorker = new Worker(
         }
       )
 
-      await job.updateProgress({ percentage: 92, message: 'Invalidating cache...' })
+      await job.updateProgress({ percentage: 92, message: 'Actualizando tu cartera…' })
 
       // 4. Invalidate cache
       if (results.imported > 0) {
         await invalidateUserCache(userId)
       }
 
-      await job.updateProgress({ percentage: 95, message: 'Fetching prices for new tickers...' })
+      await job.updateProgress({ percentage: 95, message: 'Buscando precios de los activos nuevos…' })
 
       // 5. Fetch prices for any new tickers
       if (results.imported > 0) {
@@ -67,7 +67,7 @@ export const importWorker = new Worker(
         }
       }
 
-      await job.updateProgress({ percentage: 100, message: 'Import completed!' })
+      await job.updateProgress({ percentage: 100, message: 'Importación terminada' })
 
       console.log(`[ImportWorker] Job ${job.id} completed. Success: ${results.success}, Imported: ${results.imported}, Failed: ${results.failed}`)
 
@@ -97,7 +97,7 @@ export const importWorker = new Worker(
           ticker: 'UNKNOWN', 
           error: err instanceof Error ? err.message : 'Unknown error' 
         }],
-        message: 'Import failed with unexpected error'
+        message: 'La importación falló por un error inesperado. Probá de nuevo.'
       }
     } finally {
       // 5. Always release lock

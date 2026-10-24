@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
+import { serverError } from '@/lib/api/errors'
+import { INVALID_JSON } from '@/lib/api/validation'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,13 +17,13 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
   try {
     body = await req.json()
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+    return NextResponse.json({ error: INVALID_JSON }, { status: 400 })
   }
 
   const name = typeof body.name === 'string' ? body.name.trim() : ''
   if (!name || name.length < 1 || name.length > 50) {
     return NextResponse.json(
-      { error: 'name must be between 1 and 50 characters' },
+      { error: 'El nombre de la lista tiene que tener entre 1 y 50 caracteres' },
       { status: 422 }
     )
   }
@@ -36,10 +38,9 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
 
   if (error || !data) {
     if (error?.code === 'PGRST116' || !data) {
-      return NextResponse.json({ error: 'Watchlist not found' }, { status: 404 })
+      return NextResponse.json({ error: 'No encontramos esa lista' }, { status: 404 })
     }
-    console.error('[PATCH /api/watchlist/lists/[id]] Supabase error:', error)
-    return NextResponse.json({ error: 'Failed to update watchlist' }, { status: 500 })
+    return serverError('PATCH /api/watchlist/lists/[id]', error)
   }
 
   return NextResponse.json({ id: data.id, name: data.name })
@@ -60,7 +61,7 @@ export async function DELETE(_req: NextRequest, { params }: RouteContext) {
     .single()
 
   if (ownershipError || !watchlist) {
-    return NextResponse.json({ error: 'Watchlist not found' }, { status: 404 })
+    return NextResponse.json({ error: 'No encontramos esa lista' }, { status: 404 })
   }
 
   // Check last-list guard
@@ -70,13 +71,12 @@ export async function DELETE(_req: NextRequest, { params }: RouteContext) {
     .eq('user_id', user.id)
 
   if (countError) {
-    console.error('[DELETE /api/watchlist/lists/[id]] Count error:', countError)
-    return NextResponse.json({ error: 'Failed to check watchlist count' }, { status: 500 })
+    return serverError('DELETE /api/watchlist/lists/[id]', countError)
   }
 
   if ((allLists ?? []).length <= 1) {
     return NextResponse.json(
-      { error: 'Cannot delete the last watchlist' },
+      { error: 'No podés borrar tu única lista' },
       { status: 422 }
     )
   }
@@ -89,8 +89,7 @@ export async function DELETE(_req: NextRequest, { params }: RouteContext) {
     .eq('user_id', user.id)
 
   if (deleteError) {
-    console.error('[DELETE /api/watchlist/lists/[id]] Delete error:', deleteError)
-    return NextResponse.json({ error: 'Failed to delete watchlist' }, { status: 500 })
+    return serverError('DELETE /api/watchlist/lists/[id]', deleteError)
   }
 
   return NextResponse.json({ success: true })

@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase-server'
 import { normalizeError } from '@/lib/errors'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { rateLimit, tooManyRequests } from '@/lib/rate-limit'
+import { serverError } from '@/lib/api/errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,7 +36,6 @@ export async function GET() {
 
     return NextResponse.json(transformed)
   } catch (err) {
-    console.error('Error fetching cedears:', err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('API /cedears', err)
   }
 }

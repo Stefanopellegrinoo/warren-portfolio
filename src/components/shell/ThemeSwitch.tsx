@@ -2,7 +2,7 @@
 
 import { useEffect, useSyncExternalStore } from 'react'
 import { Sun, Moon, Monitor } from 'lucide-react'
-import { THEME_STORAGE_KEY, isRedesigned, parseThemePref, resolveTheme, type ThemePref } from '@/lib/theme'
+import { THEME_STORAGE_KEY, parseThemePref, resolveTheme, type ThemePref } from '@/lib/theme'
 
 const OPTIONS: { value: ThemePref; label: string; icon: typeof Sun }[] = [
   { value: 'light', label: 'Claro', icon: Sun },
@@ -34,26 +34,23 @@ function subscribe(onChange: () => void) {
   }
 }
 
-function applyTheme(pref: ThemePref, pathname: string) {
-  const t = resolveTheme(pref, pathname)
+function applyTheme(pref: ThemePref) {
+  const t = resolveTheme(pref)
   if (t) document.documentElement.dataset.theme = t
   else delete document.documentElement.dataset.theme
 }
 
-export default function ThemeSwitch({ pathname }: { pathname: string }) {
+export default function ThemeSwitch() {
   const pref = useSyncExternalStore(subscribe, getPref, () => 'system' as ThemePref)
-  const enabled = isRedesigned(pathname)
 
-  useEffect(() => { applyTheme(pref, pathname) }, [pref, pathname])
+  useEffect(() => { applyTheme(pref) }, [pref])
 
   return (
     <div className="mb-3">
       <fieldset
-        disabled={!enabled}
         role="radiogroup"
         aria-label="Tema"
-        aria-describedby={enabled ? undefined : 'theme-note'}
-        className="flex w-full gap-0.5 rounded-md border border-line bg-surface-2 p-0.5 disabled:opacity-60"
+        className="flex w-full gap-0.5 rounded-md border border-line bg-surface-2 p-0.5"
       >
         {OPTIONS.map(({ value, label, icon: Icon }) => (
           <label
@@ -73,9 +70,6 @@ export default function ThemeSwitch({ pathname }: { pathname: string }) {
           </label>
         ))}
       </fieldset>
-      {!enabled && (
-        <p id="theme-note" className="mt-1.5 px-1 text-xs text-ink-3">Esta página todavía usa el estilo anterior</p>
-      )}
     </div>
   )
 }

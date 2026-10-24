@@ -143,7 +143,7 @@ describe('GET /api/quote', () => {
     providerFactoryThrows = true
     const res = await GET(makeRequest({ ticker: 'AAPL' }))
     expect(res.status).toBe(500)
-    expect((await res.json()).error).toBe('Failed to fetch quotes')
+    expect((await res.json()).error).toBe('No se pudo completar la operación')
   })
 
   it('returns 400 when no ticker provided', async () => {

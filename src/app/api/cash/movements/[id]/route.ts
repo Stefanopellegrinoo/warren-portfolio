@@ -18,11 +18,8 @@ export async function DELETE(
   // Validate UUID
   try {
     UUIDSchema.parse(params.id)
-  } catch (error: any) {
-    return NextResponse.json(
-      { error: 'Invalid movement ID', details: error.errors },
-      { status: 400 }
-    )
+  } catch {
+    return NextResponse.json({ error: 'Identificador de movimiento inválido' }, { status: 400 })
   }
 
   try {

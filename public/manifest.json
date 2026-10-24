@@ -1,25 +1,26 @@
 {
-  "name": "Warren Portfolio",
+  "id": "/",
+  "name": "Warren",
   "short_name": "Warren",
-  "description": "Portfolio tracking and analytics",
-  "theme_color": "#0f172a",
-  "background_color": "#0f172a",
+  "description": "Tu cartera de inversiones: cuánto tenés, cómo te va hoy, tus ONs, operaciones y gráficos.",
+  "lang": "es-AR",
+  "dir": "ltr",
+  "start_url": "/dashboard",
+  "scope": "/",
   "display": "standalone",
-  "orientation": "portrait",
-  "scope": "https://portfolio.fratellipastas.com/",
-  "start_url": "https://portfolio.fratellipastas.com/",
+  "background_color": "#faf9f7",
+  "theme_color": "#faf9f7",
+  "categories": ["finance"],
   "icons": [
-    {
-      "src": "/icon-192x192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/icon-512x512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    }
+    { "src": "/icon-192x192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512x512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512x512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    { "name": "Resumen", "url": "/dashboard" },
+    { "name": "Mis ONs", "short_name": "Mis ONs", "url": "/ons/mi-cartera" },
+    { "name": "Gráficos", "url": "/trading" },
+    { "name": "Operaciones", "url": "/history" }
   ]
 }

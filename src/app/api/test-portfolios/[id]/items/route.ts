@@ -18,7 +18,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   try {
     const { analyses } = await loadOnAnalyses(auth.supabase, { isin: body.isin })
     const analysis = analyses[0]
-    if (!analysis) return fail('ON no encontrada en el catálogo', 404)
+    if (!analysis) return fail('No encontramos esa ON en el catálogo', 404)
     refusal = itemRefusal(analysis, body)
   } catch (e) {
     console.error('[Test portfolios API] Failed to load the catalog:', e)

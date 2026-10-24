@@ -57,7 +57,7 @@ describe('GET /api/ons/[isin]', () => {
     mockLoad.mockResolvedValue({ analyses: [], asOf: '2026-10-20', stale: false, prices: { ok: true, fetchedAt: null } })
     const res = await call('AR0000000009')
     expect(res.status).toBe(404)
-    expect((await res.json()).error).toMatch(/no encontrada/i)
+    expect((await res.json()).error).toBe('No encontramos esa ON en el catálogo')
   })
 
   it('returns the analysis scoped to the ISIN with the D-line history', async () => {

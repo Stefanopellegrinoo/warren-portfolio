@@ -3,6 +3,8 @@ import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { DateSchema } from '@/lib/schemas/common'
 import { getFxRate } from '@/lib/fx-rates'
 import { createServiceClient } from '@/lib/supabase-server'
+import { serverError } from '@/lib/api/errors'
+import { firstIssueMessage } from '@/lib/api/validation'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,16 +19,15 @@ export async function GET(req: NextRequest) {
   if (isAuthFailure(auth)) return auth.error
 
   const date = DateSchema.safeParse(req.nextUrl.searchParams.get('date'))
-  if (!date.success) return NextResponse.json({ error: 'date must be a valid YYYY-MM-DD' }, { status: 400 })
+  if (!date.success) return NextResponse.json({ error: firstIssueMessage(date.error) }, { status: 400 })
 
   try {
     // fx_rates is readable only by the service role (odd/tasks/security-hardening.md S12).
     const market = createServiceClient()
     const [mep, ccl] = await Promise.all([getFxRate(market, date.data, 'mep'), getFxRate(market, date.data, 'ccl')])
-    if (!mep && !ccl) return NextResponse.json({ error: 'No hay cotización para esa fecha.' }, { status: 404 })
+    if (!mep && !ccl) return NextResponse.json({ error: 'No hay cotización del dólar para esa fecha' }, { status: 404 })
     return NextResponse.json({ mep, ccl })
   } catch (err) {
-    console.error('[fx] read failed:', err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('fx', err)
   }
 }

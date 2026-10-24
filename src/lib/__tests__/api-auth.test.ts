@@ -11,7 +11,7 @@ vi.mock('@/lib/rate-limit', async (importOriginal) => ({
 }))
 
 import { AuthRetryableFetchError } from '@supabase/supabase-js'
-import { requireUser, isAuthFailure } from '@/lib/api-auth'
+import { requireUser, isAuthFailure, SESSION_EXPIRED } from '@/lib/api-auth'
 
 const victim = { id: '00000000-0000-0000-0000-000000000001' }
 
@@ -49,7 +49,11 @@ describe('requireUser', () => {
     const result = await requireUser()
 
     expect(isAuthFailure(result)).toBe(true)
-    if (isAuthFailure(result)) expect(result.error.status).toBe(401)
+    if (isAuthFailure(result)) {
+      expect(result.error.status).toBe(401)
+      expect(await result.error.json()).toEqual({ error: SESSION_EXPIRED })
+    }
+    expect(SESSION_EXPIRED).toBe('Tu sesión venció. Volvé a ingresar.')
   })
 
   // T5 (S5): one global per-user budget across every authenticated route.
@@ -76,7 +80,7 @@ describe('requireUser', () => {
     expect(isAuthFailure(result)).toBe(true)
     if (isAuthFailure(result)) {
       expect(result.error.status).toBe(503)
-      expect(await result.error.json()).toEqual({ error: 'Servicio de autenticación no disponible' })
+      expect(await result.error.json()).toEqual({ error: 'No se pudo verificar tu sesión. Probá de nuevo en unos minutos.' })
     }
   })
 })
