@@ -23,6 +23,7 @@ describe('recharts loads only with the chart that needs it (S9)', () => {
     ['an ON detail', () => import('@/components/ons/OnDetailLoader')],
     ['my ONs', () => import('@/components/ons/MyPortfolio')],
     ['a test portfolio', () => import('@/components/ons/portfolios/PortfolioBuilder')],
+    ['Caja', () => import('@/app/cashflow/page')],
   ])('%s does not import recharts when its code loads', async (_, load) => {
     await load()
     expect(seen.recharts).toBe(false)
