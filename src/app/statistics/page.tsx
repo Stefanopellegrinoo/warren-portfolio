@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
 import KpiCard, { toneOfResult } from '@/components/ui/KpiCard'
 import RiskMetricsRow from '@/components/ui/RiskMetricsRow'
 import BenchmarkComparison from '@/components/charts/BenchmarkComparison'
@@ -12,6 +12,9 @@ import { SectionHead } from '@/components/resumen/ui'
 import { ErrorNotice } from '@/components/strategies/ui'
 import { formatUSD } from '@/lib/utils'
 import { requestErrorMessage } from '@/lib/request-errors'
+import { useCached } from '@/lib/client-cache'
+import { useCachedPerVisit } from '@/components/charts/use-cached-per-visit'
+import { argentinaDate } from '@/lib/utils'
 import type { Universe } from '@/lib/asset-universe'
 import DetailedStats, { type StatData } from './DetailedStats'
 
@@ -47,117 +50,83 @@ const UNIVERSE_BY_TAB: Record<TabType, Universe> = {
 const TAB_LABEL: Record<TabType, string> = { general: 'Toda la cartera', stocks: 'Acciones', ons: 'ONs' }
 
 const LOAD_FAILED = 'No se pudieron cargar las estadísticas.'
+const STATS = {
+  stocks: '/api/statistics?universe=stocks',
+  ons: '/api/statistics/ons',
+  combined: '/api/statistics/combined',
+  total: '/api/statistics?universe=total',
+}
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
-function Skeleton() {
+function Skeleton({ label = 'Cargando el rendimiento', rows = 5 }: { label?: string; rows?: number }) {
   return (
-    <div role="status" aria-label="Cargando el rendimiento" className="grid gap-3">
-      {[0, 1, 2, 3, 4].map(i => <span key={i} className="block h-14 animate-pulse rounded bg-surface-2" />)}
+    <div role="status" aria-label={label} className="grid gap-3">
+      {Array.from({ length: rows }, (_, i) => <span key={i} className="block h-14 animate-pulse rounded bg-surface-2" />)}
     </div>
   )
 }
 
+type Period = '30' | '90' | '180' | '365' | 'all'
+
+/** One statistics request: an error body never becomes data (it would crash DetailedStats). */
+const statsOf = <T,>(url: string) => async (): Promise<T> => {
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(LOAD_FAILED)
+  return res.json()
+}
+
+/** The full series of a part, asked once; a period is cut here, as the route cuts it (Argentine days back from today). */
+async function fullHistory(universe: Universe): Promise<PortfolioChartPoint[]> {
+  const res = await fetch(`/api/portfolio-history?days=all&universe=${universe}`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const body = await res.json()
+  return Array.isArray(body.data) ? body.data : []
+}
+function cut(series: PortfolioChartPoint[], period: Period): PortfolioChartPoint[] {
+  if (period === 'all') return series
+  const from = new Date(`${argentinaDate()}T00:00:00Z`)
+  from.setUTCDate(from.getUTCDate() - parseInt(period))
+  const since = from.toISOString().split('T')[0]
+  return series.filter(p => p.snapshot_date >= since)
+}
+
 export default function StatisticsPage() {
   const [activeTab, setActiveTab] = useState<TabType>('general')
-  const [stocksData, setStocksData] = useState<StatData | null>(null)
-  const [onsData, setOnsData] = useState<StatData | null>(null)
-  const [combinedData, setCombinedData] = useState<CombinedData | null>(null)
+  const [historyPeriod, setHistoryPeriod] = useState<Period>('90')
+  // Each block shows when its own request answers (S9); a page seen before shows its last data at once.
+  const stocks = useCached('statistics:stocks', statsOf<StatData>(STATS.stocks))
+  const ons = useCached('statistics:ons', statsOf<StatData>(STATS.ons))
+  const combined = useCached('statistics:combined', statsOf<CombinedData>(STATS.combined))
   // General-tab risk, over the whole portfolio — the same universe as its chart (S9).
-  const [generalRisk, setGeneralRisk] = useState<StatData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState<string | null>(null)
-  const [historyPeriod, setHistoryPeriod] = useState<'30' | '90' | '180' | '365' | 'all'>('90')
-  const [history, setHistory] = useState<PortfolioChartPoint[]>([])
-  const [historyLoading, setHistoryLoading] = useState(true)
-
-  const load = useCallback(() =>
-    Promise.all([
-      fetch('/api/statistics?universe=stocks'),
-      fetch('/api/statistics/ons'),
-      fetch('/api/statistics/combined'),
-      fetch('/api/statistics?universe=total')
-    ])
-      // An error body is an OBJECT, so it is truthy, and every `&& data`
-      // gate downstream waves it through — DetailedStats then throws on
-      // data.allPnLs.slice and takes the whole page down. A failed fetch
-      // must yield null, and its tab says it failed. Likewise a failed
-      // metrics fetch must not fill the risk row with "Sin datos suficientes":
-      // an error is not a measurement.
-      .then(responses => Promise.all(responses.map(r => (r.ok ? r.json() : null))))
-      .then(([stocks, ons, combined, general]) => {
-        setStocksData(stocks)
-        setOnsData(ons)
-        setCombinedData(combined)
-        setGeneralRisk(general)
-        setLoadError(null)
-      })
-      .catch(err => {
-        setStocksData(null)
-        setOnsData(null)
-        setCombinedData(null)
-        setGeneralRisk(null)
-        setLoadError(requestErrorMessage(err, LOAD_FAILED))
-      })
-      .finally(() => setLoading(false)), [])
-
-  useEffect(() => { load() }, [load])
-
-  const retry = () => {
-    setLoading(true)
-    load()
+  const general = useCached('statistics:total', statsOf<StatData>(STATS.total))
+  // The full series of each part, asked once per visit: a period or tab change asks nothing (S9). Tolerant by
+  // design: a failed history leaves the chart's own empty state, never another tab's series.
+  const universe = UNIVERSE_BY_TAB[activeTab]
+  const history = useCachedPerVisit(`statistics:history:${universe}`, () => fullHistory(universe))
+  const changePeriod = (p: Period) => {
+    setHistoryPeriod(p)
+    if (history.error) history.reload()
   }
 
-  useEffect(() => {
-    let cancelled = false
-    async function fetchHistory() {
-      // Tolerant by design: losing the chart must not blank the page the way
-      // the other fetches would. Same posture the route itself takes with its
-      // live point. But "tolerant" must not mean "silently show the PREVIOUS
-      // period's (or tab's) data under the NEW selection's highlighted button"
-      // — on any failure we clear the series so the chart falls back to its
-      // own honest empty state instead of asserting stale data.
-      setHistoryLoading(true)
-      try {
-        const universe = UNIVERSE_BY_TAB[activeTab]
-        const res = await fetch(`/api/portfolio-history?days=${historyPeriod}&universe=${universe}`)
-        if (!res.ok) {
-          console.error(`[Statistics] Evolution chart fetch failed: ${res.status}`)
-          if (!cancelled) {
-            setHistory([])
-            setHistoryLoading(false)
-          }
-          return
-        }
-        const body = await res.json()
-        if (cancelled) return
-        setHistory(Array.isArray(body.data) ? body.data : [])
-        setHistoryLoading(false)
-      } catch (err) {
-        console.error('[Statistics] Evolution chart unavailable:', err)
-        if (!cancelled) {
-          setHistory([])
-          setHistoryLoading(false)
-        }
-      }
-    }
-    fetchHistory()
-    return () => { cancelled = true }
-  }, [historyPeriod, activeTab])
+  const combinedData = combined.data ?? null
+  const failed = <T,>(r: { data?: T; error: unknown }) => !r.data && !!r.error
+  const retry = () => { stocks.reload(); ons.reload(); combined.reload(); general.reload() }
 
   const tabs: TabType[] = combinedData
     ? (['general', 'stocks', 'ons'] as TabType[]).filter(t =>
         t === 'general' || (t === 'stocks' ? combinedData.stocks.positionCount > 0 : combinedData.ons.positionCount > 0))
     : ['general']
 
-  // The stocks or ONs tab's own data: null when its fetch failed, undefined on the whole-portfolio tab.
-  const tabData = activeTab === 'stocks' ? stocksData : activeTab === 'ons' ? onsData : undefined
+  // The stocks or ONs tab's own data: null when its fetch failed, undefined while it loads and on the whole-portfolio tab.
+  const own = activeTab === 'stocks' ? stocks : activeTab === 'ons' ? ons : null
+  const tabData = own && failed(own) ? null : own?.data
 
   const evolution = (
     <section aria-labelledby="h-evolucion">
       <SectionHead id="h-evolucion" title={activeTab === 'general' ? 'Evolución de la cartera' : `Evolución de ${TAB_LABEL[activeTab]}`} />
       <p className="pt-3 text-[13px] text-ink-3">Valor de mercado contra el capital invertido.</p>
-      <PortfolioChart data={history} period={historyPeriod} onPeriodChange={setHistoryPeriod} loading={historyLoading} />
+      <PortfolioChart data={cut(history.data ?? [], historyPeriod)} period={historyPeriod} onPeriodChange={changePeriod} loading={!history.data && history.loading} />
     </section>
   )
 
@@ -185,17 +154,14 @@ export default function StatisticsPage() {
         )}
       </div>
 
-      {loading && <Skeleton />}
+      {/* Without the portfolio summary there are no tabs, headline or composition: say what happened. */}
+      {failed(combined) && <ErrorNotice onRetry={retry}>{requestErrorMessage(combined.error, LOAD_FAILED)}</ErrorNotice>}
 
-      {/* Loading is DONE and the page still has no composition data. A spinner here
-          would assert "still working" forever; say what actually happened instead. */}
-      {!loading && !combinedData && <ErrorNotice onRetry={retry}>{loadError ?? LOAD_FAILED}</ErrorNotice>}
-
-      {!loading && combinedData && (
+      {!failed(combined) && (
         // Headline first: total value and results, then how it got there. Each block
         // keeps one slot across tabs, so the chosen benchmark survives a tab switch.
         <div className="grid gap-10">
-          {activeTab === 'general' && (
+          {activeTab === 'general' && (combinedData ? (
             <dl className="grid grid-cols-3 gap-x-6 gap-y-5 border-b border-line pb-5 max-[819px]:grid-cols-2">
               <div className="min-w-0 max-[819px]:col-span-2">
                 <dt className="text-[13px] text-ink-3">Valor total de la cartera</dt>
@@ -208,7 +174,7 @@ export default function StatisticsPage() {
                 {plural(combinedData.ons.positionCount, 'posición', 'posiciones')} · {plural(combinedData.ons.closedTradesCount, 'operación cerrada', 'operaciones cerradas')}
               </KpiCard>
             </dl>
-          )}
+          ) : <Skeleton label="Cargando el resumen" rows={1} />)}
 
           {/* A tab whose own data failed says so instead of showing only part of itself. */}
           {tabData === null && (
@@ -221,21 +187,26 @@ export default function StatisticsPage() {
           {activeTab === 'general' && (
             <>
               {/* Risk over the whole portfolio — scope stated on screen */}
-              {generalRisk
-                ? <RiskMetricsRow data={generalRisk} />
-                : <ErrorNotice onRetry={retry}>No se pudieron calcular las métricas de riesgo.</ErrorNotice>}
+              {general.data
+                ? <RiskMetricsRow data={general.data} />
+                : failed(general)
+                  ? <ErrorNotice onRetry={retry}>No se pudieron calcular las métricas de riesgo.</ErrorNotice>
+                  : <Skeleton label="Cargando las métricas de riesgo" rows={1} />}
 
               <section aria-labelledby="h-composicion">
                 <SectionHead id="h-composicion" title="Composición" />
                 <p className="pt-3 text-[13px] text-ink-3">Por clase de activo.</p>
-                {combinedData.composition.length > 0
-                  ? <div className="pt-2"><ShareList items={combinedData.composition} /></div>
-                  : <p className="py-8 text-sm text-ink-3">Sin datos suficientes.</p>}
+                {!combinedData
+                  ? <div className="pt-2"><Skeleton label="Cargando la composición" rows={2} /></div>
+                  : combinedData.composition.length > 0
+                    ? <div className="pt-2"><ShareList items={combinedData.composition} /></div>
+                    : <p className="py-8 text-sm text-ink-3">Sin datos suficientes.</p>}
               </section>
             </>
           )}
 
           {tabData && <DetailedStats data={tabData} assetLabel={activeTab === 'stocks' ? 'acciones' : 'ONs'} />}
+          {own && tabData === undefined && <Skeleton label="Cargando las estadísticas" />}
         </div>
       )}
     </div>

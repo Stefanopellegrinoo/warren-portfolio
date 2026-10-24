@@ -1,10 +1,11 @@
 'use client'
 
-import { ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Cell, LineChart, Line } from 'recharts'
+import dynamic from 'next/dynamic'
 import KpiCard, { toneOfResult } from '@/components/ui/KpiCard'
 import { SharpeMetric, VolatilityMetric, DrawdownMetric } from '@/components/ui/RiskMetricsRow'
 import ShareList from '@/components/charts/ShareList'
-import { AXIS, GRID, TOOLTIP, GAIN, LOSS, signed, axisSigned } from '@/components/charts/tokens'
+import ChartPlaceholder from '@/components/charts/ChartPlaceholder'
+import { signed } from '@/components/charts/tokens'
 import { SectionHead } from '@/components/resumen/ui'
 import { formatUSD, formatPct, formatNumber } from '@/lib/utils'
 
@@ -45,7 +46,11 @@ export interface StatData {
   couponsReceived?: number
 }
 
-const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+// recharts arrives with the charts, not with the page (odd/tasks/rendimiento.md S9); each box keeps its height meanwhile.
+const lazy = { ssr: false, loading: ChartPlaceholder }
+const CumulativeChart = dynamic(() => import('./DetailedCharts').then(m => m.CumulativeChart), lazy)
+const MonthlyChart = dynamic(() => import('./DetailedCharts').then(m => m.MonthlyChart), lazy)
+const AssetChart = dynamic(() => import('./DetailedCharts').then(m => m.AssetChart), lazy)
 const STATUS: Record<string, string> = { OPEN: 'abierta', CLOSED: 'cerrada' }
 const empty = 'flex h-[300px] items-center text-sm text-ink-3 max-[819px]:h-auto max-[819px]:py-8'
 
@@ -117,18 +122,7 @@ export default function DetailedStats({ data, assetLabel }: { data: StatData; as
           <SectionHead id="h-acumulado" title="Resultado realizado acumulado" />
           <p className="pt-3 text-[13px] text-ink-3">Cómo creció el resultado de las operaciones cerradas.</p>
           <div className="mt-3 h-[260px] max-[819px]:h-[200px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={data.cumulativePnl} margin={{ top: 6, right: 4, left: 0, bottom: 0 }} accessibilityLayer>
-                <CartesianGrid {...GRID} />
-                <XAxis dataKey="date" {...AXIS} minTickGap={24}
-                  tickFormatter={(v: string) => { const d = new Date(v); return `${d.getUTCDate()}/${d.getUTCMonth() + 1}` }} />
-                <YAxis {...AXIS} width={52} tickFormatter={axisSigned} />
-                <Tooltip {...TOOLTIP}
-                  formatter={(value: number) => [signed(value), 'Acumulado']}
-                  labelFormatter={(label: string) => new Date(label).toLocaleDateString('es-AR', { timeZone: 'UTC' })} />
-                <Line type="monotone" dataKey="cumulative" stroke="var(--accent)" strokeWidth={1.75} dot={false} isAnimationActive={false} />
-              </LineChart>
-            </ResponsiveContainer>
+            <CumulativeChart data={data.cumulativePnl} />
           </div>
         </section>
       )}
@@ -139,20 +133,7 @@ export default function DetailedStats({ data, assetLabel }: { data: StatData; as
           <p className="pt-3 text-[13px] text-ink-3">Resultado realizado en cada mes calendario.</p>
           {data.monthlyReturns.length > 0 ? (
             <div className="mt-3 h-[280px] max-[819px]:h-[200px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data.monthlyReturns} margin={{ top: 6, right: 4, left: 0, bottom: 0 }} accessibilityLayer>
-                  <CartesianGrid {...GRID} />
-                  <XAxis dataKey="month" {...AXIS}
-                    tickFormatter={(v: string) => { const [y, m] = v.split('-'); return `${m}/${y.slice(2)}` }} />
-                  <YAxis {...AXIS} width={52} tickFormatter={axisSigned} />
-                  <Tooltip {...TOOLTIP}
-                    formatter={(value: number) => [signed(value), 'Resultado']}
-                    labelFormatter={(label: string) => { const [y, m] = label.split('-'); return `${MONTHS[parseInt(m) - 1]} ${y}` }} />
-                  <Bar dataKey="pnl" radius={[2, 2, 0, 0]} maxBarSize={28} isAnimationActive={false}>
-                    {data.monthlyReturns.map((entry, i) => <Cell key={i} fill={entry.pnl >= 0 ? GAIN : LOSS} />)}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <MonthlyChart data={data.monthlyReturns} />
             </div>
           ) : (
             <p className={empty}>Sin operaciones cerradas todavía.</p>
@@ -174,17 +155,7 @@ export default function DetailedStats({ data, assetLabel }: { data: StatData; as
           <p className="pt-3 text-[13px] text-ink-3">Posiciones abiertas y cerradas, las 15 de mayor resultado.</p>
           {chartData.length > 0 ? (
             <div className="mt-3" style={{ height: Math.max(160, chartData.length * 28) }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} layout="vertical" margin={{ top: 0, right: 8, left: 0, bottom: 0 }} accessibilityLayer>
-                  <CartesianGrid stroke="var(--line)" horizontal={false} />
-                  <XAxis type="number" {...AXIS} tickFormatter={axisSigned} />
-                  <YAxis dataKey="ticker" type="category" {...AXIS} tick={{ fill: 'var(--ink-2)', fontSize: 12 }} width={56} />
-                  <Tooltip {...TOOLTIP} formatter={(value: number) => [signed(value), 'Resultado']} />
-                  <Bar dataKey="pnl" radius={[0, 2, 2, 0]} barSize={14} isAnimationActive={false}>
-                    {chartData.map((entry, i) => <Cell key={i} fill={entry.pnl >= 0 ? GAIN : LOSS} />)}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <AssetChart data={chartData} />
             </div>
           ) : (
             <p className={empty}>Todavía no hay operaciones.</p>
