@@ -24,6 +24,7 @@ const chart = {
   panes: vi.fn(() => []),
   removeSeries: vi.fn(),
   remove: vi.fn(),
+  chartElement: () => document.createElement('div'),
 }
 vi.mock('lightweight-charts', () => ({
   createChart: vi.fn(() => chart),

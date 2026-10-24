@@ -21,7 +21,7 @@ Branch `feat/chart-mobile` from master 37525ad (the crypto alerts fix is separat
 |---|---|---|---|---|
 | T1 `touch-action: none` on the chart; regression test | S1 | inline | done: RED→GREEN (jsdom), touch probe: 100px move, no pointercancel, pan leaves the line | (this commit) |
 | T2 Touch hit sizes: install-time patch of lightweight-charts-drawing 0.6.2 (script + Dockerfile + CI) | S4 | inline | done: behavior test RED→GREEN (finger 12px off selects, mouse unchanged); script tests (written after) cover version and missing-line failures; Risk item 5 | (this commit) |
-| T3 Touch drawing: drag places the second point with a live preview | S2 | inline | pending | |
+| T3 Touch drawing: drag places the second point with a live preview | S2 | inline | done: 3 RED→GREEN (drag draws, preview follows, 3-point tool), 4 kept (tap-tap, one-point, brush, mouse); Chromium touch: drag drew the line with the preview midway, finger 12px off selected and moved it | (this commit) |
 | T4 Selected-drawing bar (color, thickness, style, text, lock, delete) and text editor inside the screen | S3 | inline | pending | |
 | T5 Tool picker with names, armed-tool hint and Cancelar | S5 | inline | pending | |
 | T6 Price pane height on phones; alert precision, buttons and wording | S6, S7 | inline | pending | |

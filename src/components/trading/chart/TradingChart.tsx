@@ -22,6 +22,7 @@ import { ChevronDown, Eye, EyeOff, Settings2, X } from "lucide-react";
 import { useChartStore, type IndicatorKey } from "@/lib/store/chart-store";
 import { INDICATOR_ORDER, INDICATOR_SPECS } from "@/lib/chart/indicator-specs";
 import { hitTestAlert, type ChartAlert } from "@/lib/chart/alerts";
+import { touchDrawing } from "@/lib/chart/touch-drawing";
 import type { Candle, Timeframe } from "@/lib/binance/types";
 import { cn, formatNumber } from "@/lib/utils";
 import { useCandles } from "./useCandles";
@@ -174,6 +175,7 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 		const series = chart.addSeries(CandlestickSeries, { priceLineVisible: true, priceFormat: PRICE_FORMAT });
 		const drawings = new DrawingManager(chart, series, { magnet: "off" });
 		const offText = drawings.on("textEdit", (drawing, screen) => setTextEdit({ drawing, x: screen.x, y: screen.y }));
+		const offTouch = touchDrawing(drawings, chart.chartElement());
 		const onMove = (p: MouseEventParams) => setHover((p.seriesData.get(series) as Candle | undefined) ?? null);
 		chart.subscribeCrosshairMove(onMove);
 		chartRef.current = chart;
@@ -181,6 +183,7 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 		setManager(drawings);
 		return () => {
 			offText();
+			offTouch();
 			chart.unsubscribeCrosshairMove(onMove);
 			drawings.destroy();
 			chart.remove();
