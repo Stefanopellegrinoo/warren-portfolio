@@ -2,10 +2,10 @@
 
 import { useState, type ReactNode } from 'react'
 import type { PortfolioAnalysis } from '@/lib/on-portfolio-analytics'
-import { fmtDate, fmtMonth, fmtNum, fmtPct, TAX_COPY } from '@/lib/on-format'
+import { fmtMonth, fmtNum, fmtPct, TAX_COPY } from '@/lib/on-format'
 import { SectionHead } from '@/components/resumen/ui'
 import PortfolioCalendarChart from './PortfolioCalendarChart'
-import { Bars, btnSecondary, Disclosure, HEAD_ROW, Metric, Metrics, notice, ScrollTable, signedUsd, signTone, TD, TH, TR } from '../ui'
+import { Bars, btnSecondary, Disclosure, HEAD_ROW, Metric, Metrics, ScrollTable, signedUsd, signTone, TD, TH, TR } from '../ui'
 
 const usd = (x: number) => `USD ${fmtNum(x)}`
 const FIRST_MONTHS = 12
@@ -30,25 +30,24 @@ function Table({ caption, head, children, minWidth = 'min-w-[440px]' }: { captio
 
 /**
  * odd/tasks/ux-ons-y-operaciones.md S5: the few numbers that answer "¿cuánto me pagaría esta combinación?".
- * `held`: the user's real holdings (market value, no purchase profit) instead of a hypothetical purchase.
  */
-export function PortfolioSummary({ analysis: a, held = false }: { analysis: PortfolioAnalysis; held?: boolean }) {
+export function PortfolioSummary({ analysis: a }: { analysis: PortfolioAnalysis }) {
   return (
-    <Metrics className={held ? undefined : 'grid-cols-5'}>
-      <Metric label={held ? 'Valor de mercado' : 'Costo total'} value={usd(a.totals.cost)}
-        hint={held ? 'Cada ticker a su propia cotización (igual que el dashboard), solo ONs con precio' : 'Lo que pagarías hoy, con los intereses ya corridos'} />
+    <Metrics className="grid-cols-5">
+      <Metric label="Costo total" value={usd(a.totals.cost)}
+        hint="Lo que pagarías hoy, con los intereses ya corridos" />
       <Metric label="Total a cobrar" value={usd(a.totals.collected)} hint={`Intereses ${usd(a.totals.interest)} · capital ${usd(a.totals.principal)}`} />
-      {!held && <Metric label="Ganancia vs. costo" value={signedUsd(a.totals.profit, fmtNum)} valueClass={signTone(a.totals.profit)} hint="Sin impuestos ni reinversión" />}
+      <Metric label="Ganancia vs. costo" value={signedUsd(a.totals.profit, fmtNum)} valueClass={signTone(a.totals.profit)} hint="Sin impuestos ni reinversión" />
       <Metric label="TIR de la cartera" value={fmtPct(a.ytmPct)}
-        hint={held ? 'TIR calculada con el precio de la línea de pago (cable/MEP). Flujos combinados, no un promedio de TIRs. Efectiva anual.' : 'Por año, todos los cobros juntos contra el costo (no es un promedio de TIRs)'} />
-      {a.next12m.total > 0 && <Metric label={held ? 'Intereses próximos 12 meses' : 'Próximos 12 meses'} value={usd(a.next12m.interest)}
+        hint="Por año, todos los cobros juntos contra el costo (no es un promedio de TIRs)" />
+      {a.next12m.total > 0 && <Metric label="Próximos 12 meses" value={usd(a.next12m.interest)}
         hint={a.next12m.principal > 0 ? `Intereses; con capital, ${usd(a.next12m.total)}` : 'Intereses que cobrarías en el próximo año'} />}
     </Metrics>
   )
 }
 
 /** The full analysis, each part a collapsed section with one line saying what is inside (S5). */
-export function PortfolioDetails({ analysis: a, held = false }: { analysis: PortfolioAnalysis; held?: boolean }) {
+export function PortfolioDetails({ analysis: a }: { analysis: PortfolioAnalysis }) {
   const [allMonths, setAllMonths] = useState(false)
   const months = allMonths ? a.monthly : a.monthly.slice(0, FIRST_MONTHS)
   const top = a.issuers[0]
@@ -108,21 +107,20 @@ export function PortfolioDetails({ analysis: a, held = false }: { analysis: Port
         <p className={NOTE}>La plaza es la de cobro de cada ON, sin importar la línea en la que se compra.</p>
       </Disclosure>
 
-      <Disclosure id="pf-positions" title="Detalle por ON" summary={`${held ? 'Valor' : 'Costo'}, peso, TIR y duración de cada ON`}>
+      <Disclosure id="pf-positions" title="Detalle por ON" summary="Costo, peso, TIR y duración de cada ON">
         <Metrics className="mb-4 grid-cols-3">
           <Metric label="Duración modificada" value={a.mdYears === null ? '—' : `${fmtNum(a.mdYears)} años`} hint="De la cartera, ponderada por valor de mercado" />
           <Metric label="Vida promedio" value={a.walYears === null ? '—' : `${fmtNum(a.walYears)} años`} hint="Plazo medio de devolución del capital" />
           <Metric label="ONs en el cálculo" value={a.positions.length} hint={a.skipped.length > 0 ? `${a.skipped.length} sin simular` : undefined} />
         </Metrics>
-        <Table caption="Detalle de cada ON de la cartera" minWidth={held ? 'min-w-[720px]' : 'min-w-[520px]'} head={held ? ['ON', 'VN', 'Valor de mercado', 'Peso', 'Próximo cobro', 'TIR', 'Duración'] : ['ON', 'VN', 'Costo', 'Peso', 'TIR', 'Duración']}>
+        <Table caption="Detalle de cada ON de la cartera" minWidth="min-w-[520px]" head={['ON', 'VN', 'Costo', 'Peso', 'TIR', 'Duración']}>
           {a.positions.map((p) => (
             <tr key={p.isin} className={`${TR} text-right`}>
-              {/* Same ticker as the explorer (the O line) in a test portfolio; the held view keeps the line the user holds. */}
-              <td className={`${TD} text-left font-semibold`}>{held ? p.ticker : p.tickerO}</td>
+              {/* Same ticker as the explorer (the O line). */}
+              <td className={`${TD} text-left font-semibold`}>{p.tickerO}</td>
               <td className={TD}>{fmtNum(p.vn, 0)}</td>
-              <td className={TD}>{held && !p.priced ? '—' : fmtNum(p.cost)}</td>
-              <td className={TD}>{held && !p.priced ? '—' : fmtPct(p.weightPct, 1)}</td>
-              {held && <td className={TD}>{p.nextPayDate ? `${fmtDate(p.nextPayDate)} · ${usd(p.nextPayAmount ?? 0)}` : '—'}</td>}
+              <td className={TD}>{fmtNum(p.cost)}</td>
+              <td className={TD}>{fmtPct(p.weightPct, 1)}</td>
               <td className={TD}>{fmtPct(p.ytmPct)}</td>
               <td className={TD}>{p.mdYears === null ? '—' : fmtNum(p.mdYears)}</td>
             </tr>
@@ -131,33 +129,8 @@ export function PortfolioDetails({ analysis: a, held = false }: { analysis: Port
       </Disclosure>
 
       <p className="mt-4 max-w-[96ch] text-[13px] leading-relaxed text-ink-3">
-        {held ? 'Proyección de lo que cobrás con las ONs que tenés hoy, sin importar cuándo las compraste. ' : ''}Sin impuestos, comisiones ni reinversión; solo ONs en dólares de tasa fija, step up o cupón cero. Informativo, no es una recomendación de inversión. {TAX_COPY}
+        Sin impuestos, comisiones ni reinversión; solo ONs en dólares de tasa fija, step up o cupón cero. Informativo, no es una recomendación de inversión. {TAX_COPY}
       </p>
     </section>
-  )
-}
-
-/** Summary and full analysis in one block, with the warnings on top (the held view of Mis ONs). */
-export default function PortfolioResults({ analysis: a, held = false }: { analysis: PortfolioAnalysis; held?: boolean }) {
-  return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-10">
-      {a.warnings.length > 0 && (
-        <section aria-labelledby="pf-warnings" className={notice('warn')}>
-          <h2 id="pf-warnings" className="mb-1 font-semibold">Avisos ({a.warnings.length})</h2>
-          <ul className="list-disc space-y-1 pl-5">{a.warnings.map((w, i) => <li key={`${w.isin}-${w.kind}-${i}`}>{w.message}</li>)}</ul>
-        </section>
-      )}
-
-      {a.empty ? (
-        <p className="py-4 text-ink-2">
-          {a.skipped.length > 0 ? `Ninguna de las ONs se puede ${held ? 'proyectar' : 'simular'}: revisá los avisos.` : 'Agregá ONs para ver el calendario de cobros y las métricas de la cartera.'}
-        </p>
-      ) : (
-        <>
-          <PortfolioSummary analysis={a} held={held} />
-          <PortfolioDetails analysis={a} held={held} />
-        </>
-      )}
-    </div>
   )
 }

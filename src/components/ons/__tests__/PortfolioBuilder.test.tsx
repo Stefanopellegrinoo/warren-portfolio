@@ -29,7 +29,7 @@ const view = (items: (PortfolioItem & { id: string })[]) => ({
 
 type Reply = { status: number; body?: unknown }
 type Handler = (url: string, method: string) => Reply | undefined
-function stubFetch(handler: Handler, items = [ITEM_A]) {
+function stubFetch(handler: Handler, items: (PortfolioItem & { id: string })[] = [ITEM_A]) {
   const fn = vi.fn(async (url: string, init?: { method?: string }) => {
     const method = init?.method ?? 'GET'
     const r = handler(url, method)
@@ -70,6 +70,19 @@ describe('PortfolioBuilder (S5)', () => {
     const details = [...el.querySelectorAll('details')]
     expect(details.map((d) => d.id)).toEqual(['pf-calendar', 'pf-annual', 'pf-ladder', 'pf-issuers', 'pf-plaza', 'pf-positions', 'glosario'])
     expect(details.some((d) => d.open)).toBe(false)
+  })
+
+  it('shows a warning under the ON it belongs to, without its ticker prefix', async () => {
+    const F = on('AR0000000003', { tickerO: 'FLOAO', tickerD: 'FLOAD', est: 'Tasa Variable' }, [{ date: '2028-04-21', ren: 1, amo: 100 }], 100)
+    const ITEM_F = { id: 'item-f', isin: 'AR0000000003', mode: 'usd' as const, amount: 1_000, manualPrice: null }
+    const items = [ITEM_A, ITEM_F]
+    const body = { ...view(items), analysis: analyzePortfolio({ items, analyses: [A, B, F], today: '2026-10-21' }) }
+    stubFetch((url) => (url === '/api/ons' ? { status: 200, body: { rows: [A.row, B.row, F.row] } } : { status: 200, body }), items)
+    const el = await mount()
+    const row = [...el.querySelectorAll('li')].find((li) => li.textContent?.includes('FLOAO'))!
+    expect(row.textContent).toMatch(/tasa variable/i)
+    expect(row.textContent).not.toContain('FLOAD:')
+    expect([...el.querySelectorAll('li')].find((li) => li.textContent?.includes('AAAAO'))!.textContent).not.toMatch(/tasa variable/i)
   })
 
   it('shows the same ticker as the explorer (the O line)', async () => {
