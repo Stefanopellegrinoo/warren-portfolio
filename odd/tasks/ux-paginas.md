@@ -21,13 +21,13 @@ Skipped: `viewport-fit=cover` and safe-area insets. The user tested the installe
 
 | ID | Specs | Route | Status | Commit |
 |---|---|---|---|---|
-| T0 Shared helpers: `InlineConfirm`, `requestErrorMessage` | S1, S3 | inline | | |
-| T1 Gastos: toggle/delete errors and busy state, success toasts, in-app delete confirm, Argentina dates | S1-S4 | delegated (parallel unit) | | |
-| T2 Gráficos: watchlist load/remove/add errors and toasts, chart alert remove toast, in-app "borrar dibujos" confirm, chart and search errors in Spanish | S1-S3 | delegated (parallel unit) | | |
-| T3 Estrategias: in-app setup delete confirm, performance tables as cards on phones, load errors with retry, connection errors in the forms | S1, S3, S5 | delegated (parallel unit) | | |
-| T4 Estadísticas: headline first, retry, per-tab failures, close dates | S1, S4, S6 | delegated (parallel unit) | | |
-| T5 Resumen and Historial: refresh failure notice, movement delete errors/toast/confirm, movements load error, history delete confirm and toast, CEDEAR fix toast | S1-S3 | inline | | |
-| T6 Messages: `validateRequest` invalid JSON, `ons/search`, dead auth-utils code, connection errors in AddTransactionModal and review-fix | S1, S7 | inline | | |
+| T0 Shared helpers: `InlineConfirm`, `requestErrorMessage` | S1, S3 | inline | done: 7 tests RED→GREEN | 1c34614 |
+| T1 Gastos: toggle/delete errors and busy state, success toasts, in-app delete confirm, Argentina dates | S1-S4 | delegated (parallel unit) | done: 12 RED→GREEN, 22 tests pass | 4089f58 |
+| T2 Gráficos: watchlist load/remove/add errors and toasts, chart alert remove toast, in-app "borrar dibujos" confirm, chart and search errors in Spanish | S1-S3 | delegated (parallel unit) | done: 27 RED→GREEN, 74 tests pass; drawings confirm in a Popover (the 40px toolbar cannot host InlineConfirm); list manager network toasts use NO_CONNECTION (inline) | 799ee16 |
+| T3 Estrategias: in-app setup delete confirm, performance tables as cards on phones, load errors with retry, connection errors in the forms | S1, S3, S5 | delegated (parallel unit) | done: 12 RED→GREEN, 17 tests pass | df6217d |
+| T4 Estadísticas: headline first, retry, per-tab failures, close dates | S1, S4, S6 | delegated (parallel unit) | done: 7 RED→GREEN, 15 tests pass; Acciones/ONs tabs keep their KPIs after the chart (General only, as specified) | 8d74644 |
+| T5 Resumen and Historial: refresh failure notice, movement delete errors/toast/confirm, movements load error, history delete confirm and toast, CEDEAR fix toast | S1-S3 | inline | done: 8 tests RED→GREEN | 9868f44 |
+| T6 Messages: `validateRequest` invalid JSON, `ons/search`, dead auth-utils code, connection errors in AddTransactionModal and review-fix | S1, S7 | inline | done: 2 tests RED→GREEN (500→400, Failed to fetch→NO_CONNECTION) | 2cbd5f9 (Risk item 3, shared validator), c01459d |
 | T7 Integration sweep (13 widths × 2 themes) and full suite | all | inline | | |
 
 Route evidence: T1-T4 are four independent units with disjoint edit surfaces (cashflow, trading, strategies, statistics), each with several files and 100+ changed lines, launched together; T0 lands first so they reuse it. T5-T6 are small and run inline while the writers work.
@@ -37,3 +37,4 @@ Route evidence: T1-T4 are four independent units with disjoint edit surfaces (ca
 - L1 (2026-10-23, user, project 1 request, verbatim in `odd/tasks/ux-base-global.md` L1): "...También quiero que te fijes página por página y que uses la cabeza, que sigas patrones de diseño, buenas prácticas, todas esas cosas para mostrar la información más importante, para no saturar al usuario... También quiero que te fijes en los detalles, en formularios, en las alertas y toda la experiencia de usuario. Muy importante también que el usuario entienda bien cuando hay un error o qué pasó."
 - L2 (2026-10-24, user, after testing projects 1 and 2 in production on the iPhone): "todo perfecto segui"
 - L3: map from a read-only explorer (path:line evidence in Engram, topic `odd/ux-paginas/tasks`): silent failures in cashflow, watchlist, dashboard refresh, movements, strategy performance, statistics; 5 native `confirm()`; UTC dates in cashflow and statistics; strategy tables 820-920px wide; statistics headline after the charts and no retry; `validateRequest` turns malformed JSON into 500; no password reset; price alerts only by Telegram, skipped silently when not configured.
+- L4: T1-T6 done (commits in the table). Left as they were, out of the mapped evidence: the chart's Reactivar can be tapped twice (it only sets the alert active again); a failed 30-second refresh of stock candles keeps the old bars without a notice. T7: full suite and an independent verifier (Risk item 3 in 2cbd5f9) with the responsive sweep.
