@@ -54,4 +54,18 @@ describe('POST /api/cash', () => {
       validationErrors: [{ path: 'amount', message: 'El monto tiene que ser mayor a 0' }],
     })
   })
+
+  // odd/tasks/ux-paginas.md S7: a body that is not JSON is the client's mistake, not a server error.
+  it('a body that is not JSON answers 400 in Spanish, not 500', async () => {
+    mockRequireUser.mockResolvedValue({ supabase: ledgerSupabase({}), user: { id: 'u1' } })
+    const req = new Request('http://localhost/api/cash', { method: 'POST', body: '{"date": ' })
+
+    const res = await POST(req)
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({
+      error: 'No se pudo leer el pedido. Recargá la página y probá de nuevo.',
+      validationErrors: [{ message: 'No se pudo leer el pedido. Recargá la página y probá de nuevo.' }],
+    })
+  })
 })
