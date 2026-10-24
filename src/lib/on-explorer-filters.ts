@@ -85,6 +85,42 @@ export function issuersOf(rows: OnListRow[]): string[] {
   return [...new Set(rows.map((r) => r.issuer).filter((i): i is string => !!i))].sort((a, b) => a.localeCompare(b, 'es'))
 }
 
+// odd/tasks/ux-ons-y-operaciones.md S4: the search box is always visible; the rest of the
+// filters sit behind one "Filtros" control that shows how many of these are set.
+const PANEL_KEYS = ['issuer', 'currency', 'law', 'rateType', 'maturityFrom', 'maturityTo', 'ytmMin', 'ytmMax', 'mdMin', 'mdMax'] as const
+
+export const activeFilterCount = (f: ExplorerFilters): number =>
+  PANEL_KEYS.filter((k) => f[k] !== DEFAULT_STATE.filters[k]).length
+
+/** One-tap shortcuts, each a plain patch of the filters above (so they travel in the URL like any filter). */
+export interface ExplorerPreset {
+  id: 'mep' | 'ny' | 'short'
+  label: string
+  patch: (today: string) => Partial<ExplorerFilters>
+}
+
+/** ISO date two years after `today`; 29 February falls back to the 28th. */
+const inTwoYears = (today: string): string => {
+  const md = today.slice(5) === '02-29' ? '02-28' : today.slice(5)
+  return `${Number(today.slice(0, 4)) + 2}-${md}`
+}
+
+export const PRESETS: ExplorerPreset[] = [
+  { id: 'mep', label: 'Pagan en dólar MEP', patch: () => ({ currency: 'USD MEP' }) },
+  { id: 'ny', label: 'Ley Nueva York', patch: () => ({ law: 'NY' }) },
+  { id: 'short', label: 'Vencen en 2 años o menos', patch: (today) => ({ maturityTo: inTwoYears(today) }) },
+]
+
+export const presetActive = (f: ExplorerFilters, p: ExplorerPreset, today: string): boolean =>
+  Object.entries(p.patch(today)).every(([k, v]) => f[k as keyof ExplorerFilters] === v)
+
+/** The patch a tap applies: the preset's values, or back to the defaults of those fields when it was on. */
+export function togglePreset(f: ExplorerFilters, p: ExplorerPreset, today: string): Partial<ExplorerFilters> {
+  const patch = p.patch(today)
+  if (!presetActive(f, p, today)) return patch
+  return Object.fromEntries(Object.keys(patch).map((k) => [k, DEFAULT_STATE.filters[k as keyof ExplorerFilters]]))
+}
+
 export function serializeExplorerQuery(s: ExplorerState): string {
   const p = new URLSearchParams()
   for (const k of TEXT_KEYS) if (s.filters[k]) p.set(k, s.filters[k])

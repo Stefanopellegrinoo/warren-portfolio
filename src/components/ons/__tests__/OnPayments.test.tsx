@@ -40,13 +40,26 @@ describe('OnPaymentsView — Pagos cobrados (S10)', () => {
   it('lists every payment in order with date, ticker, kind, amount and its action', () => {
     const { el } = mount()
     expect(el.querySelector('h2')?.textContent).toContain('Pagos cobrados')
-    const rows = [...el.querySelectorAll('li[data-payment]')].map(li => [...li.children].map(c => c.textContent).join(' '))
+    // Leaf texts in reading order: ticker, kind, date, amount, action (S2 of ux-ons-y-operaciones: two aligned lines).
+    const rows = [...el.querySelectorAll('li[data-payment]')].map(li =>
+      [...li.querySelectorAll('span, button')].filter(n => n.children.length === 0).map(n => n.textContent!.replace(/^· /, '')).join(' '))
     expect(rows).toEqual([
-      '09/10/2026 VSCXD Cupón US$\u00a01.141,88 Corregir',
-      '10/09/2026 CS50D Amortización US$\u00a01.088,49 Corregir',
-      '14/05/2026 MGCRD Cupón US$\u00a02.363,75 Corregido por vos',
-      '04/05/2026 TTCDD Cupón No lo cobré Corregido por vos',
+      'VSCXD Cupón 09/10/2026 US$\u00a01.141,88 Corregir',
+      'CS50D Amortización 10/09/2026 US$\u00a01.088,49 Corregir',
+      'MGCRD Cupón 14/05/2026 US$\u00a02.363,75 Corregido por vos',
+      'TTCDD Cupón 04/05/2026 No lo cobré Corregido por vos',
     ])
+  })
+
+  it('shows the latest five payments and the rest five at a time', () => {
+    const many = { payments: Array.from({ length: 12 }, (_, i) => ({ ...DATA.payments[0], date: `2026-${String(12 - i).padStart(2, '0')}-01` })), missing: [] }
+    const { el } = mount(many)
+    expect(el.querySelectorAll('li[data-payment]')).toHaveLength(5)
+    act(() => buttons(el, 'Ver 5 más')[0].click())
+    expect(el.querySelectorAll('li[data-payment]')).toHaveLength(10)
+    act(() => buttons(el, 'Ver 2 más')[0].click())
+    expect(el.querySelectorAll('li[data-payment]')).toHaveLength(12)
+    expect(buttons(el, 'Ver 2 más')).toHaveLength(0)
   })
 
   it('names the missing payments of each bond with a "Cargar" action (S8)', () => {

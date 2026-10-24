@@ -4,6 +4,7 @@ import OnDetail from '../OnDetail'
 import OnNotFound from '../OnNotFound'
 import { analyzeOn, type OnInput, type TermsRow } from '@/lib/on-analytics'
 import type { OverrideRow } from '@/lib/on-terms'
+import { TAX_COPY } from '@/lib/on-format'
 
 // Synthetic amortizing ON (100 -> 67 -> 34 -> 0), NY law. Public-style terms, no real holdings.
 const SETTLE = '2026-10-21'
@@ -242,5 +243,89 @@ describe('OnDetail: no-trades text names the line used', () => {
     expect(c).toContain('sin operaciones en la línea C')
     const o = render(build({ terms: terms({ paymentPlaza: 'CCL' }), price: null, lines: { O: { px: 96000, v: 0 } }, ccl: { rate: 1000, at: '2026-10-21T15:00:00Z' }, quiet: false }))
     expect(o).toContain('sin operaciones en la línea O')
+  })
+})
+
+// odd/tasks/ux-ons-y-operaciones.md S3 and S6: the page answers "¿qué es, cuánto rinde, cuándo paga?" first.
+describe('OnDetail: what comes first (S3)', () => {
+  const page = (a = build(), extra = {}) => render(a, history, { today: '2026-10-21', ...extra })
+  const facts = (html: string) => html.slice(html.indexOf('aria-label="Lo principal"'), html.indexOf('</section>', html.indexOf('aria-label="Lo principal"')))
+  const labels = (html: string) => [...html.matchAll(/<dt[^>]*>([^<]*)<\/dt>/g)].map((m) => m[1])
+
+  it('shows at most five facts, in order, with one TIR and no source line under each', () => {
+    const top = facts(page())
+    expect(labels(top)).toEqual(['Precio', 'TIR (rinde por año)', 'Vencimiento', 'Próximo pago', 'Lámina mínima'])
+    expect(top).toContain('98,00')
+    expect(top).not.toContain('BYMA')
+    expect(top).not.toContain('Warren (cálculo propio)')
+  })
+
+  it('maturity says how long is left; the next payment says what it pays; the lot says what it costs', () => {
+    const top = facts(page(build({ overrides: [ov('min_denomination', 10000)] })))
+    expect(top).toContain('22/04/2028')
+    expect(top).toContain('en 1 año y 6 meses')
+    expect(top).toContain('22/04/2027')
+    expect(top).toContain('Paga 3,00% de interés y devuelve el 33,00% del capital')
+    expect(top).toContain('VN 10.000')
+    expect(top).toContain('Unos USD 9.800 al precio de hoy')
+  })
+
+  it('no price: one plain sentence instead of price and TIR, and no technical section', () => {
+    const html = page(build({ price: null }))
+    const top = facts(html)
+    expect(top).toContain('Sin precio en dólares hoy: no se puede calcular cuánto rinde')
+    expect(labels(top)).toEqual(['Precio y TIR', 'Vencimiento', 'Próximo pago', 'Lámina mínima'])
+    expect(html).not.toContain('Datos técnicos')
+  })
+
+  it('the simulator comes right after the facts, before the chart', () => {
+    const html = page()
+    const factsEnd = html.indexOf('</section>', html.indexOf('aria-label="Lo principal"')) + '</section>'.length
+    expect(html.slice(factsEnd)).toMatch(/^<section class="min-w-0" aria-labelledby="sim-title">/)
+    expect(html.indexOf('¿Cuánto cobrás?')).toBeLessThan(html.indexOf('Historial de precio'))
+    expect(html).toContain('Comprás') // the given date lets the simulator compute
+  })
+
+  it('technical data, schedule, terms, options, taxes, sources and glossary are collapsed, in that order', () => {
+    const html = page(build({ overrides: [ov('calls', [{ from: '2027-04-22', to: null, pricePct: 100 }])] }))
+    const titles = [...html.matchAll(/<details[^>]*>\s*<summary[^>]*><span[^>]*><h2[^>]*>([^<]*)<\/h2>/g)].map((m) => m[1])
+    expect(titles).toEqual([
+      'Detalle del cálculo', 'Datos técnicos', 'Cronograma de pagos (% del valor nominal)', 'Condiciones de emisión',
+      'Opciones de rescate y venta', 'Impuestos', 'Fuentes de los datos', '¿Qué significa cada dato?',
+    ])
+    expect(html).not.toMatch(/<details[^>]*open/)
+    const technical = html.slice(html.indexOf('id="on-technical"'), html.indexOf('id="on-schedule"'))
+    expect(technical).toContain('TIR Warren')
+    expect(technical).toContain('Duración Macaulay')
+    expect(technical).toContain('Paridad')
+  })
+
+  it('the BYMA TIR appears only inside the technical data', () => {
+    const check = { asOf: '2026-10-20', bymaYtmPct: 8.41, methodYtmPct: 8.41, methodDiffBp: 0, termsYtmPct: 8.41, termsDiffBp: 0, flagged: false }
+    const html = page(build({ check }))
+    expect(html.split('TIR BYMA').length - 1).toBe(1)
+    expect(html.indexOf('TIR BYMA')).toBeGreaterThan(html.indexOf('id="on-technical"'))
+    expect(html.indexOf('TIR BYMA')).toBeLessThan(html.indexOf('id="on-schedule"'))
+  })
+
+  it('shows the tax copy exactly once in the whole page', () => {
+    expect(page().split(TAX_COPY).length - 1).toBe(1)
+  })
+
+  it('no explanation lives only in a tooltip: the only titles are the source chips, explained in visible text', () => {
+    const html = page(build({ events: [{ kind: 'reapertura', eventDate: '2026-09-01', note: 'Reapertura de la clase', sourceUrl: 'https://example.org/e', verifiedAt: null }] }))
+    const titles = [...html.matchAll(/title="([^"]*)"/g)].map((m) => m[1])
+    expect(titles.length).toBeGreaterThan(0)
+    for (const t of titles) expect(t).toMatch(/^(Verificado contra|Dato de BYMA Educa|Fuente secundaria|Valor por defecto)/)
+    expect(html).toContain('Cada dato dice de dónde sale')
+    expect(html).toContain('Reapertura 01/09/2026: Reapertura de la clase') // the event note, once visible
+  })
+
+  it('ends with the glossary of the terms the page shows', () => {
+    const html = page()
+    expect(html).toContain('¿Qué significa cada dato?')
+    expect(html).toContain('Precio sucio y limpio')
+    expect(html).toContain('Lámina mínima')
+    expect(html).not.toMatch(/<dt[^>]*>YTW<\/dt>/) // no callable terms, no YTW entry
   })
 })

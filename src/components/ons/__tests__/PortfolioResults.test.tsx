@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import PortfolioResults from '../portfolios/PortfolioResults'
+import { PortfolioDetails, PortfolioSummary } from '../portfolios/PortfolioResults'
 import { parseFields } from '../portfolios/PortfolioItemFields'
 import { analyzePortfolio } from '@/lib/on-portfolio-analytics'
 import { analyzeOn } from '@/lib/on-analytics'
@@ -12,15 +12,12 @@ const on = (isin: string, over: Record<string, unknown>, flows: { date: string; 
   })
 const A = on('AR0000000001', { tickerO: 'AAAAO' }, [{ date: '2027-04-22', ren: 3, amo: 0 }, { date: '2028-04-21', ren: 3, amo: 100 }], 100)
 const F = on('AR0000000002', { tickerO: 'FLOAO', est: 'Tasa Variable' }, [{ date: '2028-04-21', ren: 1, amo: 100 }], 100)
-const view = (items: { isin: string; mode: 'usd' | 'vn'; amount: number }[]) => renderToStaticMarkup(<PortfolioResults analysis={analyzePortfolio({ items, analyses: [A, F], today: '2026-10-21' })} />)
+const view = (items: { isin: string; mode: 'usd' | 'vn'; amount: number }[]) => {
+  const analysis = analyzePortfolio({ items, analyses: [A, F], today: '2026-10-21' })
+  return renderToStaticMarkup(<><PortfolioSummary analysis={analysis} /><PortfolioDetails analysis={analysis} /></>)
+}
 
 describe('PortfolioResults', () => {
-  it('empty portfolio shows the empty state and no KPIs', () => {
-    const html = view([])
-    expect(html).toContain('Agregá ONs')
-    expect(html).not.toContain('TIR de la cartera')
-  })
-
   it('renders KPIs, an accessible calendar table with a caption, and the labelled chart', () => {
     const html = view([{ isin: 'AR0000000001', mode: 'vn', amount: 10_000 }])
     expect(html).toContain('TIR de la cartera')
@@ -31,10 +28,20 @@ describe('PortfolioResults', () => {
     expect(html).toContain('10.300,00') // 3% + 100% at maturity on VN 10,000, es-AR
   })
 
-  it('lists the warning for a floating ON and still computes the rest', () => {
+  it('leads with the key numbers and tucks the full analysis into collapsed sections (S5)', () => {
+    const html = view([{ isin: 'AR0000000001', mode: 'vn', amount: 10_000 }])
+    const order = ['Costo total', 'Total a cobrar', 'Ganancia vs. costo', 'TIR de la cartera', 'Próximos 12 meses', 'Calendario de cobros'].map((s) => html.indexOf(s))
+    expect(order.every((i) => i >= 0)).toBe(true)
+    expect([...order].sort((x, y) => x - y)).toEqual(order)
+    for (const id of ['pf-calendar', 'pf-annual', 'pf-ladder', 'pf-issuers', 'pf-plaza', 'pf-positions']) expect(html).toContain(`<details id="${id}"`)
+    expect(html).not.toContain(' open=""')
+    expect(html).toContain('>AAAAO<') // the explorer's ticker, not the D line
+  })
+
+  it('still computes the portfolio when one ON (floating) cannot be simulated', () => {
     const html = view([{ isin: 'AR0000000001', mode: 'vn', amount: 10_000 }, { isin: 'AR0000000002', mode: 'usd', amount: 1_000 }])
-    expect(html).toContain('Avisos (1)')
-    expect(html).toContain('tasa variable')
+    expect(html).toContain('TIR de la cartera')
+    expect(html).toContain('Total a cobrar')
   })
 })
 

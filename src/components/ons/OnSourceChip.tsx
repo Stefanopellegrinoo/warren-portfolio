@@ -11,6 +11,8 @@ interface Props {
 }
 
 const TONE = { verified: 'ok', byma: 'info', unverified: 'warn' } as const
+// A 22px chip with a 44px tap area on phones (the dot already uses `before:`).
+const HIT = 'relative max-[819px]:after:absolute max-[819px]:after:inset-x-0 max-[819px]:after:-inset-y-[11px]'
 
 /** Provenance of one term: verificado (primary source) / BYMA / sin verificar. */
 export default function OnSourceChip({ prov, sourceUrl, verifiedAt, className }: Props) {
@@ -28,7 +30,7 @@ export default function OnSourceChip({ prov, sourceUrl, verifiedAt, className }:
   const cls = cn(tag(TONE[prov === 'verified' ? 'verified' : unverified ? 'unverified' : 'byma']), className)
   const text = prov === 'verified' && verifiedAt ? `${label} ${fmtDate(verifiedAt)}` : label
   return href ? (
-    <a href={href} target="_blank" rel="noopener noreferrer" title={`${title}. Ver fuente`} className={cn(cls, 'underline decoration-1 underline-offset-2 hover:decoration-2')}>
+    <a href={href} target="_blank" rel="noopener noreferrer" title={`${title}. Ver fuente`} className={cn(cls, HIT, 'underline decoration-1 underline-offset-2 hover:decoration-2')}>
       {text}
     </a>
   ) : (

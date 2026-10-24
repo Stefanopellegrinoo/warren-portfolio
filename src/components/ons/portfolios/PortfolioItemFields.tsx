@@ -66,10 +66,10 @@ export default function PortfolioItemFields({ idPrefix, values, onChange, market
         </p>
       </div>
       <div className="flex min-w-0 flex-col gap-1.5">
-        <label htmlFor={P} className={label}>Precio manual (opcional, sucio por 100 VN)</label>
+        <label htmlFor={P} className={label}>Precio manual (opcional)</label>
         <input id={P} className={field} type="text" inputMode="decimal" autoComplete="off" placeholder={marketPrice != null ? fmtNum(marketPrice) : 'Precio de mercado'} value={values.price} aria-invalid={priceBad || undefined} aria-describedby={`${P}-hint`} onChange={(e) => set({ price: e.target.value })} />
         <p id={`${P}-hint`} className={priceBad ? 'text-[13px] font-medium text-danger' : hint}>
-          {priceBad ? FORMAT_ERROR : priceValue !== null ? `Interpretado: ${typed(priceValue)} por 100 VN` : ' '}
+          {priceBad ? FORMAT_ERROR : priceValue !== null ? `Interpretado: ${typed(priceValue)} por 100 VN` : 'Vacío: se usa el de mercado. Es el precio sucio por cada 100 VN.'}
         </p>
       </div>
     </div>

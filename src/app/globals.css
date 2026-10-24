@@ -77,6 +77,15 @@
     input, select, textarea { font-size: 16px !important; }
   }
 
+  /* iOS sizes a date field to its native control and ignores width: 100%, so in a narrow column
+     it spills off the screen. Without the native look it takes the width it is given; tapping it
+     still opens the date wheel. */
+  input[type="date"] { min-width: 0; }
+  @supports (-webkit-touch-callout: none) {
+    input[type="date"] { -webkit-appearance: none; appearance: none; }
+    input[type="date"]::-webkit-date-and-time-value { text-align: left; }
+  }
+
   :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 
   @media (prefers-reduced-motion: reduce) {

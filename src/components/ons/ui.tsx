@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import type { ReactNode } from 'react'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { fmtPct } from '@/lib/on-format'
 
 // Shared pieces of the ON pages, on the same tokens and idioms as the Resumen.
 
@@ -133,3 +134,113 @@ export function ScrollTable({ label: name, children, className }: { label: strin
 /** Signed amount for results: "+USD 819,38", "−USD 12,00". */
 export const signedUsd = (x: number, fmt: (n: number) => string) => `${x > 0 ? '+' : x < 0 ? '−' : ''}USD ${fmt(Math.abs(x))}`
 export const signTone = (x: number) => (x > 0 ? 'text-ok' : x < 0 ? 'text-danger' : '')
+
+// odd/tasks/ux-ons-y-operaciones.md S1: the three views of the section, on the pages that are views
+// (detail pages keep a back link instead).
+const ONS_TABS = [
+  { key: 'mi-cartera', href: '/ons/mi-cartera', label: 'Mis ONs' },
+  { key: 'explorar', href: '/ons', label: 'Explorar' },
+  { key: 'carteras', href: '/ons/carteras', label: 'Carteras de prueba' },
+] as const
+export type OnsTab = (typeof ONS_TABS)[number]['key']
+
+export function OnsTabs({ current }: { current: OnsTab }) {
+  return (
+    <nav aria-label="Secciones de obligaciones negociables" className="mt-5 flex gap-1 overflow-x-auto border-b border-line">
+      {ONS_TABS.map((t) => (
+        <Link key={t.key} href={t.href} aria-current={t.key === current ? 'page' : undefined}
+          className={cn(
+            'relative inline-flex min-h-11 flex-none items-center whitespace-nowrap px-3 text-sm font-medium text-ink-2 hover:text-ink max-[400px]:px-2 max-[400px]:text-[13px]',
+            t.key === current && 'text-ink after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:rounded-full after:bg-accent max-[400px]:after:inset-x-2',
+          )}>
+          {t.label}
+        </Link>
+      ))}
+    </nav>
+  )
+}
+
+/**
+ * A collapsed section (S2-S6): native <details>, so a tap opens it without script and the browser's
+ * find-in-page still reaches its text. `summary` is one line saying what is inside.
+ */
+export function Disclosure({ id, title, count, summary, defaultOpen = false, children, className }: {
+  id?: string
+  title: string
+  count?: number
+  summary?: ReactNode
+  defaultOpen?: boolean
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <details id={id} open={defaultOpen || undefined} className={cn('group min-w-0 border-b border-line', className)}>
+      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 py-3 hover:text-ink [&::-webkit-details-marker]:hidden">
+        <span className="min-w-0">
+          <h2 className="inline text-base font-semibold tracking-[-0.005em]">{title}</h2>
+          {count !== undefined && <span className="ml-1 text-ink-3">{count}</span>}
+          {summary && <span className="mt-0.5 block text-[13px] text-ink-3">{summary}</span>}
+        </span>
+        <ChevronDown className="h-4 w-4 flex-none text-ink-3 transition-transform group-open:rotate-180 motion-reduce:transition-none" strokeWidth={1.5} aria-hidden="true" />
+      </summary>
+      <div className="pb-6 pt-2">{children}</div>
+    </details>
+  )
+}
+
+/** Same shape as the Resumen distribution: name, thin bar, percentage. */
+export function Bars({ rows, label: name }: { rows: { key: string; name: string; pct: number; detail: string }[]; label: string }) {
+  return (
+    <ul aria-label={name}>
+      {rows.map((r) => (
+        <li key={r.key} className="grid grid-cols-[minmax(0,1fr)_96px_56px] items-center gap-x-3 gap-y-0.5 border-b border-line py-2.5 last:border-b-0 max-[819px]:grid-cols-[minmax(0,1fr)_auto]">
+          <span className="min-w-0 truncate font-medium">{r.name}</span>
+          <span className="relative h-1 overflow-hidden rounded-full bg-line max-[819px]:col-span-2 max-[819px]:row-start-2 max-[819px]:my-1" aria-hidden="true">
+            <span className="absolute inset-y-0 left-0 rounded-full bg-accent" style={{ width: `${Math.min(100, r.pct)}%` }} />
+          </span>
+          <span className="text-right text-[13px] tabular-nums text-ink-2 max-[819px]:col-start-2 max-[819px]:row-start-1">{fmtPct(r.pct, 1)}</span>
+          <span className="col-span-3 text-[13px] text-ink-3 max-[819px]:col-span-2 max-[819px]:row-start-3">{r.detail}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+// S6: the explanations that used to live only in `title=` tooltips, which never show on a phone.
+export const ON_GLOSSARY = {
+  'TIR': 'Cuánto rinde por año la ON si la comprás hoy a este precio y la tenés hasta el final, cobrando todos los pagos. Sirve para comparar ONs entre sí.',
+  'Duración': 'Cuánto se mueve el precio si cambian las tasas: con duración 3, si las tasas suben un punto el precio baja cerca de un 3 %. A más duración, más riesgo de precio.',
+  'Vida promedio': 'En cuántos años, en promedio, te devuelven el capital. Es más corta que el plazo al vencimiento cuando la ON devuelve el capital en cuotas.',
+  'Valor nominal (VN)': 'La cantidad de la ON que tenés o comprás. Los precios se expresan cada 100 de valor nominal.',
+  'Lámina mínima': 'La menor cantidad de valor nominal que se puede comprar.',
+  'Cupón': 'El pago de intereses, en las fechas del cronograma.',
+  'Amortización': 'La devolución del capital. Algunas ONs lo devuelven todo al vencimiento y otras en cuotas.',
+  'Tipo de tasa': 'Fija: el cupón no cambia. Step up: el cupón sube en fechas previstas. Cupón cero: no paga intereses, se compra con descuento. Variable: depende de una tasa de referencia, por eso no se puede simular.',
+  'Ley': 'La ley que rige la ON, Nueva York o Argentina: define qué tribunales intervienen si la empresa no paga.',
+  'Plaza de pago': 'Dónde paga la empresa: en dólar MEP (una cuenta en Argentina) o en dólar cable (una cuenta en el exterior).',
+  'Precio sucio y limpio': 'El sucio incluye los intereses que se acumularon desde el último cupón; el limpio no. Lo que pagás al comprar es el sucio.',
+  'Valor técnico': 'Lo que vale la ON según sus condiciones: el capital que falta devolver más los intereses acumulados.',
+  'Paridad': 'El precio dividido por el valor técnico. Debajo de 100 % la ON cotiza con descuento; arriba, con prima.',
+  'Tasa corriente': 'El cupón anual dividido por el precio. No tiene en cuenta lo que ganás o perdés entre el precio y lo que te devuelven al final.',
+  'Spread': 'Cuánto más rinde la ON que un bono del Estado de plazo parecido: lo que te pagan por el riesgo de la empresa.',
+  'YTW': 'El rendimiento en el peor caso: si la empresa rescata la ON antes de tiempo en la fecha que menos te conviene.',
+  'Duración Macaulay': 'El plazo promedio, en años, en que cobrás los pagos, pesado por su valor. La duración de arriba sale de esta.',
+  'Convexidad': 'Un ajuste fino de la duración para cambios grandes de tasa. Para comparar ONs alcanza con la TIR y la duración.',
+} as const
+export type GlossaryTerm = keyof typeof ON_GLOSSARY
+
+/** The collapsed "¿Qué significa cada dato?" of an ONs page, with only the terms that page shows. */
+export function Glossary({ terms }: { terms: GlossaryTerm[] }) {
+  return (
+    <Disclosure id="glosario" title="¿Qué significa cada dato?">
+      <dl className="grid max-w-[80ch] gap-3">
+        {terms.map((t) => (
+          <div key={t}>
+            <dt className="font-medium">{t}</dt>
+            <dd className="text-ink-2">{ON_GLOSSARY[t]}</dd>
+          </div>
+        ))}
+      </dl>
+    </Disclosure>
+  )
+}

@@ -79,7 +79,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               // Sonner fixes buttons at 24px; on phones they need the 44px touch target.
               actionButton: 'bg-primary text-primary-on font-medium rounded-md !h-8 !px-3 max-[819px]:!h-11',
               cancelButton: 'bg-surface-2 text-ink-2 font-medium rounded-md !h-8 !px-3 max-[819px]:!h-11',
-              closeButton: 'text-ink-3 hover:text-ink',
+              // The visible x stays small; an invisible 44px area makes it tappable on phones.
+              closeButton: "text-ink-3 hover:text-ink after:absolute after:-inset-3 after:content-['']",
             },
           }}
         />

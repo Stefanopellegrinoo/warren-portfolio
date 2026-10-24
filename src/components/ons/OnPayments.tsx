@@ -21,10 +21,13 @@ type Revert = (key: PaymentKey) => Promise<string | null>
 
 const KIND: Record<PaymentKind, string> = { coupon: 'Cupón', amortization: 'Amortización' }
 const round2 = (x: number) => Math.round(x * 100) / 100
+// Latest first, five at a time, like the Resumen's movements: a long history must not bury the page.
+const PAGE_SIZE = 5
 const linkBtn = 'min-h-6 whitespace-nowrap font-medium text-accent-ink underline underline-offset-2 max-[819px]:min-h-11'
 
 export function OnPaymentsView({ data, onSave, onRevert }: { data: OnPaymentsData; onSave: Save; onRevert: Revert }) {
   const [open, setOpen] = useState<string | null>(null)
+  const [shown, setShown] = useState(PAGE_SIZE)
   const { payments, missing } = data
   if (payments.length === 0 && missing.length === 0) return null
   const close = () => setOpen(null)
@@ -33,17 +36,33 @@ export function OnPaymentsView({ data, onSave, onRevert }: { data: OnPaymentsDat
     <section aria-labelledby="mc-pagos">
       <SectionHead id="mc-pagos" title="Pagos cobrados" count={payments.length} />
       <ul>
-        {payments.map((p) => {
+        {missing.map((g) => {
+          const id = `m:${g.ticker}`
+          return [
+            <li key={id} className={`${notice('warn')} mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-1`}>
+              <p><span aria-hidden="true">⚠ </span>Faltan pagos de {g.ticker}: {g.payments.map((m) => fmtDate(m.date)).join(', ')}</p>
+              <button type="button" className={linkBtn} aria-expanded={open === id} onClick={() => setOpen(open === id ? null : id)}>Cargar</button>
+            </li>,
+            open === id && (
+              <li key={`${id}:form`} className="py-3">
+                <PaymentForm title={`Pago de ${g.ticker}`} options={g.payments} kind="coupon" initial={g.payments[0].estimate}
+                  notReceived={false} chooseKind onSave={(k) => onSave(k)} onDone={close} ticker={g.ticker} />
+              </li>
+            ),
+          ]
+        })}
+        {payments.slice(0, shown).map((p) => {
           const id = `p:${p.ticker}|${p.date}|${p.kind}`
           const key = { ticker: p.ticker, pay_date: p.date, kind: p.kind }
           return [
-            <li key={id} data-payment className="flex min-h-11 flex-wrap items-center gap-x-4 gap-y-1 border-b border-line py-2 tabular-nums">
-              <span className="text-ink-2">{fmtDate(p.date)}</span>
-              <span className="font-semibold">{p.ticker}</span>
-              <span className="text-ink-2">{KIND[p.kind]}</span>
-              <span className={`ml-auto ${p.amount === null ? 'text-ink-3' : 'font-medium'}`}>{p.amount === null ? 'No lo cobré' : formatUSD(p.amount)}</span>
-              <span>
-                <button type="button" className={linkBtn} aria-expanded={open === id} onClick={() => setOpen(open === id ? null : id)}>
+            <li key={id} data-payment className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 border-b border-line py-2 tabular-nums">
+              <span className="min-w-0">
+                <span className="font-semibold">{p.ticker}</span> <span className="text-ink-3">· {KIND[p.kind]}</span>
+                <span className="block text-[13px] text-ink-3">{fmtDate(p.date)}</span>
+              </span>
+              <span className="text-right">
+                <span className={`block ${p.amount === null ? 'text-ink-3' : 'font-medium'}`}>{p.amount === null ? 'No lo cobré' : formatUSD(p.amount)}</span>
+                <button type="button" className={`${linkBtn} text-[13px]`} aria-expanded={open === id} onClick={() => setOpen(open === id ? null : id)}>
                   {p.corrected ? 'Corregido por vos' : 'Corregir'}
                 </button>
               </span>
@@ -60,22 +79,12 @@ export function OnPaymentsView({ data, onSave, onRevert }: { data: OnPaymentsDat
             ),
           ]
         })}
-        {missing.map((g) => {
-          const id = `m:${g.ticker}`
-          return [
-            <li key={id} className={`${notice('warn')} mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-1`}>
-              <p><span aria-hidden="true">⚠ </span>Faltan pagos de {g.ticker}: {g.payments.map((m) => fmtDate(m.date)).join(', ')}</p>
-              <button type="button" className={linkBtn} aria-expanded={open === id} onClick={() => setOpen(open === id ? null : id)}>Cargar</button>
-            </li>,
-            open === id && (
-              <li key={`${id}:form`} className="py-3">
-                <PaymentForm title={`Pago de ${g.ticker}`} options={g.payments} kind="coupon" initial={g.payments[0].estimate}
-                  notReceived={false} chooseKind onSave={(k) => onSave(k)} onDone={close} ticker={g.ticker} />
-              </li>
-            ),
-          ]
-        })}
       </ul>
+      {payments.length > shown && (
+        <button type="button" className={`${btnSecondary} mt-3 w-full`} onClick={() => setShown((n) => n + PAGE_SIZE)}>
+          Ver {Math.min(PAGE_SIZE, payments.length - shown)} más
+        </button>
+      )}
     </section>
   )
 }
@@ -167,7 +176,8 @@ function PaymentForm({ title, ticker, options, kind: initialKind, initial, notRe
   )
 }
 
-export default function OnPayments() {
+/** Loads the paid and missing payments and saves corrections; shared by Mis ONs (its summary shows what is missing). */
+export function useOnPayments() {
   const [data, setData] = useState<OnPaymentsData | null>(null)
   const [failed, setFailed] = useState(false)
   const mounted = useRef(true)
@@ -188,7 +198,11 @@ export default function OnPayments() {
   }
   const onSave: Save = async (body) => after(await api('/api/ons/pagos', { method: 'PUT', body }))
   const onRevert: Revert = async (k) => after(await api(`/api/ons/pagos?${new URLSearchParams(k)}`, { method: 'DELETE' }))
+  return { data, failed, load, onSave, onRevert }
+}
 
+export default function OnPayments({ state }: { state: ReturnType<typeof useOnPayments> }) {
+  const { data, failed, load, onSave, onRevert } = state
   if (failed) return <LoadError message="No se pudieron cargar tus pagos de ONs." onRetry={() => void load()} />
   if (!data) return null
   return <OnPaymentsView data={data} onSave={onSave} onRevert={onRevert} />

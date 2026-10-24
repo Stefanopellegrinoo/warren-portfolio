@@ -26,7 +26,7 @@ export default function OnSchedule({ schedule, floating }: { schedule: ScheduleR
                 <td className={`${TD} text-left`}>{fmtDate(s.date)}</td>
                 <td className={`${TD} text-left`}>
                   {fmtDate(s.payDate)}
-                  {s.payDate !== s.date && <span className="ml-1.5 text-xs text-ink-3" title="El pago se corre al siguiente día hábil">(día hábil)</span>}
+                  {s.payDate !== s.date && <span className="ml-1.5 text-xs text-ink-3">(día hábil)</span>}
                 </td>
                 <td className={TD}>{s.couponPct === null ? '—' : fmtPct(s.couponPct, 4)}</td>
                 <td className={TD}>{fmtPct(s.amortPct)}</td>
@@ -36,6 +36,9 @@ export default function OnSchedule({ schedule, floating }: { schedule: ScheduleR
           </tbody>
         </table>
       </ScrollTable>
+      <p className="mt-2 text-[13px] text-ink-3">
+        Porcentajes del valor nominal original. Cuando la fecha cae en fin de semana o feriado, el pago se corre al día hábil: por eso hay dos fechas.
+      </p>
     </>
   )
 }
