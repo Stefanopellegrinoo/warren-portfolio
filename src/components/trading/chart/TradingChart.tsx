@@ -30,12 +30,16 @@ import { useDrawings } from "./useDrawings";
 import { useChartAlerts } from "./useChartAlerts";
 import { useChartTheme, type ChartTheme } from "./useChartTheme";
 import { DrawingTools } from "./DrawingTools";
+import { DrawingActions } from "./DrawingActions";
 
 const TZ = "America/Argentina/Buenos_Aires";
 const INTRADAY: Timeframe[] = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h"];
 const VISIBLE_BARS = 160;
 const DRAG_THRESHOLD_PX = 3;
 const LEGEND_OPEN_MAX = 3;
+const TEXT_EDITOR_PX = 224;
+// The text editor stays inside the chart however narrow the screen or close to the edge the text is.
+const editorLeft = (x: number, width: number) => Math.max(8, Math.min(x, width - TEXT_EDITOR_PX - 8));
 
 const priceText = (p: number) => formatNumber(p, { decimals: Math.abs(p) < 1 ? 4 : 2 });
 const asTime = (t: number) => t as UTCTimestamp;
@@ -174,7 +178,7 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 		const chart = createChart(box, { autoSize: true });
 		const series = chart.addSeries(CandlestickSeries, { priceLineVisible: true, priceFormat: PRICE_FORMAT });
 		const drawings = new DrawingManager(chart, series, { magnet: "off" });
-		const offText = drawings.on("textEdit", (drawing, screen) => setTextEdit({ drawing, x: screen.x, y: screen.y }));
+		const offText = drawings.on("textEdit", (drawing, screen) => setTextEdit({ drawing, x: editorLeft(screen.x, box.clientWidth), y: screen.y }));
 		const offTouch = touchDrawing(drawings, chart.chartElement());
 		const onMove = (p: MouseEventParams) => setHover((p.seriesData.get(series) as Candle | undefined) ?? null);
 		chart.subscribeCrosshairMove(onMove);
@@ -413,12 +417,14 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 					</div>
 				)}
 
+				<DrawingActions manager={manager} onEditText={(drawing) => setTextEdit({ drawing, x: 12, y: 56 })} />
+
 				{textEdit && (
 					<input
 						autoFocus
 						aria-label="Texto del dibujo"
 						defaultValue={textEdit.drawing.text ?? ""}
-						className="absolute z-20 w-56 rounded border border-line-strong bg-surface px-2 py-1 text-[13px] text-ink outline-none focus:border-ring"
+						className="absolute z-20 w-56 max-w-[calc(100%-16px)] rounded border border-line-strong bg-surface px-2 py-1 text-[13px] text-ink outline-none focus:border-ring"
 						style={{ left: textEdit.x, top: textEdit.y }}
 						onKeyDown={(e) => {
 							if (e.key === "Enter") {

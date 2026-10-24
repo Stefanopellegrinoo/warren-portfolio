@@ -32,9 +32,11 @@ vi.mock('lightweight-charts', () => ({
   CrosshairMode: { Normal: 0 }, LineStyle: { Solid: 0, Dashed: 2 },
   TickMarkType: { Year: 0, Month: 1, DayOfMonth: 2, Time: 3, TimeWithSeconds: 4 },
 }))
+// The drawing layer's events, so a test can raise them.
+const drawingEvents: Record<string, (...a: unknown[]) => void> = {}
 vi.mock('lightweight-charts-drawing', () => ({
   DrawingManager: class {
-    on() { return () => {} }
+    on(event: string, cb: (...a: unknown[]) => void) { drawingEvents[event] = cb; return () => {} }
     tool() { return null }
     setInterval() {}
     destroy() {}
@@ -77,6 +79,21 @@ describe('TradingChart on a touch screen', () => {
     const { box, unmount } = await render()
 
     expect(box.classList).toContain('touch-none')
+    unmount()
+  })
+})
+
+describe('TradingChart text editor', () => {
+  it('stays inside the chart when the text sits near the right edge of a phone (S3)', async () => {
+    const { box, unmount } = await render()
+    Object.defineProperty(box, 'clientWidth', { value: 390 })
+
+    await act(async () => { drawingEvents.textEdit({ id: 't', kind: 'text', text: 'Soporte' }, { x: 380, y: 120 }) })
+
+    const input = document.querySelector<HTMLInputElement>('input[aria-label="Texto del dibujo"]')!
+    expect(input.value).toBe('Soporte')
+    expect(input.style.left).toBe('158px') // 390 wide, a 224px editor, 8px from the edge
+    expect(input.classList).toContain('max-w-[calc(100%-16px)]')
     unmount()
   })
 })
