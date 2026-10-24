@@ -9,6 +9,7 @@ import type { StrategyWithSetups, IndicatorSetup, IndicatorParam } from '@/types
 import { StrategyFormModal } from '@/components/strategies/StrategyFormModal'
 import { SetupFormModal } from '@/components/strategies/SetupFormModal'
 import { Chip, SectionHead } from '@/components/resumen/ui'
+import { InlineConfirm } from '@/components/ui/InlineConfirm'
 import { ErrorNotice, SkeletonRows, ghostButton, iconButton, page, pageTitle, primaryButton, secondaryButton, textLink } from '@/components/strategies/ui'
 import { formatNumber } from '@/lib/utils'
 
@@ -95,8 +96,6 @@ export default function StrategyDetailPage() {
   }
 
   async function deleteSetup(setupId: string) {
-    const confirmed = window.confirm('¿Eliminar este setup? Esta acción no se puede deshacer.')
-    if (!confirmed) return
     setDeletingSetupId(setupId)
     try {
       const res = await fetch(`/api/strategies/${strategyId}/setups/${setupId}`, {
@@ -290,7 +289,7 @@ function SetupRow({
         {risk && <p className="text-[13px] text-ink-3">{risk}</p>}
       </div>
 
-      <div className="flex items-center gap-1 max-[819px]:-ml-3">
+      <div className="flex flex-wrap items-center gap-1 max-[819px]:-ml-3">
         <button
           type="button"
           className={ghostButton}
@@ -304,17 +303,16 @@ function SetupRow({
         <button type="button" className={iconButton} onClick={() => onEdit(setup)} aria-label={`Editar ${setup.name}`} title="Editar">
           <Pencil className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
         </button>
-        <button
-          type="button"
-          className={`${iconButton} hover:text-danger`}
-          onClick={() => onDelete(setup.id)}
-          disabled={isDeleting}
-          aria-busy={isDeleting}
-          aria-label={`Eliminar ${setup.name}`}
-          title="Eliminar"
+        <InlineConfirm
+          question="¿Eliminar este setup? Esta acción no se puede deshacer."
+          confirmLabel="Sí, eliminar"
+          onConfirm={() => onDelete(setup.id)}
+          busy={isDeleting}
+          triggerLabel={`Eliminar ${setup.name}`}
+          triggerClassName={`${iconButton} hover:text-danger`}
         >
           <Trash2 className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
-        </button>
+        </InlineConfirm>
       </div>
     </li>
   )

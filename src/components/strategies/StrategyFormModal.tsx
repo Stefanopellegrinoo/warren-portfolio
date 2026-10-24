@@ -5,6 +5,7 @@ import { X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Dialog } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
+import { requestErrorMessage } from '@/lib/request-errors'
 import { DialogActions, StrategyDialog, field, ghostButton, label, primaryButton } from './ui'
 import type { Strategy } from '@/types'
 
@@ -104,7 +105,7 @@ export function StrategyFormModal({
       onSuccess(saved)
       onOpenChange(false)
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Error inesperado'
+      const message = requestErrorMessage(err, 'No se pudo guardar la estrategia.')
       setError(message)
       toast.error(message)
     } finally {
