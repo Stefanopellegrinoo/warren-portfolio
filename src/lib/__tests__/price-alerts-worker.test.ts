@@ -35,7 +35,10 @@ vi.mock('../summary-cache', () => ({ cacheUserSummaries: vi.fn() }))
 vi.mock('../portfolio-valuation', () => ({
   splitQuotesByAssetClass: (m: Map<string, unknown>) => ({ stockQuotes: m, onQuotes: new Map() }),
 }))
-vi.mock('../utils', () => ({ isMarketOpen: () => true, argentinaDate: () => '2026-10-22' }))
+let mockMarketOpen = true
+vi.mock('../utils', () => ({ isMarketOpen: () => mockMarketOpen, argentinaDate: () => '2026-10-22' }))
+const mockFetchCrypto = vi.fn(async () => new Map())
+vi.mock('../binance/rest', () => ({ fetchCryptoQuotes: (...a: unknown[]) => mockFetchCrypto(...(a as [])) }))
 vi.mock('../import-worker', () => ({ startImportWorker: vi.fn() }))
 vi.mock('../signals-worker', () => ({ startSignalsWorker: vi.fn() }))
 vi.mock('../job-health', () => ({ beat: vi.fn(), alertJobFailure: vi.fn(), recordRefresh: vi.fn() }))
@@ -67,6 +70,7 @@ beforeEach(() => {
   mockPositionRows = []
   mockOnRows = []
   mockAlertTickerRows = []
+  mockMarketOpen = true
 
   // select chain: .from('price_alerts').select('*').eq('status',…).eq('type',…).in('ticker',…)
   mockIn.mockResolvedValue({ data: mockAlertsData, error: mockFetchError })
@@ -386,5 +390,47 @@ describe('periodic price job', () => {
     expect(mockIn.mock.calls[0][1]).toEqual(['AAPL'])
     expect(mockEqUpdate).toHaveBeenCalledWith('id', 'aapl-1')
     expect(mockSendTelegram).toHaveBeenCalledOnce()
+  })
+})
+
+describe('crypto alerts', () => {
+  const btcAlert = { id: 'btc-1', user_id: 'owner-btc', ticker: 'BTCUSDT', operator: 'crosses_above', value: 80000, name: 'n' }
+
+  it('are checked with the market closed, with Binance prices', async () => {
+    mockMarketOpen = false
+    mockAlertTickerRows = [{ ticker: 'BTCUSDT' }, { ticker: 'AAPL' }]
+    mockFetchLkp.mockResolvedValueOnce(new Map([['BTCUSDT', quote('BTCUSDT', 79900)]]))
+    mockFetchCrypto.mockResolvedValueOnce(new Map([['BTCUSDT', quote('BTCUSDT', 80100)]]))
+    mockIn.mockResolvedValueOnce({ data: [btcAlert], error: null })
+
+    await processor({ name: 'repeat', data: {} })
+
+    expect(mockFetchCrypto).toHaveBeenCalledWith(['BTCUSDT'])
+    expect(mockFetchYahoo).not.toHaveBeenCalled()
+    expect(mockIn.mock.calls[0][1]).toEqual(['BTCUSDT'])
+    expect(mockEqUpdate).toHaveBeenCalledWith('id', 'btc-1')
+    expect(mockSendPush).toHaveBeenCalledWith(expect.anything(), 'owner-btc', expect.objectContaining({ url: '/trading?symbol=BTCUSDT' }))
+  })
+
+  it('never go to Yahoo with the market open', async () => {
+    mockAlertTickerRows = [{ ticker: 'BTCUSDT' }, { ticker: 'TSLA' }]
+    mockFetchCrypto.mockResolvedValueOnce(new Map([['BTCUSDT', quote('BTCUSDT', 79000)]]))
+
+    await processor({ name: 'repeat', data: {} })
+
+    expect(mockFetchCrypto).toHaveBeenCalledWith(['BTCUSDT'])
+    expect((mockFetchYahoo.mock.calls[0] as unknown as [string[]])[0]).toEqual(['TSLA'])
+  })
+
+  it('a Binance failure is logged and the stock cycle still runs', async () => {
+    mockAlertTickerRows = [{ ticker: 'BTCUSDT' }, { ticker: 'TSLA' }]
+    mockFetchCrypto.mockRejectedValueOnce(new Error('binance 451'))
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await processor({ name: 'repeat', data: {} })
+
+    expect(errorSpy).toHaveBeenCalledWith('[Worker] Crypto alerts failed:', expect.any(Error))
+    expect(mockFetchYahoo).toHaveBeenCalledOnce()
+    errorSpy.mockRestore()
   })
 })
