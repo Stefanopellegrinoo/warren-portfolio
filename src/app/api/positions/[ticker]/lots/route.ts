@@ -4,6 +4,7 @@ import { fetchQuotes } from '@/lib/yahoo-finance'
 import { cached } from '@/lib/cache'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { normalizeError } from '@/lib/errors'
+import { serverError } from '@/lib/api/errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -44,7 +45,6 @@ export async function GET(
 
     return NextResponse.json({ lots: enrichedLots })
   } catch (err: any) {
-    console.error(`[Lots API] Error for ${params.ticker}:`, err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('Lots API', err)
   }
 }

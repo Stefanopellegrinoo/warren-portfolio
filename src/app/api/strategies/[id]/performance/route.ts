@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
+import { serverError } from '@/lib/api/errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,7 +23,7 @@ export async function GET(
       .single()
 
     if (!strategy) {
-      return NextResponse.json({ error: 'Strategy not found' }, { status: 404 })
+      return NextResponse.json({ error: 'No encontramos esa estrategia' }, { status: 404 })
     }
 
     const [{ data: setups }, { data: perf }, { data: openTrades }] = await Promise.all([
@@ -109,7 +110,6 @@ export async function GET(
 
     return NextResponse.json({ setups: aggregatedSetups, best_setup_id: bestSetupId })
   } catch (err: unknown) {
-    console.error(err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('API /strategies/[id]/performance', err)
   }
 }

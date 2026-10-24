@@ -3,7 +3,7 @@ import { getMarketDataProvider, MarketDataError } from '@/lib/market-data'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { cached } from '@/lib/cache'
 import type { CandleInterval } from '@/lib/market-data'
-import { serverError } from '@/lib/api/errors'
+import { marketDataMessage, serverError } from '@/lib/api/errors'
 import { rateLimit, tooManyRequests } from '@/lib/rate-limit'
 
 // Days of history per interval when the caller sends no `days`. Intraday limits
@@ -43,10 +43,10 @@ export async function GET(req: NextRequest) {
   const daysParam = searchParams.get('days')
 
   if (!ticker) {
-    return NextResponse.json({ error: 'ticker required' }, { status: 400 })
+    return NextResponse.json({ error: 'Ingresá el ticker' }, { status: 400 })
   }
   if (!isInterval(interval)) {
-    return NextResponse.json({ error: `unsupported interval: ${interval}` }, { status: 400 })
+    return NextResponse.json({ error: 'Ese intervalo del gráfico no está disponible' }, { status: 400 })
   }
 
   const authResult = await requireUser()
@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
     // A 404 or 429 tells the user something; a provider failure is internal (S6).
     if (err instanceof MarketDataError && errorToStatus(err) !== 500) {
       console.error(`[/api/klines] ${err.code}: ${err.message}`)
-      return NextResponse.json({ error: err.message }, { status: errorToStatus(err) })
+      return NextResponse.json({ error: marketDataMessage(err.code) }, { status: errorToStatus(err) })
     }
     return serverError('/api/klines', err)
   }

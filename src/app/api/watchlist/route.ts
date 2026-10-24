@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getMarketDataProvider } from '@/lib/market-data'
 import { MarketDataError } from '@/lib/market-data/types'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
+import { serverError } from '@/lib/api/errors'
+import { INVALID_JSON } from '@/lib/api/validation'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,7 +23,7 @@ export async function GET(req: NextRequest) {
 
   const watchlistId = req.nextUrl.searchParams.get('watchlistId')
   if (!watchlistId) {
-    return NextResponse.json({ error: 'watchlistId query param is required' }, { status: 400 })
+    return NextResponse.json({ error: 'Elegí una lista' }, { status: 400 })
   }
 
   // Verify ownership
@@ -33,7 +35,7 @@ export async function GET(req: NextRequest) {
     .single()
 
   if (ownershipError || !watchlist) {
-    return NextResponse.json({ error: 'Watchlist not found' }, { status: 404 })
+    return NextResponse.json({ error: 'No encontramos esa lista' }, { status: 404 })
   }
 
   const { data: rows, error } = await supabase
@@ -43,8 +45,7 @@ export async function GET(req: NextRequest) {
     .order('added_at', { ascending: true })
 
   if (error) {
-    console.error('[GET /api/watchlist] Supabase error:', error)
-    return NextResponse.json({ error: 'Failed to fetch watchlist items' }, { status: 500 })
+    return serverError('GET /api/watchlist', error)
   }
 
   const provider = getMarketDataProvider()
@@ -85,17 +86,17 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json()
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+    return NextResponse.json({ error: INVALID_JSON }, { status: 400 })
   }
 
   const symbol = body.symbol?.trim()
   if (!symbol) {
-    return NextResponse.json({ error: 'symbol is required' }, { status: 400 })
+    return NextResponse.json({ error: 'Ingresá el ticker' }, { status: 400 })
   }
 
   const watchlistId = body.watchlistId
   if (!watchlistId) {
-    return NextResponse.json({ error: 'watchlistId is required' }, { status: 400 })
+    return NextResponse.json({ error: 'Elegí una lista' }, { status: 400 })
   }
 
   // Verify ownership
@@ -107,7 +108,7 @@ export async function POST(req: NextRequest) {
     .single()
 
   if (ownershipError || !watchlist) {
-    return NextResponse.json({ error: 'Watchlist not found' }, { status: 404 })
+    return NextResponse.json({ error: 'No encontramos esa lista' }, { status: 404 })
   }
 
   const { data, error } = await supabase
@@ -118,10 +119,9 @@ export async function POST(req: NextRequest) {
   if (error) {
     // Postgres unique violation code
     if (error.code === '23505') {
-      return NextResponse.json({ error: 'Already in watchlist' }, { status: 409 })
+      return NextResponse.json({ error: 'Ese ticker ya está en la lista' }, { status: 409 })
     }
-    console.error('[POST /api/watchlist] Supabase error:', error)
-    return NextResponse.json({ error: 'Failed to add to watchlist' }, { status: 500 })
+    return serverError('POST /api/watchlist', error)
   }
 
   return NextResponse.json({ symbol, watchlistId }, { status: 201 })
@@ -135,12 +135,12 @@ export async function DELETE(req: NextRequest) {
 
   const symbol = req.nextUrl.searchParams.get('symbol')
   if (!symbol) {
-    return NextResponse.json({ error: 'symbol query param is required' }, { status: 400 })
+    return NextResponse.json({ error: 'Ingresá el ticker' }, { status: 400 })
   }
 
   const watchlistId = req.nextUrl.searchParams.get('watchlistId')
   if (!watchlistId) {
-    return NextResponse.json({ error: 'watchlistId query param is required' }, { status: 400 })
+    return NextResponse.json({ error: 'Elegí una lista' }, { status: 400 })
   }
 
   // Verify ownership
@@ -152,7 +152,7 @@ export async function DELETE(req: NextRequest) {
     .single()
 
   if (ownershipError || !watchlist) {
-    return NextResponse.json({ error: 'Watchlist not found' }, { status: 404 })
+    return NextResponse.json({ error: 'No encontramos esa lista' }, { status: 404 })
   }
 
   const { data, error } = await supabase
@@ -163,12 +163,11 @@ export async function DELETE(req: NextRequest) {
     .select('id')
 
   if (error) {
-    console.error('[DELETE /api/watchlist] Supabase error:', error)
-    return NextResponse.json({ error: 'Failed to delete from watchlist' }, { status: 500 })
+    return serverError('DELETE /api/watchlist', error)
   }
 
   if (!data || data.length === 0) {
-    return NextResponse.json({ error: 'Symbol not found in watchlist' }, { status: 404 })
+    return NextResponse.json({ error: 'Ese ticker no está en la lista' }, { status: 404 })
   }
 
   return NextResponse.json({ success: true })

@@ -45,16 +45,16 @@ export async function POST(req: NextRequest) {
   const { date, category, description, amount_usd, status } = body
 
   if (!date || typeof date !== 'string') {
-    return NextResponse.json({ error: 'Fecha requerida' }, { status: 400 })
+    return NextResponse.json({ error: 'Ingresá una fecha' }, { status: 400 })
   }
   if (!category || !ALLOWED_CATEGORIES.includes(category)) {
-    return NextResponse.json({ error: 'Categoría inválida' }, { status: 400 })
+    return NextResponse.json({ error: 'Elegí una categoría de la lista' }, { status: 400 })
   }
   if (typeof amount_usd !== 'number' || amount_usd <= 0) {
-    return NextResponse.json({ error: 'Monto debe ser positivo' }, { status: 400 })
+    return NextResponse.json({ error: 'El monto tiene que ser mayor a 0' }, { status: 400 })
   }
   if (status && !['PAGADO', 'PENDIENTE'].includes(status)) {
-    return NextResponse.json({ error: 'Estado inválido' }, { status: 400 })
+    return NextResponse.json({ error: 'Elegí un estado: pagado o pendiente' }, { status: 400 })
   }
 
   // Only pass whitelisted fields
@@ -84,11 +84,11 @@ export async function PATCH(req: NextRequest) {
   const body = await req.json()
   const { id, status } = body
 
-  if (!id) return NextResponse.json({ error: 'ID requerido' }, { status: 400 })
+  if (!id) return NextResponse.json({ error: 'Falta el identificador del gasto' }, { status: 400 })
 
   // Only allow status updates via PATCH
   if (status && !['PAGADO', 'PENDIENTE'].includes(status)) {
-    return NextResponse.json({ error: 'Estado inválido' }, { status: 400 })
+    return NextResponse.json({ error: 'Elegí un estado: pagado o pendiente' }, { status: 400 })
   }
 
   const { data, error } = await supabase
@@ -100,7 +100,7 @@ export async function PATCH(req: NextRequest) {
     .single()
 
   if (error) return serverError('API /cashflow', error)
-  if (!data) return NextResponse.json({ error: 'No encontrado' }, { status: 404 })
+  if (!data) return NextResponse.json({ error: 'No encontramos ese gasto' }, { status: 404 })
   await invalidateUserCache(user.id)
   return NextResponse.json(data)
 }
@@ -111,7 +111,7 @@ export async function DELETE(req: NextRequest) {
   const { supabase, user } = authResult
 
   const { id } = await req.json()
-  if (!id) return NextResponse.json({ error: 'ID requerido' }, { status: 400 })
+  if (!id) return NextResponse.json({ error: 'Falta el identificador del gasto' }, { status: 400 })
 
   const { error } = await supabase
     .from('cashflow')

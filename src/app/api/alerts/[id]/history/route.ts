@@ -21,7 +21,7 @@ export async function GET(
     .maybeSingle()
 
   if (alertError) return serverError('API /alerts/[id]/history', alertError)
-  if (!alert) return NextResponse.json({ error: 'Alert not found' }, { status: 404 })
+  if (!alert) return NextResponse.json({ error: 'No encontramos esa alerta' }, { status: 404 })
 
   const { data, error } = await supabase
     .from('alert_history')

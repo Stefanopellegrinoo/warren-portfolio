@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase-server'
 import { getAvailableCorporateBonds } from '@/lib/data912-client'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { rateLimit, tooManyRequests } from '@/lib/rate-limit'
+import { serverError } from '@/lib/api/errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -89,7 +90,6 @@ export async function GET(req: NextRequest) {
     })
 
   } catch (error) {
-    console.error('[ON Search] Error:', error)
-    return NextResponse.json({ error: 'Failed to search bonds' }, { status: 500 })
+    return serverError('ON Search', error)
   }
 }

@@ -95,7 +95,7 @@ describe('tooManyRequests', () => {
 
     expect(res.status).toBe(429)
     expect(res.headers.get('Retry-After')).toBe('60')
-    expect((await res.json()).error).toBe('Too many requests')
+    expect((await res.json()).error).toBe('Hiciste demasiados pedidos seguidos. Esperá un minuto y probá de nuevo.')
   })
 })
 

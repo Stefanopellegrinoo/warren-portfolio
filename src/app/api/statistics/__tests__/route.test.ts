@@ -237,7 +237,7 @@ describe('GET /api/statistics — universe parameter', () => {
   it('rejects an unknown universe with 400 instead of silently defaulting', async () => {
     const res = await GET(makeRequest('/api/statistics?universe=banana'))
     expect(res.status).toBe(400)
-    expect((await res.json()).error).toBe('Invalid universe. Allowed: total, stocks, ons')
+    expect((await res.json()).error).toBe('Elegí qué ver: toda la cartera, acciones u ONs')
     expect(mockCacheRoute).not.toHaveBeenCalled()
   })
 

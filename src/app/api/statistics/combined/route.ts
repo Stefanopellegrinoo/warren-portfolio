@@ -6,6 +6,7 @@ import { getFullPortfolio } from '@/lib/portfolio-engine'
 import { enrichPositionsForStats } from '@/lib/position-stats'
 import { loadLastCloses } from '@/lib/ledger-now'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
+import { serverError } from '@/lib/api/errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -73,7 +74,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(responseData)
 
   } catch (err) {
-    console.error(err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('API /statistics/combined', err)
   }
 }

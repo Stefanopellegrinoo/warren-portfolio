@@ -3,6 +3,7 @@ import { z } from "zod"
 import { requireUser, isAuthFailure } from "@/lib/api-auth"
 import { serverError } from "@/lib/api/errors"
 import type { ChartDrawing } from "@/lib/types/drawings"
+import { INVALID_JSON } from '@/lib/api/validation'
 
 const pointSchema = z.object({
   time: z.number().int().positive(),
@@ -47,12 +48,12 @@ export async function PATCH(
   try {
     body = await req.json()
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
+    return NextResponse.json({ error: INVALID_JSON }, { status: 400 })
   }
 
   const parsed = patchSchema.safeParse(body)
   if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
+    return NextResponse.json({ error: "No se pudo guardar el dibujo. Recargá la página y probá de nuevo." }, { status: 400 })
   }
 
   const { id } = await params
@@ -71,7 +72,7 @@ export async function PATCH(
     .single()
 
   if (error) return serverError("API /drawings/[id]", error)
-  if (!data) return NextResponse.json({ error: "not found" }, { status: 404 })
+  if (!data) return NextResponse.json({ error: "No encontramos ese dibujo" }, { status: 404 })
   return NextResponse.json(rowToDrawing(data))
 }
 

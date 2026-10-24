@@ -3,7 +3,7 @@ import { getMarketDataProvider, MarketDataError } from '@/lib/market-data'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { getCachedRoute, cacheRoute } from '@/lib/redis'
 import { rateLimit, tooManyRequests } from '@/lib/rate-limit'
-import { serverError } from '@/lib/api/errors'
+import { marketDataMessage, serverError } from '@/lib/api/errors'
 
 const CACHE_TTL_SECONDS = 600
 // q becomes a Redis key and Redis runs noeviction: an unbounded q could fill it (S5).
@@ -33,16 +33,16 @@ export async function GET(req: NextRequest) {
   const rawQ = searchParams.get('q')
 
   if (!rawQ) {
-    return NextResponse.json({ error: 'q parameter is required' }, { status: 400 })
+    return NextResponse.json({ error: 'Escribí algo para buscar' }, { status: 400 })
   }
 
   const q = rawQ.toLowerCase().trim()
 
   if (q.length < 2) {
-    return NextResponse.json({ error: 'q must be at least 2 characters' }, { status: 400 })
+    return NextResponse.json({ error: 'Escribí al menos 2 letras para buscar' }, { status: 400 })
   }
   if (q.length > MAX_Q_LENGTH) {
-    return NextResponse.json({ error: `q must be at most ${MAX_Q_LENGTH} characters` }, { status: 400 })
+    return NextResponse.json({ error: `La búsqueda puede tener hasta ${MAX_Q_LENGTH} caracteres` }, { status: 400 })
   }
 
   const cacheKey = `ticker-search:${q}`
@@ -68,7 +68,7 @@ export async function GET(req: NextRequest) {
     // A 404 or 429 tells the user something; a provider failure is internal (S6).
     if (err instanceof MarketDataError && errorToStatus(err) !== 500) {
       console.error(`[/api/ticker/search] ${err.code}: ${err.message}`)
-      return NextResponse.json({ error: err.message }, { status: errorToStatus(err) })
+      return NextResponse.json({ error: marketDataMessage(err.code) }, { status: errorToStatus(err) })
     }
     return serverError('/api/ticker/search', err)
   }

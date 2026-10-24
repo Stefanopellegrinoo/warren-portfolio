@@ -3,6 +3,7 @@ import { z } from "zod"
 import { requireUser, isAuthFailure } from "@/lib/api-auth"
 import { serverError } from "@/lib/api/errors"
 import type { ChartDrawing } from "@/lib/types/drawings"
+import { INVALID_JSON } from '@/lib/api/validation'
 
 const querySchema = z.object({
   ticker: z.string().min(1).max(20),
@@ -56,7 +57,7 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url)
   const parsed = querySchema.safeParse({ ticker: url.searchParams.get("ticker") })
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid ticker" }, { status: 400 })
+    return NextResponse.json({ error: "Ingresá un ticker válido" }, { status: 400 })
   }
 
   const { data, error } = await supabase
@@ -80,12 +81,12 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json()
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
+    return NextResponse.json({ error: INVALID_JSON }, { status: 400 })
   }
 
   const parsed = bodySchema.safeParse(body)
   if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
+    return NextResponse.json({ error: "No se pudo guardar el dibujo. Recargá la página y probá de nuevo." }, { status: 400 })
   }
 
   const { data, error } = await supabase
@@ -113,7 +114,7 @@ export async function DELETE(req: NextRequest) {
 
   const url = new URL(req.url)
   const ticker = url.searchParams.get("ticker")
-  if (!ticker) return NextResponse.json({ error: "ticker required" }, { status: 400 })
+  if (!ticker) return NextResponse.json({ error: "Ingresá el ticker" }, { status: 400 })
 
   const { error } = await supabase
     .from("chart_drawings")

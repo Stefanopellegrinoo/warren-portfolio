@@ -88,6 +88,6 @@ describe('GET /api/ons/search', () => {
     const res = await search('q=aer')
 
     expect(res.status).toBe(500)
-    expect(await res.json()).toEqual({ error: 'Failed to search bonds' })
+    expect(await res.json()).toEqual({ error: 'No se pudo completar la operación' })
   })
 })

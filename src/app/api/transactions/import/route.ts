@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { addImportJob, QueueUnavailableError } from '@/lib/queue'
 import { parseExcelTransactions, ExcelParseError } from '@/lib/excel-import'
 import { TransactionImportSchema } from '@/lib/schemas/transaction'
-import { validationErrorResponse } from '@/lib/api/validation'
+import { INVALID_JSON, validateBody, validationErrorResponse } from '@/lib/api/validation'
+import { serverError } from '@/lib/api/errors'
 import type { TransactionInput } from '@/types'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 
@@ -21,35 +22,26 @@ export async function POST(req: NextRequest) {
 
     // ponytail: a chunked body without content-length skips this; the 5 MB file check still runs after parsing.
     if (Number(req.headers.get('content-length') ?? 0) > MAX_BODY_BYTES) {
-      return NextResponse.json({ error: 'Request too large (max 5 MB)' }, { status: 413 })
+      return NextResponse.json({ error: 'El archivo es demasiado grande. El máximo es 5 MB.' }, { status: 413 })
     }
 
     const contentType = req.headers.get('content-type') ?? ''
     let transactions: TransactionInput[] = []
 
     if (contentType.includes('application/json')) {
-      // Validate JSON body
+      let body: unknown
       try {
-        const body = await req.json()
-        const validated = TransactionImportSchema.parse(body)
-        transactions = validated.transactions
-      } catch (error: any) {
-        const errors = error.errors?.map((err: any) => ({
-          path: err.path.join('.'),
-          message: err.message,
-        })) || [{ message: 'Invalid request body' }]
-
-        return validationErrorResponse({
-          status: 400,
-          message: 'Validation failed',
-          errors,
-        })
+        body = await req.json()
+      } catch {
+        return NextResponse.json({ error: INVALID_JSON }, { status: 400 })
       }
+      // A rejected field throws { status: 400 }, answered by the catch below.
+      transactions = validateBody(TransactionImportSchema, body).transactions
     } else if (contentType.includes('multipart/form-data')) {
       const formData = await req.formData()
       const file = formData.get('file') as File | null
-      if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 })
-      if (file.size > MAX_UPLOAD_BYTES) return NextResponse.json({ error: 'File too large (max 5 MB)' }, { status: 413 })
+      if (!file) return NextResponse.json({ error: 'Elegí un archivo para importar' }, { status: 400 })
+      if (file.size > MAX_UPLOAD_BYTES) return NextResponse.json({ error: 'El archivo es demasiado grande. El máximo es 5 MB.' }, { status: 413 })
 
       const buffer = await file.arrayBuffer()
       const XLSX = await import('xlsx')
@@ -64,7 +56,8 @@ export async function POST(req: NextRequest) {
       } catch (error) {
         if (error instanceof ExcelParseError) {
           return NextResponse.json({
-            error: 'Error al validar el archivo Excel',
+            // Already Spanish and names the line: "Línea 3: Falta el campo FECHA".
+            error: error.message,
             details: {
               line: error.line,
               field: error.field,
@@ -75,11 +68,11 @@ export async function POST(req: NextRequest) {
         throw error // Re-throw unexpected errors
       }
     } else {
-      return NextResponse.json({ error: 'Content-Type must be application/json or multipart/form-data' }, { status: 400 })
+      return NextResponse.json({ error: INVALID_JSON }, { status: 400 })
     }
 
     if (!transactions.length) {
-      return NextResponse.json({ error: 'No valid transactions found' }, { status: 400 })
+      return NextResponse.json({ error: 'El archivo no tiene operaciones para importar' }, { status: 400 })
     }
 
     // Enqueue background job (async)
@@ -98,12 +91,11 @@ export async function POST(req: NextRequest) {
       return validationErrorResponse(err)
     }
 
-    // Queue unreachable: the import cannot run without it — tell the truth.
+    // Queue unreachable: the import cannot run without it — tell the truth, without naming Redis.
     if (err instanceof QueueUnavailableError) {
-      return NextResponse.json({ error: err.message }, { status: 503 })
+      return NextResponse.json({ error: 'No se pudo iniciar la importación en este momento. Probá de nuevo en unos minutos.' }, { status: 503 })
     }
 
-    console.error(err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('Import', err)
   }
 }

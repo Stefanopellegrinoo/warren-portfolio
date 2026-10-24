@@ -3,13 +3,23 @@ import { NextResponse } from 'next/server'
 /** Same text as `dbFail` in `src/lib/test-portfolios.ts`, so the UI shows one message for every failure. */
 export const GENERIC_ERROR = 'No se pudo completar la operación'
 
+export const MARKET_DATA_UNAVAILABLE = 'Los precios no están disponibles en este momento. Probá de nuevo en unos minutos.'
+
+/** The user's text for a MarketDataError code; the provider's own message is English and internal. */
+export function marketDataMessage(code: string): string {
+  if (code === 'NOT_FOUND') return 'No encontramos datos de ese ticker. Revisá cómo está escrito.'
+  if (code === 'RATE_LIMITED') return 'El proveedor de precios recibió demasiados pedidos. Probá de nuevo en un minuto.'
+  return MARKET_DATA_UNAVAILABLE
+}
+
 // process_transaction_atomic catches EVERY error and re-raises it as P0001
 // 'Transaction failed: <msg> (SQLSTATE: <code>)': a wrapped code other than P0001 is internal.
 const WRAPPED_INTERNAL = /\(SQLSTATE: (?!P0001\))[0-9A-Z]{5}\)$/
 
 // Plain Errors that portfolio-engine.ts and on-engine.ts throw on purpose for the user.
 // ponytail: matched by text because the engines throw bare `Error`; a typed error class there replaces this list.
-const ENGINE_GUARDS = [/^Hay una importación masiva en curso/, /^ON tickers must end with 'D'/]
+// The ON one is `onTickerMessage` in src/lib/schemas/transaction.ts.
+const ENGINE_GUARDS = [/^Hay una importación masiva en curso/, /^El ticker de una ON tiene que terminar en D/]
 
 /** The message of a deliberate, user-facing failure, or null for anything unexpected. */
 function domainMessage(err: unknown): string | null {

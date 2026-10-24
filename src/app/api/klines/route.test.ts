@@ -111,7 +111,7 @@ describe('GET /api/klines', () => {
     const res = await GET(makeRequest({ ticker: 'AAPL', interval: '4h' }))
 
     expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({ error: 'unsupported interval: 4h' })
+    expect(await res.json()).toEqual({ error: 'Ese intervalo del gráfico no está disponible' })
     expect(mockGetCandles).not.toHaveBeenCalled()
   })
 

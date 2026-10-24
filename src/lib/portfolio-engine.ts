@@ -7,6 +7,7 @@ import { tradeRecordRpcParams, type TradeRecord } from './trade-record'
 import { loadPortfolioNow } from './ledger-now'
 import { argentinaDate } from './utils'
 import { assertNoNewOversell, OversellError, pendingTrade, stateAfterWrite } from './ledger-write'
+import { GENERIC_ERROR } from './api/errors'
 
 /**
  * SECURITY: Explicitly validate userId to prevent data corruption.
@@ -49,7 +50,7 @@ export async function processTransaction(
     const redis = getRedis()
     const isImporting = await redis?.get(`importing:${userId}`)
     if (isImporting) {
-      throw new Error('Hay una importación masiva en curso para este usuario. Por favor, espere a que finalice para realizar cambios manuales.')
+      throw new Error('Hay una importación masiva en curso. Esperá a que termine para cargar operaciones a mano.')
     }
   }
 
@@ -274,13 +275,13 @@ export async function processTransactionBatch(
         success: false,
         imported: 0,
         failed: inputs.length,
-        errors: [{ line: 0, ticker: 'BATCH', error: 'Import already in progress. Please wait.' }],
+        errors: [{ line: 0, ticker: 'BATCH', error: 'Ya hay una importación en curso. Esperá a que termine y probá de nuevo.' }],
       }
     }
   }
 
   try {
-    if (onProgress) await onProgress(10, 'Validating and sorting transactions...')
+    if (onProgress) await onProgress(10, 'Revisando las operaciones…')
     const sortedInputs = [...inputs].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 
     // The core's sale rule on the ledger after the import (a replace: the file alone).
@@ -303,7 +304,7 @@ export async function processTransactionBatch(
     }))
 
     if (onProgress) {
-      const msg = replace ? `Replacing portfolio with ${sortedInputs.length} transactions...` : `Importing ${sortedInputs.length} transactions...`
+      const msg = replace ? `Reemplazando tu cartera con ${sortedInputs.length} operaciones…` : `Importando ${sortedInputs.length} operaciones…`
       await onProgress(20, msg)
     }
 
@@ -315,7 +316,12 @@ export async function processTransactionBatch(
 
     if (error) throw normalizeError(error)
     const result = Array.isArray(data) ? data[0] : data
-    if (!result.success) return { success: false, imported: 0, failed: result.failed, errors: result.error_details }
+    if (!result.success) {
+      // SQLERRM is database text (English, sometimes internal): the user keeps the line and the ticker.
+      console.error('[importTransactions] rejected by the database:', result.error_details)
+      const errors = (result.error_details ?? []).map((e: { line: number; ticker: string }) => ({ ...e, error: GENERIC_ERROR }))
+      return { success: false, imported: 0, failed: result.failed, errors }
+    }
 
     const tickers = Array.from(new Set(sortedInputs.map(i => i.ticker.toUpperCase().trim())))
 
@@ -327,8 +333,11 @@ export async function processTransactionBatch(
 
     return { success: true, imported: result.imported, failed: 0, errors: [] }
   } catch (err: any) {
+    // Only the oversell rule speaks to the user; anything else is internal (logged, never shown).
+    if (!(err instanceof OversellError)) console.error('[importTransactions]', err)
     const ticker = err instanceof OversellError ? err.issue.ticker : 'BATCH'
-    return { success: false, imported: 0, failed: inputs.length, errors: [{ line: 0, ticker, error: err.message }] }
+    const error = err instanceof OversellError ? err.message : GENERIC_ERROR
+    return { success: false, imported: 0, failed: inputs.length, errors: [{ line: 0, ticker, error }] }
   }
 }
 

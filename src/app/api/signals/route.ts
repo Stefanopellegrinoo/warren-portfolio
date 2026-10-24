@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
 
   const ticker = searchParams.get('ticker')
-  if (!ticker) return NextResponse.json({ error: 'ticker required' }, { status: 400 })
+  if (!ticker) return NextResponse.json({ error: 'Ingresá el ticker' }, { status: 400 })
 
   const hours = parseInt(searchParams.get('hours') ?? '72', 10)
   const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString()

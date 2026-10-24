@@ -109,8 +109,7 @@ export async function GET() {
       txRows = [...(await fetchFlowTransactions(supabase, user.id)), ...automatic.transactions]
       income = [...(await fetchIncomeMovements(supabase, user.id)), ...automatic.income]
     } catch (txErr) {
-      console.error('[Statistics ONs] flow inputs fetch failed:', normalizeError(txErr).message)
-      return NextResponse.json({ error: 'Failed to fetch flow inputs' }, { status: 500 })
+      return serverError('Statistics ONs', normalizeError(txErr))
     }
 
     // External flows are irrelevant to the ons universe (universeFlows routes

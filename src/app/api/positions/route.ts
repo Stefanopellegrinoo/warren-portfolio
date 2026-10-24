@@ -9,6 +9,7 @@ import type { Position, ONPosition } from '@/types'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { currencyViewsFor, loadCurrencyContext } from '@/lib/currency-views'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { serverError } from '@/lib/api/errors'
 
 /** The Pesos / MEP / Cable views; their failure never fails the response. */
 async function currencyViews(
@@ -108,7 +109,6 @@ export async function GET(req: NextRequest) {
     const views = await currencyViews(supabase, user.id, { positions, onPositions, cashBalance: portfolio.cashBalance })
     return NextResponse.json({ positions, onPositions, summary, unpricedCount, unpricedTickers, lastRefresh, ...views })
   } catch (err) {
-    console.error(err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('API /positions', err)
   }
 }

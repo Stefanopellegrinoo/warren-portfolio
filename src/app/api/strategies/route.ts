@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { normalizeError } from '@/lib/errors'
 import type { Strategy, StrategiesListResponse } from '@/types'
+import { serverError } from '@/lib/api/errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,8 +24,7 @@ export async function GET(_req: NextRequest) {
     const response: StrategiesListResponse = { strategies: data ?? [] }
     return NextResponse.json(response)
   } catch (err: unknown) {
-    console.error(err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('API /strategies', err)
   }
 }
 
@@ -39,10 +39,10 @@ export async function POST(req: NextRequest) {
     const { name, philosophy, tickers, timeframes } = body
 
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
-      return NextResponse.json({ error: 'name is required' }, { status: 400 })
+      return NextResponse.json({ error: 'Ingresá un nombre para la estrategia' }, { status: 400 })
     }
     if (!philosophy || typeof philosophy !== 'string' || philosophy.trim().length === 0) {
-      return NextResponse.json({ error: 'philosophy is required' }, { status: 400 })
+      return NextResponse.json({ error: 'Describí la filosofía de la estrategia' }, { status: 400 })
     }
 
     const { data, error } = await supabase
@@ -61,7 +61,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ strategy: data as Strategy }, { status: 201 })
   } catch (err: unknown) {
-    console.error(err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('API /strategies', err)
   }
 }

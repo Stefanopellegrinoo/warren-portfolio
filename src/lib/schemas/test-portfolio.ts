@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import './locale'
 
 export const MAX_PORTFOLIOS = 20 // per user (A6), also enforced by migration 040
 export const MAX_ITEMS = 50 // per portfolio
@@ -9,12 +10,12 @@ export const ISIN_RE = /^[A-Z]{2}[A-Z0-9]{9}\d$/
 export const ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export const PortfolioNameSchema = z.strictObject({
-  name: z.string({ message: 'Ingresá un nombre' }).trim().min(1, 'Ingresá un nombre').max(MAX_NAME, `Máximo ${MAX_NAME} caracteres`),
+  name: z.string({ message: 'Ingresá un nombre' }).trim().min(1, 'Ingresá un nombre').max(MAX_NAME, `El nombre puede tener hasta ${MAX_NAME} caracteres`),
 })
 
-const amount = z.number({ message: 'El monto debe ser un número' }).finite().positive('El monto debe ser mayor a cero').max(MAX_AMOUNT, 'Monto demasiado grande')
+const amount = z.number({ message: 'El monto debe ser un número' }).finite().positive('El monto debe ser mayor a cero').max(MAX_AMOUNT, 'El monto es demasiado grande')
 const mode = z.enum(['usd', 'vn'], { message: 'Modo inválido' })
-const manualPrice = z.number({ message: 'El precio debe ser un número' }).finite().positive('El precio debe ser mayor a cero').max(1e6, 'Precio demasiado grande')
+const manualPrice = z.number({ message: 'El precio debe ser un número' }).finite().positive('El precio debe ser mayor a cero').max(1e6, 'El precio es demasiado grande')
 
 export const ItemCreateSchema = z.strictObject({
   isin: z.string().trim().toUpperCase().regex(ISIN_RE, 'ISIN inválido'),

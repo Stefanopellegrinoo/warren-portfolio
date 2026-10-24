@@ -4,6 +4,7 @@ import { getImportQueue } from '@/lib/queue'
 import { validateQueryParams, validationErrorResponse } from '@/lib/api/validation'
 import { ImportStatusQuerySchema } from '@/lib/schemas/transaction'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
+import { serverError } from '@/lib/api/errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,7 +22,7 @@ export async function GET(req: NextRequest) {
 
     // Job ids are sequential: never show another user's job.
     if (job && job.data?.userId !== user.id) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 })
+      return NextResponse.json({ error: 'No encontramos esa importación' }, { status: 404 })
     }
 
     if (!job) {
@@ -30,8 +31,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({
         jobId,
         state: 'completed',
-        progress: { percentage: 100, message: 'Import completed' },
-        result: { success: true, imported: 0, failed: 0, errors: [], message: 'Job completed successfully (cleaned up)' }
+        progress: { percentage: 100, message: 'Importación terminada' },
+        result: { success: true, imported: 0, failed: 0, errors: [], message: 'Importación terminada' }
       })
     }
 
@@ -52,7 +53,6 @@ export async function GET(req: NextRequest) {
       return validationErrorResponse(err)
     }
 
-    console.error('[ImportStatus] Error:', err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('ImportStatus', err)
   }
 }

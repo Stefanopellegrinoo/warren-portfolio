@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
 import { requireUser, isAuthFailure } from "@/lib/api-auth"
 import { serverError } from "@/lib/api/errors"
+import { INVALID_JSON } from '@/lib/api/validation'
 
 // One document per user and ticker: the drawing list exactly as the chart's
 // DrawingManager exports it. The drawing core validates and migrates it on
@@ -25,7 +26,7 @@ const bodySchema = z.object({
 
 export async function GET(req: NextRequest) {
   const parsed = tickerSchema.safeParse(req.nextUrl.searchParams.get("ticker"))
-  if (!parsed.success) return NextResponse.json({ error: "invalid ticker" }, { status: 400 })
+  if (!parsed.success) return NextResponse.json({ error: "Ingresá un ticker válido" }, { status: 400 })
 
   const auth = await requireUser()
   if (isAuthFailure(auth)) return auth.error
@@ -48,10 +49,10 @@ export async function PUT(req: NextRequest) {
   try {
     body = await req.json()
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
+    return NextResponse.json({ error: INVALID_JSON }, { status: 400 })
   }
   const parsed = bodySchema.safeParse(body)
-  if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
+  if (!parsed.success) return NextResponse.json({ error: "No se pudieron guardar los dibujos. Recargá la página y probá de nuevo." }, { status: 400 })
 
   const auth = await requireUser()
   if (isAuthFailure(auth)) return auth.error

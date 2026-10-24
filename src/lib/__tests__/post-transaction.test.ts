@@ -33,12 +33,12 @@ describe('postTransaction', () => {
   })
 
   it('reports a plain error for other failures', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(503, { error: 'Could not verify the ticker right now. Try again shortly.' }))
+    fetchMock.mockResolvedValue(jsonResponse(503, { error: 'No se pudo verificar el ticker en este momento. Probá de nuevo en unos minutos.' }))
 
     expect(await postTransaction({ ticker: 'NVDA' })).toEqual({
       ok: false,
       kind: 'error',
-      message: 'Could not verify the ticker right now. Try again shortly.',
+      message: 'No se pudo verificar el ticker en este momento. Probá de nuevo en unos minutos.',
     })
   })
 

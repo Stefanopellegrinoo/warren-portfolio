@@ -19,10 +19,10 @@ export async function GET(req: NextRequest) {
 
   const ticker = new URL(req.url).searchParams.get('ticker')
   if (!ticker || !ticker.trim()) {
-    return NextResponse.json({ error: 'ticker is required' }, { status: 400 })
+    return NextResponse.json({ error: 'Ingresá el ticker' }, { status: 400 })
   }
   if (ticker.length > MAX_TICKER_LENGTH) {
-    return NextResponse.json({ error: `ticker must be at most ${MAX_TICKER_LENGTH} characters` }, { status: 400 })
+    return NextResponse.json({ error: `El ticker puede tener hasta ${MAX_TICKER_LENGTH} caracteres` }, { status: 400 })
   }
 
   try {
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
     // was impossible, not that the ticker was fine.
     console.error('[TickerResolve] resolution failed:', err)
     return NextResponse.json(
-      { error: 'Could not verify the ticker right now. Try again shortly.' },
+      { error: 'No se pudo verificar el ticker en este momento. Probá de nuevo en unos minutos.' },
       { status: 503 }
     )
   }

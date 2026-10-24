@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { serverError } from '@/lib/api/errors'
+import { INVALID_JSON } from '@/lib/api/validation'
 
 export async function GET(req: NextRequest) {
   const auth = await requireUser()
@@ -33,14 +34,14 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json()
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+    return NextResponse.json({ error: INVALID_JSON }, { status: 400 })
   }
 
   const { ticker, type, operator, value, name } = (body ?? {}) as Record<string, unknown>
 
   if (!ticker || !type || !operator || value === undefined || value === null || !name) {
     return NextResponse.json(
-      { error: 'Missing required fields: ticker, type, operator, value, name' },
+      { error: 'Completá el ticker, el tipo, la condición, el valor y el nombre de la alerta' },
       { status: 400 }
     )
   }

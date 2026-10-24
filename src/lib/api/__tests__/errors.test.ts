@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { serverError, GENERIC_ERROR } from '../errors'
 import { normalizeError } from '@/lib/errors'
+import { onTickerMessage } from '@/lib/schemas/transaction'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -37,8 +38,8 @@ describe('serverError', () => {
   })
 
   it('keeps the guards the engines throw on purpose', async () => {
-    const lock = 'Hay una importación masiva en curso para este usuario. Por favor, espere a que finalice para realizar cambios manuales.'
-    const onTicker = "ON tickers must end with 'D' for Dollar-MEP bonds. 'YCA6O' is invalid."
+    const lock = 'Hay una importación masiva en curso. Esperá a que termine para cargar operaciones a mano.'
+    const onTicker = onTickerMessage('YCA6O')
 
     for (const message of [lock, onTicker]) {
       expect(await serverError('X', new Error(message)).json()).toEqual({ error: message })

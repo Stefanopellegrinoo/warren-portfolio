@@ -44,7 +44,7 @@ export async function GET(
       .single()
 
     if (!strategy) {
-      return NextResponse.json({ error: 'Strategy not found' }, { status: 404 })
+      return NextResponse.json({ error: 'No encontramos esa estrategia' }, { status: 404 })
     }
 
     let query = supabase
@@ -84,7 +84,6 @@ export async function GET(
 
     return NextResponse.json({ trades })
   } catch (err: unknown) {
-    console.error(err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('API /strategies/[id]/paper-trades', err)
   }
 }

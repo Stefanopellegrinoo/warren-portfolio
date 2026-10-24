@@ -37,8 +37,10 @@ export async function rateLimit(key: string, max: number, windowSec: number): Pr
   }
 }
 
+export const TOO_MANY_REQUESTS = 'Hiciste demasiados pedidos seguidos. Esperá un minuto y probá de nuevo.'
+
 export function tooManyRequests(windowSec: number): NextResponse {
-  return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: { 'Retry-After': String(windowSec) } })
+  return NextResponse.json({ error: TOO_MANY_REQUESTS }, { status: 429, headers: { 'Retry-After': String(windowSec) } })
 }
 
 /**

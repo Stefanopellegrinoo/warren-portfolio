@@ -19,13 +19,13 @@ export async function PATCH(req: Request, { params }: Ctx) {
 
   const { data: current, error: readError } = await auth.supabase.from('test_portfolio_items').select(COLS).eq('id', params.itemId).eq('portfolio_id', params.id).maybeSingle()
   if (readError) return dbFail(readError, 'item')
-  if (!current) return fail('ON no encontrada en la cartera', 404)
+  if (!current) return fail('Esa ON no está en la cartera', 404)
   const merged = { ...toItem(current as ItemRow), ...body }
 
   try {
     const { analyses } = await loadOnAnalyses(auth.supabase, { isin: merged.isin })
     const analysis = analyses[0]
-    if (!analysis) return fail('ON no encontrada en el catálogo', 404)
+    if (!analysis) return fail('No encontramos esa ON en el catálogo', 404)
     const refusal = itemRefusal(analysis, merged)
     if (refusal) return fail(refusal, 422)
   } catch (e) {
@@ -39,7 +39,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
   if (body.manualPrice !== undefined) patch.manual_price = body.manualPrice
   const { data, error } = await auth.supabase.from('test_portfolio_items').update(patch).eq('id', params.itemId).eq('portfolio_id', params.id).select(COLS).maybeSingle()
   if (error) return dbFail(error, 'item')
-  if (!data) return fail('ON no encontrada en la cartera', 404)
+  if (!data) return fail('Esa ON no está en la cartera', 404)
   return NextResponse.json({ item: toItem(data as ItemRow) })
 }
 
@@ -51,6 +51,6 @@ export async function DELETE(_req: Request, { params }: Ctx) {
 
   const { data, error } = await auth.supabase.from('test_portfolio_items').delete().eq('id', params.itemId).eq('portfolio_id', params.id).select('id')
   if (error) return dbFail(error, 'item')
-  if (!data || data.length === 0) return fail('ON no encontrada en la cartera', 404)
+  if (!data || data.length === 0) return fail('Esa ON no está en la cartera', 404)
   return new NextResponse(null, { status: 204 })
 }

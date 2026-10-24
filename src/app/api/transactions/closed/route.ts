@@ -3,6 +3,7 @@ import { validateQueryParams, validationErrorResponse } from '@/lib/api/validati
 import { TransactionQuerySchema } from '@/lib/schemas/transaction'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { getFullPortfolio } from '@/lib/portfolio-engine'
+import { serverError } from '@/lib/api/errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,7 +29,6 @@ export async function GET(req: NextRequest) {
       return validationErrorResponse(err)
     }
 
-    console.error(err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('API /transactions/closed', err)
   }
 }

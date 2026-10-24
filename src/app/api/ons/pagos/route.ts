@@ -6,6 +6,7 @@ import { invalidateUserCache } from '@/lib/redis'
 import { DateSchema } from '@/lib/schemas/common'
 import { fail, parseBody } from '@/lib/test-portfolios'
 import { argentinaDate } from '@/lib/utils'
+import { firstIssueMessage } from '@/lib/api/validation'
 
 export const dynamic = 'force-dynamic'
 
@@ -61,7 +62,7 @@ export async function DELETE(req: Request) {
   const auth = await requireUser()
   if (isAuthFailure(auth)) return auth.error
   const parsed = PaymentKey.safeParse(Object.fromEntries(new URL(req.url).searchParams))
-  if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? 'Datos inválidos', 400)
+  if (!parsed.success) return fail(firstIssueMessage(parsed.error), 400)
   const key = parsed.data
 
   const { data, error } = await auth.supabase.from('on_payment_overrides').delete()

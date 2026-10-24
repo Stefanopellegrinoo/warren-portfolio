@@ -23,13 +23,12 @@ export async function GET(
       .single()
 
     if (error || !data) {
-      return NextResponse.json({ error: 'Strategy not found' }, { status: 404 })
+      return NextResponse.json({ error: 'No encontramos esa estrategia' }, { status: 404 })
     }
 
     return NextResponse.json({ strategy: data })
   } catch (err: unknown) {
-    console.error(err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('API /strategies/[id]', err)
   }
 }
 
@@ -48,14 +47,14 @@ export async function PUT(
 
     if (body.name !== undefined) {
       if (typeof body.name !== 'string' || body.name.trim().length === 0) {
-        return NextResponse.json({ error: 'name must be a non-empty string' }, { status: 400 })
+        return NextResponse.json({ error: 'Ingresá un nombre para la estrategia' }, { status: 400 })
       }
       updates.name = (body.name as string).trim()
     }
 
     if (body.philosophy !== undefined) {
       if (typeof body.philosophy !== 'string' || body.philosophy.trim().length === 0) {
-        return NextResponse.json({ error: 'philosophy must be a non-empty string' }, { status: 400 })
+        return NextResponse.json({ error: 'Describí la filosofía de la estrategia' }, { status: 400 })
       }
       updates.philosophy = (body.philosophy as string).trim()
     }
@@ -73,7 +72,7 @@ export async function PUT(
     }
 
     if (Object.keys(updates).length === 0) {
-      return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
+      return NextResponse.json({ error: 'No hay cambios para guardar' }, { status: 400 })
     }
 
     const { data, error } = await supabase
@@ -86,18 +85,17 @@ export async function PUT(
 
     if (error) {
       if (error.code === 'PGRST116') {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 })
+        return NextResponse.json({ error: 'No encontramos esa estrategia' }, { status: 404 })
       }
       return serverError('API /strategies/[id]', error)
     }
     if (!data) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 })
+      return NextResponse.json({ error: 'No encontramos esa estrategia' }, { status: 404 })
     }
 
     return NextResponse.json({ strategy: data as Strategy })
   } catch (err: unknown) {
-    console.error(err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('API /strategies/[id]', err)
   }
 }
 
@@ -119,12 +117,11 @@ export async function DELETE(
 
     if (error) return serverError('API /strategies/[id]', error)
     if (!data || data.length === 0) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 })
+      return NextResponse.json({ error: 'No encontramos esa estrategia' }, { status: 404 })
     }
 
     return new NextResponse(null, { status: 204 })
   } catch (err: unknown) {
-    console.error(err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return serverError('API /strategies/[id]', err)
   }
 }

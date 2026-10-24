@@ -66,7 +66,7 @@ describe('POST /api/trigger-evaluation', () => {
     // Assert
     expect(res.status).toBe(503)
     const body = await res.json()
-    expect(body.error).toMatch(/temporarily unavailable/i)
+    expect(body.error).toBe('Las señales no están disponibles en este momento. Probá de nuevo en unos minutos.')
     expect(mockEnqueueImmediateEvaluation).not.toHaveBeenCalled()
   })
 
@@ -83,7 +83,7 @@ describe('POST /api/trigger-evaluation', () => {
     // Assert
     expect(res.status).toBe(429)
     const body = await res.json()
-    expect(body.error).toMatch(/rate limit/i)
+    expect(body.error).toBe('Hiciste demasiados pedidos seguidos. Esperá un minuto y probá de nuevo.')
     expect(mockEnqueueImmediateEvaluation).not.toHaveBeenCalled()
   })
 
@@ -138,7 +138,7 @@ describe('POST /api/trigger-evaluation', () => {
     // Assert — execution reached the ensureRedisConnected guard
     expect(res.status).toBe(503)
     const body = await res.json()
-    expect(body.error).toMatch(/temporarily unavailable/i)
+    expect(body.error).toBe('Las señales no están disponibles en este momento. Probá de nuevo en unos minutos.')
     expect(mockEnqueueImmediateEvaluation).not.toHaveBeenCalled()
     warnSpy.mockRestore()
   })
