@@ -16,3 +16,16 @@ export function barsToUpdate(drawn: readonly Candle[], polled: readonly Candle[]
   const tail = polled.slice(from)
   return same(tail[0], last) ? tail.slice(1) : tail
 }
+
+/**
+ * The drawn bars with a fresh window of recent ones laid over their end. Null when the window
+ * does not reach the last drawn bar (a gap): the whole history must load again. An empty window
+ * changes nothing.
+ */
+export function mergeRecent(drawn: readonly Candle[], recent: readonly Candle[]): readonly Candle[] | null {
+  if (recent.length === 0) return drawn
+  const last = drawn.at(-1)
+  if (!last || !recent.some((b) => b.time === last.time)) return null
+  return [...drawn.filter((b) => b.time < recent[0].time), ...recent]
+}
+

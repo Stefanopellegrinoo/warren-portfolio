@@ -213,6 +213,21 @@ describe('YahooProvider.getCandles — retry logic', () => {
   })
 })
 
+describe('YahooProvider.getCandles — a ticker Yahoo does not know', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('is asked once, not twice: retrying cannot find it', async () => {
+    const { YahooProvider } = await import('./yahoo')
+    mockHistorical.mockRejectedValue(new Error('No data found for symbol'))
+
+    await expect(new YahooProvider().getCandles('INVALID', '1d')).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect(mockHistorical).toHaveBeenCalledTimes(1)
+    mockHistorical.mockReset()
+  })
+})
+
 describe('YahooProvider.getCandles — ARS→USD normalization', () => {
   beforeEach(() => {
     vi.clearAllMocks()

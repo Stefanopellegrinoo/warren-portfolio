@@ -2,12 +2,12 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { useCandles } from '../useCandles'
+import { forgetCandles, useCandles } from '../useCandles'
 import { NO_CONNECTION } from '@/lib/request-errors'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-afterEach(() => { vi.unstubAllGlobals(); document.body.innerHTML = '' })
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); forgetCandles(); document.body.innerHTML = '' })
 
 const CANDLES_FAILED = 'No se pudieron cargar las velas. Probá de nuevo.'
 
@@ -27,9 +27,10 @@ async function render(symbol: string, answer: (url: string) => Response | Promis
   const el = document.createElement('div')
   document.body.appendChild(el)
   const root = createRoot(el)
-  await act(async () => { root.render(<Probe symbol={symbol} onState={(s) => { state = s }} />) })
+  const show = (sym: string) => act(async () => { root.render(<Probe symbol={sym} onState={(s) => { state = s }} />) })
+  await show(symbol)
   await flush()
-  return { calls, unmount: () => act(() => root.unmount()) }
+  return { calls, show, unmount: () => act(() => root.unmount()) }
 }
 
 describe('useCandles — the error the chart shows is Spanish', () => {
@@ -70,6 +71,56 @@ describe('useCandles — the error the chart shows is Spanish', () => {
     expect(state.status).toBe('ready')
     expect(state.candles).toHaveLength(1)
     expect(state.error).toBeUndefined()
+    unmount()
+  })
+})
+
+describe('useCandles — quick to show, light to keep live (S4)', () => {
+  const k = (time: number, close: number) => ({ time, open: 1, high: 2, low: 0.5, close, volume: 1 })
+  const answer = (history: object[], recent: object[]) => (url: string) => Response.json(url.includes('&days=') ? recent : history)
+
+  it('a stock asks its history and a recent window together and lays the window over the end', async () => {
+    const { calls, unmount } = await render('AAPL', answer([k(100, 1), k(200, 2), k(300, 3)], [k(300, 30), k(400, 4)]))
+
+    expect(calls).toEqual(['/api/klines?ticker=AAPL&interval=1d', '/api/klines?ticker=AAPL&interval=1d&days=14'])
+    expect(state.candles.map(c => c.close)).toEqual([1, 2, 30, 4])
+    unmount()
+  })
+
+  it('a stock keeps its live bars by polling only the recent window', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval'] })
+    const { calls, unmount } = await render('AAPL', answer([k(100, 1), k(200, 2)], [k(200, 2), k(300, 3)]))
+    calls.length = 0
+
+    await act(async () => { vi.advanceTimersByTime(30_000) })
+    await flush()
+
+    expect(calls).toEqual(['/api/klines?ticker=AAPL&interval=1d&days=14'])
+    expect(state.candles.map(c => c.close)).toEqual([1, 2, 3])
+    unmount()
+  })
+
+  it('an asset seen before shows its candles at once while they refresh behind', async () => {
+    let pending = false
+    const { show, unmount } = await render('AAPL', (url) =>
+      pending && url.includes('AAPL') ? new Promise<Response>(() => {}) : Response.json(url.includes('MSFT') ? [k(100, 9)] : [k(100, 1), k(200, 2)]))
+    await show('MSFT')
+    await flush()
+    pending = true
+
+    await show('AAPL')
+
+    expect(state.status).toBe('ready')
+    expect(state.candles.map(c => c.close)).toEqual([1, 2])
+    unmount()
+  })
+
+  it('an asset never seen still shows Cargando until its candles arrive', async () => {
+    const { show, unmount } = await render('AAPL', (url) => url.includes('MSFT') ? new Promise<Response>(() => {}) : Response.json([k(100, 1)]))
+
+    await show('MSFT')
+
+    expect(state.status).toBe('loading')
     unmount()
   })
 })

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { barsToUpdate } from '../live-bars'
+import { barsToUpdate, mergeRecent } from '../live-bars'
 
 const bar = (time: number, close: number) => ({ time, open: 1, high: 2, low: 0.5, close, volume: 1 })
 
@@ -22,5 +22,22 @@ describe('barsToUpdate', () => {
     expect(barsToUpdate([], [bar(100, 1)])).toBeNull()
     expect(barsToUpdate(prev, [bar(300, 1)])).toBeNull()
     expect(barsToUpdate(prev, [])).toBeNull()
+  })
+})
+
+describe('mergeRecent', () => {
+  const bar = (time: number, close = time) => ({ time, open: 1, high: 2, low: 0, close, volume: 1 })
+  const drawn = [bar(1), bar(2), bar(3), bar(4)]
+
+  it('lays a fresh window of recent bars over the end of the drawn ones', () => {
+    expect(mergeRecent(drawn, [bar(3, 30), bar(4, 40), bar(5)])).toEqual([bar(1), bar(2), bar(3, 30), bar(4, 40), bar(5)])
+  })
+
+  it('is null when the window does not reach the last drawn bar (a gap): reload the history', () => {
+    expect(mergeRecent(drawn, [bar(6), bar(7)])).toBeNull()
+  })
+
+  it('an empty window changes nothing', () => {
+    expect(mergeRecent(drawn, [])).toBe(drawn)
   })
 })
