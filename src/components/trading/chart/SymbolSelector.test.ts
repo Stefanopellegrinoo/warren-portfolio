@@ -64,22 +64,21 @@ describe('fetchTickerSearch', () => {
     expect(mockFetch).toHaveBeenCalledWith('/api/ticker/search?q=msft')
   })
 
-  it('returns empty array when API response is not ok', async () => {
-    mockFetch.mockResolvedValue({ ok: false, json: async () => ({}) } as Response)
+  // A failed search must not look like "no results" (odd/tasks/ux-paginas.md S1).
+  it('rejects with the server message when the API response is not ok', async () => {
+    mockFetch.mockResolvedValue({ ok: false, json: async () => ({ error: 'Probá de nuevo en un minuto.' }) } as Response)
 
     const { fetchTickerSearch } = await import('./SymbolSelector')
-    const results = await fetchTickerSearch('err')
 
-    expect(results).toHaveLength(0)
+    await expect(fetchTickerSearch('err')).rejects.toThrow('Probá de nuevo en un minuto.')
   })
 
-  it('returns empty array when fetch throws', async () => {
-    mockFetch.mockRejectedValue(new Error('Network error'))
+  it('rejects when fetch throws', async () => {
+    mockFetch.mockRejectedValue(new TypeError('Failed to fetch'))
 
     const { fetchTickerSearch } = await import('./SymbolSelector')
-    const results = await fetchTickerSearch('err')
 
-    expect(results).toHaveLength(0)
+    await expect(fetchTickerSearch('err')).rejects.toBeInstanceOf(TypeError)
   })
 })
 

@@ -1,7 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { requestErrorMessage } from "@/lib/request-errors";
+import { LoadError } from "@/components/ons/ui";
 import {
   Popover,
   PopoverContent,
@@ -52,6 +55,24 @@ export function getAddButtonDisabled(isInWatchlist: boolean, isLoading: boolean)
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
+const ADD_FAILED = "No se pudo agregar a la lista";
+
+/** Adds the symbol to a list: the response status when it is there now (409: it already was), or null after saying why it failed. */
+async function addToList(symbol: string, listId: string): Promise<number | null> {
+  try {
+    const res = await fetch("/api/watchlist", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildAddPayload(symbol, listId)),
+    });
+    if (res.ok || res.status === 409) return res.status;
+    toast.error((await res.json().catch(() => null))?.error ?? ADD_FAILED);
+  } catch (e) {
+    toast.error(requestErrorMessage(e, ADD_FAILED));
+  }
+  return null;
+}
+
 interface AddToWatchlistButtonProps {
   symbol: string;
   /**
@@ -80,6 +101,8 @@ export function AddToWatchlistButton({
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [popoverLists, setPopoverLists] = useState<Watchlist[]>([]);
   const [popoverLoading, setPopoverLoading] = useState(false);
+  const [listsError, setListsError] = useState<string | null>(null);
+  const [addingId, setAddingId] = useState<string | null>(null);
   const [addedListIds, setAddedListIds] = useState<Set<string>>(new Set());
 
   // ── Direct add (watchlistId provided) ──────────────────────────────────────
@@ -91,58 +114,45 @@ export function AddToWatchlistButton({
   async function handleDirectClick() {
     if (!watchlistId || disabled) return;
     setLoading(true);
-    try {
-      const res = await fetch("/api/watchlist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildAddPayload(symbol, watchlistId)),
-      });
-      if (res.ok || res.status === 409) {
-        setAddedLocally(true);
-        onAdded?.(watchlistId);
-      }
-    } catch {
-      // silently ignore
-    } finally {
-      setLoading(false);
+    // The button itself turns into "En la lista": no toast needed.
+    if (await addToList(symbol, watchlistId)) {
+      setAddedLocally(true);
+      onAdded?.(watchlistId);
     }
+    setLoading(false);
   }
 
   // ── Popover: lazy-fetch lists on first open ─────────────────────────────────
 
-  async function handlePopoverOpenChange(open: boolean) {
-    setPopoverOpen(open);
-    if (open && popoverLists.length === 0 && !popoverLoading) {
-      setPopoverLoading(true);
-      try {
-        const res = await fetch(getListsUrl());
-        if (res.ok) {
-          const data = await res.json();
-          setPopoverLists(data.lists ?? []);
-        }
-      } catch {
-        // silently ignore
-      } finally {
-        setPopoverLoading(false);
-      }
+  async function loadLists() {
+    setPopoverLoading(true);
+    setListsError(null);
+    try {
+      const res = await fetch(getListsUrl());
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? "");
+      const data = await res.json();
+      setPopoverLists(data.lists ?? []);
+    } catch (e) {
+      setListsError(requestErrorMessage(e, "No se pudieron cargar tus listas."));
+    } finally {
+      setPopoverLoading(false);
     }
   }
 
-  async function handleAddToList(listId: string) {
-    try {
-      const res = await fetch("/api/watchlist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildAddPayload(symbol, listId)),
-      });
-      if (res.ok || res.status === 409) {
-        setAddedListIds((prev) => new Set(prev).add(listId));
-        setPopoverOpen(false);
-        onAdded?.(listId);
-      }
-    } catch {
-      // silently ignore
-    }
+  function handlePopoverOpenChange(open: boolean) {
+    setPopoverOpen(open);
+    if (open && popoverLists.length === 0 && !popoverLoading) loadLists();
+  }
+
+  async function handleAddToList(list: Watchlist) {
+    setAddingId(list.id);
+    const status = await addToList(symbol, list.id);
+    setAddingId(null);
+    if (!status) return;
+    setAddedListIds((prev) => new Set(prev).add(list.id));
+    setPopoverOpen(false);
+    onAdded?.(list.id);
+    toast.success(status === 409 ? "Ya estaba en la lista" : "Agregado a la lista", { description: list.name });
   }
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -179,6 +189,8 @@ export function AddToWatchlistButton({
       <PopoverContent className="w-auto min-w-[10rem] max-w-[calc(100vw-32px)] rounded-lg border border-line bg-surface p-1 text-ink shadow-pop ring-0">
         {popoverLoading ? (
           <p role="status" className="px-3 py-2 text-[13px] text-ink-3">Cargando…</p>
+        ) : listsError ? (
+          <LoadError message={listsError} onRetry={loadLists} />
         ) : popoverLists.length === 0 ? (
           <p className="px-3 py-2 text-[13px] text-ink-3">No tenés listas guardadas.</p>
         ) : (
@@ -188,8 +200,8 @@ export function AddToWatchlistButton({
               <button
                 key={list.id}
                 type="button"
-                disabled={alreadyAdded}
-                onClick={() => handleAddToList(list.id)}
+                disabled={alreadyAdded || addingId === list.id}
+                onClick={() => handleAddToList(list)}
                 className={cn(
                   "flex min-h-9 w-full items-center justify-between gap-3 rounded px-3 text-left text-[13px] max-[819px]:min-h-11",
                   alreadyAdded ? "cursor-default text-ink-3" : "text-ink hover:bg-hover"

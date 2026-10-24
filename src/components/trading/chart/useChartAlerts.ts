@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { alertName, operatorFor, type ChartAlert } from "@/lib/chart/alerts";
+import { requestErrorMessage } from "@/lib/request-errors";
 
 async function send(url: string, method: string, body?: unknown) {
 	const res = await fetch(url, {
@@ -11,9 +12,12 @@ async function send(url: string, method: string, body?: unknown) {
 		body: body ? JSON.stringify(body) : undefined,
 	});
 	const json = await res.json().catch(() => null);
-	if (!res.ok) throw new Error(json?.error ?? `Error ${res.status}`);
+	if (!res.ok) throw new Error(json?.error ?? "");
 	return json;
 }
+
+// The server's message, or a Spanish one when it sent none or the request never arrived.
+const failed = (title: string, e: unknown) => toast.error(title, { description: requestErrorMessage(e, "Probá de nuevo.") });
 
 const toAlert = (r: Record<string, unknown>): ChartAlert => ({
 	id: String(r.id),
@@ -62,7 +66,7 @@ export function useChartAlerts(symbol: string, lastPrice: number | null) {
 				setAlerts((a) => [...a, toAlert(alert)]);
 				toast.success("Alerta creada", { description: alertName(symbol, operator, value) });
 			} catch (e) {
-				toast.error("No se pudo crear la alerta", { description: (e as Error).message });
+				failed("No se pudo crear la alerta", e);
 			}
 		},
 		[symbol, lastPrice],
@@ -74,7 +78,7 @@ export function useChartAlerts(symbol: string, lastPrice: number | null) {
 			setAlerts((a) => a.map((x) => (x.id === id ? { ...x, ...changes } : x)));
 			return true;
 		} catch (e) {
-			toast.error(failMsg, { description: (e as Error).message });
+			failed(failMsg, e);
 			return false;
 		}
 	}, []);
@@ -94,8 +98,9 @@ export function useChartAlerts(symbol: string, lastPrice: number | null) {
 		try {
 			await send(`/api/price-alerts/${id}`, "DELETE");
 			setAlerts((a) => a.filter((x) => x.id !== id));
+			toast.success("Alerta eliminada");
 		} catch (e) {
-			toast.error("No se pudo eliminar la alerta", { description: (e as Error).message });
+			failed("No se pudo eliminar la alerta", e);
 		}
 	}, []);
 

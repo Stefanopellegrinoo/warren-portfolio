@@ -15,6 +15,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { TradingDialog, dangerButton, field, ghostButton, iconButton, primaryButton } from "@/components/trading/ui";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { NO_CONNECTION } from "@/lib/request-errors";
 
 const LOCAL_NAME = "Lista local";
 
@@ -73,7 +74,7 @@ export function WatchlistSelector() {
         toast.error(msg);
       }
     } catch {
-      toast.error("Error de red al cargar las listas");
+      toast.error("No se pudieron cargar las listas", { description: NO_CONNECTION });
     }
   }
 
@@ -102,7 +103,7 @@ export function WatchlistSelector() {
         toast.error(msg);
       }
     } catch {
-      toast.error("Error de red al crear la lista");
+      toast.error("No se pudo crear la lista", { description: NO_CONNECTION });
     } finally {
       setLoading(false);
     }
@@ -128,7 +129,7 @@ export function WatchlistSelector() {
         toast.error(msg);
       }
     } catch {
-      toast.error("Error de red al renombrar la lista");
+      toast.error("No se pudo renombrar la lista", { description: NO_CONNECTION });
     } finally {
       setLoading(false);
     }
@@ -154,7 +155,7 @@ export function WatchlistSelector() {
         toast.error(data?.error || "No se pudo eliminar la lista");
       }
     } catch {
-      toast.error("Error de red al eliminar la lista");
+      toast.error("No se pudo eliminar la lista", { description: NO_CONNECTION });
     } finally {
       setPendingDeleteId(null);
       setShowDeleteDialog(false);
