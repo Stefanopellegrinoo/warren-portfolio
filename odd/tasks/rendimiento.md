@@ -17,7 +17,7 @@ Branch `feat/performance` from `feat/chart-mobile` 2d38b00 (both unmerged; same 
 | ID | Specs | Route | Status | Commit |
 |---|---|---|---|---|
 | T1 Open on ?symbol= without loading the last symbol | S1 | inline | done: RED→GREEN (page test: only BTCUSDT mounted, no SPY quote) | (this commit) |
-| T2 Drawings in one request (server reads the old format) | S2 | inline | pending | |
+| T2 Drawings in one request (server reads the old format) | S2 | inline | done: 4 RED→GREEN (route returns legacy rows with a null set, never reads legacy for a saved ticker, legacy error 500; hook makes one request and saves the conversion once) | (this commit) |
 | T3 No opaque overlay on a switch; drawings and alerts as they arrive | S3 | inline | pending | |
 | T4 Client memory per asset/timeframe; server candle cache; no retry on unknown ticker | S4 | inline | pending | |
 | T5 Chart page duplicates | S5 | inline | pending | |

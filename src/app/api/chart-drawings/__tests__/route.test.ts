@@ -63,13 +63,44 @@ describe('GET /api/chart-drawings', () => {
     expect(chain.eq).toHaveBeenCalledWith('ticker', 'AAPL')
   })
 
-  it('returns drawings: null when the ticker was never saved, so the client can bring the legacy rows over', async () => {
-    selectChain({ data: null, error: null })
+  it('a ticker never saved comes with its legacy rows in the same response: one round trip', async () => {
+    const sets = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }) }
+    const row = { id: 'r1', type: 'trendline', points: [{ time: 1, price: 2 }, { time: 3, price: 4 }], style: null, label: null }
+    const legacy = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), order: vi.fn().mockResolvedValue({ data: [row], error: null }) }
+    mockFrom.mockImplementation((table: string) => (table === 'chart_drawing_sets' ? sets : legacy))
+    const { GET } = await import('../route')
+
+    const res = await GET(new NextRequest(url('aapl')))
+
+    expect(await res.json()).toEqual({
+      drawings: null,
+      legacy: [{ id: 'r1', type: 'trendline', points: [{ time: 1, price: 2 }, { time: 3, price: 4 }], style: {} }],
+    })
+    expect(mockFrom).toHaveBeenCalledWith('chart_drawings')
+    expect(legacy.eq).toHaveBeenCalledWith('user_id', 'user-1')
+    expect(legacy.eq).toHaveBeenCalledWith('ticker', 'AAPL')
+    expect(legacy.order).toHaveBeenCalledWith('created_at', { ascending: true })
+  })
+
+  it('a saved ticker never reads the legacy table', async () => {
+    selectChain({ data: { drawings: [trendLine] }, error: null })
+    const { GET } = await import('../route')
+
+    await GET(new NextRequest(url('AAPL')))
+
+    expect(mockFrom).toHaveBeenCalledTimes(1)
+  })
+
+  it('a legacy read error is a generic 500', async () => {
+    const sets = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }) }
+    const legacy = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), order: vi.fn().mockResolvedValue({ data: null, error: { message: 'boom' } }) }
+    mockFrom.mockImplementation((table: string) => (table === 'chart_drawing_sets' ? sets : legacy))
     const { GET } = await import('../route')
 
     const res = await GET(new NextRequest(url('AAPL')))
 
-    expect(await res.json()).toEqual({ drawings: null })
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: GENERIC_ERROR })
   })
 
   it('rejects a missing ticker with 400', async () => {

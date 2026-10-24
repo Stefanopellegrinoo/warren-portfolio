@@ -13,13 +13,11 @@ const KEEPALIVE_MAX_BYTES = 60_000;
 async function loadDrawings(symbol: string): Promise<{ json: string; fromLegacy: boolean }> {
 	const res = await fetch(`/api/chart-drawings?ticker=${encodeURIComponent(symbol)}`);
 	if (!res.ok) throw new Error(`Error ${res.status}`);
-	const { drawings } = (await res.json()) as { drawings: unknown[] | null };
+	const { drawings, legacy } = (await res.json()) as { drawings: unknown[] | null; legacy?: LegacyDrawing[] };
 	if (drawings) return { json: JSON.stringify(drawings), fromLegacy: false };
 
-	// Never saved in the new format: bring the old per-row drawings over once.
-	const legacy = await fetch(`/api/drawings?ticker=${encodeURIComponent(symbol)}`);
-	if (!legacy.ok) throw new Error(`Error ${legacy.status}`);
-	const rows = (await legacy.json()) as LegacyDrawing[];
+	// Never saved in the new format: the old per-row drawings came in the same response.
+	const rows = legacy ?? [];
 	return { json: JSON.stringify(fromLegacyDrawings(rows)), fromLegacy: rows.length > 0 };
 }
 
