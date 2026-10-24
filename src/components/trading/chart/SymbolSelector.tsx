@@ -6,7 +6,8 @@ import { Dialog, DialogTrigger } from "@/components/ui/dialog";
 import { TradingDialog, field } from "@/components/trading/ui";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { fetchExchangeSymbols } from "@/lib/binance/rest";
-import { getPortfolio } from "@/lib/warren/positions";
+import { getPortfolio, POSITIONS_KEY } from "@/lib/warren/positions";
+import { cachedValue } from "@/lib/client-cache";
 import { useChartStore } from "@/lib/store/chart-store";
 import { cn } from "@/lib/utils";
 import { NO_CONNECTION, requestErrorMessage } from "@/lib/request-errors";
@@ -94,16 +95,19 @@ export function SymbolSelector({ onSymbolSelect, children }: SymbolSelectorProps
   const debouncedFetch = useRef(debounce(search, 300)).current
 
   useEffect(() => {
+    if (!open || allBinanceSymbols.length > 0) return;
+    fetchExchangeSymbols()
+      .then((symbols) => { setAllBinanceSymbols(symbols); setBinanceError(null); })
+      .catch((e) => setBinanceError(loadMessage(e, "No se pudo cargar la lista de cripto.")));
+  }, [open, allBinanceSymbols.length, loadAttempt]);
+
+  // The held tickers: the portfolio this tab already has, else one request (not one per open).
+  useEffect(() => {
     if (!open) return;
-    if (allBinanceSymbols.length === 0) {
-      fetchExchangeSymbols()
-        .then((symbols) => { setAllBinanceSymbols(symbols); setBinanceError(null); })
-        .catch((e) => setBinanceError(loadMessage(e, "No se pudo cargar la lista de cripto.")));
-    }
-    getPortfolio()
+    Promise.resolve(cachedValue<Awaited<ReturnType<typeof getPortfolio>>>(POSITIONS_KEY) ?? getPortfolio())
       .then((data) => { setPortfolioTickers((data.positions ?? []).map((p) => p.ticker)); setPortfolioError(null); })
       .catch((e) => setPortfolioError(loadMessage(e, "No se pudo cargar tu cartera.")));
-  }, [open, allBinanceSymbols.length, loadAttempt]);
+  }, [open, loadAttempt]);
 
   useEffect(() => {
     if (query.length < 2) {
