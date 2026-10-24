@@ -14,16 +14,17 @@ const sub = (id: string, endpoint: string) => ({ id, endpoint, p256dh: `p-${id}`
 
 function supabase(rows: ReturnType<typeof sub>[]) {
   const deleted: string[][] = []
+  const reads: { col: string; ascending: boolean; n: number }[] = []
   const client = {
     from: (table: string) => {
       expect(table).toBe('push_subscriptions')
       return {
-        select: () => ({ eq: (_c: string, userId: string) => Promise.resolve({ data: userId === 'u1' ? rows : [], error: null }) }),
+        select: () => ({ eq: (_c: string, userId: string) => ({ order: (col: string, o: { ascending: boolean }) => ({ limit: (n: number) => { reads.push({ col, ascending: o.ascending, n }); return Promise.resolve({ data: (userId === 'u1' ? rows : []).slice(0, n), error: null }) } }) }) }),
         delete: () => ({ in: (_c: string, ids: string[]) => { deleted.push(ids); return Promise.resolve({ error: null }) } }),
       }
     },
   }
-  return { client: client as never, deleted }
+  return { client: client as never, deleted, reads }
 }
 
 const payload = { title: 'Alerta de precio: AAPL', body: 'Cruzó hacia arriba 180', url: '/trading?symbol=AAPL', tag: 'alert-1' }
@@ -45,8 +46,16 @@ describe('sendPushToUser', () => {
     expect(sendNotification).toHaveBeenCalledWith(
       { endpoint: APPLE, keys: { p256dh: 'p-s1', auth: 'a-s1' } },
       JSON.stringify(payload),
-      { vapidDetails: { subject: 'mailto:avisos@warren.app', publicKey: 'pub', privateKey: 'priv' }, TTL: 3600 },
+      { vapidDetails: { subject: 'mailto:avisos@warren.app', publicKey: 'pub', privateKey: 'priv' }, TTL: 3600, timeout: 10000 },
     )
+  })
+
+  // Verifier advisories 2-3: a stuck push service cannot stall the worker, and one user cannot fan out without end.
+  it('reads at most the 10 most recently used devices of the user', async () => {
+    const many = Array.from({ length: 14 }, (_, i) => sub(`s${i}`, `${FCM}${i}`))
+    const { client, reads } = supabase(many)
+    expect(await sendPushToUser(client, 'u1', payload)).toEqual({ ok: true, sent: 10 })
+    expect(reads).toEqual([{ col: 'updated_at', ascending: false, n: 10 }])
   })
 
   it('deletes a device the push service reports gone (404/410) and keeps sending to the rest', async () => {
@@ -88,7 +97,7 @@ describe('isPushEndpoint', () => {
   it.each([APPLE, FCM, 'https://updates.push.services.mozilla.com/wpush/v2/x', 'https://wns2-par02p.notify.windows.com/w/?token=x'])('accepts %s', (url) => {
     expect(isPushEndpoint(url)).toBe(true)
   })
-  it.each(['http://fcm.googleapis.com/fcm/send/x', 'https://fcm.googleapis.com.evil.example/x', 'https://evil.example/web.push.apple.com', 'https://user@web.push.apple.com/x', 'https://web.push.apple.com:8443/x', 'not a url'])('rejects %s', (url) => {
+  it.each(['https:\t//fcm.googleapis.com/x', 'https://FCM.googleapis.com/fcm/send/x', 'https://fcm.googleapis.com/fcm/send/x\n', 'http://fcm.googleapis.com/fcm/send/x', 'https://fcm.googleapis.com.evil.example/x', 'https://evil.example/web.push.apple.com', 'https://user@web.push.apple.com/x', 'https://web.push.apple.com:8443/x', 'not a url'])('rejects %s', (url) => {
     expect(isPushEndpoint(url)).toBe(false)
   })
 })

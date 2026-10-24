@@ -26,13 +26,18 @@ export function pushKeys(): { subject: string; publicKey: string; privateKey: st
 
 /** How long a push service keeps an undelivered notification: an alert an hour later is still news. */
 const TTL_SECONDS = 60 * 60
+/** A push service that never answers must not stall the worker's alert loop. */
+const SEND_TIMEOUT_MS = 10_000
+/** Devices one user can receive on: phones and browsers come and go, and gone ones are dropped on 404/410. */
+const MAX_DEVICES = 10
 
 /** Sends the payload to every device of the user and deletes the ones the push service says are gone. */
 export async function sendPushToUser(supabase: SupabaseClient, userId: string, payload: PushPayload): Promise<PushResult> {
   const vapidDetails = pushKeys()
   if (!vapidDetails) return { ok: false, error: 'push not configured' }
 
-  const { data, error } = await supabase.from('push_subscriptions').select('id, endpoint, p256dh, auth').eq('user_id', userId)
+  const { data, error } = await supabase.from('push_subscriptions').select('id, endpoint, p256dh, auth')
+    .eq('user_id', userId).order('updated_at', { ascending: false }).limit(MAX_DEVICES)
   if (error) return { ok: false, error: error.message }
   if (!data?.length) return { ok: false, error: 'no devices' }
 
@@ -41,7 +46,7 @@ export async function sendPushToUser(supabase: SupabaseClient, userId: string, p
   let sent = 0
   await Promise.all(data.filter(s => isPushEndpoint(s.endpoint)).map(async (s) => {
     try {
-      await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, body, { vapidDetails, TTL: TTL_SECONDS })
+      await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, body, { vapidDetails, TTL: TTL_SECONDS, timeout: SEND_TIMEOUT_MS })
       sent++
     } catch (err) {
       const status = (err as { statusCode?: number }).statusCode

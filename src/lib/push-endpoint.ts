@@ -14,6 +14,8 @@ export function isPushEndpoint(raw: string): boolean {
   } catch {
     return false
   }
-  return url.protocol === 'https:' && !url.port && !url.username && !url.password
+  // Browsers hand out canonical URLs; anything the parser had to rewrite (a tab, upper case, a stray
+  // newline) is refused, because web-push parses it again with a different parser.
+  return url.href === raw && url.protocol === 'https:' && !url.port && !url.username && !url.password
     && PUSH_HOSTS.some(host => host.test(url.hostname))
 }

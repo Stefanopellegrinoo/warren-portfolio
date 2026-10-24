@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { requestErrorMessage } from "@/lib/request-errors";
 import { ghostButton, primaryButton, secondaryButton } from "./ui";
@@ -34,18 +34,18 @@ async function errorOf(res: Response, fallback: string): Promise<string> {
 }
 
 /** What this device can do right now, and the public key when it can subscribe. */
-async function detect(): Promise<{ state: State; key: string | null }> {
+async function detect(): Promise<{ state: State; key: string | null; reg: ServiceWorkerRegistration | null }> {
   // iOS offers push only to the app opened from the Home Screen.
-  if (!supportsPush()) return { state: isIphone() ? "install" : "unavailable", key: null };
-  if (Notification.permission === "denied") return { state: "denied", key: null };
+  if (!supportsPush()) return { state: isIphone() ? "install" : "unavailable", key: null, reg: null };
+  if (Notification.permission === "denied") return { state: "denied", key: null, reg: null };
   const reg = await registration();
-  if (!reg) return { state: "unavailable", key: null };
-  if (await reg.pushManager.getSubscription()) return { state: "on", key: null };
-  // The key is fetched now so the tap goes straight to the browser's prompt, as iOS requires.
+  if (!reg) return { state: "unavailable", key: null, reg: null };
+  if (await reg.pushManager.getSubscription()) return { state: "on", key: null, reg };
+  // The key and the registration are ready before the tap: iOS keeps the tap only until the first await.
   const res = await fetch("/api/push").catch(() => null);
-  if (res?.status === 503) return { state: "not-configured", key: null };
+  if (res?.status === 503) return { state: "not-configured", key: null, reg };
   const body = res?.ok ? await res.json().catch(() => null) : null;
-  return { state: "off", key: typeof body?.publicKey === "string" ? body.publicKey : null };
+  return { state: "off", key: typeof body?.publicKey === "string" ? body.publicKey : null, reg };
 }
 
 const COPY: Record<Exclude<State, "checking" | "off" | "on">, string> = {
@@ -60,9 +60,10 @@ export function PushSettings() {
   const [state, setState] = useState<State>("checking");
   const [publicKey, setPublicKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const reg = useRef<ServiceWorkerRegistration | null>(null);
 
   const check = useCallback(() => {
-    void detect().then(({ state, key }) => { setState(state); setPublicKey(key); });
+    void detect().then((found) => { reg.current = found.reg; setState(found.state); setPublicKey(found.key); });
   }, []);
 
   useEffect(() => { check(); }, [check]);
@@ -71,10 +72,10 @@ export function PushSettings() {
     setBusy(true);
     let subscription: PushSubscription | null = null;
     try {
-      const reg = await registration();
-      if (!reg || !publicKey) throw new Error("No se pudieron activar los avisos. Recargá la página y probá de nuevo.");
+      if (!reg.current || !publicKey) throw new Error("No se pudieron activar los avisos. Recargá la página y probá de nuevo.");
       try {
-        subscription = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) });
+        // The first await of the tap: the browser's permission prompt.
+        subscription = await reg.current.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) });
       } catch {
         if (Notification.permission === "denied") return setState("denied");
         throw new Error("Sin tu permiso no podemos avisarte. Tocá Activar avisos y elegí Permitir.");
@@ -99,8 +100,7 @@ export function PushSettings() {
   async function deactivate() {
     setBusy(true);
     try {
-      const reg = await registration();
-      const subscription = await reg?.pushManager.getSubscription();
+      const subscription = await reg.current?.pushManager.getSubscription();
       if (subscription) {
         const res = await fetch("/api/push", {
           method: "DELETE",

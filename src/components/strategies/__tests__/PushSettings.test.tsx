@@ -83,6 +83,9 @@ describe('PushSettings', () => {
     const { pushManager } = browser()
     const calls = server()
     const { el, click, has, unmount } = await mount()
+    // Verifier advisory 7: iOS keeps the tap only until the first await, so subscribe() must come first.
+    const ready = vi.fn()
+    Object.defineProperty(navigator.serviceWorker, 'ready', { get: () => { ready(); return new Promise(() => {}) } })
     expect(el.textContent).toContain('Te avisamos con una notificación cuando se dispara una alerta.')
     await click('Activar avisos')
     expect(pushManager.subscribe).toHaveBeenCalledTimes(1)
