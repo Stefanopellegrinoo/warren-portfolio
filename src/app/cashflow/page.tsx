@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react'
+import { toast } from 'sonner'
 import { formatUSD } from '@/lib/utils'
+import { requestErrorMessage } from '@/lib/request-errors'
 import type { Cashflow } from '@/types'
 import { SectionHead } from '@/components/resumen/ui'
 import ExpenseList, { type Sort, type SortKey } from './ExpenseList'
@@ -14,12 +16,14 @@ const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Jul
 
 const primaryButton = 'inline-flex min-h-9 items-center justify-center gap-2 rounded-md bg-primary px-4 font-medium text-primary-on hover:bg-primary-hover max-[819px]:min-h-11'
 const stepButton = 'grid h-9 w-9 place-items-center rounded-md text-ink-2 hover:bg-hover hover:text-ink max-[819px]:h-11 max-[819px]:w-11'
+const LOAD_FAILED = 'No se pudieron cargar los gastos.'
 const select = 'min-h-8 rounded-md border border-line-strong bg-surface px-2 text-[13px] text-ink hover:border-ink-3 max-[819px]:min-h-11'
 
 export default function CashflowPage() {
   const [items, setItems] = useState<Cashflow[]>([])
   const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [busyIds, setBusyIds] = useState<string[]>([])
   const [showForm, setShowForm] = useState(false)
   const [stats, setStats] = useState({ totalPending: 0, overdueCount: 0 })
 
@@ -35,13 +39,13 @@ export default function CashflowPage() {
     setLoading(true)
     try {
       const res = await fetch('/api/cashflow')
-      if (!res.ok) throw new Error(String(res.status))
+      if (!res.ok) throw new Error(LOAD_FAILED)
       const data = await res.json()
       setItems(data.data ?? [])
       setStats({ totalPending: data.totalPending ?? 0, overdueCount: data.overdueCount ?? 0 })
-      setLoadError(false)
-    } catch {
-      setLoadError(true)
+      setLoadError(null)
+    } catch (err) {
+      setLoadError(requestErrorMessage(err, LOAD_FAILED))
     } finally {
       setLoading(false)
     }
@@ -49,23 +53,33 @@ export default function CashflowPage() {
 
   useEffect(() => { fetchData() }, [])
 
-  async function toggleStatus(item: Cashflow) {
-    await fetch('/api/cashflow', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: item.id, status: item.status === 'PAGADO' ? 'PENDIENTE' : 'PAGADO' }),
-    })
-    fetchData()
+  /** Sends one row's change; its buttons stay disabled until the list reloads. */
+  async function send(item: Cashflow, method: 'PATCH' | 'DELETE', body: object, failed: string, done: string) {
+    setBusyIds(ids => [...ids, item.id])
+    try {
+      const res = await fetch('/api/cashflow', {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || failed)
+      toast.success(done)
+      await fetchData()
+    } catch (err) {
+      toast.error(requestErrorMessage(err, failed))
+    } finally {
+      setBusyIds(ids => ids.filter(id => id !== item.id))
+    }
   }
 
-  async function deleteItem(item: Cashflow) {
-    if (!confirm('¿Eliminar este gasto?')) return
-    await fetch('/api/cashflow', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: item.id }),
-    })
-    fetchData()
+  function toggleStatus(item: Cashflow) {
+    const paid = item.status !== 'PAGADO'
+    return send(item, 'PATCH', { id: item.id, status: paid ? 'PAGADO' : 'PENDIENTE' },
+      'No se pudo cambiar el estado del gasto', paid ? 'Marcado como pagado' : 'Marcado como pendiente')
+  }
+
+  function deleteItem(item: Cashflow) {
+    return send(item, 'DELETE', { id: item.id }, 'No se pudo borrar el gasto', 'Gasto borrado')
   }
 
   const filteredByMonth = useMemo(() => {
@@ -181,7 +195,7 @@ export default function CashflowPage() {
 
       {loadError && (
         <div role="alert" className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-md bg-danger-soft px-4 py-3 text-sm text-danger">
-          No se pudieron cargar los gastos.
+          {loadError}
           <button type="button" onClick={() => fetchData()} className="font-medium underline underline-offset-2 max-[819px]:min-h-11">Reintentar</button>
         </div>
       )}
@@ -238,7 +252,7 @@ export default function CashflowPage() {
             />
             {sortedItems.length === 0
               ? <p className="py-4 text-[13px] text-ink-3">Sin gastos en este período.</p>
-              : <div className="pt-1"><ExpenseList items={sortedItems} sort={sort} onSort={handleSort} onToggle={toggleStatus} onDelete={deleteItem} /></div>}
+              : <div className="pt-1"><ExpenseList items={sortedItems} sort={sort} onSort={handleSort} onToggle={toggleStatus} onDelete={deleteItem} busyIds={busyIds} /></div>}
           </section>
         </>
       )}
