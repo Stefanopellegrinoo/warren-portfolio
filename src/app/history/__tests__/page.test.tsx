@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { toast } from 'sonner'
 import HistoryPage from '../page'
+import { forgetCached } from '@/lib/client-cache'
 import type { ClosedTrade, Transaction } from '@/types'
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
@@ -24,7 +25,7 @@ async function mount(response: () => Promise<Response>) {
   return { el, unmount: () => act(() => root.unmount()) }
 }
 
-afterEach(() => { vi.unstubAllGlobals(); vi.mocked(toast.success).mockClear(); document.body.innerHTML = '' })
+afterEach(() => { vi.unstubAllGlobals(); vi.mocked(toast.success).mockClear(); forgetCached(); document.body.innerHTML = '' })
 
 describe('HistoryPage', () => {
   it('renders the new header and view switch, without the old visual system', () => {
@@ -49,6 +50,51 @@ describe('HistoryPage', () => {
     expect(el.textContent).toContain('−50,50')
     expect(el.textContent).toContain('+13,3 %')
     expect(el.textContent).toContain('US$ 149,50') // total realized
+    unmount()
+  })
+})
+
+// odd/tasks/rendimiento.md S7: each tab keeps what it loaded; coming back shows it at once and refreshes behind.
+describe('HistoryPage — tabs keep what they loaded', () => {
+  it('coming back to a tab shows its rows at once while it asks again', async () => {
+    const urls: string[] = []
+    let held: ((r: Response) => void) | null = null
+    let hold = false
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      urls.push(url)
+      const body = url === '/api/transactions/closed' ? { data: [trade({})] } : { data: [] }
+      if (hold) return new Promise<Response>(r => { held = r })
+      return Promise.resolve(new Response(JSON.stringify(body)))
+    }))
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<HistoryPage />) })
+    await act(async () => {})
+    await act(async () => { (el.querySelector('input[value="all"]') as HTMLInputElement).click() })
+    await act(async () => {})
+
+    hold = true
+    await act(async () => { (el.querySelector('input[value="closed"]') as HTMLInputElement).click() })
+    expect(el.querySelector('[aria-label="Cargando operaciones"]')).toBeNull()
+    expect(el.textContent).toContain('+200,00')
+    expect(urls).toEqual(['/api/transactions/closed', '/api/transactions?limit=1000', '/api/transactions/closed'])
+
+    await act(async () => { held!(new Response(JSON.stringify({ data: [trade({})] }))) })
+    act(() => root.unmount())
+  })
+
+  it('Reintentar shows the skeleton until its answer, then the rows', async () => {
+    let answer: (() => Response) | null = () => new Response('{}', { status: 500 })
+    let held: ((r: Response) => void) | null = null
+    const { el, unmount } = await mount(() => (answer ? Promise.resolve(answer()) : new Promise<Response>(r => { held = r })))
+    expect(el.textContent).toContain('No se pudieron cargar las operaciones')
+    answer = null
+    await act(async () => { [...el.querySelectorAll('button')].find(b => b.textContent === 'Reintentar')!.click() })
+    expect(el.querySelector('[aria-label="Cargando operaciones"]')).not.toBeNull()
+    expect(el.textContent).not.toContain('No se pudieron cargar las operaciones')
+    await act(async () => { held!(new Response(JSON.stringify({ data: [trade({})] }))) })
+    expect(el.textContent).toContain('+200,00')
     unmount()
   })
 })
@@ -97,6 +143,27 @@ describe('HistoryPage — trades to review', () => {
     expect(nativeConfirm).not.toHaveBeenCalled()
     expect(calls.filter(c => c.init?.method === 'DELETE').map(c => c.url)).toEqual(['/api/transactions/ok'])
     expect(toast.success).toHaveBeenCalledWith('Operación borrada')
+    unmount()
+  })
+
+  it('a deleted row leaves at once, while the list is asked again behind', async () => {
+    const { el, calls, unmount } = await mountAll()
+    const serveRows = vi.mocked(fetch).getMockImplementation()!
+    let held: (() => void) | null = null
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      if (init?.method === 'DELETE') return serveRows(url, init)
+      calls.push({ url: String(url), init })
+      await new Promise<void>(r => { held = r })
+      return serveRows(url, init)
+    })
+    const row = el.querySelector('table button[aria-label^="Borrar operación de KO"]')!.closest('tr')!
+    await act(async () => { (row.querySelector('button[aria-label^="Borrar operación de KO"]') as HTMLButtonElement).click() })
+    await act(async () => { buttonIn(row, 'Sí, borrar').click() })
+    await act(async () => {})
+    expect(tableRows(el).some(r => r.includes('KO'))).toBe(false)
+    expect(tableRows(el).filter(r => r.includes('AAPL'))).toHaveLength(1)
+    expect(calls.filter(c => c.url === '/api/transactions?limit=1000')).toHaveLength(2)
+    await act(async () => { held!() })
     unmount()
   })
 

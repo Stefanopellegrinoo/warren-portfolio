@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { toast } from 'sonner'
 import type { Cashflow } from '@/types'
 import { NO_CONNECTION } from '@/lib/request-errors'
+import { forgetCached } from '@/lib/client-cache'
 import CashflowPage from '../page'
 import ExpenseDialog from '../ExpenseDialog'
 import ExpenseList from '../ExpenseList'
@@ -25,6 +26,7 @@ afterEach(() => {
   vi.useRealTimers()
   vi.mocked(toast.success).mockClear()
   vi.mocked(toast.error).mockClear()
+  forgetCached()
   document.body.innerHTML = ''
 })
 
@@ -62,22 +64,33 @@ async function mountPage({ load, write }: { load?: Reply; write?: Reply } = {}) 
   await act(async () => { root.render(<CashflowPage />) })
   await flush()
   if (byText(el, 'Ver todos los meses')) click(byText(el, 'Ver todos los meses'))
-  return { el, calls, writes: () => calls.filter(c => c.method !== 'GET'), loads: () => calls.filter(c => c.method === 'GET').length }
+  return {
+    el, calls, writes: () => calls.filter(c => c.method !== 'GET'), loads: () => calls.filter(c => c.method === 'GET').length,
+    unmount: () => act(() => root.unmount()),
+  }
 }
 
 describe('Gastos: toggling the status', () => {
-  it('sends the new status, confirms it and reloads the list', async () => {
-    const { el, writes, loads } = await mountPage()
+  // odd/tasks/rendimiento.md S7: the answer carries the updated list, so the page asks for nothing else.
+  it('sends the new status, confirms it and shows the list the answer carries, without asking for it again', async () => {
+    const toggled = { ...PAID, status: 'PENDIENTE' as const }
+    const { el, writes, loads } = await mountPage({ write: () => json({ ...toggled, list: { data: [toggled, PENDING], totalPending: 200, overdueCount: 0 } }) })
     click(byLabel(el, PAID_TOGGLE))
     await flush()
     expect(writes()).toEqual([{ method: 'PATCH', body: { id: 'a', status: 'PENDIENTE' } }])
     expect(toast.success).toHaveBeenCalledWith('Marcado como pendiente')
-    expect(loads()).toBe(2)
+    expect(loads()).toBe(1)
+    expect(allByLabel(el, PAID_TOGGLE)).toEqual([])
+    expect(allByLabel(el, PENDING_TOGGLE).length).toBeGreaterThan(0)
+  })
 
+  it('reloads the list when the answer does not carry it', async () => {
+    const { el, writes, loads } = await mountPage()
     click(byLabel(el, PENDING_TOGGLE))
     await flush()
-    expect(writes()[1]).toEqual({ method: 'PATCH', body: { id: 'b', status: 'PAGADO' } })
+    expect(writes()[0]).toEqual({ method: 'PATCH', body: { id: 'b', status: 'PAGADO' } })
     expect(toast.success).toHaveBeenCalledWith('Marcado como pagado')
+    expect(loads()).toBe(2)
   })
 
   it('shows the server message when the change fails', async () => {
@@ -127,6 +140,16 @@ describe('Gastos: deleting', () => {
     expect(toast.success).toHaveBeenCalledWith('Gasto borrado')
   })
 
+  it('shows the list the answer carries, without the deleted expense and without asking again', async () => {
+    const { el, loads } = await mountPage({ write: () => json({ ok: true, list: { data: [PENDING], totalPending: 100, overdueCount: 0 } }) })
+    click(byLabel(el, PAID_DELETE))
+    click(byText(el, 'Sí, borrar'))
+    await flush()
+    expect(loads()).toBe(1)
+    expect(allByLabel(el, PAID_DELETE)).toEqual([])
+    expect(allByLabel(el, PENDING_DELETE).length).toBeGreaterThan(0)
+  })
+
   it('sends nothing when the question is cancelled', async () => {
     const { el, writes } = await mountPage()
     click(byLabel(el, PAID_DELETE))
@@ -147,6 +170,18 @@ describe('Gastos: deleting', () => {
 })
 
 describe('Gastos: loading', () => {
+  // odd/tasks/rendimiento.md S7: a page seen before in the tab shows its last data at once and refreshes behind.
+  it('a visit after the first shows the last list at once while it asks again', async () => {
+    const first = await mountPage()
+    first.unmount()
+    let release!: (r: Response) => void
+    const { el, loads } = await mountPage({ load: () => new Promise<Response>(r => { release = r }) })
+    expect(el.querySelector('[aria-label="Cargando gastos"]')).toBeNull()
+    expect(allByLabel(el, PAID_DELETE).length).toBeGreaterThan(0)
+    expect(loads()).toBe(1)
+    await act(async () => { release(json({ data: [PAID] })) })
+  })
+
   it('keeps saying the load failed, with Reintentar, instead of an empty list', async () => {
     let fail = true
     const { el, loads } = await mountPage({ load: () => (fail ? json({ error: 'x' }, 500) : json({ data: [PAID] })) })

@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { toast } from 'sonner'
 import MovementsList from '../MovementsList'
+import { forgetCached } from '@/lib/client-cache'
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
@@ -18,6 +19,7 @@ afterEach(() => {
   root = null
   document.body.innerHTML = ''
   vi.unstubAllGlobals()
+  forgetCached()
 })
 
 /** Serves `all` the way the API does: one page per limit/offset, with the total. */
@@ -122,6 +124,21 @@ describe('MovementsList pagination', () => {
     expect(urls.at(-1)).toBe('/api/cash/movements?limit=5&offset=0')
     expect(m.rows()).toHaveLength(5)
     expect(m.status()).toBeNull()
+  })
+
+  // odd/tasks/rendimiento.md S7: a page seen before in the tab shows its last data at once and refreshes behind.
+  it('a list seen before in the tab shows at once while it asks again', async () => {
+    serve(movements(3))
+    await mount()
+    act(() => root!.unmount())
+    let release!: () => void
+    const serveList = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (url, init) => { await new Promise<void>(r => { release = r }); return serveList(url, init) })
+    const m = await mount()
+    expect(m.el.querySelector('[aria-label="Cargando movimientos"]')).toBeNull()
+    expect(m.rows()).toHaveLength(3)
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2)
+    await act(async () => { release() })
   })
 
   it('says so when there are no movements', async () => {

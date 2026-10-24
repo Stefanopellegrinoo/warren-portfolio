@@ -10,6 +10,19 @@ export const RANGES = [
 
 export type RangeId = (typeof RANGES)[number]['id']
 
+/**
+ * The points of `range`, cut from the whole series the way /api/portfolio-history cuts its window:
+ * from `today` (an Argentine YYYY-MM-DD) minus the range's days, inclusive.
+ */
+export function pointsInRange(points: HistoryPoint[], range: RangeId, today: string): HistoryPoint[] {
+  const days = RANGES.find(r => r.id === range)!.days
+  if (days === 'all') return points
+  const cutoff = new Date(`${today}T00:00:00Z`)
+  cutoff.setUTCDate(cutoff.getUTCDate() - parseInt(days))
+  const from = cutoff.toISOString().slice(0, 10)
+  return points.filter(p => p.snapshot_date >= from)
+}
+
 /** Plot gutters: room for y labels on the left and date labels below. */
 export const PLOT = { left: 44, top: 6, bottom: 22 }
 
