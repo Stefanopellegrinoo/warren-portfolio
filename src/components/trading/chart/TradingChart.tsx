@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
 	CandlestickSeries,
 	CrosshairMode,
@@ -187,7 +188,23 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 		const chart = createChart(box, { autoSize: true });
 		const series = chart.addSeries(CandlestickSeries, { priceLineVisible: true, priceFormat: PRICE_FORMAT });
 		const drawings = new DrawingManager(chart, series, { magnet: "off" });
-		const offText = drawings.on("textEdit", (drawing, screen) => setTextEdit({ drawing, x: editorLeft(screen.x, box.clientWidth), y: screen.y }));
+		// A text drawing asks for its editor on the press that places it, but the chart blurs
+		// whatever has the focus when a press starts (its touchstart and mousedown come after
+		// that pointerdown). So the editor opens when the press ends: on touchend for a finger,
+		// where iOS still lets a field take the focus and raise the keyboard, and with no
+		// emulated mouse press after it to take the focus away again.
+		let pressing: string | null = null;
+		const onPress = (e: PointerEvent) => { pressing = e.pointerType; };
+		const onRelease = () => { pressing = null; };
+		box.addEventListener("pointerdown", onPress, true);
+		window.addEventListener("pointerup", onRelease, true);
+		const offText = drawings.on("textEdit", (drawing, screen) => {
+			const open = () => flushSync(() => setTextEdit({ drawing, x: editorLeft(screen.x, box.clientWidth), y: screen.y }));
+			if (pressing === "touch") {
+				window.addEventListener("touchend", (e) => { e.preventDefault(); open(); }, { once: true, passive: false });
+			} else if (pressing) window.addEventListener("pointerup", open, { once: true });
+			else open();
+		});
 		const offTouch = touchDrawing(drawings, chart.chartElement());
 		const onMove = (p: MouseEventParams) => setHover((p.seriesData.get(series) as Candle | undefined) ?? null);
 		chart.subscribeCrosshairMove(onMove);
@@ -197,6 +214,8 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 		return () => {
 			offText();
 			offTouch();
+			box.removeEventListener("pointerdown", onPress, true);
+			window.removeEventListener("pointerup", onRelease, true);
 			chart.unsubscribeCrosshairMove(onMove);
 			drawings.destroy();
 			chart.remove();

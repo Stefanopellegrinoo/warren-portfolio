@@ -180,3 +180,35 @@ describe('TradingChart alert lines under a finger (S4)', () => {
     unmount()
   })
 })
+
+describe('TradingChart text editor after placing a text (S3)', () => {
+  const editor = () => document.querySelector<HTMLInputElement>('input[aria-label="Texto del dibujo"]')
+
+  it('with a finger it opens when the finger lifts, focused, so the chart cannot take the focus away', async () => {
+    const { box, unmount } = await render()
+
+    act(() => { box.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', bubbles: true })) })
+    await act(async () => { drawingEvents.textEdit({ id: 't', kind: 'text', text: '' }, { x: 40, y: 120 }) })
+    expect(editor()).toBeNull()
+
+    const lift = new Event('touchend', { cancelable: true })
+    act(() => { window.dispatchEvent(new PointerEvent('pointerup', { pointerType: 'touch' })); window.dispatchEvent(lift) })
+
+    expect(editor()).not.toBeNull()
+    expect(document.activeElement).toBe(editor())
+    expect(lift.defaultPrevented).toBe(true) // no emulated mouse press follows to blur it
+    unmount()
+  })
+
+  it('with the mouse it opens when the button is released', async () => {
+    const { box, unmount } = await render()
+
+    act(() => { box.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'mouse', bubbles: true })) })
+    await act(async () => { drawingEvents.textEdit({ id: 't', kind: 'text', text: '' }, { x: 40, y: 120 }) })
+    expect(editor()).toBeNull()
+    act(() => { window.dispatchEvent(new PointerEvent('pointerup', { pointerType: 'mouse' })) })
+
+    expect(document.activeElement).toBe(editor())
+    unmount()
+  })
+})
