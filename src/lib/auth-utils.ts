@@ -1,11 +1,8 @@
 /**
- * Centralized Authentication Utilities
- * 
- * Provides consistent error handling, token validation, and HTTP response patterns
- * for all auth-related API routes. This ensures uniform behavior across all endpoints.
+ * Authentication utilities for the auth routes: authorization-code validation,
+ * session exchange and callback parsing.
  */
 
-import { NextResponse } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { safeNextPath } from '@/lib/login-redirect'
 
@@ -30,20 +27,6 @@ export interface AuthError {
   message: string
   statusCode: number
   metadata?: Record<string, any>
-}
-
-/**
- * Error response mapping for consistent HTTP responses
- */
-const ERROR_RESPONSES: Record<AuthErrorType, { status: number; message: string }> = {
-  unauthorized: { status: 401, message: 'Unauthorized' },
-  invalid_token: { status: 401, message: 'Invalid or expired token' },
-  session_expired: { status: 401, message: 'Session has expired' },
-  invalid_callback: { status: 400, message: 'Invalid OAuth callback' },
-  invalid_code_format: { status: 400, message: 'Invalid authorization code format' },
-  session_exchange_failed: { status: 401, message: 'Failed to establish session' },
-  callback_failed: { status: 500, message: 'Authentication callback failed' },
-  internal_error: { status: 500, message: 'Internal server error' },
 }
 
 /**
@@ -140,104 +123,6 @@ export async function exchangeCodeForSession(
       },
     }
   }
-}
-
-/**
- * Validate user session and return user data or error
- * Used as the first step in protected API routes
- * 
- * @param supabase - Supabase client instance
- * @returns User object or structured error
- */
-export async function validateUserSession(
-  supabase: SupabaseClient
-): Promise<{ user: any; error?: AuthError }> {
-  try {
-    const { data: { user }, error: authErr } = await supabase.auth.getUser()
-
-    if (authErr) {
-      console.error('[Auth] User validation failed:', {
-        message: authErr.message,
-        status: authErr.status,
-      })
-
-      return {
-        user: null,
-        error: {
-          type: authErr.status === 400 ? 'invalid_token' : 'session_expired',
-          message: authErr.message || 'Failed to validate session',
-          statusCode: authErr.status || 401,
-          metadata: {
-            reason: 'supabase_validation_error',
-            originalStatus: authErr.status,
-          },
-        },
-      }
-    }
-
-    if (!user) {
-      return {
-        user: null,
-        error: {
-          type: 'unauthorized',
-          message: 'No authenticated user found',
-          statusCode: 401,
-          metadata: { reason: 'no_user' },
-        },
-      }
-    }
-
-    return { user }
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : 'Unknown error'
-
-    console.error('[Auth] User validation exception:', {
-      error: errorMsg,
-      stack: err instanceof Error ? err.stack : undefined,
-    })
-
-    return {
-      user: null,
-      error: {
-        type: 'internal_error',
-        message: errorMsg,
-        statusCode: 500,
-        metadata: { reason: 'exception_during_validation' },
-      },
-    }
-  }
-}
-
-/**
- * Create a standardized HTTP response for auth errors
- * Ensures consistent error format across all endpoints
- * 
- * @param error - AuthError object
- * @returns NextResponse with appropriate status and format
- */
-export function createAuthErrorResponse(error: AuthError): NextResponse {
-  const { status, message } = ERROR_RESPONSES[error.type] || ERROR_RESPONSES.internal_error
-
-  return NextResponse.json(
-    {
-      error: true,
-      type: error.type,
-      message: error.message || message,
-      ...(process.env.NODE_ENV === 'development' && { metadata: error.metadata }),
-    },
-    { status }
-  )
-}
-
-/**
- * Create a standardized HTTP response for successful auth operations
- * 
- * @param data - Response payload
- * @param statusCode - HTTP status code (default: 200)
- * @returns NextResponse with JSON data
- */
-export function createAuthSuccessResponse(data: any, statusCode: number = 200): NextResponse {
-  return NextResponse.json(data, { status: statusCode })
 }
 
 /**

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Plus, X, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { fetchTickers24h } from "@/lib/binance/rest";
 import { getBinanceWS } from "@/lib/binance/ws";
 import { useChartStore } from "@/lib/store/chart-store";
@@ -11,6 +12,8 @@ import { Chip, toneOf } from "@/components/resumen/ui";
 import { iconButton, priceText } from "@/components/trading/ui";
 import { getProviderForSymbol } from "@/lib/market-data/resolver";
 import { addSymbolToCurrentWatchlist } from "@/lib/warren/watchlist";
+import { requestErrorMessage } from "@/lib/request-errors";
+import { LoadError } from "@/components/ons/ui";
 import { WatchlistSelector } from "./WatchlistSelector";
 
 interface Row {
@@ -34,6 +37,9 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
 
   const [currentList, setCurrentList] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [removing, setRemoving] = useState<string | null>(null);
   const [rows, setRows] = useState<Record<string, Row>>({});
   const [flash, setFlash] = useState<Record<string, "up" | "down" | null>>({});
 
@@ -48,16 +54,20 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
     if (!activeId) return;
     let cancelled = false;
     setLoading(true);
+    setLoadError(null);
     fetch(`/api/watchlist?watchlistId=${activeId}`)
-      .then((res) => res.ok ? res.json() : Promise.reject(res.statusText))
+      .then(async (res) => {
+        if (res.ok) return res.json();
+        throw new Error((await res.json().catch(() => null))?.error ?? "");
+      })
       .then((data) => {
         if (cancelled) return;
         setCurrentList(data.items.map((i: { symbol: string }) => i.symbol));
       })
-      .catch((e) => console.error("Failed to fetch remote watchlist", e))
+      .catch((e) => { if (!cancelled) setLoadError(requestErrorMessage(e, "No se pudo cargar la lista.")); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [activeId, watchlistRefreshTick]);
+  }, [activeId, watchlistRefreshTick, attempt]);
 
   // Effect: data fetching — Binance WS + Yahoo polling, both run in parallel
   useEffect(() => {
@@ -137,20 +147,29 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
   }, [currentList]);
 
   const handleRemove = async (s: string) => {
+    const removed = () => toast.success("Quitado de la lista", { description: s });
     if (!activeId) {
       removeFromLocal(s);
+      removed();
       return;
     }
 
+    const fallback = `No se pudo quitar ${s} de la lista`;
+    setRemoving(s);
     try {
       const res = await fetch(`/api/watchlist?symbol=${s}&watchlistId=${activeId}`, {
         method: 'DELETE'
       });
       if (res.ok) {
         setCurrentList(prev => prev.filter(item => item !== s));
+        removed();
+      } else {
+        toast.error((await res.json().catch(() => null))?.error ?? fallback);
       }
     } catch (e) {
-      console.error("Failed to remove item", e);
+      toast.error(requestErrorMessage(e, fallback));
+    } finally {
+      setRemoving(null);
     }
   };
 
@@ -176,6 +195,11 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
+        {loadError && (
+          <div className="p-2">
+            <LoadError message={loadError} onRetry={() => setAttempt((n) => n + 1)} />
+          </div>
+        )}
         {loading && currentList.length === 0 ? (
           <p role="status" className="flex items-center gap-2 px-4 py-6 text-[13px] text-ink-3">
             <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
@@ -216,17 +240,20 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
                     type="button"
                     aria-label={`Quitar ${s} de la lista`}
                     title="Quitar de la lista"
+                    disabled={removing === s}
                     onClick={() => handleRemove(s)}
                     className="mx-1 grid h-8 w-8 flex-none place-items-center rounded-md text-ink-3 opacity-0 hover:bg-danger-soft hover:text-danger focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring group-hover:opacity-100 max-[819px]:h-11 max-[819px]:w-11 max-[819px]:opacity-100"
                   >
-                    <X className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+                    {removing === s
+                      ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                      : <X className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
                   </button>
                 </li>
               );
             })}
           </ul>
         )}
-        {currentList.length === 0 && !loading && (
+        {currentList.length === 0 && !loading && !loadError && (
           <div className="px-4 py-6 text-[13px]">
             <p className="text-ink-2">La lista está vacía.</p>
             <p className="mt-1 text-ink-3">Agregá símbolos con el botón + de arriba.</p>

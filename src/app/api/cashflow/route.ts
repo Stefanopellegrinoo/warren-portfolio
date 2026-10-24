@@ -3,6 +3,7 @@ import type { Cashflow } from '@/types'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { invalidateUserCache } from '@/lib/redis'
 import { serverError } from '@/lib/api/errors'
+import { argentinaDate } from '@/lib/utils'
 
 const ALLOWED_CATEGORIES = [
   'Alquiler', 'Servicios', 'Supermercado', 'Transporte', 'Salud',
@@ -29,7 +30,9 @@ export async function GET(req: NextRequest) {
   const cashflowData = (data as Cashflow[] | null) ?? []
   const pending = cashflowData.filter((c: Cashflow) => c.status === 'PENDIENTE')
   const totalPending = pending.reduce((s: number, c: Cashflow) => s + (c.amount_usd ?? 0), 0)
-  const overdue = pending.filter((c: Cashflow) => new Date(c.date) < new Date())
+  // Due dates are YYYY-MM-DD: due today is not overdue until the day is over in Argentina.
+  const today = argentinaDate()
+  const overdue = pending.filter((c: Cashflow) => c.date < today)
 
   return NextResponse.json({ data, count, totalPending, overdueCount: overdue.length })
 }

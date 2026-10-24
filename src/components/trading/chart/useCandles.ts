@@ -6,9 +6,11 @@ import { getBinanceWS } from "@/lib/binance/ws";
 import { getProviderForSymbol } from "@/lib/market-data/resolver";
 import { klinesInterval, toChartTime } from "@/lib/chart/timeframes";
 import { barsToUpdate } from "@/lib/chart/live-bars";
+import { requestErrorMessage } from "@/lib/request-errors";
 import type { Candle, Timeframe } from "@/lib/binance/types";
 
 const POLL_MS = 30_000;
+const CANDLES_FAILED = "No se pudieron cargar las velas. Probá de nuevo.";
 
 /** reset: draw every bar again; update: series.update() these bars in order. */
 export type CandleChange = { kind: "reset" } | { kind: "update"; bars: Candle[] };
@@ -28,7 +30,7 @@ async function fetchYahoo(symbol: string, tf: Timeframe, signal: AbortSignal): P
 		{ signal },
 	);
 	const body = await res.json().catch(() => null);
-	if (!res.ok) throw new Error(body?.error ?? `Error ${res.status}`);
+	if (!res.ok) throw new Error(body?.error ?? "");
 	return (body as { time: string | number; open: number; high: number; low: number; close: number; volume?: number }[]).map(
 		(k) => ({ time: toChartTime(k.time), open: k.open, high: k.high, low: k.low, close: k.close, volume: k.volume ?? 0 }),
 	);
@@ -57,13 +59,16 @@ export function useCandles(symbol: string, timeframe: Timeframe) {
 
 		const fail = (e: unknown) => {
 			if (ctrl.signal.aborted) return;
-			setState({ ...LOADING, status: "error", error: e instanceof Error ? e.message : String(e) });
+			setState({ ...LOADING, status: "error", error: requestErrorMessage(e, CANDLES_FAILED) });
 		};
 
 		(async () => {
 			try {
 				if (getProviderForSymbol(symbol) === "binance") {
-					const candles = await fetchKlines(symbol, timeframe);
+					// Binance's own errors ("klines 451") say nothing to the user; a dropped connection does.
+					const candles = await fetchKlines(symbol, timeframe).catch((e) => {
+						throw e instanceof TypeError ? e : new Error("");
+					});
 					if (ctrl.signal.aborted) return;
 					setState({ status: "ready", candles, change: { kind: "reset" } });
 					stop = getBinanceWS().subscribeKline({

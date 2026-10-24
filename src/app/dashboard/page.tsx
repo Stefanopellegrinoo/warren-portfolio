@@ -164,10 +164,11 @@ export default function DashboardPage() {
 
       <UnpricedNotice count={data?.unpricedCount} tickers={data?.unpricedTickers} />
 
-      {loadError && !summary && (
-        <div role="alert" className="mb-8 flex flex-wrap items-center justify-between gap-3 rounded-md bg-danger-soft px-4 py-3 text-sm text-danger">
-          No se pudo cargar tu cartera.
-          <button type="button" onClick={() => fetchPositions()} className="font-medium underline underline-offset-2">Reintentar</button>
+      {/* With numbers already on screen a failed refresh only warns: they may be outdated. */}
+      {loadError && (
+        <div role="alert" className={`mb-8 flex flex-wrap items-center justify-between gap-3 rounded-md px-4 py-3 text-sm ${summary ? 'bg-warn-soft text-warn' : 'bg-danger-soft text-danger'}`}>
+          {summary ? 'No se pudieron actualizar los precios. Lo que ves puede estar desactualizado.' : 'No se pudo cargar tu cartera.'}
+          <button type="button" onClick={() => fetchPositions()} className="font-medium underline underline-offset-2 max-[819px]:min-h-11">Reintentar</button>
         </div>
       )}
 

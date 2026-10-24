@@ -2,9 +2,11 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
+import { toast } from 'sonner'
 import HistoryPage from '../page'
 import type { ClosedTrade, Transaction } from '@/types'
 
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 const trade = (over: Partial<ClosedTrade>): ClosedTrade => ({
@@ -22,7 +24,7 @@ async function mount(response: () => Promise<Response>) {
   return { el, unmount: () => act(() => root.unmount()) }
 }
 
-afterEach(() => { vi.unstubAllGlobals(); document.body.innerHTML = '' })
+afterEach(() => { vi.unstubAllGlobals(); vi.mocked(toast.success).mockClear(); document.body.innerHTML = '' })
 
 describe('HistoryPage', () => {
   it('renders the new header and view switch, without the old visual system', () => {
@@ -79,6 +81,40 @@ describe('HistoryPage — trades to review', () => {
     return { el, calls, unmount: () => act(() => root.unmount()) }
   }
   const tableRows = (el: HTMLElement) => [...el.querySelectorAll('tbody tr')].map(r => r.textContent ?? '')
+  const buttonIn = (el: Element, text: string) => [...el.querySelectorAll('button')].find(b => b.textContent === text) as HTMLButtonElement
+
+  // odd/tasks/ux-paginas.md S1-S3: a delete asks inside the app, says it worked, and a failure says why.
+  it('a delete asks next to the row instead of a native confirm, then says it was deleted', async () => {
+    const nativeConfirm = vi.fn(() => true)
+    const { el, calls, unmount } = await mountAll()
+    vi.stubGlobal('confirm', nativeConfirm)
+    const row = el.querySelector('table button[aria-label^="Borrar operación de KO"]')!.closest('tr')!
+    await act(async () => { (row.querySelector('button[aria-label^="Borrar operación de KO"]') as HTMLButtonElement).click() })
+    expect(row.textContent).toContain('¿Estás seguro que querés borrar esta operación? Esto recalculará toda la posición desde cero.')
+    expect(calls.some(c => c.init?.method === 'DELETE')).toBe(false)
+    await act(async () => { buttonIn(row, 'Sí, borrar').click() })
+    await act(async () => {})
+    expect(nativeConfirm).not.toHaveBeenCalled()
+    expect(calls.filter(c => c.init?.method === 'DELETE').map(c => c.url)).toEqual(['/api/transactions/ok'])
+    expect(toast.success).toHaveBeenCalledWith('Operación borrada')
+    unmount()
+  })
+
+  it('a delete without connection says so in Spanish', async () => {
+    const { el, unmount } = await mountAll()
+    const serveRows = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      if (init?.method === 'DELETE') throw new TypeError('Failed to fetch')
+      return serveRows(url, init)
+    })
+    const row = el.querySelector('table button[aria-label^="Borrar operación de KO"]')!.closest('tr')!
+    await act(async () => { (row.querySelector('button[aria-label^="Borrar operación de KO"]') as HTMLButtonElement).click() })
+    await act(async () => { buttonIn(row, 'Sí, borrar').click() })
+    await act(async () => {})
+    expect(el.querySelector('[role="alert"]')?.textContent).toBe('No hay conexión. Revisá tu internet y probá de nuevo.')
+    expect(toast.success).not.toHaveBeenCalled()
+    unmount()
+  })
 
   it('marks the rows to review with a chip and their note', async () => {
     const { el, unmount } = await mountAll()
@@ -114,6 +150,7 @@ describe('HistoryPage — trades to review', () => {
       date: '2026-03-02', ticker: 'AAPL', operation: 'COMPRA', assetType: 'CEDEAR',
       tradeCurrency: 'ARS', tradeQuantity: 40, tradePrice: 15999.99, tradeCommission: 0, notes: '',
     })
+    expect(toast.success).toHaveBeenCalledWith('Corrección guardada')
     unmount()
   })
 

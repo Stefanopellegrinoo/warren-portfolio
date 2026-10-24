@@ -9,6 +9,8 @@ import { fetchExchangeSymbols } from "@/lib/binance/rest";
 import { getPortfolio } from "@/lib/warren/positions";
 import { useChartStore } from "@/lib/store/chart-store";
 import { cn } from "@/lib/utils";
+import { NO_CONNECTION, requestErrorMessage } from "@/lib/request-errors";
+import { LoadError } from "@/components/ons/ui";
 import { AddToWatchlistButton } from "@/components/trading/watchlist/AddToWatchlistButton";
 import type { SymbolInfo } from "@/lib/binance/types";
 import type { SearchResult } from "@/lib/market-data/types";
@@ -19,16 +21,17 @@ export function buildSearchUrl(q: string): string {
   return `/api/ticker/search?q=${encodeURIComponent(q)}`
 }
 
+/** Rejects when the search failed, with the server's message when it sent one: a failure is not "no results". */
 export async function fetchTickerSearch(q: string): Promise<SearchResult[]> {
-  try {
-    const res = await fetch(buildSearchUrl(q))
-    if (!res.ok) return []
-    const data = await res.json()
-    return data.results ?? []
-  } catch {
-    return []
-  }
+  const res = await fetch(buildSearchUrl(q))
+  const data = await res.json().catch(() => null)
+  if (!res.ok || !data) throw new Error(data?.error ?? '')
+  return data.results ?? []
 }
+
+const SEARCH_FAILED = "No se pudo buscar. Probá de nuevo."
+// Binance's and /api/positions' own errors are English ("exchangeInfo 451"): only a dropped connection says more.
+const loadMessage = (e: unknown, fallback: string) => (e instanceof TypeError ? NO_CONNECTION : fallback)
 
 export function shouldFetchSearch(query: string): boolean {
   return query.length >= 2
@@ -64,35 +67,49 @@ export function SymbolSelector({ onSymbolSelect, children }: SymbolSelectorProps
   const [query, setQuery] = useState("");
   const [allBinanceSymbols, setAllBinanceSymbols] = useState<SymbolInfo[]>([]);
   const [portfolioTickers, setPortfolioTickers] = useState<string[]>([]);
+  const [binanceError, setBinanceError] = useState<string | null>(null);
+  const [portfolioError, setPortfolioError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const retryLoad = () => setLoadAttempt((n) => n + 1);
 
   // ── Search state ──────────────────────────────────────────────────────────
   const [yahooResults, setYahooResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+
+  async function search(q: string) {
+    setIsSearching(true)
+    setSearchError(null)
+    try {
+      setYahooResults(await fetchTickerSearch(q))
+    } catch (e) {
+      setYahooResults([])
+      setSearchError(requestErrorMessage(e, SEARCH_FAILED))
+    } finally {
+      setIsSearching(false)
+    }
+  }
 
   // Stable debounced fetch reference
-  const debouncedFetch = useRef(
-    debounce(async (q: string) => {
-      setIsSearching(true)
-      const results = await fetchTickerSearch(q)
-      setYahooResults(results)
-      setIsSearching(false)
-    }, 300)
-  ).current
+  const debouncedFetch = useRef(debounce(search, 300)).current
 
   useEffect(() => {
     if (!open) return;
     if (allBinanceSymbols.length === 0) {
-      fetchExchangeSymbols().then(setAllBinanceSymbols).catch(console.error);
+      fetchExchangeSymbols()
+        .then((symbols) => { setAllBinanceSymbols(symbols); setBinanceError(null); })
+        .catch((e) => setBinanceError(loadMessage(e, "No se pudo cargar la lista de cripto.")));
     }
     getPortfolio()
-      .then((data) => setPortfolioTickers((data.positions ?? []).map((p) => p.ticker)))
-      .catch(console.error);
-  }, [open, allBinanceSymbols.length]);
+      .then((data) => { setPortfolioTickers((data.positions ?? []).map((p) => p.ticker)); setPortfolioError(null); })
+      .catch((e) => setPortfolioError(loadMessage(e, "No se pudo cargar tu cartera.")));
+  }, [open, allBinanceSymbols.length, loadAttempt]);
 
   useEffect(() => {
     if (query.length < 2) {
       setYahooResults([])
       setIsSearching(false)
+      setSearchError(null)
     }
   }, [query])
 
@@ -177,6 +194,9 @@ export function SymbolSelector({ onSymbolSelect, children }: SymbolSelectorProps
               </div>
             )}
 
+            {query.length < 2 && portfolioError && <ErrorRow message={portfolioError} onRetry={retryLoad} />}
+            {!isSearching && query.length >= 2 && searchError && <ErrorRow message={searchError} onRetry={() => search(query)} />}
+
             {!isSearching && query.length < 2 && filteredPortfolio.map((ticker) => (
               <TickerRow
                 key={`port-${ticker}`}
@@ -200,6 +220,7 @@ export function SymbolSelector({ onSymbolSelect, children }: SymbolSelectorProps
             ))}
 
             <SectionHeader title="Cripto (Binance)" />
+            {binanceError && <ErrorRow message={binanceError} onRetry={retryLoad} />}
             {filteredBinance.map((s) => (
               <TickerRow
                 key={`binance-${s.symbol}`}
@@ -214,6 +235,10 @@ export function SymbolSelector({ onSymbolSelect, children }: SymbolSelectorProps
       </TradingDialog>
     </Dialog>
   );
+}
+
+function ErrorRow(props: { message: string; onRetry: () => void }) {
+  return <div className="border-b border-line p-3"><LoadError {...props} /></div>;
 }
 
 function SectionHeader({ title }: { title: string }) {

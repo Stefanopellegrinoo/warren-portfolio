@@ -28,6 +28,8 @@ import {
 	type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { buttonVariants } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 interface Tool {
 	kind: DrawingKind;
@@ -67,6 +69,9 @@ export const TOOL_LABELS: Partial<Record<DrawingKind, string>> = Object.fromEntr
 	GROUPS.flat().map((t) => [t.kind, t.label]),
 );
 
+const toolClass =
+	"grid h-8 w-8 shrink-0 place-items-center rounded text-ink-2 hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring max-[819px]:h-11 max-[819px]:w-11";
+
 function ToolButton({
 	label,
 	icon: Icon,
@@ -85,10 +90,7 @@ function ToolButton({
 			aria-label={label}
 			aria-pressed={active}
 			onClick={onClick}
-			className={cn(
-				"grid h-8 w-8 shrink-0 place-items-center rounded text-ink-2 hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring max-[819px]:h-11 max-[819px]:w-11",
-				active && "bg-accent-soft text-accent-ink hover:bg-accent-soft hover:text-accent-ink",
-			)}
+			className={cn(toolClass, active && "bg-accent-soft text-accent-ink hover:bg-accent-soft hover:text-accent-ink")}
 		>
 			<Icon className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
 		</button>
@@ -114,6 +116,7 @@ export function DrawingTools({
 	const [tool, setTool] = useState<DrawingKind | null>(null);
 	const [magnet, setMagnet] = useState(false);
 	const [visible, setVisible] = useState(true);
+	const [askingClear, setAskingClear] = useState(false);
 
 	useEffect(() => {
 		if (!manager) return;
@@ -172,13 +175,30 @@ export function DrawingTools({
 				active={!visible}
 				onClick={() => manager?.setDrawingsVisible(!visible)}
 			/>
-			<ToolButton
-				label="Borrar todos los dibujos"
-				icon={Trash2}
-				onClick={() => {
-					if (manager && manager.drawings().length > 0 && window.confirm("¿Borrar todos los dibujos de este activo?")) manager.clear();
-				}}
-			/>
+			{/* InlineConfirm's question would widen the 40px vertical strip and shift the chart: same two steps in a popover. */}
+			<Popover open={askingClear} onOpenChange={(open) => setAskingClear(open && !!manager && manager.drawings().length > 0)}>
+				<PopoverTrigger title="Borrar todos los dibujos" aria-label="Borrar todos los dibujos" className={toolClass}>
+					<Trash2 className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
+				</PopoverTrigger>
+				<PopoverContent className="flex w-[min(16rem,calc(100vw-32px))] flex-col gap-2 p-3">
+					<p className="text-[13px] font-medium text-danger">¿Borrar todos los dibujos de este activo?</p>
+					<div className="flex flex-wrap justify-end gap-2">
+						<button
+							type="button"
+							className={cn(buttonVariants({ variant: "destructive", size: "sm" }), "max-[819px]:h-11")}
+							onClick={() => {
+								setAskingClear(false);
+								manager?.clear();
+							}}
+						>
+							Sí, borrar
+						</button>
+						<button type="button" autoFocus className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "max-[819px]:h-11")} onClick={() => setAskingClear(false)}>
+							Cancelar
+						</button>
+					</div>
+				</PopoverContent>
+			</Popover>
 		</div>
 	);
 }

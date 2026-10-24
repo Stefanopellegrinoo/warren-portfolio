@@ -111,8 +111,11 @@ function getDayKey(dateStr: string): string {
 const signColor = (n: number | null) => (n === null ? 'text-ink-3' : n > 0 ? 'text-ok' : n < 0 ? 'text-danger' : '')
 const money = (n: number) => `US$ ${formatNumber(n)}`
 const day = (iso: string) => new Date(iso).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+const days = (n: number | null) => (n === null ? <span className="text-ink-3">—</span> : `${n.toFixed(0)} días`)
 const th = 'py-2 pr-4 font-medium last:pr-0'
 const td = 'py-2.5 pr-4 last:pr-0'
+// Below 1080 px (phones and tablets, where the menu takes room) the wide tables become cards.
+const card = 'grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 border-b border-line py-3 last:border-b-0'
 
 /** Percent value in points (12.5 = 12,5 %), with sign; dash when missing. */
 function Pct({ value, digits = 1, sign = true }: { value: number | null; digits?: number; sign?: boolean }) {
@@ -154,51 +157,75 @@ function ComparisonTab({
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[820px] border-collapse text-sm tabular-nums">
-        <caption className="sr-only">Comparación de setups</caption>
-        <thead>
-          <tr className="border-b border-line-strong text-left text-[13px] text-ink-3">
-            <th scope="col" className={th}>Setup</th>
-            <th scope="col" className={th}>Estado</th>
-            <th scope="col" className={`${th} text-right`}>Operaciones</th>
-            <th scope="col" className={`${th} text-right`}>Ganadoras</th>
-            <th scope="col" className={`${th} text-right`}>Acierto</th>
-            <th scope="col" className={`${th} text-right`}>Retorno prom.</th>
-            <th scope="col" className={`${th} text-right`}>Duración prom.</th>
-            <th scope="col" className={`${th} text-right`}>Abiertas</th>
-          </tr>
-        </thead>
-        <tbody>
-          {setups.map((setup) => (
-            <tr key={setup.setup_id} className="border-b border-line last:border-b-0 hover:bg-hover">
-              <th scope="row" className={`${td} text-left font-medium`}>
-                <span className="flex flex-wrap items-center gap-2">
-                  <SetupName id={setup.setup_id} name={setup.setup_name} />
-                  {setup.setup_id === bestSetupId && <Chip tone="ok">Mejor</Chip>}
-                </span>
-              </th>
-              <td className={td}><Chip tone={setup.active ? 'ok' : 'neutral'}>{setup.active ? 'Activo' : 'Inactivo'}</Chip></td>
-              <td className={`${td} text-right`}>{setup.total_trades}</td>
-              <td className={`${td} text-right`}>{setup.profitable_trades}</td>
-              <td className={`${td} text-right`}><Pct value={setup.hit_rate === null ? null : setup.hit_rate * 100} sign={false} /></td>
-              <td className={`${td} text-right`}><Pct value={setup.avg_return_pct} /></td>
-              <td className={`${td} text-right`}>
-                {setup.avg_duration_days !== null ? `${setup.avg_duration_days.toFixed(0)} días` : <span className="text-ink-3">—</span>}
-              </td>
-              <td className={`${td} text-right`}>{setup.open_trades}</td>
+    <>
+      <div className="overflow-x-auto max-[1279px]:hidden">
+        <table className="w-full min-w-[820px] border-collapse text-sm tabular-nums">
+          <caption className="sr-only">Comparación de setups</caption>
+          <thead>
+            <tr className="border-b border-line-strong text-left text-[13px] text-ink-3">
+              <th scope="col" className={th}>Setup</th>
+              <th scope="col" className={th}>Estado</th>
+              <th scope="col" className={`${th} text-right`}>Operaciones</th>
+              <th scope="col" className={`${th} text-right`}>Ganadoras</th>
+              <th scope="col" className={`${th} text-right`}>Acierto</th>
+              <th scope="col" className={`${th} text-right`}>Retorno prom.</th>
+              <th scope="col" className={`${th} text-right`}>Duración prom.</th>
+              <th scope="col" className={`${th} text-right`}>Abiertas</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {setups.map((setup) => (
+              <tr key={setup.setup_id} className="border-b border-line last:border-b-0 hover:bg-hover">
+                <th scope="row" className={`${td} text-left font-medium`}>
+                  <span className="flex flex-wrap items-center gap-2">
+                    <SetupName id={setup.setup_id} name={setup.setup_name} />
+                    {setup.setup_id === bestSetupId && <Chip tone="ok">Mejor</Chip>}
+                  </span>
+                </th>
+                <td className={td}><Chip tone={setup.active ? 'ok' : 'neutral'}>{setup.active ? 'Activo' : 'Inactivo'}</Chip></td>
+                <td className={`${td} text-right`}>{setup.total_trades}</td>
+                <td className={`${td} text-right`}>{setup.profitable_trades}</td>
+                <td className={`${td} text-right`}><Pct value={setup.hit_rate === null ? null : setup.hit_rate * 100} sign={false} /></td>
+                <td className={`${td} text-right`}><Pct value={setup.avg_return_pct} /></td>
+                <td className={`${td} text-right`}>{days(setup.avg_duration_days)}</td>
+                <td className={`${td} text-right`}>{setup.open_trades}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <ul aria-label="Comparación de setups" className="border-t border-line-strong min-[1280px]:hidden">
+        {setups.map((setup) => (
+          <li key={setup.setup_id} className={card}>
+            <span className="flex min-w-0 flex-wrap items-center gap-2 font-medium">
+              <SetupName id={setup.setup_id} name={setup.setup_name} />
+              {setup.setup_id === bestSetupId && <Chip tone="ok">Mejor</Chip>}
+              <Chip tone={setup.active ? 'ok' : 'neutral'}>{setup.active ? 'Activo' : 'Inactivo'}</Chip>
+            </span>
+            <span className="text-right tabular-nums">
+              <span className="block text-base font-medium"><Pct value={setup.avg_return_pct} /></span>
+              <small className="block text-[13px] text-ink-3">Retorno prom.</small>
+            </span>
+            <p className="col-span-2 mt-1.5 text-[13px] tabular-nums text-ink-2">
+              Acierto <Pct value={setup.hit_rate === null ? null : setup.hit_rate * 100} sign={false} /> · Operaciones {setup.total_trades}
+            </p>
+            <p className="col-span-2 text-[13px] tabular-nums text-ink-3">
+              Ganadoras {setup.profitable_trades} · Duración prom. {days(setup.avg_duration_days)} · Abiertas {setup.open_trades}
+            </p>
+          </li>
+        ))}
+      </ul>
+    </>
   )
 }
 
 // ─── Tab: Signals ─────────────────────────────────────────────────────────────
 
-function SignalsTab({ signals, loading }: { signals: Signal[]; loading: boolean }) {
+function SignalsTab({ signals, loading, error, onRetry }: { signals: Signal[]; loading: boolean; error: boolean; onRetry: () => void }) {
   if (loading) return <SkeletonRows label="Cargando señales" rows={3} />
+
+  if (error) return <ErrorNotice onRetry={onRetry}>No se pudieron cargar las señales.</ErrorNotice>
 
   if (signals.length === 0) return <Empty title="No hay señales para los filtros elegidos." />
 
@@ -323,39 +350,67 @@ function PaperTradesTab({
       {filtered.length === 0 ? (
         <Empty title="No hay paper trades para los filtros elegidos." hint="Se generan automáticamente cuando las señales abren y cierran posiciones." />
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[920px] border-collapse text-sm tabular-nums">
-            <caption className="sr-only">Paper trades</caption>
-            <thead>
-              <tr className="border-b border-line-strong text-left text-[13px] text-ink-3">
-                <th scope="col" className={th}>Setup</th>
-                <th scope="col" className={th}>Ticker</th>
-                <th scope="col" className={th}>Estado</th>
-                <th scope="col" className={`${th} text-right`}>Apertura</th>
-                <th scope="col" className={`${th} text-right`}>Cierre</th>
-                <th scope="col" className={`${th} text-right`}>Precio de entrada</th>
-                <th scope="col" className={`${th} text-right`}>Precio de salida</th>
-                <th scope="col" className={`${th} text-right`}>Resultado</th>
-                <th scope="col" className={`${th} text-right`}>Motivo de cierre</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((trade) => (
-                <tr key={trade.id} className="border-b border-line last:border-b-0 hover:bg-hover">
-                  <th scope="row" className={`${td} text-left font-medium`}><SetupName id={trade.setup_id} name={trade.setup_name} /></th>
-                  <td className={`${td} font-semibold`}>{trade.ticker}</td>
-                  <td className={td}><Chip tone={trade.status === 'OPEN' ? 'ok' : 'neutral'}>{trade.status === 'OPEN' ? 'Abierto' : 'Cerrado'}</Chip></td>
-                  <td className={`${td} text-right`}>{day(trade.open_at)}</td>
-                  <td className={`${td} text-right`}>{trade.close_at ? day(trade.close_at) : <span className="text-ink-3">—</span>}</td>
-                  <td className={`${td} text-right`}>{money(trade.open_price)}</td>
-                  <td className={`${td} text-right`}>{trade.close_price !== null ? money(trade.close_price) : <span className="text-ink-3">—</span>}</td>
-                  <td className={`${td} text-right font-medium`}><Pct value={trade.pnl_pct} digits={2} /></td>
-                  <td className={`${td} text-right`}><CloseReasonBadge value={trade.close_reason} /></td>
+        <>
+          <div className="overflow-x-auto max-[1279px]:hidden">
+            <table className="w-full min-w-[920px] border-collapse text-sm tabular-nums">
+              <caption className="sr-only">Paper trades</caption>
+              <thead>
+                <tr className="border-b border-line-strong text-left text-[13px] text-ink-3">
+                  <th scope="col" className={th}>Setup</th>
+                  <th scope="col" className={th}>Ticker</th>
+                  <th scope="col" className={th}>Estado</th>
+                  <th scope="col" className={`${th} text-right`}>Apertura</th>
+                  <th scope="col" className={`${th} text-right`}>Cierre</th>
+                  <th scope="col" className={`${th} text-right`}>Precio de entrada</th>
+                  <th scope="col" className={`${th} text-right`}>Precio de salida</th>
+                  <th scope="col" className={`${th} text-right`}>Resultado</th>
+                  <th scope="col" className={`${th} text-right`}>Motivo de cierre</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {filtered.map((trade) => (
+                  <tr key={trade.id} className="border-b border-line last:border-b-0 hover:bg-hover">
+                    <th scope="row" className={`${td} text-left font-medium`}><SetupName id={trade.setup_id} name={trade.setup_name} /></th>
+                    <td className={`${td} font-semibold`}>{trade.ticker}</td>
+                    <td className={td}><Chip tone={trade.status === 'OPEN' ? 'ok' : 'neutral'}>{trade.status === 'OPEN' ? 'Abierto' : 'Cerrado'}</Chip></td>
+                    <td className={`${td} text-right`}>{day(trade.open_at)}</td>
+                    <td className={`${td} text-right`}>{trade.close_at ? day(trade.close_at) : <span className="text-ink-3">—</span>}</td>
+                    <td className={`${td} text-right`}>{money(trade.open_price)}</td>
+                    <td className={`${td} text-right`}>{trade.close_price !== null ? money(trade.close_price) : <span className="text-ink-3">—</span>}</td>
+                    <td className={`${td} text-right font-medium`}><Pct value={trade.pnl_pct} digits={2} /></td>
+                    <td className={`${td} text-right`}><CloseReasonBadge value={trade.close_reason} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <ul aria-label="Paper trades" className="border-t border-line-strong min-[1280px]:hidden">
+            {filtered.map((trade) => (
+              <li key={trade.id} className={card}>
+                <span className="min-w-0">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="text-base font-semibold">{trade.ticker}</span>
+                    <Chip tone={trade.status === 'OPEN' ? 'ok' : 'neutral'}>{trade.status === 'OPEN' ? 'Abierto' : 'Cerrado'}</Chip>
+                  </span>
+                  <small className="mt-0.5 block text-[13px] text-ink-2"><SetupName id={trade.setup_id} name={trade.setup_name} /></small>
+                </span>
+                <span className="grid justify-items-end gap-1 tabular-nums">
+                  <span className="text-base font-medium"><span className="sr-only">Resultado </span><Pct value={trade.pnl_pct} digits={2} /></span>
+                  {trade.close_reason && <CloseReasonBadge value={trade.close_reason} />}
+                </span>
+                <p className="col-span-2 mt-1.5 text-[13px] tabular-nums text-ink-2">
+                  Entrada {money(trade.open_price)}
+                  {trade.close_price !== null && <> · Salida {money(trade.close_price)}</>}
+                </p>
+                <p className="col-span-2 text-[13px] tabular-nums text-ink-3">
+                  Apertura {day(trade.open_at)}
+                  {trade.close_at && <> · Cierre {day(trade.close_at)}</>}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </div>
   )
@@ -400,6 +455,8 @@ export default function PerformancePage() {
   const [loadingSignals, setLoadingSignals] = useState(true)
   const [loadingPaperTrades, setLoadingPaperTrades] = useState(false)
   const [errorPaperTrades, setErrorPaperTrades] = useState(false)
+  const [errorStrategy, setErrorStrategy] = useState(false)
+  const [errorSignals, setErrorSignals] = useState(false)
 
   const [activeTab, setActiveTab] = useState<Tab>('comparison')
   const [period, setPeriod] = useState<Period>('30d')
@@ -408,10 +465,14 @@ export default function PerformancePage() {
 
   const loadStrategy = useCallback(async () => {
     try {
+      setLoadingStrategy(true)
+      setErrorStrategy(false)
       const res = await fetch(`/api/strategies/${strategyId}`)
-      if (!res.ok) return
+      if (!res.ok) { setErrorStrategy(true); return }
       const data = await res.json() as { strategy: Strategy }
       setStrategy(data.strategy)
+    } catch {
+      setErrorStrategy(true)
     } finally {
       setLoadingStrategy(false)
     }
@@ -424,6 +485,8 @@ export default function PerformancePage() {
       if (!res.ok) return
       const data = await res.json() as PerformanceResponse
       setPerformance(data)
+    } catch {
+      // performance stays null: the comparison tab shows the error with Reintentar.
     } finally {
       setLoadingPerformance(false)
     }
@@ -432,13 +495,16 @@ export default function PerformancePage() {
   const loadSignals = useCallback(async () => {
     try {
       setLoadingSignals(true)
+      setErrorSignals(false)
       const params = new URLSearchParams({ period })
       if (ticker !== 'all') params.set('ticker', ticker)
       if (signalType !== 'all') params.set('type', signalType)
       const res = await fetch(`/api/strategies/${strategyId}/signals?${params.toString()}`)
-      if (!res.ok) return
+      if (!res.ok) { setErrorSignals(true); return }
       const data = await res.json() as SignalsResponse
       setSignals(data.signals)
+    } catch {
+      setErrorSignals(true)
     } finally {
       setLoadingSignals(false)
     }
@@ -496,6 +562,7 @@ export default function PerformancePage() {
 
       {isLoading ? <SkeletonRows label="Cargando el rendimiento" /> : (
         <>
+          {errorStrategy && <div className="mb-6"><ErrorNotice onRetry={loadStrategy}>No se pudo cargar la estrategia.</ErrorNotice></div>}
           <div role="tablist" aria-label="Vistas" onKeyDown={onTabKey} className="mb-6 flex gap-6 overflow-x-auto border-b border-line">
             {TABS.map((t) => (
               <button
@@ -542,7 +609,7 @@ export default function PerformancePage() {
                     <Segmented name="signals-period" legend="Período" options={PERIOD_OPTIONS} value={period} onChange={setPeriod} />
                   </div>
                 </div>
-                <SignalsTab signals={signals} loading={loadingSignals} />
+                <SignalsTab signals={signals} loading={loadingSignals} error={errorSignals} onRetry={loadSignals} />
               </div>
             )}
 

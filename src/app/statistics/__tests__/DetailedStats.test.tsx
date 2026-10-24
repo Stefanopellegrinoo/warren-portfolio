@@ -1,6 +1,24 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import DetailedStats, { type StatData } from '../DetailedStats'
+
+// Recharts draws nothing without a measured size; this stand-in prints what the
+// axis tick and the tooltip label would show for each point of the line chart.
+vi.mock('recharts', async () => {
+  const { createContext, useContext } = await import('react')
+  type Point = { date: string }
+  const Points = createContext<Point[]>([])
+  const Chart = ({ data, children }: { data: Point[]; children: React.ReactNode }) => <Points.Provider value={data}>{children}</Points.Provider>
+  const none = () => null
+  return {
+    ResponsiveContainer: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    LineChart: Chart, BarChart: Chart, YAxis: none, CartesianGrid: none, Line: none, Bar: none, Cell: none,
+    XAxis: ({ tickFormatter }: { tickFormatter: (v: string) => string }) =>
+      <>{useContext(Points).map(p => <i key={p.date}>tick {tickFormatter(p.date)};</i>)}</>,
+    Tooltip: ({ labelFormatter = () => '' }: { labelFormatter?: (v: string) => string }) =>
+      <>{useContext(Points).map(p => <b key={p.date}>label {labelFormatter(p.date)};</b>)}</>,
+  }
+})
 
 const data: StatData = {
   maxDrawdown: -0.123, winRate: null, totalPortfolioValue: 10000,
@@ -31,5 +49,13 @@ describe('DetailedStats', () => {
     const html = renderToStaticMarkup(<DetailedStats data={data} assetLabel="Acciones" />)
     expect(html).toContain('60,0 %')
     expect(html).toContain('US$ 7.500,00')
+  })
+
+  it('shows a close date as that day, not the previous one in Argentina (S4)', () => {
+    const html = renderToStaticMarkup(
+      <DetailedStats data={{ ...data, cumulativePnl: [{ date: '2026-10-24', ticker: 'DUK', pnl: 50, cumulative: 50 }] }} assetLabel="Acciones" />,
+    )
+    expect(html).toContain('tick 24/10;')
+    expect(html).toContain('label 24/10/2026;')
   })
 })

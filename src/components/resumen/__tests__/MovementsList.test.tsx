@@ -1,7 +1,10 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
+import { toast } from 'sonner'
 import MovementsList from '../MovementsList'
+
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -101,7 +104,6 @@ describe('MovementsList pagination', () => {
   it('steps back a page when a delete empties the last one', async () => {
     const all = movements(6)
     const urls = serve(all)
-    vi.stubGlobal('confirm', () => true)
     const m = await mount()
     act(() => m.next()!.click())
     await flush()
@@ -113,7 +115,8 @@ describe('MovementsList pagination', () => {
       if (init?.method === 'DELETE') { all.pop(); return { ok: true, json: async () => ({}) } as Response }
       return serveList(url, init)
     })
-    await act(async () => { m.el.querySelector<HTMLButtonElement>('button[aria-label^="Borrar"]')!.click() })
+    act(() => m.el.querySelector<HTMLButtonElement>('button[aria-label^="Borrar"]')!.click())
+    await act(async () => { button(m.el, 'Sí, borrar')!.click() })
     await flush()
     await flush()
     expect(urls.at(-1)).toBe('/api/cash/movements?limit=5&offset=0')
@@ -126,5 +129,66 @@ describe('MovementsList pagination', () => {
     const m = await mount()
     expect(m.el.textContent).toContain('Todavía no hay movimientos de caja.')
     expect(m.status()).toBeNull()
+  })
+})
+
+const button = (el: HTMLElement, text: string) => [...el.querySelectorAll('button')].find(b => b.textContent === text)
+
+// odd/tasks/ux-paginas.md S1-S3: a delete asks inside the app, confirms, and a failure says what happened.
+describe('MovementsList delete and load errors', () => {
+  async function withDelete(answer: () => Promise<Response>) {
+    const all = movements(2)
+    serve(all)
+    const fetchMock = vi.mocked(fetch)
+    const serveList = fetchMock.getMockImplementation()!
+    const deletes: string[] = []
+    fetchMock.mockImplementation(async (url, init) => {
+      if (init?.method === 'DELETE') { deletes.push(String(url)); return answer() }
+      return serveList(url, init)
+    })
+    const onChanged = vi.fn()
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    root = createRoot(el)
+    act(() => root!.render(<MovementsList refreshKey={0} onChanged={onChanged} />))
+    await flush()
+    return { el, deletes, onChanged }
+  }
+
+  it('asks next to the row instead of a native confirm, then deletes and says so', async () => {
+    const nativeConfirm = vi.fn(() => true)
+    vi.stubGlobal('confirm', nativeConfirm)
+    const { el, deletes, onChanged } = await withDelete(async () => ({ ok: true, json: async () => ({}) }) as Response)
+    act(() => el.querySelector<HTMLButtonElement>('button[aria-label="Borrar movimiento del 1 oct"]')!.click())
+    expect(el.textContent).toContain('¿Borrás el movimiento del 1 oct?')
+    expect(deletes).toEqual([])
+    await act(async () => { button(el, 'Sí, borrar')!.click() })
+    await flush()
+    expect(nativeConfirm).not.toHaveBeenCalled()
+    expect(deletes).toEqual(['/api/cash/movements/m1'])
+    expect(toast.success).toHaveBeenCalledWith('Movimiento borrado')
+    expect(onChanged).toHaveBeenCalledTimes(1)
+  })
+
+  it('a delete without connection says so in Spanish and changes nothing', async () => {
+    const { el, onChanged } = await withDelete(async () => { throw new TypeError('Failed to fetch') })
+    act(() => el.querySelector<HTMLButtonElement>('button[aria-label="Borrar movimiento del 1 oct"]')!.click())
+    await act(async () => { button(el, 'Sí, borrar')!.click() })
+    await flush()
+    expect(el.querySelector('[role="alert"]')?.textContent).toBe('No hay conexión. Revisá tu internet y probá de nuevo.')
+    expect(onChanged).not.toHaveBeenCalled()
+  })
+
+  it('a failed load says so with Reintentar, never "no movements"', async () => {
+    let fail = true
+    vi.stubGlobal('fetch', vi.fn(async () => (fail ? { ok: false, status: 500, json: async () => ({}) } : { ok: true, json: async () => ({ data: movements(1), pagination: { total: 1 } }) })))
+    const m = await mount()
+    expect(m.el.querySelector('[role="alert"]')?.textContent).toContain('No se pudieron cargar los movimientos.')
+    expect(m.el.textContent).not.toContain('Todavía no hay movimientos de caja.')
+    fail = false
+    await act(async () => { button(m.el, 'Reintentar')!.click() })
+    await flush()
+    expect(m.rows()).toHaveLength(1)
+    expect(m.el.textContent).not.toContain('No se pudieron cargar los movimientos.')
   })
 })

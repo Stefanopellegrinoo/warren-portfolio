@@ -1,7 +1,10 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { EsNumberInput } from '@/components/ui/es-number-input'
+import { argentinaDate } from '@/lib/utils'
+import { requestErrorMessage } from '@/lib/request-errors'
 
 const CATEGORIES = [
   'Alquiler', 'Servicios', 'Supermercado', 'Transporte', 'Salud',
@@ -12,7 +15,7 @@ const CATEGORIES = [
 
 const field = 'min-h-11 w-full rounded-md border border-line-strong bg-surface px-3 text-ink hover:border-ink-3 focus-visible:border-accent focus-visible:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_28%,transparent)] focus-visible:outline-none'
 const label = 'text-[13px] font-medium'
-const blank = () => ({ date: new Date().toISOString().split('T')[0], category: 'Supermercado', description: '', amount_usd: null as number | null, status: 'PAGADO' })
+const blank = () => ({ date: argentinaDate(), category: 'Supermercado', description: '', amount_usd: null as number | null, status: 'PAGADO' })
 
 export default function ExpenseDialog({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null)
@@ -49,9 +52,10 @@ export default function ExpenseDialog({ open, onClose, onSaved }: { open: boolea
       }
       setForm(blank())
       close()
+      toast.success('Gasto guardado')
       onSaved()
-    } catch {
-      setError('No se pudo guardar el gasto')
+    } catch (err) {
+      setError(requestErrorMessage(err, 'No se pudo guardar el gasto'))
     } finally {
       setSaving(false)
     }

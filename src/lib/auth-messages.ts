@@ -1,6 +1,5 @@
 import { isAuthError, isAuthRetryableFetchError } from '@supabase/supabase-js'
-
-const NO_CONNECTION = 'No hay conexión. Revisá tu internet y probá de nuevo.'
+import { NO_CONNECTION } from '@/lib/request-errors'
 
 // Supabase Auth error codes the login and sign-up forms can hit, in the words the user needs.
 const BY_CODE: Record<string, string> = {

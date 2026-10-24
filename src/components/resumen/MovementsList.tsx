@@ -2,8 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import { ChevronLeft, ChevronRight, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
 import type { CashMovement } from '@/types'
 import { formatNumber } from '@/lib/utils'
+import { requestErrorMessage } from '@/lib/request-errors'
+import { InlineConfirm } from '@/components/ui/InlineConfirm'
 import { SectionHead } from './ui'
 
 const LABELS: Record<string, string> = {
@@ -29,7 +32,7 @@ export default function MovementsList({ refreshKey, onChanged }: { refreshKey: n
   if (seenKey !== refreshKey) { setSeenKey(refreshKey); setPage(0) }
 
   const request = `${page}|${refreshKey}|${reloads}`
-  const [result, setResult] = useState<{ request: string; movements: CashMovement[]; total: number } | null>(null)
+  const [result, setResult] = useState<{ request: string; movements: CashMovement[]; total: number; failed?: boolean } | null>(null)
 
   useEffect(() => {
     // Only the last requested page may land: a slow earlier response must not overwrite it.
@@ -44,16 +47,16 @@ export default function MovementsList({ refreshKey, onChanged }: { refreshKey: n
         if (page > last) setPage(last)
         else setResult({ request, movements: d.data ?? [], total })
       })
-      .catch(() => { if (current) setResult({ request, movements: [], total: 0 }) })
+      .catch(() => { if (current) setResult({ request, movements: [], total: 0, failed: true }) })
     return () => { current = false }
   }, [request, page])
 
   const movements = result?.movements ?? null
   const total = result?.total ?? 0
   const loading = result?.request !== request
+  const failed = !!result?.failed && !loading
 
   async function remove(m: CashMovement) {
-    if (!confirm(`¿Borrás el movimiento del ${day(m.date)}?`)) return
     setDeleting(m.id)
     setError(null)
     try {
@@ -63,8 +66,11 @@ export default function MovementsList({ refreshKey, onChanged }: { refreshKey: n
         setError(d?.error || 'No se pudo borrar el movimiento')
         return
       }
+      toast.success('Movimiento borrado')
       setReloads(n => n + 1)
       onChanged()
+    } catch (err) {
+      setError(requestErrorMessage(err, 'No se pudo borrar el movimiento'))
     } finally {
       setDeleting(null)
     }
@@ -80,7 +86,13 @@ export default function MovementsList({ refreshKey, onChanged }: { refreshKey: n
       <SectionHead id="h-movimientos" title="Últimos movimientos" count={total || undefined} />
       {error && <p role="alert" className="mt-3 rounded-md bg-danger-soft px-3 py-2 text-[13px] text-danger">{error}</p>}
       {movements === null && <span role="status" aria-label="Cargando movimientos" className="mt-3 block h-24 animate-pulse rounded bg-surface-2" />}
-      {movements !== null && shown.length === 0 && <p className="py-4 text-[13px] text-ink-3">Todavía no hay movimientos de caja.</p>}
+      {failed && (
+        <div role="alert" className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md bg-danger-soft px-3 py-2 text-[13px] text-danger">
+          No se pudieron cargar los movimientos.
+          <button type="button" onClick={() => setReloads(n => n + 1)} className="font-medium underline underline-offset-2 max-[819px]:min-h-11">Reintentar</button>
+        </div>
+      )}
+      {movements !== null && !failed && shown.length === 0 && <p className="py-4 text-[13px] text-ink-3">Todavía no hay movimientos de caja.</p>}
       {/* With more than one page the list keeps five rows of height, so the arrows never jump. */}
       <ul id="movements-list" aria-busy={loading} className={`transition-opacity ${loading && movements ? 'opacity-60' : ''} ${pages > 1 ? 'min-h-[260px]' : ''}`}>
         {shown.map(m => {
@@ -100,15 +112,17 @@ export default function MovementsList({ refreshKey, onChanged }: { refreshKey: n
               {m.transaction_id ? (
                 <span className="w-8" title="Lo generó una operación: borrá la operación para revertirlo" />
               ) : (
-                <button
-                  type="button"
-                  onClick={() => remove(m)}
-                  disabled={deleting === m.id}
-                  aria-label={`Borrar movimiento del ${day(m.date)}`}
-                  className="grid h-8 w-8 place-items-center rounded-md text-ink-3 hover:bg-hover hover:text-danger disabled:opacity-50 max-[819px]:h-11 max-[819px]:w-11"
+                <InlineConfirm
+                  question={`¿Borrás el movimiento del ${day(m.date)}?`}
+                  confirmLabel="Sí, borrar"
+                  onConfirm={() => void remove(m)}
+                  busy={deleting === m.id}
+                  triggerLabel={`Borrar movimiento del ${day(m.date)}`}
+                  triggerClassName="grid h-8 w-8 place-items-center rounded-md text-ink-3 hover:bg-hover hover:text-danger disabled:opacity-50 max-[819px]:h-11 max-[819px]:w-11"
+                  className="col-span-full justify-end"
                 >
                   <Trash2 className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
-                </button>
+                </InlineConfirm>
               )}
             </li>
           )

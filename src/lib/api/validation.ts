@@ -29,7 +29,13 @@ function validationFailure(error: unknown) {
  * Simple validation helper for route handlers
  */
 export async function validateRequest<T>(schema: ZodSchema<T>, request: Request): Promise<T> {
-  return validateBody(schema, await request.json())
+  let body: unknown
+  try {
+    body = await request.json()
+  } catch {
+    throw { status: 400, message: INVALID_JSON, errors: [{ message: INVALID_JSON }] }
+  }
+  return validateBody(schema, body)
 }
 
 /** Same as validateRequest, for a body already read (a route choosing between schemas). */
