@@ -1,13 +1,31 @@
+const STATIC_CACHES = ['static-font-assets', 'static-image-assets', 'static-js-assets', 'static-style-assets']
+
 const withPWA = require('next-pwa')({
   dest: 'public',
   disable: process.env.NODE_ENV === 'development',
-  register: true,
+  // next-pwa injects its registration only into the Pages Router entry (main.js), which App Router
+  // pages never load: src/components/shell/AppStatus.tsx registers /sw.js instead.
+  register: false,
   skipWaiting: true,
-    publicExcludes: ['!robots.txt'],
-  buildExcludes: [/middleware-manifest\.json$/],
-  // The default 'apis' rule caches GET /api/* (portfolio JSON) on the device for 24 h,
-  // where it outlives logout. Without it, /api/* always goes to the network.
-  runtimeCaching: require('next-pwa/cache').filter((rule) => rule.options?.cacheName !== 'apis'),
+  publicExcludes: ['!robots.txt'],
+  // app-build-manifest.json is a build file Next never serves: precaching its 404 fails the install.
+  buildExcludes: [/middleware-manifest\.json$/, /app-build-manifest\.json$/],
+  // No start-url cache: it would store the response of `/`, a redirect that depends on the session.
+  cacheStartUrl: false,
+  dynamicStartUrl: false,
+  // A screen that cannot load without connection gets the Spanish offline page, not the browser's.
+  fallbacks: { document: '/offline' },
+  // Only what is the same for every user is cached: fonts, images, scripts and styles. Pages, RSC
+  // payloads, /api/* and other origins (Supabase Auth, Binance) always go to the network, so nothing
+  // personal stays on the device after logout. Navigations get a rule only so `fallbacks` applies.
+  runtimeCaching: [
+    ...require('next-pwa/cache').filter((rule) => STATIC_CACHES.includes(rule.options?.cacheName)),
+    {
+      urlPattern: ({ request, url, sameOrigin }) => sameOrigin && request.mode === 'navigate' && !url.pathname.startsWith('/api/'),
+      handler: 'NetworkOnly',
+      options: {},
+    },
+  ],
 })
 
 // Origins the browser talks to directly: Supabase Auth (login, token refresh) and Binance

@@ -3,6 +3,7 @@ import { IBM_Plex_Sans, IBM_Plex_Mono, Newsreader } from 'next/font/google'
 import './globals.css'
 import { Toaster } from 'sonner'
 import { THEME_BOOT_SCRIPT } from '@/lib/theme'
+import AppStatus from '@/components/shell/AppStatus'
 
 const plexSans = IBM_Plex_Sans({
   subsets: ['latin'],
@@ -35,8 +36,10 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: 'Warren · Portfolio',
-  description: 'Investment portfolio tracker',
+  description: 'Tu cartera de inversiones: cuánto tenés, cómo te va hoy, tus ONs, operaciones y gráficos.',
   manifest: '/manifest.json',
+  // iOS turns long numbers (amounts, quantities) into phone links unless told not to.
+  formatDetection: { telephone: false, date: false, email: false, address: false },
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
@@ -44,12 +47,11 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: '/icon-192x192.png', sizes: '192x192', type: 'image/png' },
-      { url: '/icon-512x512.png', sizes: '512x512', type: 'image/png' },
-    ],
-    apple: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
       { url: '/icon-192x192.png', sizes: '192x192', type: 'image/png' },
     ],
+    // Opaque and square: iOS rounds the corners itself and paints transparent pixels black.
+    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
   },
 }
 
@@ -62,7 +64,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="antialiased">
         {children}
         <Toaster
-          position="top-right"
+          // Bottom: on a phone a lasting notice (offline) must not cover the menu button in the header.
+          position="bottom-right"
           theme="system"
           toastOptions={{
             classNames: {
@@ -73,12 +76,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               error: '[&_[data-icon]]:text-danger',
               warning: '[&_[data-icon]]:text-warn',
               info: '[&_[data-icon]]:text-info',
-              actionButton: 'bg-primary text-primary-on font-medium rounded-md',
-              cancelButton: 'bg-surface-2 text-ink-2 font-medium rounded-md',
+              // Sonner fixes buttons at 24px; on phones they need the 44px touch target.
+              actionButton: 'bg-primary text-primary-on font-medium rounded-md !h-8 !px-3 max-[819px]:!h-11',
+              cancelButton: 'bg-surface-2 text-ink-2 font-medium rounded-md !h-8 !px-3 max-[819px]:!h-11',
               closeButton: 'text-ink-3 hover:text-ink',
             },
           }}
         />
+        <AppStatus />
       </body>
     </html>
   )
