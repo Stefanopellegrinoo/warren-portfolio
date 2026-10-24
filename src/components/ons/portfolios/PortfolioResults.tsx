@@ -5,7 +5,7 @@ import type { PortfolioAnalysis } from '@/lib/on-portfolio-analytics'
 import { fmtDate, fmtMonth, fmtNum, fmtPct, TAX_COPY } from '@/lib/on-format'
 import { SectionHead } from '@/components/resumen/ui'
 import PortfolioCalendarChart from './PortfolioCalendarChart'
-import { btnSecondary, HEAD_ROW, Metric, Metrics, notice, ScrollTable, signedUsd, signTone, TD, TH, TR } from '../ui'
+import { Bars, btnSecondary, HEAD_ROW, Metric, Metrics, notice, ScrollTable, signedUsd, signTone, TD, TH, TR } from '../ui'
 
 const usd = (x: number) => `USD ${fmtNum(x)}`
 const FIRST_MONTHS = 12
@@ -37,24 +37,6 @@ function Table({ caption, head, children, minWidth = 'min-w-[440px]' }: { captio
         <tbody>{children}</tbody>
       </table>
     </ScrollTable>
-  )
-}
-
-/** Same shape as the Resumen distribution: name, thin bar, percentage. */
-function Bars({ rows, label }: { rows: { key: string; name: string; pct: number; detail: string }[]; label: string }) {
-  return (
-    <ul aria-label={label}>
-      {rows.map((r) => (
-        <li key={r.key} className="grid grid-cols-[minmax(0,1fr)_96px_56px] items-center gap-x-3 gap-y-0.5 border-b border-line py-2.5 last:border-b-0 max-[819px]:grid-cols-[minmax(0,1fr)_auto]">
-          <span className="min-w-0 truncate font-medium">{r.name}</span>
-          <span className="relative h-1 overflow-hidden rounded-full bg-line max-[819px]:col-span-2 max-[819px]:row-start-2 max-[819px]:my-1" aria-hidden="true">
-            <span className="absolute inset-y-0 left-0 rounded-full bg-accent" style={{ width: `${Math.min(100, r.pct)}%` }} />
-          </span>
-          <span className="text-right text-[13px] tabular-nums text-ink-2 max-[819px]:col-start-2 max-[819px]:row-start-1">{fmtPct(r.pct, 1)}</span>
-          <span className="col-span-3 text-[13px] text-ink-3 max-[819px]:col-span-2 max-[819px]:row-start-3">{r.detail}</span>
-        </li>
-      ))}
-    </ul>
   )
 }
 
