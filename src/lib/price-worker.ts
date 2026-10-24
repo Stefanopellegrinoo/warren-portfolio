@@ -16,6 +16,7 @@ import { PRICE_QUEUE_NAME, PRICE_REPEAT_JOB_NAME, NIGHTLY_JOB_NAME, TICKER_AUDIT
 import { fetchQuotesFromYahoo, cachePrice, fetchQuotes } from './yahoo-finance'
 import { fetchData912Prices, refreshLocalPrices } from './data912-client'
 import { createServiceClient } from './supabase-server'
+import { priceAlertPush, pushKeys, sendPushToUser } from './push'
 import { getRedis } from './redis'
 import { cacheUserSummaries } from './summary-cache'
 import { captureOnPriceHistory } from './on-price-history'
@@ -142,7 +143,7 @@ async function updateONPricesInDatabase(prices: Map<string, any>): Promise<void>
  * on one side of the line and the current price on or past it. A ticker with
  * no previous price never fires.
  * Uses createServiceClient (RLS bypass) since this runs in the worker.
- * On trigger: marks the alert as 'triggered' and sends a Telegram message.
+ * On trigger: marks the alert as 'triggered', pushes it to the owner's devices and sends a Telegram message.
  */
 export async function evaluatePriceAlerts(
   prices: Record<string, number>,
@@ -187,6 +188,10 @@ export async function evaluatePriceAlerts(
       console.error(`[Worker] evaluatePriceAlerts: update failed for ${alert.id}`, updateError)
       continue
     }
+
+    // A user who never turned notifications on has no devices: that is not a failure.
+    const push = await sendPushToUser(supabase, alert.user_id, priceAlertPush(alert, value, currentPrice))
+    if (!push.ok && push.error !== 'no devices') console.warn(`[Worker] push for alert ${alert.id}: ${push.error}`)
 
     const direction = alert.operator === 'crosses_above' ? '↑' : '↓'
     const msg = `🔔 Alerta disparada: ${alert.ticker} ${direction} ${alert.value}\nPrecio actual: ${currentPrice}`
@@ -436,6 +441,7 @@ async function main() {
   startImportWorker()
   startSignalsWorker()
   checkNotificationConfig()
+  console.log(pushKeys() ? '[notifications] Push enabled' : '[notifications] Push disabled — VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT missing')
   console.log(`[Worker] Redis: ${REDIS_URL}`)
 
   // Redis must be reachable before scheduling — BullMQ's queue.add() hangs

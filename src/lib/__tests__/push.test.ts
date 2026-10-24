@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 const sendNotification = vi.fn()
 vi.mock('web-push', () => ({ default: { sendNotification: (...a: unknown[]) => sendNotification(...a) } }))
 
-const { sendPushToUser, pushKeys } = await import('../push')
+const { sendPushToUser, pushKeys, priceAlertPush } = await import('../push')
 const { isPushEndpoint } = await import('../push-endpoint')
 
 const APPLE = 'https://web.push.apple.com/QGuQyavXutnMH'
@@ -90,5 +90,17 @@ describe('isPushEndpoint', () => {
   })
   it.each(['http://fcm.googleapis.com/fcm/send/x', 'https://fcm.googleapis.com.evil.example/x', 'https://evil.example/web.push.apple.com', 'https://user@web.push.apple.com/x', 'https://web.push.apple.com:8443/x', 'not a url'])('rejects %s', (url) => {
     expect(isPushEndpoint(url)).toBe(false)
+  })
+})
+
+describe('priceAlertPush', () => {
+  it('says which line was crossed and the price now, in Argentine format, and opens that chart', () => {
+    expect(priceAlertPush({ id: 'a1', ticker: 'AAPL', operator: 'crosses_above' }, 190, 195.5)).toEqual({
+      title: 'Alerta de precio: AAPL', body: 'Superó 190. Ahora: 195,5', url: '/trading?symbol=AAPL', tag: 'price-alert-a1',
+    })
+    expect(priceAlertPush({ id: 'a2', ticker: 'BTC/USD', operator: 'crosses_below' }, 1250.75, 1249)).toEqual({
+      title: 'Alerta de precio: BTC/USD', body: 'Bajó de 1.250,75. Ahora: 1.249', url: '/trading?symbol=BTC%2FUSD', tag: 'price-alert-a2',
+    })
+    expect(priceAlertPush({ id: 'a3', ticker: 'DOGE', operator: 'crosses_above' }, 0.1234, 0.12345).body).toBe('Superó 0,1234. Ahora: 0,1235')
   })
 })

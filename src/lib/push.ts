@@ -53,3 +53,16 @@ export async function sendPushToUser(supabase: SupabaseClient, userId: string, p
   if (gone.length) await supabase.from('push_subscriptions').delete().in('id', gone)
   return sent ? { ok: true, sent } : { ok: false, error: 'no device accepted the push' }
 }
+
+const amount = (n: number) => n.toLocaleString('es-AR', { maximumFractionDigits: Math.abs(n) < 1 ? 4 : 2 })
+
+/** The notification of a fired price alert: the crossed line, the price now, and its chart on tap. */
+export function priceAlertPush(alert: { id: string; ticker: string; operator: string }, value: number, current: number): PushPayload {
+  const crossed = alert.operator === 'crosses_below' ? `Bajó de ${amount(value)}` : `Superó ${amount(value)}`
+  return {
+    title: `Alerta de precio: ${alert.ticker}`,
+    body: `${crossed}. Ahora: ${amount(current)}`,
+    url: `/trading?symbol=${encodeURIComponent(alert.ticker)}`,
+    tag: `price-alert-${alert.id}`,
+  }
+}
