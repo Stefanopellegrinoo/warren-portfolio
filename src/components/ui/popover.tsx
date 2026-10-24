@@ -21,12 +21,15 @@ function PopoverClose({ ...props }: PopoverPrimitive.Close.Props) {
   return <PopoverPrimitive.Close data-slot="popover-close" {...props} />
 }
 
-function PopoverPositioner({ ...props }: PopoverPrimitive.Positioner.Props) {
+function PopoverPositioner({ className, ...props }: PopoverPrimitive.Positioner.Props) {
   return (
+    // The positioner is placed with a transform, a stacking context of its own: the z-index that
+    // keeps the popover above the page (a chart canvas included) must sit here, not on the popup.
     <PopoverPrimitive.Positioner
       data-slot="popover-positioner"
       side="bottom"
       align="start"
+      className={cn("z-50", className)}
       {...props}
     />
   )
