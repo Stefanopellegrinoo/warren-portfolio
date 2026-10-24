@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import KpiCard, { toneOfResult } from '@/components/ui/KpiCard'
 import RiskMetricsRow from '@/components/ui/RiskMetricsRow'
 import BenchmarkComparison from '@/components/charts/BenchmarkComparison'
@@ -9,7 +9,9 @@ import type { PortfolioChartPoint } from '@/components/charts/PortfolioChart'
 import ShareList from '@/components/charts/ShareList'
 import { signed } from '@/components/charts/tokens'
 import { SectionHead } from '@/components/resumen/ui'
+import { ErrorNotice } from '@/components/strategies/ui'
 import { formatUSD } from '@/lib/utils'
+import { requestErrorMessage } from '@/lib/request-errors'
 import type { Universe } from '@/lib/asset-universe'
 import DetailedStats, { type StatData } from './DetailedStats'
 
@@ -44,6 +46,8 @@ const UNIVERSE_BY_TAB: Record<TabType, Universe> = {
 
 const TAB_LABEL: Record<TabType, string> = { general: 'Toda la cartera', stocks: 'Acciones', ons: 'ONs' }
 
+const LOAD_FAILED = 'No se pudieron cargar las estadísticas.'
+
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
 function Skeleton() {
@@ -62,47 +66,47 @@ export default function StatisticsPage() {
   // General-tab risk, over the whole portfolio — the same universe as its chart (S9).
   const [generalRisk, setGeneralRisk] = useState<StatData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [historyPeriod, setHistoryPeriod] = useState<'30' | '90' | '180' | '365' | 'all'>('90')
   const [history, setHistory] = useState<PortfolioChartPoint[]>([])
   const [historyLoading, setHistoryLoading] = useState(true)
 
-  useEffect(() => {
-    async function fetchAllStats() {
-      try {
-        const [stocksRes, onsRes, combinedRes, generalRes] = await Promise.all([
-          fetch('/api/statistics?universe=stocks'),
-          fetch('/api/statistics/ons'),
-          fetch('/api/statistics/combined'),
-          fetch('/api/statistics?universe=total')
-        ])
+  const load = useCallback(() =>
+    Promise.all([
+      fetch('/api/statistics?universe=stocks'),
+      fetch('/api/statistics/ons'),
+      fetch('/api/statistics/combined'),
+      fetch('/api/statistics?universe=total')
+    ])
+      // An error body is an OBJECT, so it is truthy, and every `&& data`
+      // gate downstream waves it through — DetailedStats then throws on
+      // data.allPnLs.slice and takes the whole page down. A failed fetch
+      // must yield null, and its tab says it failed. Likewise a failed
+      // metrics fetch must not fill the risk row with "Sin datos suficientes":
+      // an error is not a measurement.
+      .then(responses => Promise.all(responses.map(r => (r.ok ? r.json() : null))))
+      .then(([stocks, ons, combined, general]) => {
+        setStocksData(stocks)
+        setOnsData(ons)
+        setCombinedData(combined)
+        setGeneralRisk(general)
+        setLoadError(null)
+      })
+      .catch(err => {
+        setStocksData(null)
+        setOnsData(null)
+        setCombinedData(null)
+        setGeneralRisk(null)
+        setLoadError(requestErrorMessage(err, LOAD_FAILED))
+      })
+      .finally(() => setLoading(false)), [])
 
-        const [stocks, ons, combined, general] = await Promise.all([
-          stocksRes.json(),
-          onsRes.json(),
-          combinedRes.json(),
-          generalRes.json()
-        ])
+  useEffect(() => { load() }, [load])
 
-        // An error body is an OBJECT, so it is truthy, and every `&& data`
-        // gate downstream waves it through — DetailedStats then throws on
-        // data.allPnLs.slice and takes the whole page down. A failed fetch
-        // must yield null so the tab simply does not render. This route
-        // gained two new non-200 paths (400 on an unknown universe, 500 on a
-        // transactions-fetch failure), so it is no longer a remote case.
-        setStocksData(stocksRes.ok ? stocks : null)
-        setOnsData(onsRes.ok ? ons : null)
-        setCombinedData(combinedRes.ok ? combined : null)
-        // A failed metrics fetch must lose the ROW, not fill it with cards
-        // reading "Sin datos suficientes" — an error is not a measurement.
-        setGeneralRisk(generalRes.ok ? general : null)
-      } catch (err) {
-        console.error(err)
-      } finally {
-        setLoading(false)
-      }
-    }
-    fetchAllStats()
-  }, [])
+  const retry = () => {
+    setLoading(true)
+    load()
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -146,6 +150,9 @@ export default function StatisticsPage() {
         t === 'general' || (t === 'stocks' ? combinedData.stocks.positionCount > 0 : combinedData.ons.positionCount > 0))
     : ['general']
 
+  // The stocks or ONs tab's own data: null when its fetch failed, undefined on the whole-portfolio tab.
+  const tabData = activeTab === 'stocks' ? stocksData : activeTab === 'ons' ? onsData : undefined
+
   const evolution = (
     <section aria-labelledby="h-evolucion">
       <SectionHead id="h-evolucion" title={activeTab === 'general' ? 'Evolución de la cartera' : `Evolución de ${TAB_LABEL[activeTab]}`} />
@@ -182,36 +189,41 @@ export default function StatisticsPage() {
 
       {/* Loading is DONE and the page still has no composition data. A spinner here
           would assert "still working" forever; say what actually happened instead. */}
-      {!loading && !combinedData && (
-        <div role="alert" className="rounded-md bg-danger-soft px-4 py-3 text-sm text-danger">
-          No se pudieron cargar las estadísticas. Reintentá en unos segundos; si sigue igual, revisá que el servicio esté disponible.
-        </div>
-      )}
+      {!loading && !combinedData && <ErrorNotice onRetry={retry}>{loadError ?? LOAD_FAILED}</ErrorNotice>}
 
       {!loading && combinedData && (
+        // Headline first: total value and results, then how it got there. Each block
+        // keeps one slot across tabs, so the chosen benchmark survives a tab switch.
         <div className="grid gap-10">
-          {activeTab !== 'ons' && <BenchmarkComparison universe={UNIVERSE_BY_TAB[activeTab]} />}
+          {activeTab === 'general' && (
+            <dl className="grid grid-cols-3 gap-x-6 gap-y-5 border-b border-line pb-5 max-[819px]:grid-cols-2">
+              <div className="min-w-0 max-[819px]:col-span-2">
+                <dt className="text-[13px] text-ink-3">Valor total de la cartera</dt>
+                <dd className="font-serif text-2xl font-normal tabular-nums">{formatUSD(combinedData.totalValue)}</dd>
+              </div>
+              <KpiCard label="Resultado de acciones" value={signed(combinedData.stocks.totalPnl)} tone={toneOfResult(combinedData.stocks.totalPnl)}>
+                {plural(combinedData.stocks.positionCount, 'posición', 'posiciones')} · {plural(combinedData.stocks.closedTradesCount, 'operación cerrada', 'operaciones cerradas')}
+              </KpiCard>
+              <KpiCard label="Resultado de ONs" value={signed(combinedData.ons.totalPnl)} tone={toneOfResult(combinedData.ons.totalPnl)}>
+                {plural(combinedData.ons.positionCount, 'posición', 'posiciones')} · {plural(combinedData.ons.closedTradesCount, 'operación cerrada', 'operaciones cerradas')}
+              </KpiCard>
+            </dl>
+          )}
+
+          {/* A tab whose own data failed says so instead of showing only part of itself. */}
+          {tabData === null && (
+            <ErrorNotice onRetry={retry}>No se pudieron cargar las estadísticas de {activeTab === 'stocks' ? 'acciones' : 'ONs'}.</ErrorNotice>
+          )}
+
+          {tabData !== null && evolution}
+          {tabData !== null && activeTab !== 'ons' && <BenchmarkComparison universe={UNIVERSE_BY_TAB[activeTab]} />}
 
           {activeTab === 'general' && (
             <>
-              {/* Evolution chart, projected onto the full portfolio. */}
-              {evolution}
-
-              <dl className="grid grid-cols-3 gap-x-6 gap-y-5 border-b border-line pb-5 max-[819px]:grid-cols-2">
-                <div className="min-w-0 max-[819px]:col-span-2">
-                  <dt className="text-[13px] text-ink-3">Valor total de la cartera</dt>
-                  <dd className="font-serif text-2xl font-normal tabular-nums">{formatUSD(combinedData.totalValue)}</dd>
-                </div>
-                <KpiCard label="Resultado de acciones" value={signed(combinedData.stocks.totalPnl)} tone={toneOfResult(combinedData.stocks.totalPnl)}>
-                  {plural(combinedData.stocks.positionCount, 'posición', 'posiciones')} · {plural(combinedData.stocks.closedTradesCount, 'operación cerrada', 'operaciones cerradas')}
-                </KpiCard>
-                <KpiCard label="Resultado de ONs" value={signed(combinedData.ons.totalPnl)} tone={toneOfResult(combinedData.ons.totalPnl)}>
-                  {plural(combinedData.ons.positionCount, 'posición', 'posiciones')} · {plural(combinedData.ons.closedTradesCount, 'operación cerrada', 'operaciones cerradas')}
-                </KpiCard>
-              </dl>
-
               {/* Risk over the whole portfolio — scope stated on screen */}
-              <RiskMetricsRow data={generalRisk} />
+              {generalRisk
+                ? <RiskMetricsRow data={generalRisk} />
+                : <ErrorNotice onRetry={retry}>No se pudieron calcular las métricas de riesgo.</ErrorNotice>}
 
               <section aria-labelledby="h-composicion">
                 <SectionHead id="h-composicion" title="Composición" />
@@ -223,19 +235,7 @@ export default function StatisticsPage() {
             </>
           )}
 
-          {activeTab === 'stocks' && stocksData && (
-            <>
-              {evolution}
-              <DetailedStats data={stocksData} assetLabel="acciones" />
-            </>
-          )}
-
-          {activeTab === 'ons' && onsData && (
-            <>
-              {evolution}
-              <DetailedStats data={onsData} assetLabel="ONs" />
-            </>
-          )}
+          {tabData && <DetailedStats data={tabData} assetLabel={activeTab === 'stocks' ? 'acciones' : 'ONs'} />}
         </div>
       )}
     </div>

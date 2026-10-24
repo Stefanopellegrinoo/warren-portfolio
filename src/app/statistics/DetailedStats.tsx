@@ -121,11 +121,11 @@ export default function DetailedStats({ data, assetLabel }: { data: StatData; as
               <LineChart data={data.cumulativePnl} margin={{ top: 6, right: 4, left: 0, bottom: 0 }} accessibilityLayer>
                 <CartesianGrid {...GRID} />
                 <XAxis dataKey="date" {...AXIS} minTickGap={24}
-                  tickFormatter={(v: string) => { const d = new Date(v); return `${d.getDate()}/${d.getMonth() + 1}` }} />
+                  tickFormatter={(v: string) => { const d = new Date(v); return `${d.getUTCDate()}/${d.getUTCMonth() + 1}` }} />
                 <YAxis {...AXIS} width={52} tickFormatter={axisSigned} />
                 <Tooltip {...TOOLTIP}
                   formatter={(value: number) => [signed(value), 'Acumulado']}
-                  labelFormatter={(label: string) => new Date(label).toLocaleDateString('es-AR')} />
+                  labelFormatter={(label: string) => new Date(label).toLocaleDateString('es-AR', { timeZone: 'UTC' })} />
                 <Line type="monotone" dataKey="cumulative" stroke="var(--accent)" strokeWidth={1.75} dot={false} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
