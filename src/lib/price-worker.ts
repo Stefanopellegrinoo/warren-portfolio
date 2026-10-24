@@ -31,6 +31,8 @@ import { auditTickerIdentities } from './ticker-audit'
 import { ingestOnTerms } from './on-terms-ingest'
 import { ingestFxRates } from './fx-rates'
 import { loadHeldStockTickers, loadPortfolioNow } from './ledger-now'
+import { fetchCryptoQuotes } from './binance/rest'
+import { getProviderForSymbol } from './market-data/resolver'
 
 const REDIS_URL = process.env.REDIS_URL
 
@@ -212,6 +214,28 @@ async function refreshPesoPrices(tickers: string[]): Promise<void> {
   }
 }
 
+const isCrypto = (ticker: string) => getProviderForSymbol(ticker) === 'binance'
+
+/**
+ * Crypto trades around the clock, so its alerts are checked on every cycle, market
+ * hours or not, with Binance prices (the ones the chart shows). A failure is logged
+ * and never stops the stock cycle.
+ */
+async function checkCryptoAlerts(tickers: string[]): Promise<void> {
+  if (!tickers.length) return
+  try {
+    const previousPrices = toPriceRecord(await fetchQuotes(tickers))
+    const fresh = await fetchCryptoQuotes(tickers)
+    fresh.forEach((quote, ticker) => {
+      cachePrice(ticker, quote).catch(e => console.error(`[Worker] Cache error for ${ticker}:`, e))
+    })
+    console.log(`[Worker] Crypto alerts: ${fresh.size}/${tickers.length} prices from Binance`)
+    await evaluatePriceAlerts(toPriceRecord(fresh), previousPrices)
+  } catch (err) {
+    console.error('[Worker] Crypto alerts failed:', err)
+  }
+}
+
 function toPriceRecord(quotes: Map<string, any>): Record<string, number> {
   const record: Record<string, number> = {}
   quotes.forEach((quote, ticker) => {
@@ -315,21 +339,23 @@ const worker = new Worker(
     let onTickers: string[] = []
 
     if (job.name === PRICE_REPEAT_JOB_NAME) {
+      const alertTickers = await getActiveAlertTickers()
+      await checkCryptoAlerts(alertTickers.filter(isCrypto))
+
       if (!isMarketOpen()) {
         console.log('[Worker] Market is closed — skipping periodic fetch cycle')
         return
       }
       
-      const [allTickers, allONTickers, alertTickers] = await Promise.all([
-        getAllTickers(), getAllONTickers(), getActiveAlertTickers(),
-      ])
+      const [allTickers, allONTickers] = await Promise.all([getAllTickers(), getAllONTickers()])
       onTickers = allONTickers
       // Alert tickers need a price even when nobody holds them. ONs among them
-      // are already fetched from Data912 via the catalog, so they stay off Yahoo.
+      // are already fetched from Data912 via the catalog, and crypto from Binance
+      // above, so they stay off Yahoo.
       const onCatalog = new Set(allONTickers.map(t => t.toUpperCase().trim()))
       tickers = Array.from(new Set([
         ...allTickers,
-        ...alertTickers.filter(t => !onCatalog.has(t.toUpperCase().trim())),
+        ...alertTickers.filter(t => !onCatalog.has(t.toUpperCase().trim()) && !isCrypto(t)),
       ]))
       
       if (!tickers.length && !onTickers.length) {
