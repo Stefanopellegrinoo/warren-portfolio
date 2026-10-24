@@ -45,3 +45,22 @@ describe('recharts loads only with the chart that needs it (S9)', () => {
     act(() => root.unmount())
   })
 })
+
+describe('next/dynamic calls the production build accepts', () => {
+  it('pass their options as an object literal (a variable compiles in tests but fails `next build`)', async () => {
+    const { readFileSync, readdirSync, statSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const files: string[] = []
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const path = join(dir, name)
+        if (statSync(path).isDirectory()) { if (name !== '__tests__') walk(path) } else if (/\.tsx?$/.test(name)) files.push(path)
+      }
+    }
+    walk(join(process.cwd(), 'src'))
+
+    const offenders = files.filter(f => /dynamic\([^\n]*\)\s*,\s*[A-Za-z_$][\w$]*\s*\)/.test(readFileSync(f, 'utf8')))
+
+    expect(offenders.map(f => f.slice(process.cwd().length + 1))).toEqual([])
+  })
+})

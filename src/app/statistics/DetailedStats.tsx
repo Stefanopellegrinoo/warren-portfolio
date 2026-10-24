@@ -47,10 +47,10 @@ export interface StatData {
 }
 
 // recharts arrives with the charts, not with the page (odd/tasks/rendimiento.md S9); each box keeps its height meanwhile.
-const lazy = { ssr: false, loading: ChartPlaceholder }
-const CumulativeChart = dynamic(() => import('./DetailedCharts').then(m => m.CumulativeChart), lazy)
-const MonthlyChart = dynamic(() => import('./DetailedCharts').then(m => m.MonthlyChart), lazy)
-const AssetChart = dynamic(() => import('./DetailedCharts').then(m => m.AssetChart), lazy)
+// next/dynamic takes its options only as an object literal (the build rejects a variable).
+const CumulativeChart = dynamic(() => import('./DetailedCharts').then(m => m.CumulativeChart), { ssr: false, loading: ChartPlaceholder })
+const MonthlyChart = dynamic(() => import('./DetailedCharts').then(m => m.MonthlyChart), { ssr: false, loading: ChartPlaceholder })
+const AssetChart = dynamic(() => import('./DetailedCharts').then(m => m.AssetChart), { ssr: false, loading: ChartPlaceholder })
 const STATUS: Record<string, string> = { OPEN: 'abierta', CLOSED: 'cerrada' }
 const empty = 'flex h-[300px] items-center text-sm text-ink-3 max-[819px]:h-auto max-[819px]:py-8'
 
