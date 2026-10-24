@@ -158,7 +158,7 @@ function ComparisonTab({
 
   return (
     <>
-      <div className="overflow-x-auto max-[1079px]:hidden">
+      <div className="overflow-x-auto max-[1279px]:hidden">
         <table className="w-full min-w-[820px] border-collapse text-sm tabular-nums">
           <caption className="sr-only">Comparación de setups</caption>
           <thead>
@@ -195,7 +195,7 @@ function ComparisonTab({
         </table>
       </div>
 
-      <ul aria-label="Comparación de setups" className="border-t border-line-strong min-[1080px]:hidden">
+      <ul aria-label="Comparación de setups" className="border-t border-line-strong min-[1280px]:hidden">
         {setups.map((setup) => (
           <li key={setup.setup_id} className={card}>
             <span className="flex min-w-0 flex-wrap items-center gap-2 font-medium">
@@ -351,7 +351,7 @@ function PaperTradesTab({
         <Empty title="No hay paper trades para los filtros elegidos." hint="Se generan automáticamente cuando las señales abren y cierran posiciones." />
       ) : (
         <>
-          <div className="overflow-x-auto max-[1079px]:hidden">
+          <div className="overflow-x-auto max-[1279px]:hidden">
             <table className="w-full min-w-[920px] border-collapse text-sm tabular-nums">
               <caption className="sr-only">Paper trades</caption>
               <thead>
@@ -385,7 +385,7 @@ function PaperTradesTab({
             </table>
           </div>
 
-          <ul aria-label="Paper trades" className="border-t border-line-strong min-[1080px]:hidden">
+          <ul aria-label="Paper trades" className="border-t border-line-strong min-[1280px]:hidden">
             {filtered.map((trade) => (
               <li key={trade.id} className={card}>
                 <span className="min-w-0">

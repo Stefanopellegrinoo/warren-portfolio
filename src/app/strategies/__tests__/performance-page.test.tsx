@@ -54,10 +54,10 @@ const tableWrapper = (el: HTMLElement, caption: string) =>
 describe('Performance page on phones: cards below 1080 px, the full table from 1080 px', () => {
   it('comparison: one card per setup with return, hit rate and trades first', async () => {
     const { el, unmount } = await mount()
-    expect(tableWrapper(el, 'Comparación de setups').className).toContain('max-[1079px]:hidden')
+    expect(tableWrapper(el, 'Comparación de setups').className).toContain('max-[1279px]:hidden')
 
     const list = el.querySelector('ul[aria-label="Comparación de setups"]')!
-    expect(list.className).toContain('min-[1080px]:hidden')
+    expect(list.className).toContain('min-[1280px]:hidden')
     const cards = list.querySelectorAll('li')
     expect(cards).toHaveLength(1)
     const text = cards[0].textContent!
@@ -72,10 +72,10 @@ describe('Performance page on phones: cards below 1080 px, the full table from 1
     const { el, unmount } = await mount()
     act(() => tab('Paper trades').click())
     await flush()
-    expect(tableWrapper(el, 'Paper trades').className).toContain('max-[1079px]:hidden')
+    expect(tableWrapper(el, 'Paper trades').className).toContain('max-[1279px]:hidden')
 
     const list = el.querySelector('ul[aria-label="Paper trades"]')!
-    expect(list.className).toContain('min-[1080px]:hidden')
+    expect(list.className).toContain('min-[1280px]:hidden')
     const [open, closed] = [...list.querySelectorAll('li')].map(li => li.textContent!)
     for (const value of ['AAPL', 'Abierto', 'Cruce EMA', 'Entrada US$\u00a0180,50', 'Apertura 01/10/2026']) expect(open).toContain(value)
     expect(open).not.toContain('Salida')

@@ -49,6 +49,17 @@ describe('InlineConfirm', () => {
     expect(onConfirm).not.toHaveBeenCalled()
   })
 
+  // Verifier A2: like a native confirm, cancelling returns the focus to the action.
+  it('cancel and Escape give the focus back to the action', () => {
+    const { el, click, button } = mount()
+    click('Borrar')
+    click('Cancelar')
+    expect(document.activeElement).toBe(button('Borrar'))
+    click('Borrar')
+    act(() => { el.querySelector('[role="group"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    expect(document.activeElement).toBe(button('Borrar'))
+  })
+
   it('keeps the action disabled while the request is in flight', () => {
     const { render, button } = mount()
     render({ busy: true })
