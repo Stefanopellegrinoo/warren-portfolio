@@ -25,7 +25,7 @@ Branch `feat/chart-mobile` from master 37525ad (the crypto alerts fix is separat
 | T4 Selected-drawing bar (color, thickness, style, text, lock, delete) and text editor inside the screen | S3 | inline | done: 5 RED→GREEN with the real drawing layer + editor clamp RED→GREEN; Chromium touch at 390 and 320: bar, colors, thickness, style, delete + Deshacer, no page overflow | (this commit) |
 | T5 Tool picker with names, armed-tool hint and Cancelar | S5 | inline | done: 5 RED→GREEN with the real drawing layer, 3 desktop tests kept; Chromium at 390 and 320: list 374/304px wide, no page overflow, fib drawn by dragging from the list | (this commit) |
 | T6 Price pane height on phones; alert precision, buttons and wording | S6, S7 | inline | done: 5 RED→GREEN (pane share, coin precision, alert name, finger 12px off an alert line) + 3 kept (desktop panes, 2 decimals, mouse precision); Chromium 390: price pane 336px (was 274), DOGE alert 0.1081 named 0,1081, alert buttons 44px | (this commit) |
-| T7 Save drawings when the app goes to the background | S8 | inline | pending | |
+| T7 Save drawings when the app goes to the background | S8 | inline | done: 2 RED→GREEN (hidden saves at once with keepalive; pagehide saves once) + 2 kept (600ms debounce while open, nothing pending nothing saved) | (this commit) |
 | T8 Every tool with a finger at 320-430px, desktop unchanged, suite, independent verifier (Risk item 5: install patch, Dockerfile), native review | S9, all | inline + verifier | pending | |
 
 Route evidence: every unit touches `TradingChart.tsx` or depends on T1-T3, so they are not independent; each is about 100 lines or less; inline, one after another.
