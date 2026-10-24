@@ -9,7 +9,8 @@ const mockLoad = vi.fn()
 vi.mock('@/lib/on-catalog', () => ({ loadOnAnalyses: (...a: unknown[]) => mockLoad(...a) }))
 
 type Result = { data?: any; error?: { code?: string; message?: string } | null }
-let plan: Record<string, Result> = {}
+// A function answers each read in turn (e.g. the item an edit reads, then the list its view reads).
+let plan: Record<string, Result | (() => Result)> = {}
 let calls: { table: string; op: string; method: string; args: unknown[] }[] = []
 const WRITES = ['insert', 'update', 'delete']
 const fakeSb = {
@@ -23,7 +24,10 @@ const fakeSb = {
         return q
       }
     }
-    const res = () => Promise.resolve({ data: null, error: null, ...(plan[`${table}.${op}`] ?? {}) })
+    const res = () => {
+      const p = plan[`${table}.${op}`]
+      return Promise.resolve({ data: null, error: null, ...((typeof p === 'function' ? p() : p) ?? {}) })
+    }
     q.maybeSingle = q.single = () => res()
     q.then = (ok: any, ko: any) => res().then(ok, ko)
     return q
@@ -267,5 +271,61 @@ describe('PATCH / DELETE /api/test-portfolios/[id]/items/[itemId]', () => {
     plan['test_portfolio_items.delete'] = { data: [{ id: ITEM }] }
     expect((await item.DELETE(new Request('http://x'), ctx(ID, ITEM))).status).toBe(204)
     expect((await item.DELETE(new Request('http://x'), ctx(ID, 'nope'))).status).toBe(400)
+  })
+})
+
+describe('an edit answers with the updated view, so the page needs one round trip (odd/tasks/rendimiento.md S9)', () => {
+  const PORTFOLIO = { id: ID, name: 'Mi prueba', created_at: 'c', updated_at: 'u' }
+  const row = (amount: number) => ({ id: ITEM, isin: GOOD, input_mode: 'usd', amount, manual_price: null, created_at: 'c' })
+  const reads = (...answers: Result[]) => () => answers.shift() ?? { data: null }
+
+  it('PATCH of an item keeps `item` and adds the view GET would return', async () => {
+    plan['test_portfolio_items.select'] = reads({ data: row(1000) }, { data: [row(2000)] })
+    plan['test_portfolio_items.update'] = { data: row(2000) }
+    plan['test_portfolios.select'] = { data: PORTFOLIO }
+    const res = await item.PATCH(json({ amount: 2000 }, 'PATCH'), ctx(ID, ITEM))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.item).toEqual({ id: ITEM, isin: GOOD, mode: 'usd', amount: 2000, manualPrice: null })
+
+    plan['test_portfolio_items.select'] = { data: [row(2000)] }
+    const view = await (await one.GET(new Request('http://x'), ctx())).json()
+    expect(body.view).toEqual(view)
+    expect(body.view.items).toEqual([{ id: ITEM, isin: GOOD, mode: 'usd', amount: 2000, manualPrice: null }])
+  })
+
+  it('POST of an item keeps `item` (201) and adds the view', async () => {
+    plan['test_portfolio_items.insert'] = { data: row(1000) }
+    plan['test_portfolio_items.select'] = { data: [row(1000)] }
+    plan['test_portfolios.select'] = { data: PORTFOLIO }
+    const res = await items.POST(json({ isin: GOOD, mode: 'usd', amount: 1000 }), ctx())
+    expect(res.status).toBe(201)
+    const body = await res.json()
+    expect(body.item.id).toBe(ITEM)
+    expect(body.view.portfolio).toEqual({ id: ID, name: 'Mi prueba', createdAt: 'c', updatedAt: 'u' })
+    expect(body.view.analysis.totals.cost).toBeGreaterThan(0)
+  })
+
+  it('DELETE of an item answers with the view when asked (?view=1), and stays 204 otherwise', async () => {
+    plan['test_portfolio_items.delete'] = { data: [{ id: ITEM }] }
+    plan['test_portfolio_items.select'] = { data: [] }
+    plan['test_portfolios.select'] = { data: PORTFOLIO }
+    const res = await item.DELETE(new Request('http://x/api?view=1'), ctx(ID, ITEM))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.view.items).toEqual([])
+    expect(body.view.analysis.empty).toBe(true)
+    expect((await item.DELETE(new Request('http://x/api'), ctx(ID, ITEM))).status).toBe(204)
+  })
+
+  it('a saved edit whose view cannot be built still says it was saved, without the view', async () => {
+    plan['test_portfolio_items.select'] = reads({ data: row(1000) }, { data: [row(2000)] })
+    plan['test_portfolio_items.update'] = { data: row(2000) }
+    plan['test_portfolios.select'] = { error: { message: 'down' } }
+    const res = await item.PATCH(json({ amount: 2000 }, 'PATCH'), ctx(ID, ITEM))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.item.amount).toBe(2000)
+    expect(body.view).toBeUndefined()
   })
 })

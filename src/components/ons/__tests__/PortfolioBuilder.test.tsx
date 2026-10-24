@@ -4,10 +4,17 @@ import { act } from 'react-dom/test-utils'
 import PortfolioBuilder from '../portfolios/PortfolioBuilder'
 import { analyzePortfolio, type PortfolioItem } from '@/lib/on-portfolio-analytics'
 import { analyzeOn } from '@/lib/on-analytics'
+import { forgetCached } from '@/lib/client-cache'
 
 // odd/tasks/ux-ons-y-operaciones.md S5, through the real component with the network stubbed.
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-afterEach(() => { document.body.innerHTML = ''; vi.unstubAllGlobals() })
+// A request left hanging would stay in flight for the next test (the cache shares in-flight loads): end it.
+const hanging: (() => void)[] = []
+afterEach(async () => {
+  hanging.splice(0).forEach((end) => end())
+  await new Promise((r) => setTimeout(r, 0))
+  document.body.innerHTML = ''; vi.unstubAllGlobals(); forgetCached()
+})
 
 const on = (isin: string, over: Record<string, unknown>, flows: { date: string; ren: number; amo: number }[], price: number | null) =>
   analyzeOn({
@@ -28,11 +35,11 @@ const view = (items: (PortfolioItem & { id: string })[]) => ({
 })
 
 type Reply = { status: number; body?: unknown }
-type Handler = (url: string, method: string) => Reply | undefined
+type Handler = (url: string, method: string) => Reply | Promise<Reply> | undefined
 function stubFetch(handler: Handler, items: (PortfolioItem & { id: string })[] = [ITEM_A]) {
   const fn = vi.fn(async (url: string, init?: { method?: string }) => {
     const method = init?.method ?? 'GET'
-    const r = handler(url, method)
+    const r = (await handler(url, method))
       ?? (url === '/api/ons' ? { status: 200, body: { rows: [A.row, B.row] } } : { status: 200, body: view(items) })
     return { status: r.status, ok: r.status >= 200 && r.status < 300, json: async () => r.body }
   })
@@ -174,5 +181,61 @@ describe('PortfolioBuilder (S5)', () => {
     await click(button(alert, 'Reintentar'))
     expect(alerts(el)).toHaveLength(0)
     expect(el.querySelector('#pf-search-count')!.textContent).toContain('ONs en dólares disponibles')
+  })
+})
+
+describe('PortfolioBuilder — one round trip per change, and a portfolio seen before at once (odd/tasks/rendimiento.md S9)', () => {
+  const portfolioGets = (fetch: ReturnType<typeof stubFetch>) =>
+    fetch.mock.calls.filter(([u, i]) => u === `/api/test-portfolios/${ID}` && (i?.method ?? 'GET') === 'GET')
+
+  it('an edit shows the view it answers with, without asking for the portfolio again', async () => {
+    const edited = { ...ITEM_A, amount: 20_000 }
+    const fetch = stubFetch((url, method) => (method === 'PATCH' ? { status: 200, body: { item: edited, view: view([edited]) } } : undefined))
+    const el = await mount()
+    await click(button(el, 'Editar'))
+    type(el, '#edit-item-a-amount', '20.000')
+    await click(button(el, 'Guardar'))
+    expect(el.querySelector('ul[aria-label="ONs de la cartera"]')!.textContent).toContain('VN 20.000')
+    expect(el.textContent).toContain('Cambios guardados.')
+    expect(portfolioGets(fetch)).toHaveLength(1)
+  })
+
+  it('an add shows the view it answers with', async () => {
+    const fetch = stubFetch((url, method) => (method === 'POST' ? { status: 201, body: { item: ITEM_B, view: view([ITEM_A, ITEM_B]) } } : undefined))
+    const el = await mount()
+    type(el, '#pf-search', 'BBBBO')
+    await click([...el.querySelectorAll('ul[aria-label="Resultados de la búsqueda"] button')][0] as HTMLElement)
+    type(el, '#add-amount', '1.000')
+    await click(button(el, 'Agregar a la cartera'))
+    expect(el.querySelector('ul[aria-label="ONs de la cartera"]')!.textContent).toContain('BBBBO')
+    expect(portfolioGets(fetch)).toHaveLength(1)
+  })
+
+  it('a removal asks for the view and shows it', async () => {
+    const fetch = stubFetch((url, method) => (method === 'DELETE' ? { status: 200, body: { view: view([]) } } : undefined))
+    const el = await mount()
+    await click(button(el, 'Quitar'))
+    await click(button(el, 'Sí, quitar'))
+    expect(fetch.mock.calls.find(([, i]) => i?.method === 'DELETE')![0]).toBe(`/api/test-portfolios/${ID}/items/item-a?view=1`)
+    expect(el.textContent).toContain('Agregá la primera ON')
+    expect(portfolioGets(fetch)).toHaveLength(1)
+  })
+
+  it('a rename shows the new name without asking for the portfolio again', async () => {
+    const fetch = stubFetch((url, method) => (method === 'PATCH' ? { status: 200, body: { portfolio: { id: ID, name: 'Otro nombre', createdAt: 'c', updatedAt: 'u' } } } : undefined))
+    const el = await mount()
+    await click(button(el, 'Renombrar'))
+    type(el, '#pf-name', 'Otro nombre')
+    await click(button(el, 'Guardar'))
+    expect(el.querySelector('h1')!.textContent).toBe('Otro nombre')
+    expect(portfolioGets(fetch)).toHaveLength(1)
+  })
+
+  it('a portfolio seen before shows at once while it refreshes', async () => {
+    stubFetch(() => undefined)
+    await mount()
+    stubFetch(() => new Promise<Reply>((end) => { hanging.push(() => end({ status: 500 })) }))
+    const el = await mount()
+    expect(el.querySelector('h1')!.textContent).toBe('Ingreso mensual')
   })
 })

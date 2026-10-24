@@ -1,14 +1,15 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Pencil } from 'lucide-react'
 import type { OnListRow } from '@/lib/on-analytics'
 import type { PortfolioAnalysis } from '@/lib/on-portfolio-analytics'
 import { fmtDate, fmtNum, fmtVn } from '@/lib/on-format'
 import { formatAge } from '@/lib/utils'
 import { SectionHead } from '@/components/resumen/ui'
-import { api } from './api'
+import { useCached } from '@/lib/client-cache'
+import { api, apiData, ApiFailure } from './api'
 import { BackLink, btnPrimary, btnQuiet, btnSecondary, field, Glossary, hint, label, Loading, LoadError, Notice, notice, Tag, type GlossaryTerm } from '../ui'
 import PortfolioItemFields, { parseFields, toFieldText, type ItemFieldValues } from './PortfolioItemFields'
 import { PortfolioDetails, PortfolioSummary } from './PortfolioResults'
@@ -40,7 +41,7 @@ const plain = (message: string) => (message.startsWith('Mínimo: ') ? `Con ese m
 /** A warning without its leading "TICKER: ", since it shows under that ON's own row. */
 const own = (message: string) => plain(message.replace(/^\S+: /, ''))
 
-function Title({ portfolio, onRenamed }: { portfolio: View['portfolio']; onRenamed: () => Promise<void> }) {
+function Title({ portfolio, onRenamed }: { portfolio: View['portfolio']; onRenamed: (name: string) => void }) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState(portfolio.name)
   const [busy, setBusy] = useState(false)
@@ -51,11 +52,11 @@ function Title({ portfolio, onRenamed }: { portfolio: View['portfolio']; onRenam
     e.preventDefault()
     if (name.trim() === portfolio.name) return setOpen(false)
     setBusy(true)
-    const r = await api(`/api/test-portfolios/${portfolio.id}`, { method: 'PATCH', body: { name } })
+    const r = await api<{ portfolio: { name: string } }>(`/api/test-portfolios/${portfolio.id}`, { method: 'PATCH', body: { name } })
     setBusy(false)
     if (!r.ok) return setError(plain(r.error))
     setOpen(false)
-    await onRenamed()
+    onRenamed(r.data.portfolio.name)
   }
 
   return (
@@ -88,7 +89,10 @@ function Title({ portfolio, onRenamed }: { portfolio: View['portfolio']; onRenam
   )
 }
 
-function ItemRow({ item, row, view, onChanged }: { item: SavedItem; row?: OnListRow; view: View; onChanged: () => Promise<void> }) {
+/** After a change: the view the server answered with, or nothing (then the page asks for it). */
+type Changed = (view?: View) => void
+
+function ItemRow({ item, row, view, onChanged }: { item: SavedItem; row?: OnListRow; view: View; onChanged: Changed }) {
   const [editing, setEditing] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -109,19 +113,19 @@ function ItemRow({ item, row, view, onChanged }: { item: SavedItem; row?: OnList
     const p = parseFields(vals)
     if (!p.ok) return setError(p.error)
     setBusy(true)
-    const r = await api(url, { method: 'PATCH', body: { mode: p.mode, amount: p.amount, manualPrice: p.manualPrice } })
+    const r = await api<{ view?: View }>(url, { method: 'PATCH', body: { mode: p.mode, amount: p.amount, manualPrice: p.manualPrice } })
     setBusy(false)
     if (!r.ok) return setError(plain(r.error))
     setError(null); setEditing(false); setSaved(true)
-    await onChanged()
+    onChanged(r.data.view)
   }
   const remove = async () => {
     setBusy(true)
-    const r = await api(url, { method: 'DELETE' })
+    const r = await api<{ view?: View } | undefined>(`${url}?view=1`, { method: 'DELETE' })
     setBusy(false)
     setConfirming(false)
     if (!r.ok) return setError(plain(r.error))
-    await onChanged()
+    onChanged(r.data?.view)
   }
 
   return (
@@ -178,7 +182,7 @@ function AddItemForm({ portfolioId, catalog, catalogError, onRetryCatalog, taken
   count: number
   limit: number
   first: boolean
-  onAdded: () => Promise<void>
+  onAdded: Changed
 }) {
   const [query, setQuery] = useState('')
   const [picked, setPicked] = useState<OnListRow | null>(null)
@@ -201,11 +205,11 @@ function AddItemForm({ portfolioId, catalog, catalogError, onRetryCatalog, taken
     const p = parseFields(vals)
     if (!p.ok) return setError(p.error)
     setBusy(true)
-    const r = await api(`/api/test-portfolios/${portfolioId}/items`, { method: 'POST', body: { isin: picked.isin, mode: p.mode, amount: p.amount, manualPrice: p.manualPrice } })
+    const r = await api<{ view?: View }>(`/api/test-portfolios/${portfolioId}/items`, { method: 'POST', body: { isin: picked.isin, mode: p.mode, amount: p.amount, manualPrice: p.manualPrice } })
     setBusy(false)
     if (!r.ok) return setError(plain(r.error))
     setError(null); setAdded(picked.tickerO); setPicked(null); setQuery(''); setVals(EMPTY)
-    await onAdded()
+    onAdded(r.data.view)
   }
 
   const searchHint = catalog === null ? 'Cargando catálogo…'
@@ -272,30 +276,27 @@ function Result({ analysis: a }: { analysis: PortfolioAnalysis }) {
   )
 }
 
-export default function PortfolioBuilder({ id }: { id: string }) {
-  const [view, setView] = useState<View | null>(null)
-  const [state, setState] = useState<'loading' | 'ok' | 'missing' | 'error'>('loading')
-  const [catalog, setCatalog] = useState<OnListRow[] | null>(null)
-  const [catalogError, setCatalogError] = useState<string | null>(null)
+/** The `/api/ons` body; shared with the explorer under the same key. */
+type Catalog = { rows: OnListRow[] }
+const CATALOG_KEY = 'ons:catalog'
 
-  const load = useCallback(async () => {
-    const r = await api<View>(`/api/test-portfolios/${id}`)
-    if (!r.ok) return setState(r.status === 404 || r.status === 400 ? 'missing' : 'error')
-    setView(r.data)
-    setState('ok')
-  }, [id])
-  const loadCatalog = useCallback(async () => {
-    setCatalogError(null)
-    const r = await api<{ rows: OnListRow[] }>('/api/ons')
-    if (r.ok) return setCatalog(r.data.rows)
-    setCatalogError(`No se pudo cargar el catálogo de ONs, así que por ahora no podés buscar una ON para agregar. ${r.status === 0 ? r.error : 'Probá de nuevo en un momento.'}`)
-  }, [])
-  useEffect(() => { void load(); void loadCatalog() }, [load, loadCatalog])
+export default function PortfolioBuilder({ id }: { id: string }) {
+  // A portfolio seen before in this tab shows at once and refreshes behind (odd/tasks/rendimiento.md S9).
+  const portfolio = useCached(`ons:test-portfolio:${id}`, () => apiData<View>(`/api/test-portfolios/${id}`))
+  const catalogQuery = useCached(CATALOG_KEY, () => apiData<Catalog>('/api/ons'))
+  const view = portfolio.data
+  const catalog = catalogQuery.data?.rows ?? null
+  const failure = catalogQuery.data ? null : catalogQuery.error
+  const catalogError = failure
+    ? `No se pudo cargar el catálogo de ONs, así que por ahora no podés buscar una ON para agregar. ${failure instanceof ApiFailure && failure.status === 0 ? failure.message : 'Probá de nuevo en un momento.'}`
+    : null
+  // A change answers with the view (one round trip); without it, ask for the view again.
+  const changed: Changed = (next) => (next ? portfolio.mutate(next) : portfolio.reload())
 
   const byIsin = useMemo(() => new Map((catalog ?? []).map((r) => [r.isin, r])), [catalog])
 
-  if (state === 'loading') return <Loading label="Cargando cartera" />
-  if (state === 'missing') {
+  const missing = portfolio.error instanceof ApiFailure && (portfolio.error.status === 404 || portfolio.error.status === 400)
+  if (missing) {
     return (
       <div className="grid justify-items-start gap-3 py-8" role="alert">
         <p className="text-ink-2">No encontramos esa cartera. Puede que la hayas eliminado.</p>
@@ -303,13 +304,13 @@ export default function PortfolioBuilder({ id }: { id: string }) {
       </div>
     )
   }
-  if (state === 'error' || !view) return <LoadError message="No se pudo cargar la cartera." onRetry={() => { setState('loading'); void load() }} />
+  if (!view) return portfolio.error ? <LoadError message="No se pudo cargar la cartera." onRetry={portfolio.reload} /> : <Loading label="Cargando cartera" />
 
   // An empty portfolio starts with the add form; the fixed child order keeps the form's state when the first ON lands.
   const empty = view.items.length === 0
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-10">
-      <Title portfolio={view.portfolio} onRenamed={load} />
+      <Title portfolio={view.portfolio} onRenamed={(name) => portfolio.mutate({ ...view, portfolio: { ...view.portfolio, name } })} />
 
       {(view.stale || !view.prices.ok) && (
         <div className="-mt-6 grid gap-2">
@@ -323,12 +324,12 @@ export default function PortfolioBuilder({ id }: { id: string }) {
         <section aria-labelledby="pf-items">
           <SectionHead id="pf-items" title="ONs de la cartera" count={view.items.length} />
           <ul aria-label="ONs de la cartera">
-            {view.items.map((i) => <ItemRow key={i.id} item={i} row={byIsin.get(i.isin)} view={view} onChanged={load} />)}
+            {view.items.map((i) => <ItemRow key={i.id} item={i} row={byIsin.get(i.isin)} view={view} onChanged={changed} />)}
           </ul>
         </section>
       )}
-      <AddItemForm portfolioId={id} catalog={catalog} catalogError={catalogError} onRetryCatalog={() => void loadCatalog()}
-        taken={new Set(view.items.map((i) => i.isin))} count={view.items.length} limit={view.limits.items} first={empty} onAdded={load} />
+      <AddItemForm portfolioId={id} catalog={catalog} catalogError={catalogError} onRetryCatalog={catalogQuery.reload}
+        taken={new Set(view.items.map((i) => i.isin))} count={view.items.length} limit={view.limits.items} first={empty} onAdded={changed} />
       {!empty && !view.analysis.empty && <PortfolioDetails analysis={view.analysis} />}
 
       <div className="grid gap-4">

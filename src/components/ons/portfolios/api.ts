@@ -23,3 +23,17 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
     return { ok: false, status: 0, error: 'No se pudo conectar. Revisá tu conexión y reintentá.' }
   }
 }
+
+/** A failed request, thrown by `apiData`: its status and its Spanish message. */
+export class ApiFailure extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message)
+  }
+}
+
+/** `api` for useCached (odd/tasks/rendimiento.md S9): the data, or a thrown ApiFailure, so a failure is never remembered. */
+export async function apiData<T>(path: string): Promise<T> {
+  const r = await api<T>(path)
+  if (!r.ok) throw new ApiFailure(r.status, r.error)
+  return r.data
+}

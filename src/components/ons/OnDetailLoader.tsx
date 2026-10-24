@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCached } from '@/lib/client-cache'
 import OnDetail from './OnDetail'
 import OnNotFound from './OnNotFound'
 import type { OnAnalysis } from '@/lib/on-analytics'
@@ -15,27 +15,19 @@ interface DetailResponse {
   prices: { ok: boolean; fetchedAt: string | null }
 }
 
-type State = { kind: 'loading' } | { kind: 'error' } | { kind: 'missing' } | { kind: 'ok'; data: DetailResponse }
+const MISSING = 'missing'
 
 export default function OnDetailLoader({ isin }: { isin: string }) {
-  const [state, setState] = useState<State>({ kind: 'loading' })
+  // An ON seen before in this tab shows at once and refreshes behind (odd/tasks/rendimiento.md S9).
+  const { data, error, reload } = useCached(`ons:detail:${isin}`, async (): Promise<DetailResponse> => {
+    const res = await fetch(`/api/ons/${encodeURIComponent(isin)}`)
+    if (res.status === 404 || res.status === 400) throw new Error(MISSING)
+    if (!res.ok) throw new Error(String(res.status))
+    return res.json()
+  })
 
-  const load = useCallback(async () => {
-    setState({ kind: 'loading' })
-    try {
-      const res = await fetch(`/api/ons/${encodeURIComponent(isin)}`)
-      if (res.status === 404 || res.status === 400) return setState({ kind: 'missing' })
-      if (!res.ok) throw new Error(String(res.status))
-      setState({ kind: 'ok', data: await res.json() })
-    } catch {
-      setState({ kind: 'error' })
-    }
-  }, [isin])
-  useEffect(() => { void load() }, [load])
-
-  if (state.kind === 'missing') return <OnNotFound />
-  if (state.kind === 'error') return <LoadError message="No se pudo cargar la ON." onRetry={() => void load()} />
-  if (state.kind === 'loading') return <Loading label="Cargando ON" />
-  const { analysis, history, asOf, stale, prices } = state.data
+  if (error instanceof Error && error.message === MISSING) return <OnNotFound />
+  if (!data) return error ? <LoadError message="No se pudo cargar la ON." onRetry={reload} /> : <Loading label="Cargando ON" />
+  const { analysis, history, asOf, stale, prices } = data
   return <OnDetail analysis={analysis} history={history} asOf={asOf} stale={stale} prices={prices} />
 }
