@@ -19,21 +19,28 @@ export function setCachedValue<T>(key: string, value: T): void {
   store.set(key, value)
 }
 
-/** Forgets the remembered responses whose key starts with `prefix` (all of them without one). */
+/**
+ * Forgets the remembered responses whose key starts with `prefix` (all of them without one), and
+ * the requests still in flight for them: a late answer is dropped, the next load asks again.
+ */
 export function forgetCached(prefix = ''): void {
   for (const key of [...store.keys()]) if (key.startsWith(prefix)) store.delete(key)
+  for (const key of [...inflight.keys()]) if (key.startsWith(prefix)) inflight.delete(key)
 }
 
 /** One request per key at a time; a successful result is remembered, a failure is not. */
 export function load<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
   const running = inflight.get(key)
   if (running) return running as Promise<T>
-  const request = fetcher()
+  // Only the request still registered for its key may answer it: a forgotten one is dropped.
+  const request: Promise<T> = fetcher()
     .then((value) => {
-      store.set(key, value)
+      if (inflight.get(key) === request) store.set(key, value)
       return value
     })
-    .finally(() => inflight.delete(key))
+    .finally(() => {
+      if (inflight.get(key) === request) inflight.delete(key)
+    })
   inflight.set(key, request)
   return request
 }

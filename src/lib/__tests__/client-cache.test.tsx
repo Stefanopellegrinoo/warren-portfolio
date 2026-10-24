@@ -21,6 +21,20 @@ describe('load', () => {
     expect(cachedValue('k')).toEqual({ n: 1 })
   })
 
+  it('forgetting drops a request in flight: its late answer is not remembered and the next load asks again', async () => {
+    let resolve!: (v: string) => void
+    const first = load('k', () => new Promise<string>(r => { resolve = r }))
+    forgetCached()
+    const fetcher = vi.fn(async () => 'second')
+
+    await expect(load('k', fetcher)).resolves.toBe('second')
+    resolve('late')
+    await first
+
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    expect(cachedValue('k')).toBe('second')
+  })
+
   it('a failed request is not remembered and the next call asks again', async () => {
     const fetcher = vi.fn().mockRejectedValueOnce(new Error('down')).mockResolvedValueOnce('ok')
 
