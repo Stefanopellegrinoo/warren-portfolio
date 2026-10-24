@@ -7,14 +7,16 @@ import { buttonVariants } from '@/components/ui/button'
 /**
  * A destructive action that asks next to its button instead of a native confirm():
  * the question, a specific confirm label and Cancelar, which takes the focus.
+ * `className` places the question, e.g. on its own line in a narrow grid row.
  */
-export function InlineConfirm({ question, confirmLabel, onConfirm, busy = false, triggerLabel, triggerClassName, children }: {
+export function InlineConfirm({ question, confirmLabel, onConfirm, busy = false, triggerLabel, triggerClassName, className, children }: {
   question: string
   confirmLabel: string
   onConfirm: () => void
   busy?: boolean
   triggerLabel?: string
   triggerClassName?: string
+  className?: string
   children: React.ReactNode
 }) {
   const [asking, setAsking] = useState(false)
@@ -28,7 +30,7 @@ export function InlineConfirm({ question, confirmLabel, onConfirm, busy = false,
     )
   }
   return (
-    <span role="group" aria-label={question} className="inline-flex flex-wrap items-center gap-2"
+    <span role="group" aria-label={question} className={cn('inline-flex flex-wrap items-center gap-2', className)}
       onKeyDown={(e) => { if (e.key === 'Escape') setAsking(false) }}>
       <span className="text-[13px] font-medium text-danger">{question}</span>
       <button type="button" className={cn(buttonVariants({ variant: 'destructive', size: 'sm' }))}

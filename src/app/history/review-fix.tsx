@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { requestErrorMessage } from '@/lib/request-errors'
 import { formatDate } from '@/lib/utils'
 import type { Transaction } from '@/types'
 import type { TradeCurrency } from '@/lib/trade-record'
@@ -43,7 +44,7 @@ export function ReviewFix({ tx, view, onSaved, onCancel }: { tx: Transaction; vi
       }
       onSaved()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo guardar la corrección')
+      setError(requestErrorMessage(err, 'No se pudo guardar la corrección'))
     } finally {
       setSaving(false)
     }

@@ -1,6 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback, Fragment } from 'react'
+import { toast } from 'sonner'
+import { requestErrorMessage } from '@/lib/request-errors'
+import { InlineConfirm } from '@/components/ui/InlineConfirm'
 import { Trash2 } from 'lucide-react'
 import { formatDate, formatNumber, formatPct, formatUSD } from '@/lib/utils'
 import type { ClosedTrade, Transaction } from '@/types'
@@ -114,6 +117,8 @@ const field = 'min-h-9 w-64 rounded-md border border-line-strong bg-surface px-3
 const TABLE_ONLY = 'max-[1079px]:hidden'
 const LIST_ONLY = 'min-[1080px]:hidden'
 
+const DELETE_QUESTION = '¿Estás seguro que querés borrar esta operación? Esto recalculará toda la posición desde cero.'
+
 export default function HistoryPage() {
   const [activeTab, setActiveTab] = useState<'closed' | 'all'>('closed')
 
@@ -170,6 +175,7 @@ export default function HistoryPage() {
 
   async function handleFixed() {
     setFixingId(null)
+    toast.success('Corrección guardada')
     await fetchAllTransactions()
     window.dispatchEvent(new CustomEvent('portfolio-needs-refresh'))
   }
@@ -177,19 +183,21 @@ export default function HistoryPage() {
   const fixOf = (t: Transaction) => (t.cedear_ratio ? () => setFixingId(id => (id === t.id ? null : t.id)) : undefined)
 
   async function handleDelete(t: Transaction) {
-    if (!confirm('¿Estás seguro que querés borrar esta operación? Esto recalculará toda la posición desde cero.')) return
-
     setDeletingId(t.id)
     setDeleteError(null)
     try {
       const res = await fetch(`/api/transactions/${t.id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error('Error deleting transaction')
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        throw new Error(body?.error || 'No se pudo borrar la operación.')
+      }
+      toast.success('Operación borrada')
       await (activeTab === 'closed' ? fetchClosedTrades() : fetchAllTransactions())
       setTimeout(() => {
         if (window.location.pathname === '/history') window.dispatchEvent(new CustomEvent('portfolio-needs-refresh'))
       }, 500)
-    } catch {
-      setDeleteError('Hubo un error al intentar borrar la operación.')
+    } catch (err) {
+      setDeleteError(requestErrorMessage(err, 'No se pudo borrar la operación.'))
     } finally {
       setDeletingId(null)
     }
@@ -365,16 +373,17 @@ export default function HistoryPage() {
                         <td className="py-2 pr-3 text-right text-ink-2">{t.commission ? formatNumber(t.commission) : '—'}</td>
                         <td className="whitespace-nowrap py-2 pr-3 text-ink-3">{new Date(t.created_at).toLocaleDateString('es-AR')}</td>
                         <td className="py-2 text-right">
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(t)}
-                            disabled={deletingId === t.id}
-                            aria-label={`Borrar operación de ${symbolOf(t.ticker)} del ${formatDate(t.date)}`}
-                            title="Borrar operación"
-                            className="grid h-8 w-8 place-items-center rounded-md text-ink-3 hover:bg-hover hover:text-danger disabled:opacity-50"
+                          <InlineConfirm
+                            question={DELETE_QUESTION}
+                            confirmLabel="Sí, borrar"
+                            onConfirm={() => void handleDelete(t)}
+                            busy={deletingId === t.id}
+                            triggerLabel={`Borrar operación de ${symbolOf(t.ticker)} del ${formatDate(t.date)}`}
+                            triggerClassName="grid h-8 w-8 place-items-center rounded-md text-ink-3 hover:bg-hover hover:text-danger disabled:opacity-50"
+                            className="max-w-sm justify-end text-left"
                           >
                             <Trash2 className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
-                          </button>
+                          </InlineConfirm>
                         </td>
                       </tr>
                       {fixingId === t.id && (
@@ -402,15 +411,17 @@ export default function HistoryPage() {
                       <span className="block truncate text-[13px] text-ink-3 tabular-nums">{OPERATION_LABELS[t.operation] ?? t.operation} a {formatNumber(t.price)}</span>
                     </span>
                     <span className="font-medium tabular-nums">{qty(t.quantity, true)}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(t)}
-                      disabled={deletingId === t.id}
-                      aria-label={`Borrar operación de ${symbolOf(t.ticker)} del ${formatDate(t.date)}`}
-                      className="grid h-11 w-11 place-items-center rounded-md text-ink-3 hover:bg-hover hover:text-danger disabled:opacity-50"
+                    <InlineConfirm
+                      question={DELETE_QUESTION}
+                      confirmLabel="Sí, borrar"
+                      onConfirm={() => void handleDelete(t)}
+                      busy={deletingId === t.id}
+                      triggerLabel={`Borrar operación de ${symbolOf(t.ticker)} del ${formatDate(t.date)}`}
+                      triggerClassName="grid h-11 w-11 place-items-center rounded-md text-ink-3 hover:bg-hover hover:text-danger disabled:opacity-50"
+                      className="col-span-full justify-end"
                     >
                       <Trash2 className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
-                    </button>
+                    </InlineConfirm>
                   </li>
                   {fixingId === t.id && (
                     <li className="border-b border-line py-3">
