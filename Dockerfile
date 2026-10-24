@@ -7,6 +7,8 @@ WORKDIR /app
 
 # Install dependencies based on the preferred package manager
 COPY package.json package-lock.json* .npmrc* ./
+# postinstall patches the drawing library for touch (scripts/patch-drawing-lib.mjs)
+COPY scripts/patch-drawing-lib.mjs ./scripts/
 RUN npm ci
 
 # Rebuild the source code only when needed
