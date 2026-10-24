@@ -21,6 +21,8 @@ const CONCURRENCY = 5
 
 interface Entry {
   fetchedOn: string
+  /** Epoch ms of the fetch; absent in entries written before it existed. */
+  fetchedAt?: number
   /** First day the fetched window covers. */
   from: string
   bars: [string, number][]
@@ -45,6 +47,8 @@ export interface BarsDeps {
   today?: string
   /** Skip Redis entirely (read-only scripts must not share or pollute the production cache). */
   memoryOnly?: boolean
+  /** A same-day entry is fresh only this long after its fetch (today's bar still moves); default: all day. */
+  maxAgeSec?: number
 }
 
 // ponytail: never evicted (one entry per distinct symbol, ~1500 bars each) and no singleflight, so
@@ -96,12 +100,14 @@ async function getOne(symbol: string, from: Date, deps: BarsDeps): Promise<BarsR
     stored = null
   }
   // splitsKnown=false (historical() fallback) is never fresh: chart() gets another try next request.
-  if (stored && stored.splitsKnown && stored.fetchedOn === today && stored.from <= fromDay) return toResult(stored, false)
+  const young = deps.maxAgeSec === undefined || Date.now() - (stored?.fetchedAt ?? 0) < deps.maxAgeSec * 1000
+  if (stored && stored.splitsKnown && stored.fetchedOn === today && stored.from <= fromDay && young) return toResult(stored, false)
 
   try {
     const chart = await (deps.fetchChart ?? fetchDailyChart)(symbol, from, new Date(`${today}T23:59:59Z`))
     const entry: Entry = {
       fetchedOn: today,
+      fetchedAt: Date.now(),
       from: fromDay,
       bars: chart.bars.map(b => [b.date, b.close]),
       splits: chart.splits.map(s => [s.date, s.numerator, s.denominator]),

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { fetchONQuotes } from '@/lib/data912-client'
+import { fetchONQuotesWithFallback } from '@/lib/data912-client'
 import { getCachedRoute, cacheRoute } from '@/lib/redis'
 import { normalizeError } from '@/lib/errors'
 import { serverError } from '@/lib/api/errors'
@@ -31,10 +31,19 @@ export async function GET() {
       return NextResponse.json(cachedStats)
     }
 
-    // 1. ON positions and realized sales from the ledger core (never the stored tables)
-    const portfolio = await getFullPortfolio(supabase, user.id)
+    // The ledger core's ON positions and sales (never the stored tables), the derived series
+    // (ledger core + market data) and the declared flows do not depend on each other.
+    const declaredFlows = Promise.all([fetchFlowTransactions(supabase, user.id), fetchIncomeMovements(supabase, user.id)])
+      .catch((err: unknown) => normalizeError(err))
+    const [portfolio, derived, declared] = await Promise.all([
+      getFullPortfolio(supabase, user.id),
+      getDerivedSeries(supabase, user.id),
+      declaredFlows,
+    ])
+
+    // 1. ON positions and realized sales; quotes Redis-first, data912 only for what is missing
     const positions = portfolio.onPositions
-    const quotes = await fetchONQuotes(positions.map(p => p.ticker))
+    const quotes = await fetchONQuotesWithFallback(positions.map(p => p.ticker))
     const closed = portfolio.onClosedTrades
     const realizedPnl = closed.reduce((sum, t) => sum + t.pnl, 0)
 
@@ -98,19 +107,11 @@ export async function GET() {
     const usdExposure = totalPortfolioValue
     const arsExposure = 0
 
-    // The derived series (ledger core + market data) and the core's automatic ON payments:
-    // coupons as CUPON income, amortizations as ON sales.
-    const derived = await getDerivedSeries(supabase, user.id)
+    // The core's automatic ON payments: coupons as CUPON income, amortizations as ON sales.
+    if (declared instanceof Error) return serverError('Statistics ONs', declared)
     const automatic = ledgerFlows(derived.income)
-
-    let txRows
-    let income
-    try {
-      txRows = [...(await fetchFlowTransactions(supabase, user.id)), ...automatic.transactions]
-      income = [...(await fetchIncomeMovements(supabase, user.id)), ...automatic.income]
-    } catch (txErr) {
-      return serverError('Statistics ONs', normalizeError(txErr))
-    }
+    const txRows = [...declared[0], ...automatic.transactions]
+    const income = [...declared[1], ...automatic.income]
 
     // External flows are irrelevant to the ons universe (universeFlows routes
     // ON buys/sells from transactions); pass none. Income (coupons/dividends)

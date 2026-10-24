@@ -155,7 +155,7 @@ export function stripKeyPrefix(key: string): string {
  * Clears history:v3:{userId}:*, statistics:v4:{userId}:* and lots:def:{userId}:*
  * (SCAN+DEL), plus the exact-match keys statistics:combined:{userId},
  * statistics:ons:v3:{userId}, summary:{userId} and derived:v1:{userId}. Also bumps
- * summary:version:{userId} so the worker can detect stale writes.
+ * summary:version:{userId} so the summary writers (worker, /api/positions) and the derived series detect stale writes.
  */
 export async function invalidateUserCache(userId: string): Promise<void> {
   if (!isRedisReady()) return
@@ -196,7 +196,7 @@ export async function invalidateUserCache(userId: string): Promise<void> {
     keysToDelete.push(`summary:${userId}`)
     keysToDelete.push(`derived:v1:${userId}`)
 
-    // Bump summary version before deleting so the worker can detect stale writes
+    // Bump summary version before deleting so every summary and derived-series writer detects stale writes
     await redis.incr(`summary:version:${userId}`)
     await redis.expire(`summary:version:${userId}`, SUMMARY_VERSION_TTL)
 

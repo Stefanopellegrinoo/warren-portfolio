@@ -9,14 +9,22 @@ vi.mock('@/lib/api-auth', () => ({ requireUser: async () => { const r = await mo
 vi.mock('@/lib/redis', () => ({ getCachedRoute: async () => null, cacheRoute: async () => {} }))
 const mockStockQuotes = vi.fn()
 vi.mock('@/lib/yahoo-finance', () => ({ fetchQuotes: (...a: unknown[]) => mockStockQuotes(...a) }))
-vi.mock('@/lib/data912-client', () => ({ fetchONQuotes: async () => new Map() }))
+const mockFullDownload = vi.fn(async () => { throw new Error('uncached data912 download') })
+const mockOnQuotes = vi.fn()
+vi.mock('@/lib/data912-client', () => ({
+  fetchONQuotes: (...a: unknown[]) => mockFullDownload(...(a as [])),
+  fetchONQuotesWithFallback: (...a: unknown[]) => mockOnQuotes(...a),
+}))
 
 const { GET } = await import('../route')
 const { ledgerSupabase, trade, movement } = await import('@/lib/__tests__/fixtures/ledger-supabase')
 
 const quote = (ticker: string, price: number) => ({ ticker, price, change: 0, changePercent: 0, previousClose: price })
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => {
+  vi.clearAllMocks()
+  mockOnQuotes.mockResolvedValue(new Map())
+})
 
 describe('GET /api/statistics/combined', () => {
   it('composes stocks, ONs and cash from the ledger core; a missing quote is valued, never 0', async () => {
@@ -45,5 +53,25 @@ describe('GET /api/statistics/combined', () => {
     expect(body.ons.openPnl).toBeCloseTo(30)
     expect(body.totalValue).toBe(1250 + 980 + 300)
     expect(body.composition.map((c: any) => c.name)).toEqual(['Acciones', 'ONs', 'Efectivo'])
+  })
+
+  it('values ONs with the Redis-first quotes, never the full data912 download, asked together with the stock quotes', async () => {
+    mockRequireUser.mockResolvedValue({
+      supabase: ledgerSupabase({ transactions: [trade(), trade({ ticker: 'ONA', asset_type: 'ON', quantity: 10, price: 95 })] }),
+      user: { id: 'u1' },
+    })
+    let answerStocks!: (m: Map<string, unknown>) => void
+    mockStockQuotes.mockReturnValue(new Promise(r => { answerStocks = r }))
+    mockOnQuotes.mockResolvedValue(new Map([['ONA', quote('ONA', 99)]]))
+
+    const pending = GET({} as never)
+    // The stock quotes have not answered yet and the ON quotes are already asked for.
+    await vi.waitFor(() => expect(mockOnQuotes).toHaveBeenCalledWith(['ONA']))
+    answerStocks(new Map([['AAPL', quote('AAPL', 150)]]))
+    const body = await (await pending).json()
+
+    expect(mockFullDownload).not.toHaveBeenCalled()
+    expect(body.ons).toMatchObject({ value: 990, positionCount: 1 })
+    expect(body.stocks.value).toBe(1500)
   })
 })

@@ -56,31 +56,35 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(cachedStats)
     }
 
-    // 1. The derived series (ledger core + market data) for drawdown and historical analysis
-    const derived = await getDerivedSeries(supabase, user.id)
+    // The derived series (ledger core + market data) for drawdown and historical analysis; the
+    // net external cash flows, to keep deposits and withdrawals out of the drawdown (`total_value`
+    // includes cash, so without them a withdrawal reads as a loss and a deposit inflates the
+    // peak); and the positions and closed trades from the ledger core (never the stored tables).
+    // External flows and income both come from cash-flows.ts, which documents why they are two queries.
+    //
+    // Every universe except `total` has a boundary a trade or an income payment can cross:
+    // stocks and ons see their own trades and payments. Only `total` contains every class, so
+    // only `total` can skip these fetches. None of these reads depends on another.
+    const declaredFlows = universe === 'total'
+      ? null
+      : Promise.all([fetchFlowTransactions(supabase, user.id), fetchIncomeMovements(supabase, user.id)])
+          .catch((err: unknown) => normalizeError(err))
+    const [derived, externalFlows, portfolio, declared] = await Promise.all([
+      getDerivedSeries(supabase, user.id),
+      fetchExternalFlows(supabase, user.id),
+      getFullPortfolio(supabase, user.id),
+      declaredFlows,
+    ])
+    if (declared instanceof Error) return serverError('Statistics', declared)
+
     const rows = derived.rows
     // The core's automatic ON payments: coupons as CUPON income, amortizations as ON sales.
     const automatic = ledgerFlows(derived.income)
-
-    // 1b. Net external cash flows, to keep deposits and withdrawals out of the
-    // drawdown. `total_value` includes cash, so without this a
-    // withdrawal reads as a loss and a deposit inflates the peak.
-    //
-    // External flows and income both come from cash-flows.ts, which documents why they are two queries.
-    const externalFlows = await fetchExternalFlows(supabase, user.id)
-
-    // Every universe except `total` has a boundary a trade or an income
-    // payment can cross: stocks and ons see their own trades and payments.
-    // Only `total` contains every class, so only `total` can skip these fetches.
     let flowTransactions: FlowTransaction[] = []
     let income: IncomeMovement[] = []
-    if (universe !== 'total') {
-      try {
-        flowTransactions = [...(await fetchFlowTransactions(supabase, user.id)), ...automatic.transactions]
-        income = [...(await fetchIncomeMovements(supabase, user.id)), ...automatic.income]
-      } catch (err) {
-        return serverError('Statistics', normalizeError(err))
-      }
+    if (declared) {
+      flowTransactions = [...declared[0], ...automatic.transactions]
+      income = [...declared[1], ...automatic.income]
     }
 
     const risk = computeUniverseRiskMetrics(
@@ -90,27 +94,27 @@ export async function GET(req: NextRequest) {
     )
 
     // Benchmark comparison is best-effort: a Yahoo failure costs this field,
-    // never the rest of the page.
-    let benchmark: BenchmarkComparison | null = null
-    let benchmarkError = false
-    if (benchmarkId) {
+    // never the rest of the page. It runs together with the quotes.
+    const compareBenchmark = async (): Promise<{ benchmark: BenchmarkComparison | null; benchmarkError: boolean }> => {
+      if (!benchmarkId) return { benchmark: null, benchmarkError: false }
       try {
         const { series } = computeUniverseTwr(rows, universe, {
           externalFlows,
           transactions: flowTransactions,
           income,
         })
-        benchmark = await fetchBenchmarkComparison(benchmarkId, series)
+        return { benchmark: await fetchBenchmarkComparison(benchmarkId, series), benchmarkError: false }
       } catch (err) {
         console.error('[Statistics] benchmark failed:', normalizeError(err).message)
-        benchmarkError = true
+        return { benchmark: null, benchmarkError: true }
       }
     }
 
-    // 2. Positions and closed trades from the ledger core (never the stored tables)
-    const portfolio = await getFullPortfolio(supabase, user.id)
     const positions = portfolio.stockPositions
-    const quotes = await fetchQuotes(positions.map(p => p.ticker))
+    const [{ benchmark, benchmarkError }, quotes] = await Promise.all([
+      compareBenchmark(),
+      fetchQuotes(positions.map(p => p.ticker)),
+    ])
 
     // 3. Realized sales, in close-date order
     const closed = portfolio.stockClosedTrades

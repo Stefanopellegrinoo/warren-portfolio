@@ -3,6 +3,7 @@ import { loadUserPortfolios } from './user-portfolios'
 import { getRedis, SUMMARY_CACHE_TTL } from './redis'
 import { createServiceClient } from './supabase-server'
 import { currencyViewsFor, loadCurrencyContext } from './currency-views'
+import type { CurrencyViews } from './multicurrency'
 import { loadLastCloses } from './ledger-now'
 
 /**
@@ -55,11 +56,20 @@ export async function setSummaryIfVersion(
   )
 
   if (result === 0 || result === '0') {
-    console.log(`[Worker] Discarded stale summary write for ${userId} (version changed)`)
+    console.log(`[Summary] Discarded stale summary write for ${userId} (version changed)`)
     return false
   }
 
   return true
+}
+
+/** The cached summary `summary:{userId}`, one format for the worker and /api/positions. */
+export function summaryPayload(
+  valued: Pick<ReturnType<typeof valuePortfolio>, 'positions' | 'onPositions' | 'summary' | 'unpricedCount' | 'unpricedTickers'>,
+  currencies?: CurrencyViews
+): string {
+  const { positions, onPositions, summary, unpricedCount, unpricedTickers } = valued
+  return JSON.stringify({ positions, onPositions, summary, unpricedCount, unpricedTickers, ...(currencies && { currencies }) })
 }
 
 /**
@@ -104,7 +114,7 @@ export async function cacheUserSummaries(
     // Read version at the start of the per-user computation
     const startVersion = await redis.get(`summary:version:${userId}`)
 
-    const { positions: enriched, onPositions: enrichedONs, summary, unpricedCount, unpricedTickers } = valuePortfolio(
+    const valued = valuePortfolio(
       {
         positions: portfolio.positions,
         onPositions: portfolio.onPositions,
@@ -117,12 +127,11 @@ export async function cacheUserSummaries(
     )
 
     const currencies = currencyCtx
-      ? await currencyViewsFor(supabase, userId, currencyCtx, { positions: enriched, onPositions: enrichedONs, cashBalance: portfolio.cashBalance })
+      ? await currencyViewsFor(supabase, userId, currencyCtx, { positions: valued.positions, onPositions: valued.onPositions, cashBalance: portfolio.cashBalance })
           .catch(err => { console.error(`[Worker] currency views failed for ${userId}:`, err); return undefined })
       : undefined
 
-    const payload = JSON.stringify({ positions: enriched, onPositions: enrichedONs, summary, unpricedCount, unpricedTickers, ...(currencies && { currencies }) })
-    await setSummaryIfVersion(userId, payload, startVersion)
+    await setSummaryIfVersion(userId, summaryPayload(valued, currencies), startVersion)
   }
 
   console.log(`[Worker] Cached summaries for ${portfolios.length} users (stocks + ONs + cash).`)
