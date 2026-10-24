@@ -11,6 +11,7 @@ import type { PostTransactionResult } from '@/lib/api/post-transaction'
 import type { ResolveResult } from '@/lib/ticker-identity'
 import { fmtNum } from '@/lib/on-format'
 import { deriveCedearEngineValues, type TradeCurrency } from '@/lib/trade-record'
+import { requestErrorMessage } from '@/lib/request-errors'
 
 export type PendingConfirmation = {
   resolution: ResolveResult
@@ -744,7 +745,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
     try {
       await submitGated(buildAccionPayload())
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error desconocido')
+      setError(requestErrorMessage(err, 'No se pudo guardar la operación. Probá de nuevo.'))
     } finally {
       setLoading(false)
     }
@@ -763,7 +764,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
     try {
       await submitGated(buildCedearPayload())
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error desconocido')
+      setError(requestErrorMessage(err, 'No se pudo guardar la operación. Probá de nuevo.'))
     } finally {
       setLoading(false)
     }
@@ -789,7 +790,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
       }
       finish()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error desconocido')
+      setError(requestErrorMessage(err, 'No se pudo guardar la operación. Probá de nuevo.'))
     } finally {
       setLoading(false)
     }
@@ -813,7 +814,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
       }
       finish()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error desconocido')
+      setError(requestErrorMessage(err, 'No se pudo guardar la operación. Probá de nuevo.'))
     } finally {
       setLoading(false)
     }

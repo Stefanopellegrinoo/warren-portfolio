@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
     if (!query || query.length < 2) {
       return NextResponse.json({ 
         results: [],
-        message: 'Query must be at least 2 characters'
+        message: 'Escribí al menos 2 letras para buscar'
       })
     }
 

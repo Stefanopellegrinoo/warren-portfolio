@@ -187,6 +187,19 @@ describe('AddTransactionModal — says what was saved', () => {
     expect(el.querySelector('[role="alert"]')?.textContent).toBe('El monto supera tu saldo')
     unmount()
   })
+
+  // odd/tasks/ux-paginas.md S1: a save that never reached the server says so in Spanish.
+  it('a save without connection says so, never "Failed to fetch"', async () => {
+    const { el, onClose, submit, unmount } = await open({
+      option: 'Caja en dólares',
+      overrides: { '/api/cash': () => { throw new TypeError('Failed to fetch') } },
+    })
+    setValue(byId(el, 'tx-amount'), '10')
+    await submit()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(el.querySelector('[role="alert"]')?.textContent).toBe('No hay conexión. Revisá tu internet y probá de nuevo.')
+    unmount()
+  })
 })
 
 describe('AddTransactionModal — request bodies stay byte-for-byte the same', () => {
