@@ -6,6 +6,9 @@ import type { DrawingManager } from "lightweight-charts-drawing";
 import { fromLegacyDrawings, type LegacyDrawing } from "@/lib/chart/legacy-drawings";
 
 const SAVE_DELAY_MS = 600;
+// Browsers cap keepalive requests at 64 KB in flight, all together: only the save on the
+// way out uses it, and a bigger set (long brush strokes) goes as a plain request.
+const KEEPALIVE_MAX_BYTES = 60_000;
 
 async function loadDrawings(symbol: string): Promise<{ json: string; fromLegacy: boolean }> {
 	const res = await fetch(`/api/chart-drawings?ticker=${encodeURIComponent(symbol)}`);
@@ -36,13 +39,15 @@ export function useDrawings(manager: DrawingManager | null, symbol: string) {
 		setStatus("loading");
 		manager.clear();
 
-		const save = async () => {
+		const save = async (leaving = false) => {
 			const body = JSON.stringify({ ticker: symbol, drawings: JSON.parse(manager.exportJSON()) });
 			try {
 				const res = await fetch("/api/chart-drawings", {
 					method: "PUT",
 					headers: { "Content-Type": "application/json" },
 					body,
+					// The save outlives the page when the app is closed or sent to the background.
+					keepalive: leaving && new Blob([body]).size < KEEPALIVE_MAX_BYTES,
 				});
 				if (!res.ok) throw new Error(`Error ${res.status}`);
 			} catch {
@@ -58,6 +63,18 @@ export function useDrawings(manager: DrawingManager | null, symbol: string) {
 			}, SAVE_DELAY_MS);
 		};
 		const off = manager.on("change", schedule);
+		const flush = () => {
+			if (!timer) return;
+			clearTimeout(timer);
+			timer = null;
+			save(true);
+		};
+		// A PWA sent to the background may never come back: save now, not 600ms later.
+		const onVisibility = () => {
+			if (document.visibilityState === "hidden") flush();
+		};
+		document.addEventListener("visibilitychange", onVisibility);
+		window.addEventListener("pagehide", flush);
 
 		loadDrawings(symbol)
 			.then(({ json, fromLegacy }) => {
@@ -76,11 +93,10 @@ export function useDrawings(manager: DrawingManager | null, symbol: string) {
 		return () => {
 			cancelled = true;
 			off();
+			document.removeEventListener("visibilitychange", onVisibility);
+			window.removeEventListener("pagehide", flush);
 			// Flush a pending save for this ticker before the next one loads.
-			if (timer) {
-				clearTimeout(timer);
-				save();
-			}
+			flush();
 		};
 	}, [manager, symbol]);
 

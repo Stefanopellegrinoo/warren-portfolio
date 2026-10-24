@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
 	CandlestickSeries,
 	CrosshairMode,
@@ -21,7 +22,8 @@ import { DrawingManager, type Drawing } from "lightweight-charts-drawing";
 import { ChevronDown, Eye, EyeOff, Settings2, X } from "lucide-react";
 import { useChartStore, type IndicatorKey } from "@/lib/store/chart-store";
 import { INDICATOR_ORDER, INDICATOR_SPECS } from "@/lib/chart/indicator-specs";
-import { hitTestAlert, type ChartAlert } from "@/lib/chart/alerts";
+import { hitTestAlert, priceDecimals, type ChartAlert } from "@/lib/chart/alerts";
+import { touchDrawing } from "@/lib/chart/touch-drawing";
 import type { Candle, Timeframe } from "@/lib/binance/types";
 import { cn, formatNumber } from "@/lib/utils";
 import { useCandles } from "./useCandles";
@@ -29,14 +31,24 @@ import { useDrawings } from "./useDrawings";
 import { useChartAlerts } from "./useChartAlerts";
 import { useChartTheme, type ChartTheme } from "./useChartTheme";
 import { DrawingTools } from "./DrawingTools";
+import { DrawingActions } from "./DrawingActions";
 
 const TZ = "America/Argentina/Buenos_Aires";
 const INTRADAY: Timeframe[] = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h"];
 const VISIBLE_BARS = 160;
 const DRAG_THRESHOLD_PX = 3;
+// A finger covers more than a mouse pointer: the same sizes as the drawings (scripts/patch-drawing-lib.mjs).
+const TOUCH_HIT_PX = 14;
+const TOUCH_DRAG_PX = 8;
 const LEGEND_OPEN_MAX = 3;
+const TEXT_EDITOR_PX = 224;
+// The text editor stays inside the chart however narrow the screen or close to the edge the text is.
+const editorLeft = (x: number, width: number) => Math.max(8, Math.min(x, width - TEXT_EDITOR_PX - 8));
 
-const priceText = (p: number) => formatNumber(p, { decimals: Math.abs(p) < 1 ? 4 : 2 });
+const priceText = (p: number) => formatNumber(p, { decimals: priceDecimals(p) });
+// An alert keeps the precision the price axis shows: 0,1235 for a coin, not 0,12.
+const roundPrice = (p: number) => Number(p.toFixed(priceDecimals(p)));
+const PHONE = "(max-width: 819px)";
 const asTime = (t: number) => t as UTCTimestamp;
 const PRICE_FORMAT = { type: "custom" as const, formatter: priceText, minMove: 0.0001 };
 
@@ -91,6 +103,7 @@ function syncIndicators(
 	hidden: Record<IndicatorKey, boolean>,
 	config: Parameters<(typeof INDICATOR_SPECS)["ema20"]["lines"]>[1],
 	theme: ChartTheme,
+	phone: boolean,
 ) {
 	const signature = JSON.stringify([enabled, config, theme.ink3]);
 	if (built.signature !== signature) {
@@ -117,9 +130,11 @@ function syncIndicators(
 			);
 			return { key, series };
 		});
-		// The price pane keeps most of the height however many panes there are.
+		// The price pane keeps most of the height however many panes there are; on a phone,
+		// where height is scarce, at least two thirds of it.
 		const panes = chart.panes();
-		panes.forEach((p, i) => p.setStretchFactor(i === 0 ? Math.max(3, panes.length) : 1));
+		const price = phone ? Math.max(3, 2 * (panes.length - 1)) : Math.max(3, panes.length);
+		panes.forEach((p, i) => p.setStretchFactor(i === 0 ? price : 1));
 		built.signature = signature;
 	}
 	for (const { key, series } of built.list) {
@@ -158,7 +173,7 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 
 	// The indicator list starts folded on phones, or when it is long enough to cover the candles.
 	const legendLong = enabled.length > LEGEND_OPEN_MAX;
-	useEffect(() => setLegendOpen(!legendLong && !window.matchMedia("(max-width: 819px)").matches), [legendLong]);
+	useEffect(() => setLegendOpen(!legendLong && !window.matchMedia(PHONE).matches), [legendLong]);
 
 	const data = useCandles(symbol, timeframe);
 	const last = data.candles.at(-1) ?? null;
@@ -173,7 +188,28 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 		const chart = createChart(box, { autoSize: true });
 		const series = chart.addSeries(CandlestickSeries, { priceLineVisible: true, priceFormat: PRICE_FORMAT });
 		const drawings = new DrawingManager(chart, series, { magnet: "off" });
-		const offText = drawings.on("textEdit", (drawing, screen) => setTextEdit({ drawing, x: screen.x, y: screen.y }));
+		// A text drawing asks for its editor on the press that places it, but the chart blurs
+		// whatever has the focus when a press starts (its touchstart and mousedown come after
+		// that pointerdown). So the editor opens when the press ends: on touchend for a finger,
+		// where iOS still lets a field take the focus and raise the keyboard, and with no
+		// emulated mouse press after it to take the focus away again.
+		let pressing: string | null = null;
+		const onPress = (e: PointerEvent) => { pressing = e.pointerType; };
+		const onRelease = () => { pressing = null; };
+		box.addEventListener("pointerdown", onPress, true);
+		window.addEventListener("pointerup", onRelease, true);
+		const offText = drawings.on("textEdit", (drawing, screen) => {
+			const open = () => flushSync(() => setTextEdit({ drawing, x: editorLeft(screen.x, box.clientWidth), y: screen.y }));
+			if (pressing === "touch") {
+				// A cancelled touch opens it too, and takes the touchend listener with it.
+				const done = new AbortController();
+				const opts = { once: true, passive: false, signal: done.signal };
+				window.addEventListener("touchend", (e) => { e.preventDefault(); done.abort(); open(); }, opts);
+				window.addEventListener("touchcancel", () => { done.abort(); open(); }, opts);
+			} else if (pressing) window.addEventListener("pointerup", open, { once: true });
+			else open();
+		});
+		const offTouch = touchDrawing(drawings, chart.chartElement());
 		const onMove = (p: MouseEventParams) => setHover((p.seriesData.get(series) as Candle | undefined) ?? null);
 		chart.subscribeCrosshairMove(onMove);
 		chartRef.current = chart;
@@ -181,6 +217,9 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 		setManager(drawings);
 		return () => {
 			offText();
+			offTouch();
+			box.removeEventListener("pointerdown", onPress, true);
+			window.removeEventListener("pointerup", onRelease, true);
 			chart.unsubscribeCrosshairMove(onMove);
 			drawings.destroy();
 			chart.remove();
@@ -229,7 +268,7 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 	useEffect(() => {
 		const chart = chartRef.current;
 		if (!chart || !theme || data.status !== "ready") return;
-		syncIndicators(chart, indicatorsRef.current, data.candles, enabled, hidden, config, theme);
+		syncIndicators(chart, indicatorsRef.current, data.candles, enabled, hidden, config, theme, window.matchMedia(PHONE).matches);
 	}, [data.status, data.candles, enabled, hidden, config, theme, manager]);
 
 	// Alert lines.
@@ -267,11 +306,12 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 				const price = series.coordinateToPrice(y);
 				e.stopPropagation();
 				setAlertMode(false);
-				if (price !== null) create(Math.round(price * 100) / 100);
+				if (price !== null) create(roundPrice(price));
 				return;
 			}
 			if (manager?.tool()) return;
-			const id = hitTestAlert(alerts, y, (p) => series.priceToCoordinate(p));
+			const touch = e.pointerType === "touch";
+			const id = hitTestAlert(alerts, y, (p) => series.priceToCoordinate(p), touch ? TOUCH_HIT_PX : undefined);
 			if (!id) {
 				setSelectedAlert(null);
 				return;
@@ -285,11 +325,11 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 			chart.applyOptions({ handleScroll: false, handleScale: false });
 			const onMovePtr = (ev: PointerEvent) => {
 				const yy = ev.clientY - box.getBoundingClientRect().top;
-				if (!dragged && Math.abs(yy - y) < DRAG_THRESHOLD_PX) return;
+				if (!dragged && Math.abs(yy - y) < (touch ? TOUCH_DRAG_PX : DRAG_THRESHOLD_PX)) return;
 				dragged = true;
 				const p = series.coordinateToPrice(yy);
 				if (p === null) return;
-				price = Math.round(p * 100) / 100;
+				price = roundPrice(p);
 				line?.applyOptions({ price });
 			};
 			const onUp = async () => {
@@ -330,7 +370,9 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 		<div className="flex min-h-0 flex-1 max-[819px]:flex-col">
 			<DrawingTools manager={manager} alertMode={alertMode} onAlertMode={setAlertMode} />
 			<div className="relative min-h-0 min-w-0 flex-1">
-				<div ref={boxRef} className={cn("absolute inset-0", alertMode && "cursor-crosshair")} />
+				{/* touch-none: the chart pans and zooms itself; left to the browser, a finger drag on a
+				    drawing or an alert is taken over as a page scroll and cancelled halfway. */}
+				<div ref={boxRef} className={cn("absolute inset-0 touch-none", alertMode && "cursor-crosshair")} />
 
 				<div className="pointer-events-none absolute left-3 top-2 z-10 flex max-w-[calc(100%-5rem)] flex-col gap-1 text-[13px]">
 					<div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 tabular-nums">
@@ -374,8 +416,9 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 				</div>
 
 				{alertMode && (
-					<p role="status" className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded bg-ink px-3 py-1.5 text-[13px] text-canvas shadow-[var(--shadow-toast)]">
-						Tocá el gráfico en el precio de la alerta · Esc para cancelar
+					// A phone says it, with Cancelar, in its drawing bar; there is no Esc there.
+					<p role="status" className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded bg-ink px-3 py-1.5 text-[13px] text-canvas shadow-[var(--shadow-toast)] max-[819px]:hidden">
+						Tocá el gráfico en el precio de la alerta<span className="[@media(pointer:coarse)]:hidden"> · Esc para cancelar</span>
 					</p>
 				)}
 
@@ -384,11 +427,13 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 						role="dialog"
 						aria-label={selected.name}
 						className="absolute right-20 z-20 flex items-center gap-2 rounded border border-line bg-surface px-3 py-2 text-[13px] shadow-[var(--shadow-pop)] max-[819px]:left-3 max-[819px]:right-auto"
-						style={{ top: Math.max(8, selectedAlert.y - 48) }}
+						// Above the line and clear of it (the panel is up to ~62px with a wrapped
+						// name), so the line can still be dragged; below it near the top.
+						style={{ top: selectedAlert.y > 80 ? selectedAlert.y - 72 : selectedAlert.y + 16 }}
 					>
 						<span className="text-ink">{selected.name}</span>
 						{selected.status === "triggered" && (
-							<button type="button" onClick={() => rearm(selected.id)} className="rounded px-2 py-1 text-accent-ink hover:bg-accent-soft">
+							<button type="button" onClick={() => rearm(selected.id)} className="rounded px-2 py-1 text-accent-ink hover:bg-accent-soft max-[819px]:min-h-11 max-[819px]:px-3">
 								Reactivar
 							</button>
 						)}
@@ -398,22 +443,24 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 								remove(selected.id);
 								setSelectedAlert(null);
 							}}
-							className="rounded px-2 py-1 text-danger hover:bg-danger-soft"
+							className="rounded px-2 py-1 text-danger hover:bg-danger-soft max-[819px]:min-h-11 max-[819px]:px-3"
 						>
 							Eliminar
 						</button>
-						<button type="button" aria-label="Cerrar" onClick={() => setSelectedAlert(null)} className="grid h-7 w-7 place-items-center rounded text-ink-3 hover:bg-hover">
+						<button type="button" aria-label="Cerrar" onClick={() => setSelectedAlert(null)} className="grid h-7 w-7 shrink-0 place-items-center rounded text-ink-3 hover:bg-hover max-[819px]:h-11 max-[819px]:w-11">
 							<X className="h-3.5 w-3.5" aria-hidden />
 						</button>
 					</div>
 				)}
+
+				<DrawingActions manager={manager} onEditText={(drawing) => setTextEdit({ drawing, x: 12, y: 56 })} />
 
 				{textEdit && (
 					<input
 						autoFocus
 						aria-label="Texto del dibujo"
 						defaultValue={textEdit.drawing.text ?? ""}
-						className="absolute z-20 w-56 rounded border border-line-strong bg-surface px-2 py-1 text-[13px] text-ink outline-none focus:border-ring"
+						className="absolute z-20 w-56 max-w-[calc(100%-16px)] rounded border border-line-strong bg-surface px-2 py-1 text-[13px] text-ink outline-none focus:border-ring"
 						style={{ left: textEdit.x, top: textEdit.y }}
 						onKeyDown={(e) => {
 							if (e.key === "Enter") {
