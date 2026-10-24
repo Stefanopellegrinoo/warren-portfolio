@@ -161,7 +161,7 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
         </nav>
 
         <div className="mt-auto border-t border-line pt-3">
-          <ThemeSwitch pathname={pathname} />
+          <ThemeSwitch />
           <button
             type="button"
             onClick={handleLogout}

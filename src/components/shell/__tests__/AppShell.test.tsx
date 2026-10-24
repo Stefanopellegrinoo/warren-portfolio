@@ -35,9 +35,10 @@ describe('AppShell', () => {
     expect(html.match(/type="radio"/g)).toHaveLength(3)
   })
 
-  it('disables the theme choice on pages that still use the old style', () => {
-    expect(render('/not-a-page')).toContain('Esta página todavía usa el estilo anterior')
-    expect(render('/dashboard')).not.toContain('Esta página todavía usa el estilo anterior')
+  it('offers the theme choice on every page, an unknown one included', () => {
+    const html = render('/not-a-page')
+    expect(html).not.toContain('estilo anterior')
+    expect(html).not.toMatch(/<fieldset[^>]*disabled/)
   })
 
   it('carries none of the old decorative classes', () => {
