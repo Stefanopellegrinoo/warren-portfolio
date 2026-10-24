@@ -28,3 +28,12 @@ describe('AlertsList', () => {
     expect(html).toContain('aria-label="Eliminar la alerta de AAPL"')
   })
 })
+
+// odd/tasks/push-notificaciones.md S2: the alerts tab says how an alert reaches the user.
+describe('PriceAlertsTab', () => {
+  it('says alerts are delivered to the devices with notifications on', async () => {
+    const { PriceAlertsTab } = await import('../PriceAlertsTab')
+    const html = renderToStaticMarkup(<PriceAlertsTab />)
+    expect(html).toContain('Cuando se disparan te avisamos en los dispositivos donde activaste los avisos')
+  })
+})

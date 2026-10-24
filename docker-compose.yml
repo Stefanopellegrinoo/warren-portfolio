@@ -39,6 +39,11 @@ services:
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
       - REDIS_URL=${REDIS_URL}
+      # Push notifications (odd/tasks/push-notificaciones.md S5): the app hands the public key to the
+      # phone at runtime (GET /api/push) and sends the test notification.
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
+      - VAPID_SUBJECT=${VAPID_SUBJECT}
       - PORT=3000
     healthcheck:
       # 127.0.0.1, not localhost: inside the container localhost resolves to ::1 only,
@@ -66,6 +71,10 @@ services:
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
       - REDIS_URL=${REDIS_URL}
+      # Push notifications (odd/tasks/push-notificaciones.md S5): the worker signs and sends them.
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
+      - VAPID_SUBJECT=${VAPID_SUBJECT}
     depends_on:
       redis:
         condition: service_healthy

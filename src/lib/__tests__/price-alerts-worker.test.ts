@@ -11,6 +11,13 @@ vi.mock('../notifications', async () => ({
   checkNotificationConfig: vi.fn(),
 }))
 
+// Push goes to the alert's owner; the payload builder stays real.
+const mockSendPush = vi.fn().mockResolvedValue({ ok: true, sent: 1 })
+vi.mock('../push', async () => ({
+  ...(await vi.importActual<typeof import('../push')>('../push')),
+  sendPushToUser: (...a: unknown[]) => mockSendPush(...a),
+}))
+
 // Capture the BullMQ processor so the price job can be driven directly
 let processor: (job: unknown) => Promise<void> = async () => {}
 vi.mock('bullmq', () => ({ Worker: class { constructor(_q: string, fn: typeof processor) { processor = fn } on() {} } }))
@@ -249,6 +256,56 @@ describe('evaluatePriceAlerts', () => {
 
     expect(mockUpdate).not.toHaveBeenCalled()
     expect(mockSendTelegram).not.toHaveBeenCalled()
+  })
+})
+
+// odd/tasks/push-notificaciones.md S4: a fired alert reaches its owner's devices; a push failure never stops the worker.
+describe('evaluatePriceAlerts push', () => {
+  it('sends the push to the owner of the alert, after marking it triggered', async () => {
+    mockAlertsData.push({ id: 'alert-p1', user_id: 'owner-1', ticker: 'AAPL', operator: 'crosses_above', value: 190, name: 'x' })
+    mockIn.mockResolvedValueOnce({ data: mockAlertsData, error: null })
+    mockEqUpdate.mockResolvedValueOnce({ error: null })
+
+    await evaluatePriceAlerts({ AAPL: 195.5 }, { AAPL: 185 })
+
+    expect(mockSendPush).toHaveBeenCalledOnce()
+    const [client, userId, payload] = mockSendPush.mock.calls[0]
+    expect(client).toHaveProperty('from')
+    expect(userId).toBe('owner-1')
+    expect(payload).toEqual({ title: 'Alerta de precio: AAPL', body: 'Superó 190. Ahora: 195,5', url: '/trading?symbol=AAPL', tag: 'price-alert-alert-p1' })
+    expect(mockUpdate.mock.invocationCallOrder[0]).toBeLessThan(mockSendPush.mock.invocationCallOrder[0])
+  })
+
+  it('a failed push is logged and the next alert still fires', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockSendPush.mockResolvedValueOnce({ ok: false, error: 'no device accepted the push' })
+    mockAlertsData.push(
+      { id: 'alert-p2', user_id: 'owner-1', ticker: 'AAPL', operator: 'crosses_above', value: 190, name: 'x' },
+      { id: 'alert-p3', user_id: 'owner-2', ticker: 'MSFT', operator: 'crosses_below', value: 400, name: 'y' },
+    )
+    mockIn.mockResolvedValueOnce({ data: mockAlertsData, error: null })
+    mockEqUpdate.mockResolvedValue({ error: null })
+
+    await evaluatePriceAlerts({ AAPL: 195, MSFT: 390 }, { AAPL: 185, MSFT: 410 })
+
+    expect(mockSendPush).toHaveBeenCalledTimes(2)
+    expect(mockSendPush.mock.calls[1][1]).toBe('owner-2')
+    expect(mockSendTelegram).toHaveBeenCalledTimes(2)
+    expect(warn).toHaveBeenCalledWith('[Worker] push for alert alert-p2: no device accepted the push')
+    warn.mockRestore()
+  })
+
+  it('a user without devices is not an error worth logging', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockSendPush.mockResolvedValueOnce({ ok: false, error: 'no devices' })
+    mockAlertsData.push({ id: 'alert-p4', user_id: 'owner-1', ticker: 'AAPL', operator: 'crosses_above', value: 190, name: 'x' })
+    mockIn.mockResolvedValueOnce({ data: mockAlertsData, error: null })
+    mockEqUpdate.mockResolvedValueOnce({ error: null })
+
+    await evaluatePriceAlerts({ AAPL: 195 }, { AAPL: 185 })
+
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
   })
 })
 
