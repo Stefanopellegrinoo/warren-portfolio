@@ -88,4 +88,18 @@ describe('drawing with a finger (S2)', () => {
     expect(manager.drawings()).toHaveLength(0)
     expect(manager.tool()).toBe('trend-line')
   })
+
+  it('a second finger (a pinch) cancels the point being placed instead of drawing between the fingers', () => {
+    const { el, manager } = setup('trend-line')
+
+    pointer(el, 'pointerdown', 100, 200, 'touch', 1)
+    pointer(el, 'pointerdown', 250, 100, 'touch', 2)
+    pointer(el, 'pointerup', 250, 100, 'touch', 2)
+    pointer(el, 'pointerup', 100, 200, 'touch', 1)
+    expect(manager.drawings()).toHaveLength(0)
+    expect(manager.tool()).toBe('trend-line')
+
+    tap(el, [150, 150])
+    expect(manager.drawings()).toHaveLength(0) // that tap is a first point, not the end of a stray line
+  })
 })

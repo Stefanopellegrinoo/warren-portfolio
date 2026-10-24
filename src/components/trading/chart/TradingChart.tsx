@@ -201,7 +201,11 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 		const offText = drawings.on("textEdit", (drawing, screen) => {
 			const open = () => flushSync(() => setTextEdit({ drawing, x: editorLeft(screen.x, box.clientWidth), y: screen.y }));
 			if (pressing === "touch") {
-				window.addEventListener("touchend", (e) => { e.preventDefault(); open(); }, { once: true, passive: false });
+				// A cancelled touch opens it too, and takes the touchend listener with it.
+				const done = new AbortController();
+				const opts = { once: true, passive: false, signal: done.signal };
+				window.addEventListener("touchend", (e) => { e.preventDefault(); done.abort(); open(); }, opts);
+				window.addEventListener("touchcancel", () => { done.abort(); open(); }, opts);
 			} else if (pressing) window.addEventListener("pointerup", open, { once: true });
 			else open();
 		});
@@ -414,7 +418,7 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 				{alertMode && (
 					// A phone says it, with Cancelar, in its drawing bar; there is no Esc there.
 					<p role="status" className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded bg-ink px-3 py-1.5 text-[13px] text-canvas shadow-[var(--shadow-toast)] max-[819px]:hidden">
-						Tocá el gráfico en el precio de la alerta · Esc para cancelar
+						Tocá el gráfico en el precio de la alerta<span className="[@media(pointer:coarse)]:hidden"> · Esc para cancelar</span>
 					</p>
 				)}
 
@@ -423,7 +427,9 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 						role="dialog"
 						aria-label={selected.name}
 						className="absolute right-20 z-20 flex items-center gap-2 rounded border border-line bg-surface px-3 py-2 text-[13px] shadow-[var(--shadow-pop)] max-[819px]:left-3 max-[819px]:right-auto"
-						style={{ top: Math.max(8, selectedAlert.y - 48) }}
+						// Above the line and clear of it (the panel is up to ~62px with a wrapped
+						// name), so the line can still be dragged; below it near the top.
+						style={{ top: selectedAlert.y > 80 ? selectedAlert.y - 72 : selectedAlert.y + 16 }}
 					>
 						<span className="text-ink">{selected.name}</span>
 						{selected.status === "triggered" && (
@@ -441,7 +447,7 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 						>
 							Eliminar
 						</button>
-						<button type="button" aria-label="Cerrar" onClick={() => setSelectedAlert(null)} className="grid h-7 w-7 place-items-center rounded text-ink-3 hover:bg-hover max-[819px]:h-11 max-[819px]:w-11">
+						<button type="button" aria-label="Cerrar" onClick={() => setSelectedAlert(null)} className="grid h-7 w-7 shrink-0 place-items-center rounded text-ink-3 hover:bg-hover max-[819px]:h-11 max-[819px]:w-11">
 							<X className="h-3.5 w-3.5" aria-hidden />
 						</button>
 					</div>

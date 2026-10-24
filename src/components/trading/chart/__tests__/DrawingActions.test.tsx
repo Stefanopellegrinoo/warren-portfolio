@@ -9,10 +9,12 @@ import { DrawingActions } from '../DrawingActions'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 vi.mock('sonner', () => ({ toast: vi.fn() }))
 
-afterEach(() => { vi.clearAllMocks(); document.body.innerHTML = '' })
+afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); document.body.innerHTML = '' })
 
 const flush = () => act(async () => { await new Promise(r => setTimeout(r, 0)) })
 const bar = () => document.querySelector('[role="toolbar"][aria-label="Dibujo seleccionado"]')
+const undoBar = () => document.querySelector('[role="status"][aria-label="Dibujo borrado"]')
+const byText = (text: string) => [...document.querySelectorAll('button')].find(b => b.textContent === text)
 const byLabel = (label: string) => document.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)
 
 async function render(kind: 'trend-line' | 'text' = 'trend-line') {
@@ -41,7 +43,7 @@ describe('the selected drawing on a phone (S3)', () => {
     unmount()
   })
 
-  it('deletes it with a tap and offers to undo', async () => {
+  it('deletes it with a tap and offers to undo in its own bar, where the finger is', async () => {
     const { manager, id, select, unmount } = await render()
     select()
     const before = manager.get(id)
@@ -50,10 +52,31 @@ describe('the selected drawing on a phone (S3)', () => {
 
     expect(manager.drawings()).toEqual([])
     expect(bar()).toBeNull()
-    expect(toast).toHaveBeenCalledWith('Dibujo borrado', expect.objectContaining({ action: expect.objectContaining({ label: 'Deshacer' }) }))
-    const { action } = vi.mocked(toast).mock.calls[0][1] as unknown as { action: { onClick: () => void } }
-    act(() => action.onClick())
+    expect(toast).not.toHaveBeenCalled()
+    expect(undoBar()!.textContent).toContain('Dibujo borrado')
+    act(() => byText('Deshacer')!.click())
     expect(manager.get(id)).toEqual(before)
+    expect(undoBar()).toBeNull()
+    unmount()
+  })
+
+  it('the undo offer goes away after five seconds, or when another drawing is selected', async () => {
+    vi.useFakeTimers()
+    const { manager, select, unmount } = await render()
+    select()
+    act(() => byLabel('Borrar dibujo')!.click())
+
+    act(() => { vi.advanceTimersByTime(4900) })
+    expect(undoBar()).not.toBeNull()
+    act(() => { vi.advanceTimersByTime(100) })
+    expect(undoBar()).toBeNull()
+
+    const other = manager.add({ kind: 'horizontal-line', points: [{ time: 100, price: 100 }] } as never)
+    act(() => manager.select([other]))
+    act(() => byLabel('Borrar dibujo')!.click())
+    act(() => manager.select([manager.add({ kind: 'horizontal-line', points: [{ time: 100, price: 50 }] } as never)]))
+    expect(undoBar()).toBeNull()
+    vi.useRealTimers()
     unmount()
   })
 

@@ -6,7 +6,8 @@ import type { DrawingManager } from "lightweight-charts-drawing";
 import { fromLegacyDrawings, type LegacyDrawing } from "@/lib/chart/legacy-drawings";
 
 const SAVE_DELAY_MS = 600;
-// Browsers refuse a keepalive request over 64 KB; a bigger set (long brush strokes) is sent plainly.
+// Browsers cap keepalive requests at 64 KB in flight, all together: only the save on the
+// way out uses it, and a bigger set (long brush strokes) goes as a plain request.
 const KEEPALIVE_MAX_BYTES = 60_000;
 
 async function loadDrawings(symbol: string): Promise<{ json: string; fromLegacy: boolean }> {
@@ -38,7 +39,7 @@ export function useDrawings(manager: DrawingManager | null, symbol: string) {
 		setStatus("loading");
 		manager.clear();
 
-		const save = async () => {
+		const save = async (leaving = false) => {
 			const body = JSON.stringify({ ticker: symbol, drawings: JSON.parse(manager.exportJSON()) });
 			try {
 				const res = await fetch("/api/chart-drawings", {
@@ -46,7 +47,7 @@ export function useDrawings(manager: DrawingManager | null, symbol: string) {
 					headers: { "Content-Type": "application/json" },
 					body,
 					// The save outlives the page when the app is closed or sent to the background.
-					keepalive: body.length < KEEPALIVE_MAX_BYTES,
+					keepalive: leaving && new Blob([body]).size < KEEPALIVE_MAX_BYTES,
 				});
 				if (!res.ok) throw new Error(`Error ${res.status}`);
 			} catch {
@@ -66,7 +67,7 @@ export function useDrawings(manager: DrawingManager | null, symbol: string) {
 			if (!timer) return;
 			clearTimeout(timer);
 			timer = null;
-			save();
+			save(true);
 		};
 		// A PWA sent to the background may never come back: save now, not 600ms later.
 		const onVisibility = () => {

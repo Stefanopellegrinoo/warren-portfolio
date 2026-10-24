@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import type { Drawing, DrawingManager, DrawingStyle } from "lightweight-charts-drawing";
 import { Check, Lock, Trash2, Type, Unlock } from "lucide-react";
-import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
@@ -25,8 +24,13 @@ const LINE_STYLES: { value: DrawingStyle["lineStyle"]; label: string; dash?: str
 	{ value: "dotted", label: "Punteada", dash: "2 3" },
 ];
 
+// Long enough to notice a wrong tap, short enough not to linger.
+const UNDO_MS = 5000;
+
+const barClass =
+	"absolute bottom-3 left-1/2 z-20 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-0.5 overflow-x-auto rounded border border-line bg-surface p-1 shadow-[var(--shadow-pop)]";
 const actionClass =
-	"grid h-8 min-w-8 place-items-center rounded px-1.5 text-ink-2 hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring max-[819px]:h-11 max-[819px]:min-w-11";
+	"grid h-8 min-w-8 shrink-0 place-items-center rounded px-1.5 text-ink-2 hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring max-[819px]:h-11 max-[819px]:min-w-11";
 const optionClass = "grid h-8 place-items-center rounded hover:bg-hover max-[819px]:h-11";
 
 /**
@@ -35,30 +39,56 @@ const optionClass = "grid h-8 place-items-center rounded hover:bg-hover max-[819
  */
 export function DrawingActions({ manager, onEditText }: { manager: DrawingManager | null; onEditText: (drawing: Drawing) => void }) {
 	const [selected, setSelected] = useState<Drawing[]>([]);
+	// The drawings just deleted, offered back in this same bar: a toast at the bottom of a
+	// phone would sit over the next thing the finger taps (the Dibujar list, this bar).
+	const [deleted, setDeleted] = useState<Drawing[] | null>(null);
 
 	useEffect(() => {
 		if (!manager) return;
-		const read = () => setSelected(manager.selection().map((id) => manager.get(id)).filter((d): d is Drawing => d !== undefined));
+		const read = () => {
+			const now = manager.selection().map((id) => manager.get(id)).filter((d): d is Drawing => d !== undefined);
+			setSelected(now);
+			if (now.length > 0) setDeleted(null);
+		};
 		const offs = [manager.on("selection", read), manager.on("change", read)];
 		return () => offs.forEach((off) => off());
 	}, [manager]);
 
-	if (!manager || selected.length === 0) return null;
+	useEffect(() => {
+		if (!deleted) return;
+		const timer = setTimeout(() => setDeleted(null), UNDO_MS);
+		return () => clearTimeout(timer);
+	}, [deleted]);
+
+	if (!manager) return null;
+	if (selected.length === 0) {
+		if (!deleted) return null;
+		const what = deleted.length === 1 ? "Dibujo borrado" : "Dibujos borrados";
+		return (
+			<div role="status" aria-label={what} className={cn(barClass, "gap-2 pl-3 text-[13px] text-ink")}>
+				{what}
+				<button
+					type="button"
+					onClick={() => {
+						deleted.forEach((d) => manager.add(d));
+						setDeleted(null);
+					}}
+					className={cn(actionClass, "px-3 font-medium text-accent-ink")}
+				>
+					Deshacer
+				</button>
+			</div>
+		);
+	}
 	const first = selected[0];
 	const restyle = (style: Partial<DrawingStyle>) => selected.forEach((d) => manager.update({ ...d, style: { ...d.style, ...style } }));
 	const remove = () => {
 		selected.forEach((d) => manager.remove(d.id));
-		toast(selected.length === 1 ? "Dibujo borrado" : "Dibujos borrados", {
-			action: { label: "Deshacer", onClick: () => selected.forEach((d) => manager.add(d)) },
-		});
+		setDeleted(selected);
 	};
 
 	return (
-		<div
-			role="toolbar"
-			aria-label="Dibujo seleccionado"
-			className="absolute bottom-3 left-1/2 z-20 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-0.5 overflow-x-auto rounded border border-line bg-surface p-1 shadow-[var(--shadow-pop)]"
-		>
+		<div role="toolbar" aria-label="Dibujo seleccionado" className={barClass}>
 			<Popover>
 				<PopoverTrigger aria-label="Color" title="Color" className={actionClass}>
 					<span className="h-[18px] w-[18px] rounded-full border border-line-strong" style={{ background: first.style.color }} aria-hidden />

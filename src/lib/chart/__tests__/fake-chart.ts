@@ -28,10 +28,10 @@ export function fakeChart() {
 }
 
 /** A pointer event as the browser sends it; moves and lifts bubble to window like real ones. */
-export function pointer(el: HTMLElement, type: string, x: number, y: number, pointerType = 'touch') {
+export function pointer(el: HTMLElement, type: string, x: number, y: number, pointerType = 'touch', pointerId = 1) {
   const down = type === 'pointerdown' || type === 'pointermove'
   el.dispatchEvent(new PointerEvent(type, {
-    clientX: x, clientY: y, pointerType, pointerId: 1, button: 0, buttons: down ? 1 : 0, bubbles: true, cancelable: true,
+    clientX: x, clientY: y, pointerType, pointerId, button: 0, buttons: down ? 1 : 0, bubbles: true, cancelable: true,
   }))
 }
 

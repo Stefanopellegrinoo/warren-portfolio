@@ -36,12 +36,16 @@ const hide = (event: 'visibilitychange' | 'pagehide') => {
 }
 
 describe('saving drawings when the app goes to the background (S8)', () => {
-  it('a change waits the usual 600ms while the app is open', async () => {
+  it('a change waits the usual 600ms while the app is open, as a plain request', async () => {
     const { manager, puts, unmount } = await render()
 
     act(() => { manager.add({ kind: 'horizontal-line', points: [{ time: 100, price: 150 }] } as never) })
-
     expect(puts()).toHaveLength(0)
+
+    await act(async () => { await new Promise(r => setTimeout(r, 650)) })
+    expect(puts()).toHaveLength(1)
+    // keepalive requests share a 64 KB budget: only the save on the way out uses it
+    expect(puts()[0][1]?.keepalive).toBe(false)
     unmount()
   })
 

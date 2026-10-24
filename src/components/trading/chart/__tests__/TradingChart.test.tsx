@@ -173,6 +173,14 @@ describe('TradingChart alert lines under a finger (S4)', () => {
     unmount()
   })
 
+  it('the actions open above the line, clear of it, so the line can still be dragged', async () => {
+    const { dialog, unmount } = await pressNearAlert('touch')
+
+    // pressed at y 112: the panel (up to ~62px with a wrapped name) ends 10px above
+    expect((dialog as HTMLElement).style.top).toBe('40px')
+    unmount()
+  })
+
   it('the mouse keeps its precision: 12px off misses the line', async () => {
     const { dialog, unmount } = await pressNearAlert('mouse')
 
@@ -197,6 +205,20 @@ describe('TradingChart text editor after placing a text (S3)', () => {
     expect(editor()).not.toBeNull()
     expect(document.activeElement).toBe(editor())
     expect(lift.defaultPrevented).toBe(true) // no emulated mouse press follows to blur it
+    unmount()
+  })
+
+  it('a cancelled touch still opens it, and leaves no listener to swallow the next tap', async () => {
+    const { box, unmount } = await render()
+
+    act(() => { box.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', bubbles: true })) })
+    await act(async () => { drawingEvents.textEdit({ id: 't', kind: 'text', text: '' }, { x: 40, y: 120 }) })
+    act(() => { window.dispatchEvent(new Event('touchcancel')) })
+    expect(editor()).not.toBeNull()
+
+    const nextTap = new Event('touchend', { cancelable: true })
+    act(() => { window.dispatchEvent(nextTap) })
+    expect(nextTap.defaultPrevented).toBe(false)
     unmount()
   })
 

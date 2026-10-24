@@ -2,7 +2,8 @@
 // within 6px, a handle within 12px, a drag after 3px) and has no option for touch. This
 // install step makes them finger-sized when the pointer is a touch; the mouse keeps the
 // library's sizes (odd/tasks/grafico-celular.md S4). It fails the install when the library
-// is not the one it was written for, so an upgrade cannot silently drop the patch.
+// is not the one it was written for, so an upgrade cannot silently drop the patch. Only the ES
+// build is patched: it is what Next and vitest import (the package's "import" export).
 import { readFileSync, writeFileSync } from 'node:fs'
 
 const VERSION = '0.6.2'

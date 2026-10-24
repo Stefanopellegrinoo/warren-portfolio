@@ -14,6 +14,7 @@ const FREEHAND: (DrawingKind | null)[] = ["brush", "highlighter"];
 export function touchDrawing(manager: DrawingManager, el: HTMLElement): () => void {
 	const ours = new WeakSet<Event>();
 	let drag: { id: number; x: number; y: number; moved: boolean } | null = null;
+	const fingers = new Set<number>();
 
 	const send = (target: EventTarget, type: string, e: PointerEvent, buttons: number) => {
 		const synthetic = new PointerEvent(type, {
@@ -27,6 +28,19 @@ export function touchDrawing(manager: DrawingManager, el: HTMLElement): () => vo
 		const tool = manager.tool();
 		return tool !== null && !FREEHAND.includes(tool);
 	};
+
+	// Window capture, before the library sees the press: a second finger is a pinch, not a
+	// point. It never reaches the library, and the point the first finger placed is dropped
+	// (re-arming the tool clears it), so no line is drawn between the fingers.
+	const onAnyDown = (e: PointerEvent) => {
+		if (ours.has(e) || e.pointerType !== "touch") return;
+		fingers.add(e.pointerId);
+		if (fingers.size < 2 || !placing()) return;
+		e.stopPropagation();
+		manager.setTool(manager.tool());
+		drag = null;
+	};
+	const onAnyUp = (e: PointerEvent) => { fingers.delete(e.pointerId); };
 
 	// Capture, after the library's own capture listener: the first point is already placed.
 	const onDown = (e: PointerEvent) => {
@@ -48,13 +62,20 @@ export function touchDrawing(manager: DrawingManager, el: HTMLElement): () => vo
 		// The library holds the chart still until the press it saw is released.
 		send(window, "pointerup", e, 0);
 	};
-	const onCancel = () => { drag = null; };
+	const onCancel = (e: PointerEvent) => {
+		drag = null;
+		onAnyUp(e);
+	};
 
+	window.addEventListener("pointerdown", onAnyDown, true);
+	window.addEventListener("pointerup", onAnyUp, true);
 	el.addEventListener("pointerdown", onDown, true);
 	window.addEventListener("pointermove", onMove);
 	window.addEventListener("pointerup", onUp);
 	window.addEventListener("pointercancel", onCancel);
 	return () => {
+		window.removeEventListener("pointerdown", onAnyDown, true);
+		window.removeEventListener("pointerup", onAnyUp, true);
 		el.removeEventListener("pointerdown", onDown, true);
 		window.removeEventListener("pointermove", onMove);
 		window.removeEventListener("pointerup", onUp);
