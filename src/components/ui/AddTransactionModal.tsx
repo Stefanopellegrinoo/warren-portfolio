@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { X, Search, ChevronLeft, ChevronRight, TrendingUp, Landmark, Banknote } from 'lucide-react'
-import { formatNumber, formatUSD } from '@/lib/utils'
+import { toast } from 'sonner'
+import { argentinaDate, formatNumber, formatUSD } from '@/lib/utils'
 import type { Operation, TransactionInput, Cedear, Activo, ONOperation, CashMovementType } from '@/types'
 import { postTransaction } from '@/lib/api/post-transaction'
 import { EsNumberInput } from '@/components/ui/es-number-input'
@@ -117,10 +118,96 @@ const CHOICE_LABELS: Record<string, string> = {
 // ─────────────────────────────────────────────────────────
 // Presentational pieces (same tokens as the Resumen dialogs)
 // ─────────────────────────────────────────────────────────
-export const fieldCls = 'min-h-11 w-full rounded-md border border-line-strong bg-surface px-3 text-ink placeholder:text-ink-3 hover:border-ink-3 focus-visible:border-accent focus-visible:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_28%,transparent)] focus-visible:outline-none'
+export const fieldCls = 'min-h-11 w-full rounded-md border border-line-strong bg-surface px-3 text-ink placeholder:text-ink-3 hover:border-ink-3 focus-visible:border-accent focus-visible:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_28%,transparent)] focus-visible:outline-none aria-[invalid=true]:border-danger'
 const pairCls = 'grid grid-cols-2 gap-3 max-[419px]:grid-cols-1'
 export const primaryCls = 'inline-flex min-h-11 items-center justify-center rounded-md bg-primary px-4 font-medium text-primary-on hover:bg-primary-hover disabled:opacity-70'
 export const secondaryCls = 'inline-flex min-h-11 items-center justify-center rounded-md px-4 font-medium text-ink-2 hover:bg-hover hover:text-ink'
+export const dangerCls = 'inline-flex min-h-11 items-center justify-center rounded-md bg-danger px-4 font-medium text-surface hover:opacity-90'
+/**
+ * Centered card on desktop; on phones a full-screen sheet (title on top, the
+ * form scrolls, the footer stays at the bottom). `--sheet-h`/`--sheet-top`
+ * come from useSheetViewport; without them the sheet is 100dvh tall.
+ */
+export const sheetCls = 'flex-col overflow-hidden rounded-lg border border-line bg-surface p-0 text-ink shadow-pop backdrop:bg-black/30 open:flex w-[min(480px,calc(100vw-32px))] max-[819px]:m-0 max-[819px]:top-[var(--sheet-top,0px)] max-[819px]:h-[var(--sheet-h,100dvh)] max-[819px]:max-h-none max-[819px]:w-full max-[819px]:max-w-none max-[819px]:rounded-none max-[819px]:border-0 max-[819px]:shadow-none'
+export const sheetHeadCls = 'flex shrink-0 items-start gap-2 px-6 pb-4 pt-6 max-[819px]:border-b max-[819px]:border-line max-[819px]:px-5 max-[819px]:pb-3 max-[819px]:pt-3'
+export const sheetBodyCls = 'grid min-h-0 flex-1 content-start gap-4 overflow-y-auto px-6 pb-5 pt-1 max-[819px]:px-5 max-[819px]:pt-4'
+export const sheetFootCls = 'grid shrink-0 gap-3 border-t border-line px-6 py-4 max-[819px]:px-5 max-[819px]:pb-[max(1rem,env(safe-area-inset-bottom))]'
+const formCls = 'flex min-h-0 flex-1 flex-col'
+
+/**
+ * On phones the sheet follows the visual viewport, which shrinks when the
+ * keyboard opens (100dvh does not), so the footer button stays above it.
+ */
+function useSheetViewport(ref: React.RefObject<HTMLElement>) {
+  useEffect(() => {
+    const vv = window.visualViewport
+    const el = ref.current
+    if (!vv || !el) return
+    const fit = () => {
+      el.style.setProperty('--sheet-h', `${vv.height}px`)
+      el.style.setProperty('--sheet-top', `${vv.offsetTop}px`)
+    }
+    fit()
+    vv.addEventListener('resize', fit)
+    vv.addEventListener('scroll', fit)
+    return () => { vv.removeEventListener('resize', fit); vv.removeEventListener('scroll', fit) }
+  }, [ref])
+}
+
+/**
+ * Closing a modal that holds unsaved input asks first, inside the modal; a
+ * pristine one closes at once. Covers the X (call requestClose), Escape and
+ * the Android back gesture (the dialog's cancel) and a tap on the backdrop.
+ */
+export function useDiscardGuard(dirty: boolean, onClose: () => void, content: React.RefObject<HTMLElement>) {
+  const [asking, setAsking] = useState(false)
+  const returnFocus = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    // Only the question is reachable while it is open.
+    content.current?.toggleAttribute('inert', asking)
+    if (!asking) returnFocus.current?.focus()
+  }, [asking, content])
+
+  function requestClose() {
+    if (!dirty) return onClose()
+    if (asking) return
+    returnFocus.current = document.activeElement as HTMLElement | null
+    setAsking(true)
+  }
+
+  const dialogProps = {
+    onCancel: (e: React.SyntheticEvent<HTMLDialogElement>) => {
+      e.preventDefault()
+      if (asking) setAsking(false)
+      else requestClose()
+    },
+    // A browser may close anyway on a repeated Escape: reopen, the data is still here, and ask.
+    onClose: (e: React.SyntheticEvent<HTMLDialogElement>) => {
+      if (!dirty) return onClose()
+      e.currentTarget.showModal()
+      setAsking(true)
+    },
+    onClick: (e: React.MouseEvent<HTMLDialogElement>) => { if (e.target === e.currentTarget) requestClose() },
+  }
+  return { asking, requestClose, keepEditing: () => setAsking(false), dialogProps }
+}
+
+export function DiscardPrompt({ onDiscard, onKeep }: { onDiscard: () => void; onKeep: () => void }) {
+  return (
+    <div className="absolute inset-0 z-20 grid place-items-center bg-black/30 p-4">
+      <div role="alertdialog" aria-modal="true" aria-labelledby="discard-question"
+        className="grid w-full max-w-[360px] gap-4 rounded-lg border border-line bg-surface p-5 shadow-pop">
+        <p id="discard-question" className="font-medium">Tenés datos sin guardar. ¿Descartarlos?</p>
+        <div className="flex flex-wrap justify-end gap-2 max-[419px]:grid max-[419px]:grid-cols-1">
+          {/* The safe choice takes the focus. */}
+          <button type="button" autoFocus onClick={onKeep} className={`${secondaryCls} border border-line-strong`}>Seguir editando</button>
+          <button type="button" onClick={onDiscard} className={dangerCls}>Descartar</button>
+        </div>
+      </div>
+    </div>
+  )
+}
 const iconBtnCls = 'grid h-9 w-9 shrink-0 place-items-center rounded-md text-ink-3 hover:bg-hover hover:text-ink max-[819px]:h-11 max-[819px]:w-11'
 const listCls = 'absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-line bg-surface shadow-pop'
 const optionCls = 'flex min-h-11 w-full items-center gap-2 border-b border-line px-3 text-left text-[13px] last:border-b-0 hover:bg-hover focus-visible:outline-offset-[-2px]'
@@ -186,7 +273,7 @@ function Holding({ held, price }: { held: string; price: number }) {
 
 function Total({ label, value, tone = '' }: { label: string; value: string; tone?: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 border-t border-line pt-3">
+    <div className="flex items-baseline justify-between gap-3">
       <span className="text-[13px] text-ink-2">{label}</span>
       <span className={`font-semibold tabular-nums ${tone}`}>{value}</span>
     </div>
@@ -240,8 +327,8 @@ function FxLine({ fx, tradeDate, edit, onEdit, onChange, onReset }: {
   )
 }
 
-export function FormError({ error }: { error: string }) {
-  return error ? <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-[13px] text-danger">{error}</p> : null
+export function FormError({ error, id }: { error: string; id?: string }) {
+  return error ? <p id={id} role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-[13px] text-danger">{error}</p> : null
 }
 
 function Submit({ loading, selling }: { loading: boolean; selling: boolean }) {
@@ -320,6 +407,7 @@ type FxState = { status: 'loading' | 'missing' | 'error' } | { status: 'ok'; mep
 export const TRADE_CURRENCIES: readonly TradeCurrency[] = ['ARS', 'MEP', 'CCL']
 export const IN_CURRENCY: Record<TradeCurrency, string> = { ARS: 'en pesos', MEP: 'en dólar MEP', CCL: 'en dólar cable' }
 const dayMonth = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`
+const CATALOG_FAILED = 'No se pudo cargar la lista de CEDEARs.'
 
 // ─────────────────────────────────────────────────────────
 // MAIN COMPONENT
@@ -341,7 +429,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
   // ── ACCION state ──
   const [stockOp, setStockOp] = useState<Operation>(initialData ? 'VENTA' : 'COMPRA')
   const [form, setForm] = useState<TransactionInput>({
-    date: new Date().toISOString().split('T')[0],
+    date: argentinaDate(),
     ticker: initialData?.assetClass === 'ACCION' ? initialData.ticker : '',
     operation: initialData ? 'VENTA' : 'COMPRA',
     quantity: initialData?.assetClass === 'ACCION' ? initialData.quantity : 0,
@@ -356,7 +444,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
   // ── CEDEAR state ──
   const [cedears, setCedears] = useState<Cedear[]>([])
   const [cedearForm, setCedearForm] = useState<CedearFormData>({
-    date: new Date().toISOString().split('T')[0],
+    date: argentinaDate(),
     ticker: initialData?.assetClass === 'CEDEAR' ? initialData.ticker : '',
     cantidad: initialData?.assetClass === 'CEDEAR' ? initialData.quantity : 0,
     precio: initialData?.assetClass === 'CEDEAR' ? initialData.price : 0,
@@ -373,7 +461,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
 
   // ── ON state ──
   const [onForm, setOnForm] = useState<ONFormData>({
-    date: new Date().toISOString().split('T')[0],
+    date: argentinaDate(),
     ticker: initialData?.assetClass === 'ON' ? initialData.ticker : '',
     operation: initialData ? 'VENTA' : 'COMPRA',
     quantity: initialData?.assetClass === 'ON' ? initialData.quantity : 0,
@@ -388,7 +476,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
 
   // ── CASH state ──
   const [cashForm, setCashForm] = useState<CashFormData>({
-    date: new Date().toISOString().split('T')[0],
+    date: argentinaDate(),
     type: 'DEPOSITO',
     amount: 0,
     description: '',
@@ -398,7 +486,17 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation>(null)
+  // The field a client-side check rejected: marked aria-invalid and focused.
+  const [invalid, setInvalid] = useState<string | null>(null)
+  // Any input event inside the modal: from then on, closing asks first.
+  const [dirty, setDirty] = useState(false)
+  const [catalogFailed, setCatalogFailed] = useState(false)
+  const [catalogTry, setCatalogTry] = useState(0)
+  const [onSearchFailed, setOnSearchFailed] = useState(false)
   const dialog = useRef<HTMLDialogElement>(null)
+  const content = useRef<HTMLDivElement>(null)
+  const guard = useDiscardGuard(dirty, onClose, content)
+  useSheetViewport(dialog)
 
   // Native modal dialog: focus trap, Escape and top layer come from the browser.
   useEffect(() => {
@@ -409,6 +507,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
   // ── Fetch activos & cedears ──
   useEffect(() => {
     async function fetchData() {
+      setCatalogFailed(false)
       try {
         const [activosRes, cedearsRes] = await Promise.all([
           fetch('/api/activos'),
@@ -433,13 +532,14 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
               }))
             }
           }
-        }
+        } else setCatalogFailed(true)
       } catch (err) {
         console.error('Error fetching data:', err)
+        setCatalogFailed(true)
       }
     }
     fetchData()
-  }, [initialData])
+  }, [initialData, catalogTry])
 
   // ── Reference FX of the CEDEAR trade date ──
   useEffect(() => {
@@ -468,6 +568,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
 
     const searchONs = async () => {
       setOnSearchLoading(true)
+      setOnSearchFailed(false)
       try {
         const res = await fetch(`/api/ons/search?q=${encodeURIComponent(onSearch)}&limit=10`)
         if (res.ok) {
@@ -475,10 +576,12 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
           setOnResults(data.results || [])
         } else {
           setOnResults([])
+          setOnSearchFailed(true)
         }
       } catch (err) {
         console.error('Error searching ONs:', err)
         setOnResults([])
+        setOnSearchFailed(true)
       } finally {
         setOnSearchLoading(false)
       }
@@ -550,6 +653,41 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
 
   // ── Submit handlers ──
 
+  /** Plain words for what was just saved: "Compra de 10 AAPL guardada". */
+  function savedMessage(): string {
+    if (assetClass === 'CASH') return `${CHOICE_LABELS[cashForm.type]} de ${formatUSD(cashForm.amount)} guardado`
+    if (assetClass === 'ON') {
+      return `${CHOICE_LABELS[onForm.operation]} de ${fmtNum(onForm.quantity * 100, 0)} VN de ${onForm.ticker.toUpperCase().trim()} guardada`
+    }
+    const [n, ticker] = assetClass === 'CEDEAR' ? [cedearForm.cantidad, cedearForm.ticker] : [form.quantity, form.ticker.toUpperCase().trim()]
+    return stockOp === 'DIVIDENDO' ? `Dividendo de ${ticker} guardado` : `${CHOICE_LABELS[stockOp]} de ${qty(n)} ${ticker} guardada`
+  }
+
+  function finish() {
+    toast.success(savedMessage())
+    onSuccess(); onClose()
+  }
+
+  /** A client-side check failed: say why, mark the field and put the cursor there. */
+  function fail(message: string, field?: string) {
+    setError(message)
+    setInvalid(field ?? null)
+    if (field) document.getElementById(field)?.focus()
+  }
+
+  function startSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError('')
+    setInvalid(null)
+  }
+
+  const inv = (id: string) => (invalid === id ? { 'aria-invalid': true, 'aria-describedby': 'tx-error' } : undefined)
+
+  function markEdited(e: React.FormEvent<HTMLDivElement>) {
+    setDirty(true)
+    if ((e.target as HTMLElement).id === invalid) setInvalid(null)
+  }
+
   /** Shared 409 handling for every gated submit path. Throws on a real error. */
   async function submitGated(payload: Record<string, unknown>) {
     // Never let a previous attempt's stale confirmation panel render while
@@ -559,7 +697,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
     setPendingConfirmation(nextPendingConfirmation(result, payload))
     if (!result.ok && result.kind === 'needs-confirmation') return
     if (!result.ok) throw new Error(result.message)
-    onSuccess(); onClose()
+    finish()
   }
 
   /**
@@ -590,18 +728,17 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
         return
       }
       setPendingConfirmation(null)
-      onSuccess(); onClose()
+      finish()
     } finally {
       setLoading(false)
     }
   }
 
   async function handleSubmitAccion(e: React.FormEvent) {
-    e.preventDefault()
-    setError('')
-    if (!form.ticker.trim()) { setError('Ingresá el ticker'); return }
-    if (form.quantity <= 0) { setError('La cantidad debe ser mayor a 0'); return }
-    if (form.price <= 0 && stockOp !== 'DIVIDENDO') { setError('El precio debe ser mayor a 0'); return }
+    startSubmit(e)
+    if (!form.ticker.trim()) return fail('Ingresá el ticker', 'tx-ticker')
+    if (form.quantity <= 0) return fail('La cantidad debe ser mayor a 0', 'tx-quantity')
+    if (form.price <= 0 && stockOp !== 'DIVIDENDO') return fail('El precio debe ser mayor a 0', 'tx-price')
 
     setLoading(true)
     try {
@@ -614,12 +751,13 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
   }
 
   async function handleSubmitCedear(e: React.FormEvent) {
-    e.preventDefault()
-    setError('')
-    if (!cedearForm.ticker) { setError('Seleccioná un CEDEAR'); return }
-    if (cedearForm.cantidad <= 0) { setError('La cantidad debe ser mayor a 0'); return }
-    if (cedearForm.precio <= 0) { setError('El precio debe ser mayor a 0'); return }
-    if (!cedearEngine) { setError('Falta la cotización del dólar para esa fecha. Cargala con Editar.'); return }
+    startSubmit(e)
+    if (!cedearForm.ticker) return fail('Seleccioná un CEDEAR', 'tx-ticker')
+    // Without the catalog there is no ratio to convert with.
+    if (!selectedCedear) return fail(catalogFailed ? CATALOG_FAILED : 'Ese CEDEAR no está en la lista. Elegí otro.', 'tx-ticker')
+    if (cedearForm.cantidad <= 0) return fail('La cantidad debe ser mayor a 0', 'tx-quantity')
+    if (cedearForm.precio <= 0) return fail('El precio debe ser mayor a 0', 'tx-price')
+    if (!cedearEngine) return fail('Falta la cotización del dólar para esa fecha. Cargala con Editar.')
 
     setLoading(true)
     try {
@@ -632,11 +770,11 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
   }
 
   async function handleSubmitON(e: React.FormEvent) {
-    e.preventDefault()
-    setError('')
-    if (!onForm.ticker.trim()) { setError('Ingresá el ticker de la ON'); return }
-    if (onForm.quantity <= 0) { setError('La cantidad debe ser mayor a 0'); return }
-    if (onForm.price <= 0) { setError('El precio debe ser mayor a 0'); return }
+    startSubmit(e)
+    // Typed but not picked: the ticker only comes from the list.
+    if (!onForm.ticker.trim()) return fail(onSearch.trim() ? 'Elegí la ON de la lista' : 'Ingresá el ticker de la ON', 'tx-ticker')
+    if (onForm.quantity <= 0) return fail('La cantidad debe ser mayor a 0', 'tx-quantity')
+    if (onForm.price <= 0) return fail('El precio debe ser mayor a 0', 'tx-price')
 
     setLoading(true)
     try {
@@ -649,7 +787,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
       if (!res.ok) {
         throw new Error(payload?.error || 'Error al guardar la operación')
       }
-      onSuccess(); onClose()
+      finish()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido')
     } finally {
@@ -658,9 +796,8 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
   }
 
   async function handleSubmitCash(e: React.FormEvent) {
-    e.preventDefault()
-    setError('')
-    if (cashForm.amount <= 0) { setError('El monto debe ser mayor a 0'); return }
+    startSubmit(e)
+    if (cashForm.amount <= 0) return fail('El monto debe ser mayor a 0', 'tx-amount')
 
     setLoading(true)
     try {
@@ -674,7 +811,7 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
         try { const d = await res.json(); if (d.error) errStr = d.error } catch { errStr = await res.text() || errStr }
         throw new Error(errStr)
       }
-      onSuccess(); onClose()
+      finish()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido')
     } finally {
@@ -691,18 +828,13 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
   const stockTotal = (stockOp === 'VENTA' ? form.quantity * form.price - (form.commission ?? 0) : form.quantity * form.price + (form.commission ?? 0))
   const onTotal = (onForm.operation === 'VENTA' ? onForm.quantity * onForm.price - (onForm.commission ?? 0) : onForm.quantity * onForm.price + (onForm.commission ?? 0))
 
+
   return (
-    <dialog
-      ref={dialog}
-      onClose={onClose}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
-      aria-labelledby="tx-title"
-      className="w-[min(480px,calc(100vw-32px))] rounded-lg border border-line bg-surface p-0 text-ink shadow-pop backdrop:bg-black/30"
-    >
-      <div className="grid gap-5 p-6 max-[819px]:p-5">
-        <div className="flex items-start gap-2">
+    <dialog ref={dialog} {...guard.dialogProps} aria-labelledby="tx-title" className={sheetCls}>
+      <div ref={content} onChange={markEdited} className="flex min-h-0 flex-1 flex-col">
+        <div className={sheetHeadCls}>
           {step === 2 && (
-            <button type="button" aria-label="Volver" onClick={() => { setStep(1); resetFormNavigationState(setError, setPendingConfirmation) }} className={`${iconBtnCls} -ml-2`}>
+            <button type="button" aria-label="Volver" onClick={() => { setStep(1); resetFormNavigationState(setError, setPendingConfirmation); setInvalid(null) }} className={`${iconBtnCls} -ml-2`}>
               <ChevronLeft className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />
             </button>
           )}
@@ -710,256 +842,284 @@ export default function AddTransactionModal({ onClose, onSuccess, initialData }:
             <h2 id="tx-title" className="font-serif text-2xl">{title}</h2>
             <p className="mt-1 text-[13px] text-ink-3">{subtitle}</p>
           </div>
-          <button type="button" aria-label="Cerrar" onClick={onClose} className={`${iconBtnCls} -mr-2`}>
+          <button type="button" aria-label="Cerrar" onClick={guard.requestClose} className={`${iconBtnCls} -mr-2`}>
             <X className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />
           </button>
         </div>
 
         {/* ── STEP 1: Asset Type Selector ── */}
         {step === 1 && (
-          <ul className="border-y border-line">
-            {ASSET_CLASSES.map(ac => (
-              <li key={ac.id} className="border-b border-line last:border-b-0">
-                <button
-                  type="button"
-                  onClick={() => { setAssetClass(ac.id); setStep(2); resetFormNavigationState(setError, setPendingConfirmation) }}
-                  className="flex min-h-14 w-full items-center gap-3 px-2 py-3 text-left hover:bg-hover focus-visible:outline-offset-[-2px]"
-                >
-                  <span className="text-ink-3">{ac.icon}</span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block font-medium">{ac.label}</span>
-                    <span className="block text-[13px] text-ink-3">{ac.desc}</span>
-                  </span>
-                  <ChevronRight className="h-4 w-4 text-ink-3" strokeWidth={1.5} aria-hidden="true" />
-                </button>
-              </li>
-            ))}
-          </ul>
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 max-[819px]:px-5">
+            <ul className="border-y border-line max-[819px]:border-t-0">
+              {ASSET_CLASSES.map(ac => (
+                <li key={ac.id} className="border-b border-line last:border-b-0">
+                  <button
+                    type="button"
+                    onClick={() => { setAssetClass(ac.id); setStep(2); resetFormNavigationState(setError, setPendingConfirmation); setInvalid(null) }}
+                    className="flex min-h-14 w-full items-center gap-3 px-2 py-3 text-left hover:bg-hover focus-visible:outline-offset-[-2px]"
+                  >
+                    <span className="text-ink-3">{ac.icon}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-medium">{ac.label}</span>
+                      <span className="block text-[13px] text-ink-3">{ac.desc}</span>
+                    </span>
+                    <ChevronRight className="h-4 w-4 text-ink-3" strokeWidth={1.5} aria-hidden="true" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
 
         {/* ── STEP 2: Forms ── */}
         {step === 2 && assetClass === 'ACCION' && (
-          <form onSubmit={handleSubmitAccion} className="grid gap-4">
-            <Choice name="tx-op" legend="Operación" options={filteredStockOps} value={stockOp} onChange={setStockOp} />
-            {initialData && <Holding held={`${qty(initialData.quantity)} acciones`} price={initialData.price} />}
-            <div className={pairCls}>
-              <Field id="tx-date" label="Fecha">
-                <input id="tx-date" type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} className={fieldCls} required />
-              </Field>
-              <Field id="tx-ticker" label="Ticker">
-                <div className="relative">
-                  <SearchInput id="tx-ticker" placeholder="Buscar acción" value={activoSearch}
-                    onChange={e => { setActivoSearch(e.target.value); setShowActivoDropdown(true) }}
-                    onFocus={() => setShowActivoDropdown(true)} required />
-                  {showActivoDropdown && filteredActivos.length > 0 && (
-                    <div className={listCls}>
-                      {filteredActivos.slice(0, 10).map(a => (
-                        <button key={a.ticker} type="button" className={optionCls}
-                          onClick={() => { setForm(f => ({ ...f, ticker: a.ticker })); setActivoSearch(`${a.ticker} - ${a.nombre}`); setShowActivoDropdown(false) }}>
-                          <span className="font-semibold">{a.ticker}</span>
-                          <span className="truncate text-ink-3">{a.nombre}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </Field>
+          <form onSubmit={handleSubmitAccion} className={formCls}>
+            <div className={sheetBodyCls}>
+              <Choice name="tx-op" legend="Operación" options={filteredStockOps} value={stockOp} onChange={setStockOp} />
+              {initialData && <Holding held={`${qty(initialData.quantity)} acciones`} price={initialData.price} />}
+              <div className={pairCls}>
+                <Field id="tx-date" label="Fecha">
+                  <input id="tx-date" type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} className={fieldCls} required />
+                </Field>
+                <Field id="tx-ticker" label="Ticker">
+                  <div className="relative">
+                    <SearchInput id="tx-ticker" placeholder="Buscar acción" value={activoSearch} {...inv('tx-ticker')}
+                      onChange={e => { setActivoSearch(e.target.value); setShowActivoDropdown(true) }}
+                      onFocus={() => setShowActivoDropdown(true)} required />
+                    {showActivoDropdown && filteredActivos.length > 0 && (
+                      <div className={listCls}>
+                        {filteredActivos.slice(0, 10).map(a => (
+                          <button key={a.ticker} type="button" className={optionCls}
+                            onClick={() => { setForm(f => ({ ...f, ticker: a.ticker })); setActivoSearch(`${a.ticker} - ${a.nombre}`); setShowActivoDropdown(false) }}>
+                            <span className="font-semibold">{a.ticker}</span>
+                            <span className="truncate text-ink-3">{a.nombre}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </Field>
+              </div>
+              <div className={pairCls}>
+                <Field id="tx-quantity" label="Cantidad">
+                  <EsNumberInput id="tx-quantity" placeholder="10" value={form.quantity || null} {...inv('tx-quantity')}
+                    onValue={n => setForm(f => ({ ...f, quantity: n ?? 0 }))} className={fieldCls} required />
+                </Field>
+                <Field id="tx-price" label="Precio en dólares">
+                  <EsNumberInput id="tx-price" placeholder="190,70" value={form.price || null} {...inv('tx-price')}
+                    onValue={n => setForm(f => ({ ...f, price: n ?? 0 }))} className={fieldCls} required />
+                </Field>
+              </div>
+              <div className={pairCls}>
+                <Field id="tx-commission" label="Comisión">
+                  <EsNumberInput id="tx-commission" placeholder="0" value={form.commission || null}
+                    onValue={n => setForm(f => ({ ...f, commission: n ?? 0 }))} className={fieldCls} />
+                </Field>
+                <Field id="tx-notes" label="Notas">
+                  <input id="tx-notes" type="text" placeholder="Opcional" value={form.notes ?? ''}
+                    onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className={fieldCls} />
+                </Field>
+              </div>
             </div>
-            <div className={pairCls}>
-              <Field id="tx-quantity" label="Cantidad">
-                <EsNumberInput id="tx-quantity" placeholder="10" value={form.quantity || null}
-                  onValue={n => setForm(f => ({ ...f, quantity: n ?? 0 }))} className={fieldCls} required />
-              </Field>
-              <Field id="tx-price" label="Precio en dólares">
-                <EsNumberInput id="tx-price" placeholder="190,70" value={form.price || null}
-                  onValue={n => setForm(f => ({ ...f, price: n ?? 0 }))} className={fieldCls} required />
-              </Field>
+            <div className={sheetFootCls}>
+              {form.quantity > 0 && form.price > 0 && (
+                <Total label={stockOp === 'VENTA' ? 'Total a recibir' : 'Total estimado'} value={formatUSD(stockTotal)} />
+              )}
+              {pendingConfirmation && (
+                <TickerConfirmation pending={pendingConfirmation} loading={loading}
+                  onConfirm={() => handleConfirmTicker(buildAccionPayload)} onCancel={() => setPendingConfirmation(null)} />
+              )}
+              <FormError id="tx-error" error={error} />
+              <Submit loading={loading} selling={selling} />
             </div>
-            <div className={pairCls}>
-              <Field id="tx-commission" label="Comisión">
-                <EsNumberInput id="tx-commission" placeholder="0" value={form.commission || null}
-                  onValue={n => setForm(f => ({ ...f, commission: n ?? 0 }))} className={fieldCls} />
-              </Field>
-              <Field id="tx-notes" label="Notas">
-                <input id="tx-notes" type="text" placeholder="Opcional" value={form.notes ?? ''}
-                  onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className={fieldCls} />
-              </Field>
-            </div>
-            {form.quantity > 0 && form.price > 0 && (
-              <Total label={stockOp === 'VENTA' ? 'Total a recibir' : 'Total estimado'} value={formatUSD(stockTotal)} />
-            )}
-            {pendingConfirmation && (
-              <TickerConfirmation pending={pendingConfirmation} loading={loading}
-                onConfirm={() => handleConfirmTicker(buildAccionPayload)} onCancel={() => setPendingConfirmation(null)} />
-            )}
-            <FormError error={error} />
-            <Submit loading={loading} selling={selling} />
           </form>
         )}
 
         {step === 2 && assetClass === 'CEDEAR' && (
-          <form onSubmit={handleSubmitCedear} className="grid gap-4">
-            <Choice name="tx-op" legend="Operación" options={filteredStockOps} value={stockOp} onChange={setStockOp} />
-            {initialData && (() => {
-              // The position is stored in underlying shares; the broker counts CEDEARs.
-              const ratio = Number(cedears.find(c => c.ticker === initialData.ticker)?.ratio) || 1
-              return <Holding held={`${qty(Math.round(initialData.quantity * ratio * 1e4) / 1e4)} CEDEARs`} price={initialData.price} />
-            })()}
-            <div className={pairCls}>
-              <Field id="tx-date" label="Fecha">
-                <input id="tx-date" type="date" value={cedearForm.date} onChange={e => setCedearForm(f => ({ ...f, date: e.target.value }))} className={fieldCls} required />
-              </Field>
-              <Field id="tx-ticker" label="CEDEAR">
-                <div className="relative">
-                  <SearchInput id="tx-ticker" placeholder="Buscar CEDEAR" value={cedearSearch}
-                    onChange={e => { setCedearSearch(e.target.value); setShowCedearDropdown(true) }}
-                    onFocus={() => setShowCedearDropdown(true)} required />
-                  {showCedearDropdown && filteredCedears.length > 0 && (
-                    <div className={listCls}>
-                      {filteredCedears.map(c => (
-                        <button key={c.ticker} type="button" className={optionCls}
-                          onClick={() => { setCedearForm(f => ({ ...f, ticker: c.ticker })); setCedearSearch(`${c.ticker} - ${c.nombre}`); setShowCedearDropdown(false) }}>
-                          <span className="font-semibold">{c.ticker}</span>
-                          <span className="truncate text-ink-3">{c.nombre}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </Field>
+          <form onSubmit={handleSubmitCedear} className={formCls}>
+            <div className={sheetBodyCls}>
+              <Choice name="tx-op" legend="Operación" options={filteredStockOps} value={stockOp} onChange={setStockOp} />
+              {initialData && (() => {
+                // The position is stored in underlying shares; the broker counts CEDEARs.
+                const ratio = Number(cedears.find(c => c.ticker === initialData.ticker)?.ratio) || 1
+                return <Holding held={`${qty(Math.round(initialData.quantity * ratio * 1e4) / 1e4)} CEDEARs`} price={initialData.price} />
+              })()}
+              <div className={pairCls}>
+                <Field id="tx-date" label="Fecha">
+                  <input id="tx-date" type="date" value={cedearForm.date} onChange={e => setCedearForm(f => ({ ...f, date: e.target.value }))} className={fieldCls} required />
+                </Field>
+                <Field id="tx-ticker" label="CEDEAR"
+                  hint={catalogFailed && (
+                    <p role="status" className="flex flex-wrap items-center gap-x-2 text-[13px] text-danger">
+                      <span>{CATALOG_FAILED}</span>
+                      <button type="button" onClick={() => setCatalogTry(n => n + 1)} className={linkBtnCls}>Reintentar</button>
+                    </p>
+                  )}>
+                  <div className="relative">
+                    <SearchInput id="tx-ticker" placeholder="Buscar CEDEAR" value={cedearSearch} {...inv('tx-ticker')}
+                      onChange={e => { setCedearSearch(e.target.value); setShowCedearDropdown(true) }}
+                      onFocus={() => setShowCedearDropdown(true)} required />
+                    {showCedearDropdown && filteredCedears.length > 0 && (
+                      <div className={listCls}>
+                        {filteredCedears.map(c => (
+                          <button key={c.ticker} type="button" className={optionCls}
+                            onClick={() => { setCedearForm(f => ({ ...f, ticker: c.ticker })); setCedearSearch(`${c.ticker} - ${c.nombre}`); setShowCedearDropdown(false) }}>
+                            <span className="font-semibold">{c.ticker}</span>
+                            <span className="truncate text-ink-3">{c.nombre}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </Field>
+              </div>
+              <Choice name="tx-currency" legend="Moneda" options={TRADE_CURRENCIES} value={cedearForm.moneda} onChange={m => setCedearForm(f => ({ ...f, moneda: m }))} />
+              <div className={pairCls}>
+                <Field id="tx-quantity" label="Cantidad de CEDEARs"
+                  hint={cedearEngine && <p className="text-[13px] text-ink-3 tabular-nums">Equivale a {formatNumber(cedearEngine.quantity, { decimals: 4 })} acciones</p>}>
+                  <EsNumberInput id="tx-quantity" placeholder="10" value={cedearForm.cantidad || null} {...inv('tx-quantity')}
+                    onValue={n => setCedearForm(f => ({ ...f, cantidad: n ?? 0 }))} className={fieldCls} required />
+                </Field>
+                <Field id="tx-price" label={`Precio por CEDEAR ${IN_CURRENCY[cedearForm.moneda]}`}>
+                  <EsNumberInput id="tx-price" placeholder={cedearForm.moneda === 'ARS' ? '28.080,50' : '10,50'} value={cedearForm.precio || null} {...inv('tx-price')}
+                    onValue={n => setCedearForm(f => ({ ...f, precio: n ?? 0 }))} className={fieldCls} required />
+                </Field>
+              </div>
+              <div className={pairCls}>
+                <Field id="tx-commission" label={`Comisión ${IN_CURRENCY[cedearForm.moneda]}`}>
+                  <EsNumberInput id="tx-commission" placeholder="0" value={cedearForm.comision || null}
+                    onValue={n => setCedearForm(f => ({ ...f, comision: n ?? 0 }))} className={fieldCls} />
+                </Field>
+                <Field id="tx-notes" label="Notas">
+                  <input id="tx-notes" type="text" placeholder="Opcional" value={cedearForm.notas}
+                    onChange={e => setCedearForm(f => ({ ...f, notas: e.target.value }))} className={fieldCls} />
+                </Field>
+              </div>
+              <FxLine fx={fx} tradeDate={cedearForm.date} edit={fxEdit}
+                onEdit={() => setFxEdit({ mep: refMep ?? 0, ccl: refCcl ?? 0 })}
+                onChange={setFxEdit} onReset={() => setFxEdit(null)} />
+              {selectedCedear && cedearEngine && (
+                <dl className="grid gap-1 border-t border-line pt-3 text-[13px]">
+                  <div className="flex justify-between gap-3"><dt className="text-ink-3">Ratio</dt><dd className="tabular-nums">{qty(selectedCedear.ratio)} CEDEARs por acción</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-ink-3">Precio por acción en dólar cable</dt><dd className="font-medium tabular-nums">{formatUSD(cedearEngine.price)}</dd></div>
+                </dl>
+              )}
             </div>
-            <Choice name="tx-currency" legend="Moneda" options={TRADE_CURRENCIES} value={cedearForm.moneda} onChange={m => setCedearForm(f => ({ ...f, moneda: m }))} />
-            <div className={pairCls}>
-              <Field id="tx-quantity" label="Cantidad de CEDEARs"
-                hint={cedearEngine && <p className="text-[13px] text-ink-3 tabular-nums">Equivale a {formatNumber(cedearEngine.quantity, { decimals: 4 })} acciones</p>}>
-                <EsNumberInput id="tx-quantity" placeholder="10" value={cedearForm.cantidad || null}
-                  onValue={n => setCedearForm(f => ({ ...f, cantidad: n ?? 0 }))} className={fieldCls} required />
-              </Field>
-              <Field id="tx-price" label={`Precio por CEDEAR ${IN_CURRENCY[cedearForm.moneda]}`}>
-                <EsNumberInput id="tx-price" placeholder={cedearForm.moneda === 'ARS' ? '28.080,50' : '10,50'} value={cedearForm.precio || null}
-                  onValue={n => setCedearForm(f => ({ ...f, precio: n ?? 0 }))} className={fieldCls} required />
-              </Field>
+            <div className={sheetFootCls}>
+              {cedearEngine && (
+                <Total label={stockOp === 'VENTA' ? 'A recibir en la cartera' : 'Inversión en la cartera'} value={formatUSD(cedearTotal)} />
+              )}
+              {pendingConfirmation && (
+                <TickerConfirmation pending={pendingConfirmation} loading={loading}
+                  onConfirm={() => handleConfirmTicker(buildCedearPayload)} onCancel={() => setPendingConfirmation(null)} />
+              )}
+              <FormError id="tx-error" error={error} />
+              <Submit loading={loading} selling={selling} />
             </div>
-            <div className={pairCls}>
-              <Field id="tx-commission" label={`Comisión ${IN_CURRENCY[cedearForm.moneda]}`}>
-                <EsNumberInput id="tx-commission" placeholder="0" value={cedearForm.comision || null}
-                  onValue={n => setCedearForm(f => ({ ...f, comision: n ?? 0 }))} className={fieldCls} />
-              </Field>
-              <Field id="tx-notes" label="Notas">
-                <input id="tx-notes" type="text" placeholder="Opcional" value={cedearForm.notas}
-                  onChange={e => setCedearForm(f => ({ ...f, notas: e.target.value }))} className={fieldCls} />
-              </Field>
-            </div>
-            <FxLine fx={fx} tradeDate={cedearForm.date} edit={fxEdit}
-              onEdit={() => setFxEdit({ mep: refMep ?? 0, ccl: refCcl ?? 0 })}
-              onChange={setFxEdit} onReset={() => setFxEdit(null)} />
-            {selectedCedear && cedearEngine && (
-              <dl className="grid gap-1 border-t border-line pt-3 text-[13px]">
-                <div className="flex justify-between gap-3"><dt className="text-ink-3">Ratio</dt><dd className="tabular-nums">{qty(selectedCedear.ratio)} CEDEARs por acción</dd></div>
-                <div className="flex justify-between gap-3"><dt className="text-ink-3">Precio por acción en dólar cable</dt><dd className="font-medium tabular-nums">{formatUSD(cedearEngine.price)}</dd></div>
-              </dl>
-            )}
-            {cedearEngine && (
-              <Total label={stockOp === 'VENTA' ? 'A recibir en la cartera' : 'Inversión en la cartera'} value={formatUSD(cedearTotal)} />
-            )}
-            {pendingConfirmation && (
-              <TickerConfirmation pending={pendingConfirmation} loading={loading}
-                onConfirm={() => handleConfirmTicker(buildCedearPayload)} onCancel={() => setPendingConfirmation(null)} />
-            )}
-            <FormError error={error} />
-            <Submit loading={loading} selling={selling} />
           </form>
         )}
 
         {step === 2 && assetClass === 'ON' && (
-          <form onSubmit={handleSubmitON} className="grid gap-4">
-            <Choice name="tx-op" legend="Operación" options={filteredOnOps} value={onForm.operation} onChange={op => setOnForm(f => ({ ...f, operation: op }))} />
-            {/* ON ledger quantity = VN / 100 */}
-            {initialData && <Holding held={`${fmtNum(initialData.quantity * 100, 0)} VN`} price={initialData.price} />}
-            <div className={pairCls}>
-              <Field id="tx-date" label="Fecha">
-                <input id="tx-date" type="date" value={onForm.date} onChange={e => setOnForm(f => ({ ...f, date: e.target.value }))} className={fieldCls} required />
-              </Field>
-              <Field id="tx-ticker" label="Ticker de la ON">
-                <div className="relative">
-                  <SearchInput id="tx-ticker" placeholder="Buscar ON" value={onSearch}
-                    onChange={e => { setOnSearch(e.target.value.toUpperCase()); setShowOnDropdown(true) }}
-                    onFocus={() => setShowOnDropdown(true)} required />
-                  {showOnDropdown && onResults.length > 0 && (
-                    <div className={listCls}>
-                      {onResults.map(on => (
-                        <button key={on.ticker} type="button" className={optionCls}
-                          onClick={() => { setOnForm(f => ({ ...f, ticker: on.ticker })); setOnSearch(on.ticker); setShowOnDropdown(false) }}>
-                          <span className="font-semibold">{on.ticker}</span>
-                          {on.name && <span className="truncate text-ink-3">{on.name}</span>}
-                          <span className="ml-auto text-xs text-ink-3">{on.source}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {showOnDropdown && onSearchLoading && <div className={`${listCls} px-3 py-2 text-[13px] text-ink-3`}>Buscando…</div>}
-                  {showOnDropdown && !onSearchLoading && onSearch.length >= 2 && onResults.length === 0 && (
-                    <div className={`${listCls} px-3 py-2 text-[13px] text-ink-3`}>No se encontraron ONs</div>
-                  )}
-                </div>
-              </Field>
+          <form onSubmit={handleSubmitON} className={formCls}>
+            <div className={sheetBodyCls}>
+              <Choice name="tx-op" legend="Operación" options={filteredOnOps} value={onForm.operation} onChange={op => setOnForm(f => ({ ...f, operation: op }))} />
+              {/* ON ledger quantity = VN / 100 */}
+              {initialData && <Holding held={`${fmtNum(initialData.quantity * 100, 0)} VN`} price={initialData.price} />}
+              <div className={pairCls}>
+                <Field id="tx-date" label="Fecha">
+                  <input id="tx-date" type="date" value={onForm.date} onChange={e => setOnForm(f => ({ ...f, date: e.target.value }))} className={fieldCls} required />
+                </Field>
+                <Field id="tx-ticker" label="Ticker de la ON">
+                  <div className="relative">
+                    <SearchInput id="tx-ticker" placeholder="Buscar ON" value={onSearch} {...inv('tx-ticker')}
+                      onChange={e => { setOnSearch(e.target.value.toUpperCase()); setShowOnDropdown(true) }}
+                      onFocus={() => setShowOnDropdown(true)} required />
+                    {showOnDropdown && onResults.length > 0 && (
+                      <div className={listCls}>
+                        {onResults.map(on => (
+                          <button key={on.ticker} type="button" className={optionCls}
+                            onClick={() => { setOnForm(f => ({ ...f, ticker: on.ticker })); setOnSearch(on.ticker); setShowOnDropdown(false) }}>
+                            <span className="font-semibold">{on.ticker}</span>
+                            {on.name && <span className="truncate text-ink-3">{on.name}</span>}
+                            <span className="ml-auto text-xs text-ink-3">{on.source}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {showOnDropdown && onSearchLoading && <div className={`${listCls} px-3 py-2 text-[13px] text-ink-3`}>Buscando…</div>}
+                    {showOnDropdown && !onSearchLoading && onSearch.length >= 2 && onResults.length === 0 && (
+                      <div className={`${listCls} px-3 py-2 text-[13px] ${onSearchFailed ? 'text-danger' : 'text-ink-3'}`}>
+                        {onSearchFailed ? 'No se pudo buscar. Probá de nuevo en un momento.' : 'No se encontraron ONs'}
+                      </div>
+                    )}
+                  </div>
+                </Field>
+              </div>
+              <div className={pairCls}>
+                <Field id="tx-quantity" label="Cantidad (nominales / 100)"
+                  hint={onForm.quantity > 0 && <p className="text-[13px] text-ink-3 tabular-nums">Equivale a {fmtNum(onForm.quantity * 100, 0)} VN</p>}>
+                  <EsNumberInput id="tx-quantity" placeholder="200" {...inv('tx-quantity')}
+                    value={onForm.quantity || null} onValue={n => setOnForm(f => ({ ...f, quantity: n ?? 0 }))} className={fieldCls} required />
+                </Field>
+                <Field id="tx-price" label="Precio por 100 nominales">
+                  <EsNumberInput id="tx-price" placeholder="98,50" {...inv('tx-price')}
+                    value={onForm.price || null} onValue={n => setOnForm(f => ({ ...f, price: n ?? 0 }))} className={fieldCls} required />
+                </Field>
+              </div>
+              <div className={pairCls}>
+                <Field id="tx-commission" label="Comisión">
+                  <EsNumberInput id="tx-commission" placeholder="0" value={onForm.commission || null}
+                    onValue={n => setOnForm(f => ({ ...f, commission: n ?? 0 }))} className={fieldCls} />
+                </Field>
+                <Field id="tx-notes" label="Notas">
+                  <input id="tx-notes" type="text" placeholder="Opcional" value={onForm.notes}
+                    onChange={e => setOnForm(f => ({ ...f, notes: e.target.value }))} className={fieldCls} />
+                </Field>
+              </div>
             </div>
-            <div className={pairCls}>
-              <Field id="tx-quantity" label="Cantidad (nominales / 100)">
-                <EsNumberInput id="tx-quantity" placeholder="200"
-                  value={onForm.quantity || null} onValue={n => setOnForm(f => ({ ...f, quantity: n ?? 0 }))} className={fieldCls} required />
-              </Field>
-              <Field id="tx-price" label="Precio (× 100)">
-                <EsNumberInput id="tx-price" placeholder="98,50"
-                  value={onForm.price || null} onValue={n => setOnForm(f => ({ ...f, price: n ?? 0 }))} className={fieldCls} required />
-              </Field>
+            <div className={sheetFootCls}>
+              {onForm.quantity > 0 && onForm.price > 0 && (
+                <Total label={onForm.operation === 'VENTA' ? 'Total a recibir' : 'Total estimado'} value={formatUSD(onTotal)} />
+              )}
+              <FormError id="tx-error" error={error} />
+              <Submit loading={loading} selling={selling} />
             </div>
-            <div className={pairCls}>
-              <Field id="tx-commission" label="Comisión">
-                <EsNumberInput id="tx-commission" placeholder="0" value={onForm.commission || null}
-                  onValue={n => setOnForm(f => ({ ...f, commission: n ?? 0 }))} className={fieldCls} />
-              </Field>
-              <Field id="tx-notes" label="Notas">
-                <input id="tx-notes" type="text" placeholder="Opcional" value={onForm.notes}
-                  onChange={e => setOnForm(f => ({ ...f, notes: e.target.value }))} className={fieldCls} />
-              </Field>
-            </div>
-            {onForm.quantity > 0 && onForm.price > 0 && (
-              <Total label={onForm.operation === 'VENTA' ? 'Total a recibir' : 'Total estimado'} value={formatUSD(onTotal)} />
-            )}
-            <FormError error={error} />
-            <Submit loading={loading} selling={selling} />
           </form>
         )}
 
         {step === 2 && assetClass === 'CASH' && (
-          <form onSubmit={handleSubmitCash} className="grid gap-4">
-            <Choice name="tx-cash" legend="Tipo de movimiento" options={CASH_OPS} value={cashForm.type} onChange={op => setCashForm(f => ({ ...f, type: op }))} />
-            <div className={pairCls}>
-              <Field id="tx-date" label="Fecha">
-                <input id="tx-date" type="date" value={cashForm.date} onChange={e => setCashForm(f => ({ ...f, date: e.target.value }))} className={fieldCls} required />
-              </Field>
-              <Field id="tx-amount" label="Monto en dólares">
-                <EsNumberInput id="tx-amount" placeholder="1.000,00" value={cashForm.amount || null}
-                  onValue={n => setCashForm(f => ({ ...f, amount: n ?? 0 }))} className={fieldCls} required />
+          <form onSubmit={handleSubmitCash} className={formCls}>
+            <div className={sheetBodyCls}>
+              <Choice name="tx-cash" legend="Tipo de movimiento" options={CASH_OPS} value={cashForm.type} onChange={op => setCashForm(f => ({ ...f, type: op }))} />
+              <div className={pairCls}>
+                <Field id="tx-date" label="Fecha">
+                  <input id="tx-date" type="date" value={cashForm.date} onChange={e => setCashForm(f => ({ ...f, date: e.target.value }))} className={fieldCls} required />
+                </Field>
+                <Field id="tx-amount" label="Monto en dólares">
+                  <EsNumberInput id="tx-amount" placeholder="1.000,00" value={cashForm.amount || null} {...inv('tx-amount')}
+                    onValue={n => setCashForm(f => ({ ...f, amount: n ?? 0 }))} className={fieldCls} required />
+                </Field>
+              </div>
+              <Field id="tx-description" label="Descripción">
+                <input id="tx-description" type="text" placeholder="Ej: transferencia desde el banco" value={cashForm.description}
+                  onChange={e => setCashForm(f => ({ ...f, description: e.target.value }))} className={fieldCls} />
               </Field>
             </div>
-            <Field id="tx-description" label="Descripción">
-              <input id="tx-description" type="text" placeholder="Ej: transferencia desde el banco" value={cashForm.description}
-                onChange={e => setCashForm(f => ({ ...f, description: e.target.value }))} className={fieldCls} />
-            </Field>
-            {cashForm.amount > 0 && (
-              <Total
-                label={cashForm.type === 'DEPOSITO' ? 'Saldo aumentará' : 'Saldo disminuirá'}
-                value={`${cashForm.type === 'DEPOSITO' ? '+' : MINUS}US$ ${formatNumber(cashForm.amount)}`}
-                tone={cashForm.type === 'DEPOSITO' ? 'text-ok' : 'text-danger'}
-              />
-            )}
-            <FormError error={error} />
-            <Submit loading={loading} selling={selling} />
+            <div className={sheetFootCls}>
+              {cashForm.amount > 0 && (
+                <Total
+                  label={cashForm.type === 'DEPOSITO' ? 'Saldo aumentará' : 'Saldo disminuirá'}
+                  value={`${cashForm.type === 'DEPOSITO' ? '+' : MINUS}US$ ${formatNumber(cashForm.amount)}`}
+                  tone={cashForm.type === 'DEPOSITO' ? 'text-ok' : 'text-danger'}
+                />
+              )}
+              <FormError id="tx-error" error={error} />
+              <Submit loading={loading} selling={selling} />
+            </div>
           </form>
         )}
       </div>
+      {guard.asking && <DiscardPrompt onDiscard={onClose} onKeep={guard.keepEditing} />}
     </dialog>
   )
 }
