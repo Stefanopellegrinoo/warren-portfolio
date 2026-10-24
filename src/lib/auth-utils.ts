@@ -7,6 +7,7 @@
 
 import { NextResponse } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { safeNextPath } from '@/lib/login-redirect'
 
 /**
  * Auth error response types for consistent handling
@@ -254,23 +255,11 @@ export function parseCallbackParams(url: string): {
 } {
   const urlObj = new URL(url)
   const code = urlObj.searchParams.get('code')
-  const rawNext = urlObj.searchParams.get('next') || '/dashboard'
   const origin = urlObj.origin
-  // Resolve against our origin and keep it only if it stays there: a prefix check
-  // misses `/\evil.com` and `/<tab>/evil.com`, which browsers resolve off-site.
-  let next = '/dashboard'
-  try {
-    const target = new URL(rawNext, origin)
-    const path = target.pathname + target.search + target.hash
-    // Check the value the route resolves again: dot segments (`/..//evil.com`) collapse to `//evil.com`.
-    if (target.origin === origin && new URL(path, origin).origin === origin) next = path
-  } catch {
-    // unparsable target: keep the default
-  }
 
   return {
     code,
-    next,
+    next: safeNextPath(urlObj.searchParams.get('next'), origin),
     origin,
     error: null,
   }

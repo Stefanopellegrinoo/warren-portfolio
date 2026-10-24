@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createSupabaseServerClient } from './lib/supabase-server';
+import { loginPath } from './lib/login-redirect';
 
 export async function middleware(req: NextRequest) {
   const res = NextResponse.next();
@@ -15,7 +16,11 @@ export async function middleware(req: NextRequest) {
   const { data: { session } } = await supabase.auth.getSession();
 
   if (!session && isProtected) {
-    return NextResponse.redirect(new URL('/auth/login', req.url));
+    // An auth cookie that no longer yields a session means it expired, not that the user never signed in.
+    // Sign-up leaves a PKCE `-auth-token-code-verifier` cookie behind; that is not a session.
+    const expired = req.cookies.getAll().some((c) =>
+      c.name.startsWith('sb-') && c.name.includes('-auth-token') && !c.name.endsWith('-code-verifier'));
+    return NextResponse.redirect(new URL(loginPath(pathname + req.nextUrl.search, expired), req.url));
   }
 
   if (session && isAuthPage) {

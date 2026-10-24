@@ -4,8 +4,14 @@ import { useState } from 'react'
 import { createClient } from '@/lib/supabase-client'
 import { useRouter } from 'next/navigation'
 import { Mail, Lock, Eye, EyeOff } from 'lucide-react'
+import { authErrorMessage } from '@/lib/auth-messages'
+import { safeNextPath } from '@/lib/login-redirect'
 
-export default function LoginPage() {
+type SearchParams = { next?: string | string[]; motivo?: string | string[] }
+
+export default function LoginPage({ searchParams = {} }: { searchParams?: SearchParams }) {
+  const next = typeof searchParams.next === 'string' ? searchParams.next : null
+  const sessionExpired = searchParams.motivo === 'sesion'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
@@ -24,7 +30,7 @@ export default function LoginPage() {
       if (mode === 'login') {
         const { error } = await sb.auth.signInWithPassword({ email, password })
         if (error) throw error
-        router.push('/dashboard')
+        router.push(safeNextPath(next, window.location.origin))
         router.refresh()
       } else {
         const { error } = await sb.auth.signUp({ email, password })
@@ -32,7 +38,7 @@ export default function LoginPage() {
         setSuccess('Revisá tu email para confirmar la cuenta.')
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error de autenticación')
+      setError(authErrorMessage(err, mode))
     } finally {
       setLoading(false)
     }
@@ -51,6 +57,12 @@ export default function LoginPage() {
           <p className="mb-6 mt-1 text-sm text-ink-2">
             {mode === 'login' ? 'Ingresá con tu email y contraseña.' : 'Completá los datos para registrarte.'}
           </p>
+
+          {sessionExpired && mode === 'login' && (
+            <p role="status" className="mb-4 rounded bg-info-soft px-3 py-2 text-sm text-info">
+              Tu sesión venció. Ingresá de nuevo para seguir donde estabas.
+            </p>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
@@ -72,7 +84,7 @@ export default function LoginPage() {
                   className={`${field} pr-11`} required />
                 <button type="button" onClick={() => setShowPass(s => !s)}
                   aria-label={showPass ? 'Ocultar contraseña' : 'Mostrar contraseña'}
-                  className="absolute right-1 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded text-ink-3 hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
+                  className="absolute right-1 top-1/2 grid h-9 w-9 -translate-y-1/2 max-[819px]:right-0 max-[819px]:h-11 max-[819px]:w-11 place-items-center rounded text-ink-3 hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
                   {showPass ? <EyeOff className="h-4 w-4" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
                 </button>
               </div>
@@ -93,7 +105,7 @@ export default function LoginPage() {
           </form>
 
           <button type="button" onClick={() => { setMode(m => m === 'login' ? 'signup' : 'login'); setError(''); setSuccess('') }}
-            className="mt-4 w-full rounded py-2 text-center text-sm text-accent-ink hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
+            className="mt-4 w-full rounded py-2 text-center max-[819px]:min-h-11 text-sm text-accent-ink hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
             {mode === 'login' ? '¿No tenés cuenta? Registrate' : '¿Ya tenés cuenta? Ingresá'}
           </button>
         </div>
