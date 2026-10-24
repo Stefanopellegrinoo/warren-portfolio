@@ -5,12 +5,16 @@ import { fetchKlines } from "@/lib/binance/rest";
 import { getBinanceWS } from "@/lib/binance/ws";
 import { getProviderForSymbol } from "@/lib/market-data/resolver";
 import { klinesInterval, toChartTime } from "@/lib/chart/timeframes";
-import { barsToUpdate } from "@/lib/chart/live-bars";
+import { barsToUpdate, mergeRecent } from "@/lib/chart/live-bars";
 import { requestErrorMessage } from "@/lib/request-errors";
 import type { Candle, Timeframe } from "@/lib/binance/types";
 
 const POLL_MS = 30_000;
 const CANDLES_FAILED = "No se pudieron cargar las velas. Probá de nuevo.";
+// Days of recent bars a stock's poll asks for: wide enough to hold the last drawn bar over a
+// weekend or a holiday, small next to the history.
+const RECENT_DAYS: Record<ReturnType<typeof klinesInterval>, number> = { "15m": 7, "1h": 10, "1d": 14, "1w": 60, "1mo": 400 };
+const MEMORY_MAX = 12;
 
 /** reset: draw every bar again; update: series.update() these bars in order. */
 export type CandleChange = { kind: "reset" } | { kind: "update"; bars: Candle[] };
@@ -24,9 +28,22 @@ export interface CandleState {
 
 const LOADING: CandleState = { status: "loading", candles: [], change: { kind: "reset" } };
 
-async function fetchYahoo(symbol: string, tf: Timeframe, signal: AbortSignal): Promise<Candle[]> {
+// The candles of the assets and timeframes seen in this tab, newest last: one seen before
+// opens at once and refreshes behind (odd/tasks/rendimiento.md S4).
+const memory = new Map<string, Candle[]>();
+function remember(key: string, candles: Candle[]) {
+	memory.delete(key);
+	memory.set(key, candles);
+	if (memory.size > MEMORY_MAX) memory.delete(memory.keys().next().value as string);
+}
+/** Forgets every remembered candle (tests, and a sign-out). */
+export function forgetCandles() {
+	memory.clear();
+}
+
+async function fetchYahoo(symbol: string, tf: Timeframe, signal: AbortSignal, days?: number): Promise<Candle[]> {
 	const res = await fetch(
-		`/api/klines?ticker=${encodeURIComponent(symbol)}&interval=${klinesInterval(tf)}`,
+		`/api/klines?ticker=${encodeURIComponent(symbol)}&interval=${klinesInterval(tf)}${days ? `&days=${days}` : ""}`,
 		{ signal },
 	);
 	const body = await res.json().catch(() => null);
@@ -43,9 +60,10 @@ function withBar(candles: Candle[], c: Candle): Candle[] {
 }
 
 /**
- * Candles for one symbol and timeframe, kept live: Binance through its kline
- * stream, Yahoo by re-polling /api/klines every 30 s (cached 30 s on the
- * server), so new bars appear only when the source really has them.
+ * Candles for one symbol and timeframe, kept live: Binance through its kline stream, Yahoo by
+ * loading the history once (cached 10 min on the server) and re-polling a recent window every
+ * 30 s (cached 30 s), so new bars appear only when the source really has them. An asset seen
+ * before in this tab opens at once from memory while it refreshes.
  */
 export function useCandles(symbol: string, timeframe: Timeframe) {
 	const [state, setState] = useState<CandleState>(LOADING);
@@ -54,11 +72,23 @@ export function useCandles(symbol: string, timeframe: Timeframe) {
 
 	useEffect(() => {
 		const ctrl = new AbortController();
+		const key = `${symbol}:${timeframe}`;
+		const seen = memory.get(key);
 		let stop: (() => void) | null = null;
-		setState(LOADING);
+		setState(seen ? { status: "ready", candles: seen, change: { kind: "reset" } } : LOADING);
 
+		// A fresh load: drawn over the remembered bars when it continues them, redrawn otherwise.
+		const show = (candles: Candle[]) => {
+			remember(key, candles);
+			setState((s) => {
+				const bars = s.status === "ready" ? barsToUpdate(s.candles, candles) : null;
+				if (bars?.length === 0) return s.candles.length === candles.length ? s : { ...s, candles };
+				return { status: "ready", candles, change: bars && s.candles.length <= candles.length ? { kind: "update", bars } : { kind: "reset" } };
+			});
+		};
 		const fail = (e: unknown) => {
-			if (ctrl.signal.aborted) return;
+			// A failed refresh keeps the remembered bars on screen; only a first load shows the error.
+			if (ctrl.signal.aborted || seen) return;
 			setState({ ...LOADING, status: "error", error: requestErrorMessage(e, CANDLES_FAILED) });
 		};
 
@@ -70,27 +100,48 @@ export function useCandles(symbol: string, timeframe: Timeframe) {
 						throw e instanceof TypeError ? e : new Error("");
 					});
 					if (ctrl.signal.aborted) return;
-					setState({ status: "ready", candles, change: { kind: "reset" } });
+					show(candles);
 					stop = getBinanceWS().subscribeKline({
 						symbol,
 						interval: timeframe,
 						onCandle: (c) =>
-							setState((s) => ({ ...s, candles: withBar(s.candles, c), change: { kind: "update", bars: [c] } })),
+							setState((s) => {
+								const candles = withBar(s.candles, c);
+								remember(key, candles);
+								return { ...s, candles, change: { kind: "update", bars: [c] } };
+							}),
 					});
 					return;
 				}
 
-				const candles = await fetchYahoo(symbol, timeframe, ctrl.signal);
+				const recentDays = RECENT_DAYS[klinesInterval(timeframe)];
+				const loadAll = async () => {
+					const [history, recent] = await Promise.all([
+						fetchYahoo(symbol, timeframe, ctrl.signal),
+						fetchYahoo(symbol, timeframe, ctrl.signal, recentDays).catch(() => []),
+					]);
+					return [...(mergeRecent(history, recent) ?? history)];
+				};
+				const candles = await loadAll();
 				if (ctrl.signal.aborted) return;
-				setState({ status: "ready", candles, change: { kind: "reset" } });
+				show(candles);
 				const id = setInterval(async () => {
 					try {
-						const polled = await fetchYahoo(symbol, timeframe, ctrl.signal);
+						const recent = await fetchYahoo(symbol, timeframe, ctrl.signal, recentDays);
+						let gap = false;
 						setState((s) => {
-							const bars = barsToUpdate(s.candles, polled);
-							if (bars?.length === 0) return s;
-							return { ...s, candles: polled, change: bars ? { kind: "update", bars } : { kind: "reset" } };
+							const merged = mergeRecent(s.candles, recent);
+							if (!merged) {
+								gap = true;
+								return s;
+							}
+							const bars = barsToUpdate(s.candles, recent);
+							if (merged === s.candles || bars?.length === 0) return s;
+							remember(key, [...merged]);
+							return { ...s, candles: [...merged], change: bars ? { kind: "update", bars } : { kind: "reset" } };
 						});
+						// The window no longer reaches the drawn bars (the tab slept for days): load it all again.
+						if (gap) show(await loadAll());
 					} catch {
 						// A failed poll keeps the drawn bars; the next poll retries.
 					}

@@ -6,6 +6,8 @@ import { usePathname } from 'next/navigation'
 import { Menu, X, LogOut, Search } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase-client'
+import { cachedValue } from '@/lib/client-cache'
+import { getPortfolio, POSITIONS_KEY } from '@/lib/warren/positions'
 import { NAV_ITEMS, PERSONAL_ITEMS, activeHref, type NavItem } from './nav'
 import ThemeSwitch from './ThemeSwitch'
 import AssetSearch from './AssetSearch'
@@ -15,6 +17,10 @@ const linkBase =
 const linkActive =
   'bg-surface font-medium text-ink shadow-[0_0_0_1px_var(--line)] before:absolute before:-left-3 before:bottom-2 before:top-2 before:w-0.5 before:rounded before:bg-accent'
 const sectionTitle = 'mb-1 px-2 text-xs font-medium uppercase tracking-[0.06em] text-ink-3'
+
+type Portfolio = Awaited<ReturnType<typeof getPortfolio>>
+// The search opens the stock chart, so it only offers stocks and CEDEARs.
+const heldOf = (p: Portfolio) => (p.positions ?? []).map(x => x.ticker)
 
 function NavLink({ item, active }: { item: NavItem; active: boolean }) {
   const Icon = item.icon
@@ -33,24 +39,21 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
   // The menu belongs to the page it was opened on, so navigating closes it.
   const [openOn, setOpenOn] = useState<string | null>(null)
   const open = openOn === pathname
-  const [heldTickers, setHeldTickers] = useState<string[]>([])
+  const [askedHeld, setAskedHeld] = useState<string[]>([])
   const [searchOpen, setSearchOpen] = useState(false)
   const openBtn = useRef<HTMLButtonElement>(null)
   const closeBtn = useRef<HTMLButtonElement>(null)
+  // The portfolio this tab already has; changing section never asks for it again.
+  const known = cachedValue<Portfolio>(POSITIONS_KEY)
 
   useEffect(() => {
+    if (!searchOpen || cachedValue(POSITIONS_KEY)) return
     let cancelled = false
-    fetch('/api/positions')
-      .then(r => (r.ok ? r.json() : null))
-      .then(d => {
-        if (cancelled || !d) return
-        const stocks: { ticker: string }[] = d.positions ?? []
-        // The search opens the stock chart, so it only offers stocks and CEDEARs.
-        setHeldTickers(stocks.map(p => p.ticker))
-      })
+    getPortfolio()
+      .then(d => { if (!cancelled) setAskedHeld(heldOf(d)) })
       .catch(() => { /* the search suggestions are optional; the page shows its own errors */ })
     return () => { cancelled = true }
-  }, [])
+  }, [searchOpen])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -173,7 +176,7 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
         </div>
       </aside>
 
-      <AssetSearch open={searchOpen} onClose={() => setSearchOpen(false)} held={heldTickers} />
+      <AssetSearch open={searchOpen} onClose={() => setSearchOpen(false)} held={known ? heldOf(known) : askedHeld} />
 
       <main id="main" className="min-w-0">
         {children}

@@ -27,7 +27,8 @@ export async function GET() {
 
     if (error) throw normalizeError(error)
 
-    return NextResponse.json(data ?? [])
+    // A global catalog that changes rarely: the browser keeps it an hour (private: behind a session).
+    return NextResponse.json(data ?? [], { headers: { 'Cache-Control': 'private, max-age=3600' } })
   } catch (err) {
     return serverError('API /activos', err)
   }

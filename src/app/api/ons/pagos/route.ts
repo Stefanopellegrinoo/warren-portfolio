@@ -35,7 +35,17 @@ export async function GET() {
   }
 }
 
-/** PUT /api/ons/pagos {ticker, pay_date, kind, amount|null, note?}: the user's word over one payment. */
+/** The payments after a change, so the page needs one round trip (odd/tasks/rendimiento.md S9); none if they cannot be read (the change was saved anyway). */
+async function paymentsAfter(auth: { supabase: Parameters<typeof loadPayments>[0]; user: { id: string } }) {
+  try {
+    return await loadPayments(auth.supabase, auth.user.id, argentinaDate())
+  } catch (error) {
+    console.error('[ONs pagos API] Saved, but failed to rebuild the payments:', error)
+    return null
+  }
+}
+
+/** PUT /api/ons/pagos {ticker, pay_date, kind, amount|null, note?}: the user's word over one payment. Answers `{ ok, payments, missing }`. */
 export async function PUT(req: Request) {
   const auth = await requireUser()
   if (isAuthFailure(auth)) return auth.error
@@ -54,10 +64,10 @@ export async function PUT(req: Request) {
   }, { onConflict: 'user_id,ticker,pay_date,kind' })
   if (error) return dbFail(error)
   await invalidateUserCache(auth.user.id)
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ ok: true, ...await paymentsAfter(auth) })
 }
 
-/** DELETE /api/ons/pagos?ticker=&pay_date=&kind=: drops the correction, the payment is automatic again. */
+/** DELETE /api/ons/pagos?ticker=&pay_date=&kind=: drops the correction, the payment is automatic again. 204; with `&view=1`, 200 with `{ payments, missing }`. */
 export async function DELETE(req: Request) {
   const auth = await requireUser()
   if (isAuthFailure(auth)) return auth.error
@@ -70,7 +80,8 @@ export async function DELETE(req: Request) {
   if (error) return dbFail(error)
   if (!data || data.length === 0) return fail('No había una corrección para ese pago', 404)
   await invalidateUserCache(auth.user.id)
-  return new NextResponse(null, { status: 204 })
+  const view = new URL(req.url).searchParams.get('view') === '1' ? await paymentsAfter(auth) : null
+  return view ? NextResponse.json(view) : new NextResponse(null, { status: 204 })
 }
 
 function dbFail(error: { code?: string; message?: string }) {

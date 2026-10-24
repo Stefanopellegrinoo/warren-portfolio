@@ -28,8 +28,9 @@ vi.mock('@/lib/snapshot-series', () => ({
   fetchSnapshotSeries: (...args: unknown[]) => mockFetchSnapshotSeries(...args),
 }))
 
+const mockFetchQuotes = vi.fn(async (_tickers: string[]) => new Map())
 vi.mock('@/lib/yahoo-finance', () => ({
-  fetchQuotes: () => Promise.resolve(new Map()),
+  fetchQuotes: (...a: unknown[]) => mockFetchQuotes(...(a as [string[]])),
 }))
 
 const mockFetchFlowTransactions = vi.fn()
@@ -400,5 +401,33 @@ describe('GET /api/statistics — benchmark param', () => {
     const res = await GET(makeRequest('/api/statistics?universe=total&benchmark=%5EGSPC%3Bevil'))
     expect(res.status).toBe(400)
     expect(mockGetDerivedSeries).not.toHaveBeenCalled()
+  })
+})
+
+describe('GET /api/statistics — independent reads run together', () => {
+  it('asks the series, the flows and the portfolio together, then the benchmark and the quotes together', async () => {
+    const log: string[] = []
+    mockRequireUser.mockResolvedValue({ supabase: ledgerSupabase({ transactions: [trade()] }, log), user: { id: 'u1' } })
+    let answerSeries!: (v: unknown) => void
+    mockGetDerivedSeries.mockReturnValue(new Promise(r => { answerSeries = r }))
+    let answerBenchmark!: (v: unknown) => void
+    mockFetchBenchmarkComparison.mockReturnValue(new Promise(r => { answerBenchmark = r }))
+
+    const pending = GET(makeRequest('/api/statistics?universe=stocks&benchmark=SPY'))
+    // The series has not answered yet: the flows and the ledger read have started.
+    await vi.waitFor(() => {
+      expect(mockFetchExternalFlows).toHaveBeenCalledTimes(1)
+      expect(mockFetchFlowTransactions).toHaveBeenCalledTimes(1)
+      expect(mockFetchIncomeMovements).toHaveBeenCalledTimes(1)
+      expect(log).toContain('transactions')
+    })
+    answerSeries({ rows: [], income: [], degraded: false, flags: {} })
+    // The benchmark has not answered yet: the quotes are already asked for.
+    await vi.waitFor(() => expect(mockFetchQuotes).toHaveBeenCalledWith(['AAPL']))
+    answerBenchmark(null)
+
+    const res = await pending
+    expect(res.status).toBe(200)
+    expect((await res.json()).benchmarkError).toBe(false)
   })
 })

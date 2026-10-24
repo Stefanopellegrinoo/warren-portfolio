@@ -15,9 +15,10 @@ const DEFAULT_DAYS: Record<CandleInterval, number | null> = {
   '1w': null,
   '1mo': null,
 }
-// The chart re-polls every 30 s for its live bars, so every interval
-// shares one short TTL.
-const CANDLES_TTL = 30
+// The chart loads a full history once and then re-polls a recent window (`days`) every 30 s
+// for its live bars: the history keeps 10 minutes, the window 30 s.
+const HISTORY_TTL = 600
+const RECENT_TTL = 30
 const ROUTE_LIMIT = 60
 const ROUTE_WINDOW_SEC = 60
 
@@ -65,7 +66,8 @@ export async function GET(req: NextRequest) {
     : undefined
   try {
     const provider = getMarketDataProvider()
-    const candles = await cached(`klines:${ticker}:${interval}:${days ?? 'all'}`, CANDLES_TTL, () =>
+    const ttl = daysParam != null ? RECENT_TTL : HISTORY_TTL
+    const candles = await cached(`klines:${ticker}:${interval}:${days ?? 'all'}`, ttl, () =>
       provider.getCandles(ticker, interval, from)
     )
     return NextResponse.json(candles)

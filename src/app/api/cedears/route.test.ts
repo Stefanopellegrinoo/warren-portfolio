@@ -30,6 +30,12 @@ beforeEach(() => {
 })
 
 describe('GET /api/cedears', () => {
+  it('lets the browser keep the global catalog for an hour, privately', async () => {
+    const res = await GET()
+
+    expect(res.headers.get('Cache-Control')).toBe('private, max-age=3600')
+  })
+
   it('returns the catalog with the name from activos, read with the service role', async () => {
     const res = await GET()
 

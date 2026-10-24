@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
 import OnExplorerFilters from './OnExplorerFilters'
 import OnExplorerTable, { SortSelect } from './OnExplorerTable'
@@ -8,6 +8,7 @@ import type { OnListRow } from '@/lib/on-analytics'
 import { applyExplorer, DEFAULT_STATE, issuersOf, parseExplorerQuery, serializeExplorerQuery, type ExplorerFilters, type SortKey } from '@/lib/on-explorer-filters'
 import { fmtDate } from '@/lib/on-format'
 import { argentinaDate, cn, formatAge } from '@/lib/utils'
+import { useCached } from '@/lib/client-cache'
 import { Disclosure, Glossary, Loading, LoadError, Notice, btnQuiet, btnSecondary, notice, type GlossaryTerm } from './ui'
 
 interface CatalogResponse {
@@ -35,22 +36,15 @@ export function DataStatus({ data }: { data: Pick<CatalogResponse, 'asOf' | 'sta
 export default function OnExplorer() {
   const pathname = usePathname()
   const params = useSearchParams()
-  const [data, setData] = useState<CatalogResponse | null>(null)
-  const [error, setError] = useState(false)
+  // The catalog seen before in this tab shows at once and refreshes behind; the test portfolio shares it (odd/tasks/rendimiento.md S9).
+  const catalog = useCached('ons:catalog', async (): Promise<CatalogResponse> => {
+    const res = await fetch('/api/ons')
+    if (!res.ok) throw new Error(String(res.status))
+    return res.json()
+  })
+  const data = catalog.data ?? null
   const [shown, setShown] = useState(PAGE_SIZE)
   const [moreColumns, setMoreColumns] = useState(false)
-
-  const load = useCallback(async () => {
-    setError(false)
-    try {
-      const res = await fetch('/api/ons')
-      if (!res.ok) throw new Error(String(res.status))
-      setData(await res.json())
-    } catch {
-      setError(true)
-    }
-  }, [])
-  useEffect(() => { void load() }, [load])
 
   // Local state drives the controls (typing must never wait on the router); the URL mirrors it
   // so a view can be shared or reloaded. It is read once, on mount.
@@ -75,7 +69,7 @@ export default function OnExplorer() {
   const issuers = useMemo(() => issuersOf(rows), [rows])
   const currencies = useMemo(() => [...new Set(rows.map((r) => r.currencyLabel))].sort(), [rows])
 
-  if (error) return <LoadError message="No se pudo cargar el catálogo de ONs." onRetry={() => void load()} />
+  if (!data && catalog.error) return <LoadError message="No se pudo cargar el catálogo de ONs." onRetry={catalog.reload} />
   if (!data) return <Loading label="Cargando ONs" />
   if (rows.length === 0) {
     return <Notice tone="info">El catálogo de ONs todavía no tiene datos. Se actualiza cada noche desde BYMA Educa; volvé a probar mañana.</Notice>

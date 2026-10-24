@@ -12,14 +12,16 @@ vi.hoisted(() => {
   })
 })
 
+// The URL's query and every symbol the chart was mounted with, for the ?symbol= tests.
+const nav = vi.hoisted(() => ({ query: new URLSearchParams(), charts: [] as string[] }))
 vi.mock('next/navigation', () => ({
   usePathname: () => '/trading',
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => nav.query,
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
 }))
 // The chart core has its own tests; here it only has to mount once.
 vi.mock('@/components/trading/chart/TradingChart', () => ({
-  TradingChart: ({ symbol }: { symbol: string }) => <div data-chart={symbol} />,
+  TradingChart: ({ symbol }: { symbol: string }) => { nav.charts.push(symbol); return <div data-chart={symbol} /> },
 }))
 
 import TradingPage from '../page'
@@ -40,6 +42,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  nav.query = new URLSearchParams()
+  nav.charts.length = 0
   act(() => root.unmount())
   host.remove()
   vi.unstubAllGlobals()
@@ -88,5 +92,26 @@ describe('Watchlist', () => {
     act(() => row.click())
     expect(useChartStore.getState().symbol).toBe('QQQ')
     expect(onSelect).toHaveBeenCalledWith('QQQ')
+  })
+})
+
+describe('TradingPage opened on ?symbol=', () => {
+  it('loads only the requested symbol, never the last one first', async () => {
+    nav.query = new URLSearchParams('symbol=btcusdt')
+
+    await act(async () => { root.render(<TradingPage />) })
+
+    expect(new Set(nav.charts)).toEqual(new Set(['BTCUSDT']))
+    const urls = vi.mocked(fetch).mock.calls.map(([u]) => String(u))
+    // The chart's own quote is BTCUSDT's; SPY appears only in the watchlist's prices.
+    expect(urls).toContain('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT')
+    expect(urls).not.toContain('/api/quote?tickers=SPY')
+    expect(useChartStore.getState().symbol).toBe('BTCUSDT')
+  })
+
+  it('without ?symbol= it opens on the last symbol', async () => {
+    await act(async () => { root.render(<TradingPage />) })
+
+    expect(new Set(nav.charts)).toEqual(new Set(['SPY']))
   })
 })

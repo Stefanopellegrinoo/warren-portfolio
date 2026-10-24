@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect, useCallback, Fragment } from 'react'
+import { useState, Fragment } from 'react'
 import { toast } from 'sonner'
 import { requestErrorMessage } from '@/lib/request-errors'
+import { useCached } from '@/lib/client-cache'
 import { InlineConfirm } from '@/components/ui/InlineConfirm'
 import { Trash2 } from 'lucide-react'
 import { formatDate, formatNumber, formatPct, formatUSD } from '@/lib/utils'
@@ -119,18 +120,21 @@ const LIST_ONLY = 'min-[1080px]:hidden'
 
 const DELETE_QUESTION = '¿Estás seguro que querés borrar esta operación? Esto recalculará toda la posición desde cero.'
 
+async function fetchRows<T>(url: string): Promise<T[]> {
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(String(res.status))
+  const data = await res.json()
+  return data.data ?? []
+}
+const fetchClosed = () => fetchRows<ClosedTrade>('/api/transactions/closed')
+const fetchAll = () => fetchRows<Transaction>('/api/transactions?limit=1000')
+
 export default function HistoryPage() {
   const [activeTab, setActiveTab] = useState<'closed' | 'all'>('closed')
 
-  const [closedTrades, setClosedTrades] = useState<ClosedTrade[]>([])
-  const [closedLoading, setClosedLoading] = useState(true)
-  const [closedError, setClosedError] = useState(false)
   const [closedFilter, setClosedFilter] = useState('')
   const [closedSort, setClosedSort] = useState<Sort<ClosedSortKey>>({ key: 'close_date', dir: 'desc' })
 
-  const [allTx, setAllTx] = useState<Transaction[]>([])
-  const [allLoading, setAllLoading] = useState(false)
-  const [allError, setAllError] = useState(false)
   const [allFilter, setAllFilter] = useState('')
   const [allSort, setAllSort] = useState<Sort<AllSortKey>>({ key: 'date', dir: 'desc' })
   const [reviewOnly, setReviewOnly] = useState(false)
@@ -138,45 +142,24 @@ export default function HistoryPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
-  const fetchClosedTrades = useCallback(async () => {
-    setClosedLoading(true)
-    setClosedError(false)
-    try {
-      const res = await fetch('/api/transactions/closed')
-      if (!res.ok) throw new Error(String(res.status))
-      const data = await res.json()
-      setClosedTrades(data.data ?? [])
-    } catch {
-      setClosedError(true)
-    } finally {
-      setClosedLoading(false)
-    }
-  }, [])
-
-  const fetchAllTransactions = useCallback(async () => {
-    setAllLoading(true)
-    setAllError(false)
-    try {
-      const res = await fetch('/api/transactions?limit=1000')
-      if (!res.ok) throw new Error(String(res.status))
-      const data = await res.json()
-      setAllTx(data.data ?? [])
-    } catch {
-      setAllError(true)
-    } finally {
-      setAllLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (activeTab === 'closed') fetchClosedTrades()
-    else fetchAllTransactions()
-  }, [activeTab, fetchClosedTrades, fetchAllTransactions])
+  // Each tab keeps what it loaded: coming back shows it at once and refreshes it behind.
+  const closed = useCached(activeTab === 'closed' ? 'history:closed' : null, fetchClosed)
+  const all = useCached(activeTab === 'all' ? 'history:all' : null, fetchAll)
+  // A retry shows the skeleton again until its answer, like the first load.
+  const [retried, setRetried] = useState<unknown>(null)
+  const closedError = !closed.data && !!closed.error && closed.error !== retried
+  const closedLoading = !closed.data && !closedError
+  const allError = !all.data && !!all.error && all.error !== retried
+  const allLoading = !all.data && !allError
+  const closedTrades = closed.data ?? []
+  const allTx = all.data ?? []
+  const retryClosed = () => { setRetried(closed.error); closed.reload() }
+  const retryAll = () => { setRetried(all.error); all.reload() }
 
   async function handleFixed() {
     setFixingId(null)
     toast.success('Corrección guardada')
-    await fetchAllTransactions()
+    all.reload()
     window.dispatchEvent(new CustomEvent('portfolio-needs-refresh'))
   }
   // Only a trade with a CEDEAR ratio can be re-derived from a broker ticket.
@@ -192,7 +175,9 @@ export default function HistoryPage() {
         throw new Error(body?.error || 'No se pudo borrar la operación.')
       }
       toast.success('Operación borrada')
-      await (activeTab === 'closed' ? fetchClosedTrades() : fetchAllTransactions())
+      // The row leaves at once; the list is asked again behind, as the server recalculated the position.
+      all.mutate(allTx.filter(x => x.id !== t.id))
+      all.reload()
       setTimeout(() => {
         if (window.location.pathname === '/history') window.dispatchEvent(new CustomEvent('portfolio-needs-refresh'))
       }, 500)
@@ -261,7 +246,7 @@ export default function HistoryPage() {
       {activeTab === 'closed' && (
         <section aria-labelledby="h-closed">
           <h2 id="h-closed" className="sr-only">Posiciones cerradas</h2>
-          {closedLoading ? <Skeleton /> : closedError ? <LoadError onRetry={fetchClosedTrades} /> : (
+          {closedLoading ? <Skeleton /> : closedError ? <LoadError onRetry={retryClosed} /> : (
             <>
               <dl className="grid grid-cols-4 gap-4 border-b border-line py-5 max-[819px]:grid-cols-2">
                 <div>
@@ -345,7 +330,7 @@ export default function HistoryPage() {
       {activeTab === 'all' && (
         <section aria-labelledby="h-all">
           <h2 id="h-all" className="sr-only">Todas las operaciones</h2>
-          {allLoading ? <Skeleton /> : allError ? <LoadError onRetry={fetchAllTransactions} /> : allSorted.length === 0 ? (
+          {allLoading ? <Skeleton /> : allError ? <LoadError onRetry={retryAll} /> : allSorted.length === 0 ? (
             <p className="py-6 text-[13px] text-ink-3">{allFilter || reviewOnly ? 'Ninguna operación coincide con el filtro.' : 'Todavía no cargaste operaciones.'}</p>
           ) : (
             <>

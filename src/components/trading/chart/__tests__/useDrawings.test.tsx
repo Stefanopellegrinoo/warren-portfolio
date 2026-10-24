@@ -15,9 +15,9 @@ function Probe({ manager }: { manager: DrawingManager }) {
   return null
 }
 
-async function render() {
+async function render(loaded: unknown = { drawings: [] }) {
   const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
-    new Response(init?.method === 'PUT' ? '{}' : JSON.stringify({ drawings: [] })))
+    new Response(init?.method === 'PUT' ? '{}' : JSON.stringify(loaded)))
   vi.stubGlobal('fetch', fetchMock)
   const { manager } = fakeChart()
   const el = document.createElement('div')
@@ -25,7 +25,7 @@ async function render() {
   const root = createRoot(el)
   await act(async () => { root.render(<Probe manager={manager} />) })
   const puts = () => fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')
-  return { manager, puts, unmount: () => act(() => root.unmount()) }
+  return { manager, puts, fetchMock, unmount: () => act(() => root.unmount()) }
 }
 
 const hide = (event: 'visibilitychange' | 'pagehide') => {
@@ -79,6 +79,28 @@ describe('saving drawings when the app goes to the background (S8)', () => {
     hide('visibilitychange')
 
     expect(puts()).toHaveLength(0)
+    unmount()
+  })
+})
+
+describe('loading the drawings of a ticker (S2)', () => {
+  it('a ticker never saved brings its legacy rows in the same response: no second request, saved once', async () => {
+    const legacy = [{ id: 'r1', type: 'hline', points: [{ time: 100, price: 150 }], style: {} }]
+    const { manager, puts, fetchMock, unmount } = await render({ drawings: null, legacy })
+    await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+
+    expect(fetchMock.mock.calls.map(([u]) => String(u))).not.toContain('/api/drawings?ticker=BTCUSDT')
+    expect(manager.drawings()).toHaveLength(1)
+    expect(puts()).toHaveLength(1) // brought over to the new format once
+    unmount()
+  })
+
+  it('a ticker with no drawings at all loads empty with one request', async () => {
+    const { manager, fetchMock, unmount } = await render({ drawings: null, legacy: [] })
+    await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(manager.drawings()).toEqual([])
     unmount()
   })
 })

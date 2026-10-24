@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatUSD } from '@/lib/utils'
 import { requestErrorMessage } from '@/lib/request-errors'
+import { useCached } from '@/lib/client-cache'
 import type { Cashflow } from '@/types'
 import { SectionHead } from '@/components/resumen/ui'
 import ExpenseList, { type Sort, type SortKey } from './ExpenseList'
@@ -19,13 +20,23 @@ const stepButton = 'grid h-9 w-9 place-items-center rounded-md text-ink-2 hover:
 const LOAD_FAILED = 'No se pudieron cargar los gastos.'
 const select = 'min-h-8 rounded-md border border-line-strong bg-surface px-2 text-[13px] text-ink hover:border-ink-3 max-[819px]:min-h-11'
 
+/** GET /api/cashflow, which a status change or a delete also answers. */
+interface CashflowList { data: Cashflow[] | null; overdueCount?: number }
+
+async function fetchCashflow(): Promise<CashflowList> {
+  const res = await fetch('/api/cashflow')
+  if (!res.ok) throw new Error(LOAD_FAILED)
+  return res.json()
+}
+
 export default function CashflowPage() {
-  const [items, setItems] = useState<Cashflow[]>([])
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  // A visit after the first shows the last list at once and refreshes it behind.
+  const list = useCached('api:cashflow', fetchCashflow)
+  const items = useMemo(() => list.data?.data ?? [], [list.data])
+  const overdueCount = list.data?.overdueCount ?? 0
+  const loadError = list.error ? requestErrorMessage(list.error, LOAD_FAILED) : null
   const [busyIds, setBusyIds] = useState<string[]>([])
   const [showForm, setShowForm] = useState(false)
-  const [stats, setStats] = useState({ totalPending: 0, overdueCount: 0 })
 
   // Month navigation
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
@@ -35,25 +46,7 @@ export default function CashflowPage() {
   const [sort, setSort] = useState<Sort>({ key: 'date', dir: 'desc' })
   const [filterCategory, setFilterCategory] = useState<string>('all')
 
-  async function fetchData() {
-    setLoading(true)
-    try {
-      const res = await fetch('/api/cashflow')
-      if (!res.ok) throw new Error(LOAD_FAILED)
-      const data = await res.json()
-      setItems(data.data ?? [])
-      setStats({ totalPending: data.totalPending ?? 0, overdueCount: data.overdueCount ?? 0 })
-      setLoadError(null)
-    } catch (err) {
-      setLoadError(requestErrorMessage(err, LOAD_FAILED))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { fetchData() }, [])
-
-  /** Sends one row's change; its buttons stay disabled until the list reloads. */
+  /** Sends one row's change; its buttons stay disabled until the answer brings the updated list. */
   async function send(item: Cashflow, method: 'PATCH' | 'DELETE', body: object, failed: string, done: string) {
     setBusyIds(ids => [...ids, item.id])
     try {
@@ -62,9 +55,11 @@ export default function CashflowPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
-      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || failed)
+      const answer = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(answer?.error || failed)
       toast.success(done)
-      await fetchData()
+      if (answer?.list) list.mutate(answer.list)
+      else list.reload()
     } catch (err) {
       toast.error(requestErrorMessage(err, failed))
     } finally {
@@ -163,7 +158,7 @@ export default function CashflowPage() {
   }
 
   const period = viewAll ? 'Todos los meses' : `${MONTH_NAMES[selectedMonth]} ${selectedYear}`
-  const loaded = !loading || items.length > 0
+  const loaded = !!list.data || !!list.error
 
   return (
     <div className="mx-auto w-full max-w-[1240px] px-10 pb-16 pt-8 max-[819px]:px-4 max-[819px]:pb-24 max-[819px]:pt-5">
@@ -196,7 +191,7 @@ export default function CashflowPage() {
       {loadError && (
         <div role="alert" className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-md bg-danger-soft px-4 py-3 text-sm text-danger">
           {loadError}
-          <button type="button" onClick={() => fetchData()} className="font-medium underline underline-offset-2 max-[819px]:min-h-11">Reintentar</button>
+          <button type="button" onClick={() => list.reload()} className="font-medium underline underline-offset-2 max-[819px]:min-h-11">Reintentar</button>
         </div>
       )}
 
@@ -220,8 +215,8 @@ export default function CashflowPage() {
             <div>
               <dt className="text-[13px] text-ink-3">Pendiente</dt>
               <dd className="text-base font-medium tabular-nums">{formatUSD(monthPending)}</dd>
-              {stats.overdueCount > 0 && (
-                <dd className="text-[13px] text-danger">{stats.overdueCount} {stats.overdueCount > 1 ? 'vencidos' : 'vencido'}</dd>
+              {overdueCount > 0 && (
+                <dd className="text-[13px] text-danger">{overdueCount} {overdueCount > 1 ? 'vencidos' : 'vencido'}</dd>
               )}
             </div>
             <div className="max-[819px]:col-span-2">
@@ -257,7 +252,7 @@ export default function CashflowPage() {
         </>
       )}
 
-      <ExpenseDialog open={showForm} onClose={() => setShowForm(false)} onSaved={fetchData} />
+      <ExpenseDialog open={showForm} onClose={() => setShowForm(false)} onSaved={() => list.reload()} />
     </div>
   )
 }

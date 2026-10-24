@@ -1,5 +1,9 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { createRoot } from 'react-dom/client'
+import { act } from 'react-dom/test-utils'
+import { forgetCached, setCachedValue } from '@/lib/client-cache'
+import { POSITIONS_KEY } from '@/lib/warren/positions'
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/dashboard',
@@ -43,5 +47,49 @@ describe('AppShell', () => {
 
   it('carries none of the old decorative classes', () => {
     expect(render('/dashboard')).not.toMatch(/glass|glow|backdrop-blur|gradient/)
+  })
+})
+
+// odd/tasks/rendimiento.md S7: changing section never asks for the portfolio; the search asks when it opens.
+describe('AppShell — the search and the portfolio', () => {
+  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true }
+  HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) { this.open = false }
+  afterEach(() => { vi.unstubAllGlobals(); forgetCached(); document.body.innerHTML = '' })
+
+  async function mountShell() {
+    const urls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      urls.push(url)
+      return new Response(JSON.stringify(url === '/api/positions' ? { positions: [{ ticker: 'GGAL' }], onPositions: [] } : []))
+    }))
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<AppShell pathnameForTest="/history"><p>contenido</p></AppShell>) })
+    const openSearch = async () => {
+      await act(async () => { [...el.querySelectorAll('button')].find(b => b.textContent?.includes('Buscar activo'))!.click() })
+      await act(async () => {})
+    }
+    return { el, urls, openSearch, unmount: () => act(() => root.unmount()) }
+  }
+  const options = (el: HTMLElement) => [...el.querySelectorAll('[role="option"]')].map(o => o.textContent)
+
+  it('does not ask for the portfolio on mount, and asks once when the search opens', async () => {
+    const { el, urls, openSearch, unmount } = await mountShell()
+    expect(urls).not.toContain('/api/positions')
+    await openSearch()
+    expect(urls.filter(u => u === '/api/positions')).toHaveLength(1)
+    expect(options(el)).toEqual(['GGALEn cartera'])
+    unmount()
+  })
+
+  it('offers the portfolio the tab already has without asking for it', async () => {
+    setCachedValue(POSITIONS_KEY, { positions: [{ ticker: 'YPF' }], onPositions: [] })
+    const { el, urls, openSearch, unmount } = await mountShell()
+    await openSearch()
+    expect(urls).not.toContain('/api/positions')
+    expect(options(el)).toEqual(['YPFEn cartera'])
+    unmount()
   })
 })

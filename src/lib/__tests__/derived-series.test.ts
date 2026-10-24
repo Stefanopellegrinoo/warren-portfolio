@@ -358,3 +358,102 @@ describe('getDerivedSeries', () => {
     expect(redisMock.eval).not.toHaveBeenCalled()
   })
 })
+
+/** Holds `table`'s reads until the returned function is called. */
+function holdTable(sb: any, table: string): () => void {
+  let release!: () => void
+  const gate = new Promise<void>(r => { release = r })
+  const from = sb.from
+  sb.from = (n: string) => {
+    const b = from(n)
+    if (n === table) { const then = b.then; b.then = (res: any, rej: any) => gate.then(() => then(res, rej)) }
+    return b
+  }
+  return release
+}
+
+describe('getDerivedSeries: one build at a time per user, its reads together', () => {
+  it('concurrent callers of one user share one build, each with its own range', async () => {
+    const log: string[] = []
+    const sb = fakeSupabase(tables(), log)
+    const d = deps()
+
+    const [all, recent] = await Promise.all([
+      getDerivedSeries(sb, 'u1', {}, d),
+      getDerivedSeries(sb, 'u1', { fromDate: '2026-03-05' }, d),
+    ])
+
+    expect(log.filter(t => t === 'transactions')).toHaveLength(1)
+    expect(d.getBars).toHaveBeenCalledTimes(1)
+    expect(redisMock.eval).toHaveBeenCalledTimes(1)
+    expect(recent.rows).toEqual(all.rows.filter(r => r.snapshot_date >= '2026-03-05'))
+    expect(recent.rows.length).toBeLessThan(all.rows.length)
+  })
+
+  it('never shares a build across users', async () => {
+    const log: string[] = []
+    const sb = fakeSupabase(tables(), log)
+    const d = deps()
+
+    const [a, b] = await Promise.all([getDerivedSeries(sb, 'u1', {}, d), getDerivedSeries(sb, 'u2', {}, d)])
+
+    expect(log.filter(t => t === 'transactions')).toHaveLength(2)
+    expect(a.rows.at(-1)?.user_id).toBe('u1')
+    expect(b.rows.at(-1)?.user_id).toBe('u2')
+  })
+
+  it('a caller after a mutation (version bumped) does not join the build that read the old ledger', async () => {
+    store.set('summary:version:u1', '1')
+    let release!: () => void
+    const held = new Promise<void>(r => { release = r })
+    const d = deps({ getBars: vi.fn(async (s: string[]) => { await held; return new Map(s.map(x => [x, ok()])) }) })
+
+    const before = getDerivedSeries(fakeSupabase(tables()), 'u1', {}, d)
+    await vi.waitFor(() => expect(d.getBars).toHaveBeenCalledTimes(1))
+    store.set('summary:version:u1', '2')
+    const after = getDerivedSeries(fakeSupabase(tables()), 'u1', {}, d)
+    await vi.waitFor(() => expect(d.getBars).toHaveBeenCalledTimes(2))
+
+    release()
+    await Promise.all([before, after])
+  })
+
+  it('a failed build is not kept: the next caller builds again', async () => {
+    const failing = fakeSupabase(tables({ transactions: { error: { message: 'x' } } }))
+    await expect(Promise.all([
+      getDerivedSeries(failing, 'u1', {}, deps()), getDerivedSeries(failing, 'u1', {}, deps()),
+    ])).rejects.toThrow()
+
+    const res = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, deps())
+    expect(res.rows.length).toBeGreaterThan(0)
+  })
+
+  it('reads the ledger and the ticker catalog together, then bars, ON closes, schedules and quotes together', async () => {
+    const log: string[] = []
+    const sb = fakeSupabase(tables({
+      transactions: { data: [tx(), tx({ ticker: 'AERBD', asset_type: 'ON', quantity: 100, price: 100 })] },
+      on_price_history: { data: [{ ticker: 'AERBD', price_date: '2026-03-02', close: '101' }] },
+    }), log)
+    const releaseLedger = holdTable(sb, 'transactions')
+    let releaseBars!: () => void
+    const d = deps({ getBars: vi.fn((s: string[]) => new Promise(r => { releaseBars = () => r(new Map(s.map(x => [x, ok()]))) })) })
+
+    const pending = getDerivedSeries(sb, 'u1', {}, d)
+
+    // While the trades are still on their way, the other ledger reads and the catalog have started.
+    await vi.waitFor(() => expect(log).toEqual(expect.arrayContaining(['transactions', 'cash_movements', 'on_payment_overrides', 'ticker_identity'])))
+    releaseLedger()
+    // While the bars are still on their way, the closes, schedules and quotes have started.
+    await vi.waitFor(() => expect(d.getBars).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => {
+      expect(log).toContain('on_price_history')
+      expect(d.loadSchedules).toHaveBeenCalledTimes(1)
+      expect(d.fetchQuotes).toHaveBeenCalledTimes(1)
+    })
+    releaseBars()
+
+    const res = await pending
+    expect(res.degraded).toBe(false)
+    expect(res.rows.at(-1)).toMatchObject({ snapshot_date: TODAY, user_id: 'u1' })
+  })
+})
