@@ -118,6 +118,18 @@ describe('GET /api/positions on a summary miss', () => {
     expect(store.has('summary:u1')).toBe(false)
   })
 
+  it('with a dollar answered from its last known value the summary is answered but not left in Redis', async () => {
+    mockDollar.mockImplementation(async (kind: string) => ({ rate: kind === 'mep' ? 1300 : 1400, asOf: '2026-10-20T20:00:00.000Z', source: 'lkp' }))
+    store.set('summary:version:u1', '7')
+    h.supabase = ledger()
+
+    const res = await GET(req)
+
+    expect(res.status).toBe(200)
+    expect((await res.json()).currencies).toBeDefined()
+    expect(fakeRedis.eval).not.toHaveBeenCalled() // the refresh behind it brings today's rate; the next miss caches that
+  })
+
   it('without the currency views (no dollar today) the summary is answered but not left in Redis', async () => {
     mockDollar.mockResolvedValue(null)
     h.supabase = ledger()

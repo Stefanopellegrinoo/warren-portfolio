@@ -96,7 +96,10 @@ async function getOne(symbol: string, from: Date, deps: BarsDeps): Promise<BarsR
   const fromDay = from.toISOString().slice(0, 10)
   let stored = await readEntry(symbol, deps.memoryOnly)
   if (stored?.missingUntil) {
-    if (stored.missingUntil > Date.now()) return { bars: [], splits: [], splitsKnown: false, degraded: true, missing: true }
+    // A caller that wants fresh bars (maxAgeSec) tries a missing symbol again after that long, not an hour.
+    const markedAt = stored.missingUntil - MISSING_TTL * 1000
+    const blocked = deps.maxAgeSec === undefined ? stored.missingUntil > Date.now() : Date.now() - markedAt < deps.maxAgeSec * 1000
+    if (blocked) return { bars: [], splits: [], splitsKnown: false, degraded: true, missing: true }
     stored = null
   }
   // splitsKnown=false (historical() fallback) is never fresh: chart() gets another try next request.

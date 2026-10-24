@@ -77,8 +77,11 @@ export async function fetchBenchmarkComparison(
     getBars([symbol], from, { maxAgeSec: BARS_MAX_AGE_SEC }),
     inArs ? getHistoricalCCL(from, to) : null,
   ])
-  const bars = charts.get(symbol)?.bars ?? []
+  const entry = charts.get(symbol)
+  const bars = entry?.bars ?? []
   if (bars.length === 0) throw new Error(`No benchmark data for ${symbol}`)
+  // Bars served stale after a Yahoo failure (up to days old) are not today's benchmark: the route flags it.
+  if (entry?.degraded) throw new Error(`Stale benchmark data for ${symbol}`)
 
   let ccl: DailyBar[] | undefined
   if (rates) {

@@ -137,6 +137,19 @@ describe('getBars', () => {
     expect(again.get('AAA')).toMatchObject({ bars: [], degraded: true, missing: true })
   })
 
+  it('a caller that wants fresh bars (maxAgeSec) retries a missing symbol after that long, not after an hour', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const fetchChart = vi.fn().mockRejectedValueOnce(new Error('down')).mockResolvedValueOnce(chart())
+    await getBars(['AAA'], FROM, { fetchChart, today: TODAY, maxAgeSec: 300 })
+    vi.setSystemTime(Date.now() + 301_000)
+
+    const again = await getBars(['AAA'], FROM, { fetchChart, today: TODAY, maxAgeSec: 300 })
+
+    expect(fetchChart).toHaveBeenCalledTimes(2)
+    expect(again.get('AAA')).toMatchObject({ degraded: false, missing: false })
+    vi.useRealTimers()
+  })
+
   it('S11.2: Redis down -> in-memory fallback, still cached for the day', async () => {
     redisUp = false
     const fetchChart = vi.fn(async () => chart())

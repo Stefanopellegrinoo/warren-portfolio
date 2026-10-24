@@ -101,6 +101,11 @@ describe('fetchBenchmarkComparison', () => {
     expect(r!.points.map((p) => p.benchmarkPct)).toEqual([0, expect.closeTo(10, 9), 0])
   })
 
+  it('bars served stale after a Yahoo failure are an error too, never drawn as today\'s', async () => {
+    mockGetBars.mockResolvedValue(new Map([['QQQ', { ...result([{ date: '2026-10-10', close: 100 }, { date: '2026-10-11', close: 101 }]), degraded: true }]]))
+    await expect(fetchBenchmarkComparison('QQQ', series)).rejects.toThrow('Stale benchmark data for QQQ')
+  })
+
   it('no bars at all is still an error, which the route turns into its flag', async () => {
     mockGetBars.mockResolvedValue(new Map([['QQQ', { ...result([]), degraded: true, missing: true }]]))
     await expect(fetchBenchmarkComparison('QQQ', series)).rejects.toThrow('No benchmark data for QQQ')

@@ -111,9 +111,10 @@ export async function GET(req: NextRequest) {
     // 6. Leave the summary in Redis so the next request is a hit even when the worker does not
     //    run (evenings, weekends). Same payload and TTL as the worker, and the same guard: the
     //    write is discarded if invalidateUserCache bumped the version since it was read above.
-    //    Not during an import (the worker skips it too), and not without the currency views,
-    //    which a transient failure would otherwise pin for the TTL.
-    if (redis && !importing && views.currencies) {
+    //    Not during an import (the worker skips it too), not without the currency views, and
+    //    not with a dollar answered from its last known value: either would pin a transient
+    //    state for the TTL, while the next miss brings today's.
+    if (redis && !importing && views.currencies && !currencyCtx?.stale) {
       await setSummaryIfVersion(user.id, summaryPayload(valued, views.currencies), version)
         .catch(err => console.warn('[positions] summary cache write failed:', err))
     }

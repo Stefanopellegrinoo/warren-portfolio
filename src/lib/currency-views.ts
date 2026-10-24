@@ -34,6 +34,8 @@ const FX_FALLBACK_DAYS = 10
 export interface CurrencyContext {
   fx: { mep: { rate: number; date: string }; ccl: { rate: number; date: string } }
   ratios: Map<string, number>
+  /** A rate came from its last known value while the live one refreshes behind. */
+  stale?: boolean
 }
 
 /** Every row of a query, page by page (PostgREST caps a response at 1000 rows). */
@@ -57,7 +59,7 @@ export async function loadCurrencyContext(_supabase: SupabaseClient): Promise<Cu
   const market = createServiceClient()
   const rate = async (kind: FxKind) => {
     const live = await getDollarInfo(kind)
-    return live && { rate: live.rate, date: argentinaDate(new Date(live.asOf)) }
+    return live && { rate: live.rate, date: argentinaDate(new Date(live.asOf)), lkp: live.source === 'lkp' }
   }
   const [mep, ccl, cedears] = await Promise.all([
     rate('mep'),
@@ -67,7 +69,7 @@ export async function loadCurrencyContext(_supabase: SupabaseClient): Promise<Cu
   if (!mep || !ccl) return null
   const ratios = new Map<string, number>()
   for (const c of cedears) if (Number(c.ratio) > 0) ratios.set(c.ticker, Number(c.ratio))
-  return { fx: { mep, ccl }, ratios }
+  return { fx: { mep: { rate: mep.rate, date: mep.date }, ccl: { rate: ccl.rate, date: ccl.date } }, ratios, stale: mep.lkp || ccl.lkp }
 }
 
 const orNull = (x: unknown) => (x == null ? null : Number(x))
