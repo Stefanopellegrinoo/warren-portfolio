@@ -17,7 +17,7 @@ export async function GET(
 
     const { data: strategy } = await supabase
       .from('strategies')
-      .select('id, name')
+      .select('id, name, tickers')
       .eq('id', strategyId)
       .eq('user_id', user.id)
       .single()
@@ -31,7 +31,8 @@ export async function GET(
         .from('indicator_setups')
         .select('id, name, active')
         .eq('strategy_id', strategyId)
-        .eq('user_id', user.id),
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: true }),
       supabase
         .from('setup_performance')
         .select('*')
@@ -108,7 +109,14 @@ export async function GET(
         ? eligible.reduce((best, s) => (s.hit_rate! > best.hit_rate! ? s : best)).setup_id
         : null
 
-    return NextResponse.json({ setups: aggregatedSetups, best_setup_id: bestSetupId })
+    // What the performance page shows of the strategy, so it does not ask for it (odd/tasks/rendimiento.md S9).
+    const summary = {
+      id: strategy.id as string,
+      name: strategy.name as string,
+      tickers: (strategy.tickers as string[] | null) ?? [],
+      setups: (setups ?? []).map((s) => ({ id: s.id as string, name: s.name as string, active: s.active as boolean })),
+    }
+    return NextResponse.json({ setups: aggregatedSetups, best_setup_id: bestSetupId, strategy: summary })
   } catch (err: unknown) {
     return serverError('API /strategies/[id]/performance', err)
   }
