@@ -1,4 +1,4 @@
-import { isAuthApiError, isAuthRetryableFetchError } from '@supabase/supabase-js'
+import { isAuthError, isAuthRetryableFetchError } from '@supabase/supabase-js'
 
 const NO_CONNECTION = 'No hay conexión. Revisá tu internet y probá de nuevo.'
 
@@ -19,7 +19,8 @@ const BY_CODE: Record<string, string> = {
 export function authErrorMessage(err: unknown, mode: 'login' | 'signup'): string {
   // A fetch that never reached the server: supabase-js wraps it, a bare fetch throws TypeError.
   if (isAuthRetryableFetchError(err) || err instanceof TypeError) return NO_CONNECTION
-  if (isAuthApiError(err) && err.code && BY_CODE[err.code]) return BY_CODE[err.code]
+  // Any Supabase auth error with a known code: a weak password arrives as AuthWeakPasswordError, not AuthApiError.
+  if (isAuthError(err) && err.code && BY_CODE[err.code]) return BY_CODE[err.code]
   return mode === 'login'
     ? 'No se pudo ingresar. Probá de nuevo en unos minutos.'
     : 'No se pudo crear la cuenta. Probá de nuevo en unos minutos.'

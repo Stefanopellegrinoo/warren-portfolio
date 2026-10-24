@@ -1,6 +1,6 @@
 // odd/tasks/ux-base-global.md S2: the login shows Spanish messages for Supabase auth errors.
 import { describe, it, expect } from 'vitest'
-import { AuthApiError, AuthRetryableFetchError } from '@supabase/supabase-js'
+import { AuthApiError, AuthRetryableFetchError, AuthWeakPasswordError } from '@supabase/supabase-js'
 import { authErrorMessage } from '@/lib/auth-messages'
 
 const apiError = (message: string, status: number, code: string) => new AuthApiError(message, status, code)
@@ -15,6 +15,11 @@ describe('authErrorMessage', () => {
     ['Unable to validate email address: invalid format', 400, 'email_address_invalid', 'Ese email no es válido. Revisalo y probá de nuevo.'],
   ])('translates %j', (message, status, code, expected) => {
     expect(authErrorMessage(apiError(message, status, code), 'login')).toBe(expected)
+  })
+
+  it('explains a weak password the way supabase-js really throws it (AuthWeakPasswordError, not AuthApiError)', () => {
+    const err = new AuthWeakPasswordError('Password should be at least 6 characters', 422, ['length'])
+    expect(authErrorMessage(err, 'signup')).toBe('La contraseña es muy débil. Usá una más larga, que combine letras y números.')
   })
 
   it('says there is no connection when the request never reached the server', () => {
