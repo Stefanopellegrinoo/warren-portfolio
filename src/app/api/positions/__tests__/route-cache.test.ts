@@ -23,14 +23,14 @@ vi.mock('@/lib/redis', async (importOriginal) => ({
   ensureRedisConnected: async () => true,
 }))
 
-const h = vi.hoisted(() => ({ supabase: null as any }))
+const h = vi.hoisted(() => ({ supabase: null as any, quotes: undefined as Map<string, unknown> | undefined }))
 vi.mock('@/lib/supabase-server', () => ({ createServiceClient: () => h.supabase }))
 vi.mock('@/lib/api-auth', () => ({
   requireUser: async () => ({ supabase: h.supabase, user: { id: 'u1' } }),
   isAuthFailure: () => false,
 }))
 vi.mock('@/lib/yahoo-finance', () => ({
-  fetchQuotesWithFallback: async () => new Map([['AAPL', { ticker: 'AAPL', price: 150, change: 1, changePercent: 0.01, previousClose: 149 }]]),
+  fetchQuotesWithFallback: async () => h.quotes ?? new Map([['AAPL', { ticker: 'AAPL', price: 150, change: 1, changePercent: 0.01, previousClose: 149 }]]),
   fetchQuotes: async () => new Map(),
 }))
 vi.mock('@/lib/data912-client', async (importOriginal) => ({
@@ -73,6 +73,7 @@ const workerPayload = (b: any) => JSON.stringify({
 beforeEach(() => {
   vi.clearAllMocks()
   store.clear()
+  h.quotes = undefined
   mockDollar.mockImplementation(async (kind: string) => ({ rate: kind === 'mep' ? 1500 : 1600, asOf: '2026-10-21T20:00:00.000Z', source: 'cache' }))
 })
 
@@ -116,6 +117,18 @@ describe('GET /api/positions on a summary miss', () => {
 
     expect((await GET(req)).status).toBe(200)
     expect(store.has('summary:u1')).toBe(false)
+  })
+
+  it('a holding with no quote source at all still leaves the summary, as the worker does', async () => {
+    h.quotes = new Map()
+    store.set('summary:version:u1', '7')
+    h.supabase = ledger()
+
+    const body = await (await GET(req)).json()
+
+    expect(body.unpricedCount).toBeGreaterThan(0)
+    expect(fakeRedis.eval).toHaveBeenCalledTimes(1)
+    expect(store.get('summary:u1')).toBe(workerPayload(body))
   })
 
   it('with a dollar answered from its last known value the summary is answered but not left in Redis', async () => {

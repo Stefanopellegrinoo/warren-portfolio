@@ -111,9 +111,11 @@ export async function GET(req: NextRequest) {
     // 6. Leave the summary in Redis so the next request is a hit even when the worker does not
     //    run (evenings, weekends). Same payload and TTL as the worker, and the same guard: the
     //    write is discarded if invalidateUserCache bumped the version since it was read above.
-    //    Not during an import (the worker skips it too), not without the currency views, and
-    //    not with a dollar answered from its last known value: either would pin a transient
-    //    state for the TTL, while the next miss brings today's.
+    //    Not during an import (the worker skips it too), and not with a transient state that the
+    //    TTL would pin while the next miss brings today's: no currency views, or a dollar answered
+    //    from its last known value. A holding without any quote is no such state: quotes fall back
+    //    to their last known value for 7 days, so only a ticker with no source at all is left
+    //    unpriced, and the worker caches that summary too.
     if (redis && !importing && views.currencies && !currencyCtx?.stale) {
       await setSummaryIfVersion(user.id, summaryPayload(valued, views.currencies), version)
         .catch(err => console.warn('[positions] summary cache write failed:', err))
