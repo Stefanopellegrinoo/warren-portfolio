@@ -2,15 +2,31 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { NO_CONNECTION } from '@/lib/request-errors'
+import { forgetCached } from '@/lib/client-cache'
+import { argentinaDate } from '@/lib/utils'
 import type { StatData } from '../DetailedStats'
 import StatisticsPage from '../page'
 
-// The evolution chart measures itself; its heading belongs to the page, which is what these tests read.
-vi.mock('@/components/charts/PortfolioChart', () => ({ default: () => null }))
+// The evolution chart measures itself; this stand-in prints the days it was given and offers one period.
+vi.mock('@/components/charts/PortfolioChart', () => ({
+  default: ({ data, loading, onPeriodChange }: { data: { snapshot_date: string }[]; loading: boolean; onPeriodChange: (p: string) => void }) => (
+    <div data-chart="">
+      <output>{loading ? 'cargando' : data.map(p => p.snapshot_date).join(',')}</output>
+      <button type="button" onClick={() => onPeriodChange('30')}>Período 1M</button>
+      <button type="button" onClick={() => onPeriodChange('all')}>Período Todo</button>
+    </div>
+  ),
+}))
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-afterEach(() => { vi.unstubAllGlobals(); document.body.innerHTML = '' })
+// A request left hanging would stay in flight for the next test (the cache shares in-flight loads): end it.
+const hanging: ((r: Response) => void)[] = []
+afterEach(async () => {
+  hanging.splice(0).forEach(end => end(new Response('{}', { status: 500 })))
+  await new Promise(r => setTimeout(r, 0))
+  vi.unstubAllGlobals(); forgetCached(); document.body.innerHTML = ''
+})
 
 const stats: StatData = {
   maxDrawdown: -0.123, winRate: null, totalPortfolioValue: 10000,
@@ -27,22 +43,24 @@ const STATS_URLS = ['/api/statistics?universe=stocks', '/api/statistics/ons', '/
 const ok = (body: unknown) => () => new Response(JSON.stringify(body))
 const failed = () => new Response(JSON.stringify({ error: 'boom' }), { status: 500 })
 
-function stubFetch(overrides: Record<string, () => Response> = {}, offline = { value: false }) {
+type Route = () => Response | Promise<Response>
+function stubFetch(overrides: Record<string, Route> = {}, offline = { value: false }) {
   const calls: string[] = []
-  const routes: Record<string, () => Response> = {
+  const routes: Record<string, Route> = {
     [STATS_URLS[0]]: ok(stats), [STATS_URLS[1]]: ok(stats), [STATS_URLS[2]]: ok(combined), [STATS_URLS[3]]: ok(stats),
     ...overrides,
   }
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     calls.push(url)
-    if (url.startsWith('/api/portfolio-history')) return new Response(JSON.stringify({ data: [] }))
-    if (url.includes('&benchmark=')) return new Response('{}')
+    if (url.startsWith('/api/portfolio-history') && !routes[url]) return new Response(JSON.stringify({ data: [] }))
+    if (url.includes('&benchmark=') && !routes[url]) return new Response('{}')
     if (offline.value) throw new TypeError('Failed to fetch')
     if (routes[url]) return routes[url]()
     throw new Error(`unexpected fetch ${url}`)
   }))
   return calls
 }
+const never = () => new Promise<Response>(end => { hanging.push(end) })
 
 const flush = () => act(async () => { await new Promise(r => setTimeout(r, 0)) })
 const buttons = (el: HTMLElement, text: string) => [...el.querySelectorAll('button')].filter(b => b.textContent === text)
@@ -155,6 +173,98 @@ describe('StatisticsPage — failed loads say so, with Reintentar (S1, S6)', () 
     expect(el.textContent).toContain('Resultado total')
     expect(el.textContent).toContain('Evolución de Acciones')
     expect(el.querySelector('[role="alert"]')).toBeNull()
+    unmount()
+  })
+})
+
+describe('StatisticsPage — each block as its request answers (S9)', () => {
+  it('shows the headline and composition while the risk metrics are still on their way', async () => {
+    stubFetch({ [STATS_URLS[3]]: never })
+    const { el, unmount } = await render()
+    expect(el.textContent).toContain('Valor total de la cartera')
+    expect(el.textContent).toContain('Composición')
+    expect(el.textContent).toContain('Evolución de la cartera')
+    expect(el.textContent).not.toContain('Ratio de Sharpe')
+    expect(el.querySelector('[role="status"][aria-label="Cargando las métricas de riesgo"]')).not.toBeNull()
+    unmount()
+  })
+
+  it('shows the evolution chart while the portfolio summary is still on its way', async () => {
+    stubFetch({ [STATS_URLS[2]]: never })
+    const { el, unmount } = await render()
+    expect(el.textContent).toContain('Evolución de la cartera')
+    expect(el.textContent).not.toContain('Valor total de la cartera')
+    unmount()
+  })
+})
+
+describe('StatisticsPage — history asked once per part, cut in the browser (S9)', () => {
+  const daysAgo = (n: number) => {
+    const d = new Date(`${argentinaDate()}T00:00:00Z`)
+    d.setUTCDate(d.getUTCDate() - n)
+    return d.toISOString().slice(0, 10)
+  }
+  const point = (n: number) => ({ snapshot_date: daysAgo(n), value: 100, invested: 90 })
+  const series = { data: [point(100), point(60), point(20), point(0)] }
+
+  it('a period change cuts the series it already has; a part asks once', async () => {
+    const calls = stubFetch({
+      '/api/portfolio-history?days=all&universe=total': ok(series),
+      '/api/portfolio-history?days=all&universe=stocks': ok(series),
+    })
+    const { el, unmount } = await render()
+    const shown = () => el.querySelector('[data-chart] output')!.textContent
+    const history = () => calls.filter(u => u.startsWith('/api/portfolio-history'))
+
+    expect(shown()).toBe([daysAgo(60), daysAgo(20), daysAgo(0)].join(','))
+    act(() => buttons(el, 'Período 1M')[0].click())
+    expect(shown()).toBe([daysAgo(20), daysAgo(0)].join(','))
+    act(() => buttons(el, 'Período Todo')[0].click())
+    expect(shown()).toBe(series.data.map(p => p.snapshot_date).join(','))
+
+    await openTab(el, 'Acciones')
+    await openTab(el, 'Toda la cartera')
+    expect(history()).toEqual(['/api/portfolio-history?days=all&universe=total', '/api/portfolio-history?days=all&universe=stocks'])
+    unmount()
+  })
+})
+
+describe('StatisticsPage — a page seen before shows its last data at once (S9)', () => {
+  it('a second visit shows the remembered blocks while their refresh is still on its way', async () => {
+    stubFetch()
+    const first = await render()
+    first.unmount()
+
+    stubFetch({ [STATS_URLS[0]]: never, [STATS_URLS[1]]: never, [STATS_URLS[2]]: never, [STATS_URLS[3]]: never })
+    const { el, unmount } = await render()
+    expect(el.textContent).toContain('Valor total de la cartera')
+    expect(el.textContent).toContain('Ratio de Sharpe')
+    unmount()
+  })
+})
+
+describe('StatisticsPage — a benchmark pick is not asked again per tab switch (S9)', () => {
+  it('coming back to a part shows its comparison without a new request', async () => {
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+    const comparison = (label: string) => ok({ benchmark: { id: 'SPY', label, excessPp: 1.25, points: [{ date: '2026-10-01', portfolioPct: 0, benchmarkPct: 0 }, { date: '2026-10-20', portfolioPct: 3, benchmarkPct: 1.75 }] } })
+    const calls = stubFetch({
+      '/api/statistics?universe=total&benchmark=SPY': comparison('S&P 500 (SPY)'),
+      '/api/statistics?universe=stocks&benchmark=SPY': comparison('S&P 500 (SPY)'),
+    })
+    const { el, unmount } = await render()
+    const select = () => el.querySelector<HTMLSelectElement>('select[aria-label="Índice de comparación"]')!
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select(), 'SPY')
+      select().dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await flush()
+    await openTab(el, 'Acciones')
+    await openTab(el, 'Toda la cartera')
+    expect(el.textContent).toContain('+1,3 pp')
+    expect(calls.filter(u => u.includes('&benchmark='))).toEqual([
+      '/api/statistics?universe=total&benchmark=SPY',
+      '/api/statistics?universe=stocks&benchmark=SPY',
+    ])
     unmount()
   })
 })

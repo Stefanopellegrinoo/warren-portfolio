@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildChart, nearestIndex, HISTORY_NOTE, RANGES, type HistoryPoint } from '../chart'
+import { buildChart, nearestIndex, pointsInRange, HISTORY_NOTE, RANGES, type HistoryPoint } from '../chart'
 
 const pt = (d: string, value: number, invested = 100): HistoryPoint =>
   ({ snapshot_date: d, value, invested })
@@ -7,6 +7,20 @@ const pt = (d: string, value: number, invested = 100): HistoryPoint =>
 describe('RANGES', () => {
   it('maps each period to the API days parameter', () => {
     expect(RANGES.map(r => [r.id, r.days])).toEqual([['1M', '30'], ['3M', '90'], ['6M', '180'], ['1A', '365'], ['Todo', 'all']])
+  })
+})
+
+// odd/tasks/rendimiento.md S7: each period is cut in the browser from the whole series, the way the API cuts its window.
+describe('pointsInRange', () => {
+  const series = [pt('2026-07-25', 1), pt('2026-07-26', 2), pt('2026-09-24', 3), pt('2026-09-25', 4), pt('2026-10-24', 5)]
+
+  it('keeps the days from today minus the period, inclusive, like /api/portfolio-history', () => {
+    expect(pointsInRange(series, '1M', '2026-10-24').map(p => p.value)).toEqual([3, 4, 5])
+    expect(pointsInRange(series, '3M', '2026-10-24').map(p => p.value)).toEqual([2, 3, 4, 5])
+  })
+
+  it('keeps the whole series for Todo', () => {
+    expect(pointsInRange(series, 'Todo', '2026-10-24')).toEqual(series)
   })
 })
 

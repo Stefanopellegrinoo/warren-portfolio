@@ -36,27 +36,47 @@ async function fetchLive(kind: FxKind): Promise<{ rate: number; asOf: string }> 
   return { rate: (d.compra + d.venta) / 2, asOf: d.fechaActualizacion }
 }
 
+const refreshing = new Map<FxKind, Promise<{ rate: number; asOf: string } | null>>()
+
+/** One live dolarapi call per kind at a time; caches it. null when it fails (logged). */
+function refreshLive(kind: FxKind): Promise<{ rate: number; asOf: string } | null> {
+  const inflight = refreshing.get(kind)
+  if (inflight) return inflight
+  const key = `currency:${kind}`
+  const run = (async () => {
+    try {
+      const live = await fetchLive(kind)
+      if (isRedisReady()) {
+        const value = JSON.stringify(live)
+        await getRedis()?.setex(key, CACHE_TTL, value)
+        await getRedis()?.setex(`${key}:lkp`, LKP_TTL, value)
+      }
+      return live
+    } catch (err) {
+      console.error(`[Currency] live ${kind} failed:`, err)
+      return null
+    }
+  })().finally(() => refreshing.delete(kind))
+  refreshing.set(kind, run)
+  return run
+}
+
 /**
- * Lookup order: 1-minute cache, live dolarapi, 30-day last-known. Returns null when
- * nothing real exists: callers MUST NOT convert with an invented number.
+ * Lookup order: 1-minute cache, then the 30-day last-known (answered at once, dolarapi
+ * refreshed behind it), then live dolarapi, waited for only when nothing is known yet.
+ * Returns null when nothing real exists: callers MUST NOT convert with an invented number.
  */
 export async function getDollarInfo(kind: FxKind): Promise<DollarInfo | null> {
   const key = `currency:${kind}`
   const cached = await readKey(key)
   if (cached) return { ...cached, source: 'cache' }
-  try {
-    const live = await fetchLive(kind)
-    if (isRedisReady()) {
-      const value = JSON.stringify(live)
-      await getRedis()?.setex(key, CACHE_TTL, value)
-      await getRedis()?.setex(`${key}:lkp`, LKP_TTL, value)
-    }
-    return { ...live, source: 'live' }
-  } catch (err) {
-    console.error(`[Currency] live ${kind} failed:`, err)
-  }
   const lkp = await readKey(`${key}:lkp`)
-  if (lkp) return { ...lkp, source: 'lkp' }
+  if (lkp) {
+    void refreshLive(kind)
+    return { ...lkp, source: 'lkp' }
+  }
+  const live = await refreshLive(kind)
+  if (live) return { ...live, source: 'live' }
   console.error(`[Currency] No ${kind} rate available (live failed, no last-known)`)
   return null
 }

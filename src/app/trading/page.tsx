@@ -12,17 +12,27 @@ import { getProviderForSymbol } from "@/lib/market-data/resolver";
 import { coerceTimeframe } from "@/lib/chart/timeframes";
 import { cn } from "@/lib/utils";
 
-// Opens the chart on ?symbol=X (links from the summary and the asset search).
-function SymbolFromQuery() {
-  const requested = useSearchParams().get("symbol");
-  const setSymbol = useChartStore((s) => s.setSymbol);
-  useEffect(() => {
-    if (requested) setSymbol(requested.toUpperCase());
-  }, [requested, setSymbol]);
-  return null;
+export default function TradingPage() {
+  return (
+    <Suspense fallback={null}>
+      <Trading />
+    </Suspense>
+  );
 }
 
-export default function TradingPage() {
+function Trading() {
+  // Opens the chart on ?symbol=X (links from the summary and the asset search). The first render
+  // already uses X, before anything subscribes to the store, so the last symbol is never loaded
+  // first; a later link to another symbol arrives through the effect.
+  const requested = useSearchParams().get("symbol")?.toUpperCase();
+  useState(() => {
+    if (requested) useChartStore.setState({ symbol: requested });
+  });
+  const setSymbol = useChartStore((s) => s.setSymbol);
+  useEffect(() => {
+    if (requested) setSymbol(requested);
+  }, [requested, setSymbol]);
+
   const symbol = useChartStore((s) => s.symbol);
   const timeframe = coerceTimeframe(useChartStore((s) => s.timeframe), getProviderForSymbol(symbol));
   const quote = useQuote(symbol);
@@ -31,9 +41,6 @@ export default function TradingPage() {
 
   return (
     <div className="flex h-dvh flex-col max-[819px]:h-[calc(100dvh-3.5rem)]">
-      <Suspense fallback={null}>
-        <SymbolFromQuery />
-      </Suspense>
       <h1 className="sr-only">Gráficos</h1>
 
       <Header view={view} onViewChange={setView} quote={quote} />

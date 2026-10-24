@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Plus, Pencil, Trash2 } from 'lucide-react'
@@ -12,6 +12,9 @@ import { Chip, SectionHead } from '@/components/resumen/ui'
 import { InlineConfirm } from '@/components/ui/InlineConfirm'
 import { ErrorNotice, SkeletonRows, ghostButton, iconButton, page, pageTitle, primaryButton, secondaryButton, textLink } from '@/components/strategies/ui'
 import { formatNumber } from '@/lib/utils'
+import { cachedValue, useCached } from '@/lib/client-cache'
+
+const NOT_FOUND = 'not found'
 
 function indicatorLabel(ind: IndicatorParam): string {
   switch (ind.type) {
@@ -34,37 +37,32 @@ export default function StrategyDetailPage() {
   const params = useParams<{ id: string }>()
   const strategyId = params.id
 
-  const [strategy, setStrategy] = useState<StrategyWithSetups | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [notFound, setNotFound] = useState(false)
+  // Seen before in this tab, the strategy shows at once and refreshes behind; every change made here is
+  // remembered with it (odd/tasks/rendimiento.md S9).
+  const key = `strategies:${strategyId}`
+  const query = useCached(key, async () => {
+    const res = await fetch(`/api/strategies/${strategyId}`)
+    if (res.status === 404) throw new Error(NOT_FOUND)
+    if (!res.ok) throw new Error('Failed to load')
+    const data = await res.json() as { strategy: StrategyWithSetups }
+    return data.strategy
+  })
+  const strategy = query.data ?? null
+  const notFound = query.error instanceof Error && query.error.message === NOT_FOUND
+  const loading = !strategy && query.loading
+  const error = !strategy && query.error ? 'No se pudo cargar la estrategia.' : null
+  const loadStrategy = query.reload
+  // From the latest remembered strategy, like a state updater, so a change never undoes one made meanwhile.
+  const setStrategy = (update: (prev: StrategyWithSetups | null) => StrategyWithSetups | null) => {
+    const next = update(cachedValue<StrategyWithSetups>(key) ?? null)
+    if (next) query.mutate(next)
+  }
 
   const [showEditStrategy, setShowEditStrategy] = useState(false)
   const [showSetupModal, setShowSetupModal] = useState(false)
   const [editingSetup, setEditingSetup] = useState<IndicatorSetup | undefined>(undefined)
   const [deletingSetupId, setDeletingSetupId] = useState<string | null>(null)
   const [togglingSetupId, setTogglingSetupId] = useState<string | null>(null)
-
-  const loadStrategy = useCallback(async () => {
-    try {
-      setLoading(true)
-      setError(null)
-      const res = await fetch(`/api/strategies/${strategyId}`)
-      if (res.status === 404) {
-        setNotFound(true)
-        return
-      }
-      if (!res.ok) throw new Error('Failed to load')
-      const data = await res.json() as { strategy: StrategyWithSetups }
-      setStrategy(data.strategy)
-    } catch {
-      setError('No se pudo cargar la estrategia.')
-    } finally {
-      setLoading(false)
-    }
-  }, [strategyId])
-
-  useEffect(() => { loadStrategy() }, [loadStrategy])
 
   async function toggleSetupActive(setup: IndicatorSetup) {
     if (togglingSetupId) return

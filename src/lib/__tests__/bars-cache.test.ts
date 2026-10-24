@@ -30,6 +30,36 @@ beforeEach(() => {
 })
 
 describe('getBars', () => {
+  it('maxAgeSec: a same-day entry is fresh only that long after its fetch; without it, all day', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date('2026-05-15T14:00:00Z'))
+      const fetchChart = vi.fn(async () => chart())
+      await getBars(['SPY'], FROM, { fetchChart, today: TODAY, maxAgeSec: 300 })
+      vi.setSystemTime(new Date('2026-05-15T14:04:59Z'))
+      await getBars(['SPY'], FROM, { fetchChart, today: TODAY, maxAgeSec: 300 })
+      expect(fetchChart).toHaveBeenCalledTimes(1)
+
+      vi.setSystemTime(new Date('2026-05-15T14:05:01Z'))
+      await getBars(['SPY'], FROM, { fetchChart, today: TODAY, maxAgeSec: 300 })
+      expect(fetchChart).toHaveBeenCalledTimes(2)
+
+      vi.setSystemTime(new Date('2026-05-15T22:00:00Z'))
+      await getBars(['SPY'], FROM, { fetchChart, today: TODAY })
+      expect(fetchChart).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('maxAgeSec: an entry stored without its fetch time is not fresh for it', async () => {
+    store.set('bars:v1:SPY', JSON.stringify({ fetchedOn: TODAY, from: '2026-01-02', bars: [['2026-05-14', 99]], splits: [], splitsKnown: true }))
+    const fetchChart = vi.fn(async () => chart(5))
+
+    expect((await getBars(['SPY'], FROM, { fetchChart, today: TODAY })).get('SPY')!.bars).toEqual([{ date: '2026-05-14', close: 99 }])
+    expect((await getBars(['SPY'], FROM, { fetchChart, today: TODAY, maxAgeSec: 300 })).get('SPY')!.bars).toEqual([{ date: '2026-05-14', close: 5 }])
+  })
+
   it('memoryOnly never reads or writes Redis (read-only scripts must not touch the shared cache)', async () => {
     store.set('bars:v1:AAA', JSON.stringify({ fetchedOn: TODAY, from: '2026-01-02', bars: [['2026-05-14', 99]], splits: [], splitsKnown: true }))
     const fetchChart = vi.fn(async () => chart(5))
@@ -105,6 +135,19 @@ describe('getBars', () => {
     expect(fetchChart).toHaveBeenCalledTimes(1)
     expect(redisMock.setex).toHaveBeenCalledWith('bars:v1:AAA', 3600, expect.any(String))
     expect(again.get('AAA')).toMatchObject({ bars: [], degraded: true, missing: true })
+  })
+
+  it('a caller that wants fresh bars (maxAgeSec) retries a missing symbol after that long, not after an hour', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const fetchChart = vi.fn().mockRejectedValueOnce(new Error('down')).mockResolvedValueOnce(chart())
+    await getBars(['AAA'], FROM, { fetchChart, today: TODAY, maxAgeSec: 300 })
+    vi.setSystemTime(Date.now() + 301_000)
+
+    const again = await getBars(['AAA'], FROM, { fetchChart, today: TODAY, maxAgeSec: 300 })
+
+    expect(fetchChart).toHaveBeenCalledTimes(2)
+    expect(again.get('AAA')).toMatchObject({ degraded: false, missing: false })
+    vi.useRealTimers()
   })
 
   it('S11.2: Redis down -> in-memory fallback, still cached for the day', async () => {

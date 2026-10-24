@@ -74,6 +74,25 @@ describe('getDollarInfo', () => {
     expect(await getDollarInfo('ccl')).toEqual({ rate: 1500, asOf: '2026-10-19T20:00:00.000Z', source: 'lkp' })
   })
 
+  it('minute expired: answers the last-known rate at once and refreshes it behind, one fetch per kind', async () => {
+    const lkp = JSON.stringify({ rate: 1500, asOf: '2026-10-22T20:00:00.000Z' })
+    redis.get.mockImplementation(async (key: string) => (key === 'currency:ccl:lkp' ? lkp : null))
+    let answer!: (v: unknown) => void
+    fetchMock.mockReturnValueOnce(new Promise(r => { answer = r }))
+
+    // dolarapi has not answered: both callers get the last-known rate without waiting for it.
+    const [a, b] = await Promise.all([getDollarInfo('ccl'), getDollarInfo('ccl')])
+    expect(a).toEqual({ rate: 1500, asOf: '2026-10-22T20:00:00.000Z', source: 'lkp' })
+    expect(b).toEqual(a)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    answer(dolarapi(1637.9, 1639.5))
+    await vi.waitFor(() => expect(redis.setex).toHaveBeenCalledTimes(2))
+    const written = Object.fromEntries(redis.setex.mock.calls.map(c => [c[0], JSON.parse(c[2])]))
+    expect(written['currency:ccl']).toEqual({ rate: 1638.7, asOf: '2026-10-22T20:59:00.000Z' })
+    expect(written['currency:ccl:lkp']).toEqual({ rate: 1638.7, asOf: '2026-10-22T20:59:00.000Z' })
+  })
+
   it('nothing available: null, never an invented rate', async () => {
     ready = false
     fetchMock.mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({}) })

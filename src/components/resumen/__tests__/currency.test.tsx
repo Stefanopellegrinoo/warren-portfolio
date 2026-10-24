@@ -8,7 +8,7 @@ import { DEFAULT_SORT } from '@/lib/resumen/holdings'
 import { row } from './fixtures'
 
 const noop = () => {}
-const header = { marketOpen: false, autoRefresh: false, countdown: 30, onToggleRefresh: noop, onImport: noop, onNew: noop }
+const header = { marketOpen: false, autoRefresh: false, onRefreshDue: noop, onToggleRefresh: noop, onImport: noop, onNew: noop }
 
 describe('currency selector in the Resumen header', () => {
   it('offers the three currencies as a named radio group, with the current one checked', () => {

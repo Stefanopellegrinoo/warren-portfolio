@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import AddTransactionModal from '@/components/ui/AddTransactionModal'
 import ImportModal from '@/components/ui/ImportModal'
 import UnpricedNotice from '@/components/ui/UnpricedNotice'
@@ -18,10 +18,8 @@ import { DEFAULT_CURRENCY, headline, readCurrency, saveCurrency, viewsOf } from 
 import type { Currency, CurrencyViews } from '@/lib/multicurrency'
 import type { Position, ONPosition, PortfolioSummary } from '@/types'
 import { isMarketOpen } from '@/lib/utils'
-
-// The worker refreshes prices every minute; polling every 30 s shows them
-// at most a minute and a half old.
-const REFRESH_INTERVAL_SEC = 30
+import { cachedValue, load } from '@/lib/client-cache'
+import { getCedearRatios, getPortfolio, POSITIONS_KEY } from '@/lib/warren/positions'
 
 type AssetClass = 'ACCION' | 'CEDEAR' | 'ON'
 interface QuickSell { assetClass: AssetClass; ticker: string; quantity: number; price: number }
@@ -31,10 +29,27 @@ interface PositionsPayload {
   summary?: PortfolioSummary
   unpricedCount?: number
   unpricedTickers?: string[]
-  lastRefresh?: string
+  lastRefresh?: string | null
   /** Pesos / MEP / Cable views; absent in a summary cached before they existed. */
   currencies?: CurrencyViews
 }
+
+// Catalogs that never change during a visit: asked once per tab and at hand on the next visit.
+interface Cedears { tickers: string[]; ratios: Record<string, number> }
+const CEDEARS_KEY = 'resumen:cedears'
+const NAMES_KEY = 'resumen:names'
+const NO_CEDEARS: Cedears = { tickers: [], ratios: {} }
+
+const loadCedears = async () => cachedValue<Cedears>(CEDEARS_KEY) ?? load(CEDEARS_KEY, async () => {
+  const ratios = await getCedearRatios()
+  return { tickers: [...ratios.keys()], ratios: Object.fromEntries([...ratios].map(([t, r]) => [t, Number(r)])) }
+})
+const loadNames = async () => cachedValue<Record<string, string>>(NAMES_KEY) ?? load(NAMES_KEY, async () => {
+  const res = await fetch('/api/activos')
+  if (!res.ok) throw new Error(String(res.status))
+  const list: { ticker: string; nombre: string }[] = await res.json()
+  return Object.fromEntries(list.filter(a => a.nombre && a.nombre.trim().toUpperCase() !== a.ticker.toUpperCase()).map(a => [a.ticker, a.nombre]))
+})
 
 function Skeleton() {
   return (
@@ -45,11 +60,11 @@ function Skeleton() {
 }
 
 export default function DashboardPage() {
-  const [data, setData] = useState<PositionsPayload | null>(null)
+  // A portfolio this tab already has shows at once; the visit's own request refreshes it behind.
+  const [data, setData] = useState<PositionsPayload | null>(() => cachedValue<PositionsPayload>(POSITIONS_KEY) ?? null)
   const [loadError, setLoadError] = useState(false)
-  const [cedears, setCedears] = useState<string[]>([])
-  const [cedearRatios, setCedearRatios] = useState<Record<string, number>>({})
-  const [names, setNames] = useState<Record<string, string>>({})
+  const [cedears, setCedears] = useState<Cedears>(() => cachedValue<Cedears>(CEDEARS_KEY) ?? NO_CEDEARS)
+  const [names, setNames] = useState<Record<string, string>>(() => cachedValue<Record<string, string>>(NAMES_KEY) ?? {})
   const [showAddTx, setShowAddTx] = useState(false)
   const [quickSell, setQuickSell] = useState<QuickSell | null>(null)
   const [showImport, setShowImport] = useState(false)
@@ -61,20 +76,13 @@ export default function DashboardPage() {
   const [movementsKey, setMovementsKey] = useState(0)
   const [marketOpen, setMarketOpen] = useState(isMarketOpen())
   const [autoRefresh, setAutoRefresh] = useState(isMarketOpen())
-  const countdownRef = useRef(REFRESH_INTERVAL_SEC)
-  const [countdown, setCountdown] = useState(REFRESH_INTERVAL_SEC)
 
+  // Shared with every other part of the tab asking for the portfolio at the same time.
   const fetchPositions = useCallback(() => {
-    return fetch('/api/positions')
-      .then(res => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
-      .then((payload: PositionsPayload) => {
-        setData(payload)
+    return getPortfolio()
+      .then(payload => {
+        setData(payload as PositionsPayload)
         setLoadError(false)
-        if (payload.lastRefresh) {
-          const elapsed = Math.floor((Date.now() - new Date(payload.lastRefresh).getTime()) / 1000)
-          countdownRef.current = Math.max(1, REFRESH_INTERVAL_SEC - (elapsed % REFRESH_INTERVAL_SEC))
-          setCountdown(countdownRef.current)
-        }
       })
       .catch(() => setLoadError(true))
   }, [])
@@ -93,15 +101,10 @@ export default function DashboardPage() {
     saveCurrency(c)
   }
 
-  // Lookups that never change during a visit: CEDEAR list (sale asset class) and company names.
+  // CEDEAR list (sale asset class) and company names.
   useEffect(() => {
-    fetch('/api/cedears').then(r => (r.ok ? r.json() : [])).then((list: { ticker: string; ratio: number | string }[]) => {
-      setCedears(list.map(c => c.ticker))
-      setCedearRatios(Object.fromEntries(list.map(c => [c.ticker, Number(c.ratio)])))
-    }).catch(() => {})
-    fetch('/api/activos').then(r => (r.ok ? r.json() : [])).then((list: { ticker: string; nombre: string }[]) => {
-      setNames(Object.fromEntries(list.filter(a => a.nombre && a.nombre.trim().toUpperCase() !== a.ticker.toUpperCase()).map(a => [a.ticker, a.nombre])))
-    }).catch(() => {})
+    loadCedears().then(setCedears).catch(() => {})
+    loadNames().then(setNames).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -114,24 +117,11 @@ export default function DashboardPage() {
     return () => clearInterval(timer)
   }, [])
 
-  useEffect(() => {
-    if (!autoRefresh || !marketOpen) return
-    const timer = setInterval(() => {
-      countdownRef.current -= 1
-      if (countdownRef.current <= 0) {
-        countdownRef.current = REFRESH_INTERVAL_SEC
-        fetchPositions()
-      }
-      setCountdown(countdownRef.current)
-    }, 1000)
-    return () => clearInterval(timer)
-  }, [autoRefresh, marketOpen, fetchPositions])
-
   function sell(ticker: string) {
     const on = data?.onPositions?.find(p => p.ticker === ticker)
     const pos = on ?? data?.positions?.find(p => p.ticker === ticker)
     if (!pos) return
-    const isCedear = !on && cedears.some(c => c === ticker || ticker.includes(c))
+    const isCedear = !on && cedears.tickers.some(c => c === ticker || ticker.includes(c))
     setQuickSell({ assetClass: on ? 'ON' : isCedear ? 'CEDEAR' : 'ACCION', ticker, quantity: pos.quantity, price: pos.current_price ?? 0 })
     setShowAddTx(true)
   }
@@ -140,7 +130,7 @@ export default function DashboardPage() {
   const views = data ? viewsOf(data) : null
   const rows = summary
     ? buildHoldings({
-        positions: data?.positions ?? [], onPositions: data?.onPositions ?? [], cedearTickers: cedears, cedearRatios, names,
+        positions: data?.positions ?? [], onPositions: data?.onPositions ?? [], cedearTickers: cedears.tickers, cedearRatios: cedears.ratios, names,
         total: views ? views.totals.value[currency] : summary.total_market_value, views, currency,
       })
     : []
@@ -155,7 +145,8 @@ export default function DashboardPage() {
       <SummaryHeader
         marketOpen={marketOpen}
         autoRefresh={autoRefresh}
-        countdown={countdown}
+        lastRefresh={data?.lastRefresh}
+        onRefreshDue={fetchPositions}
         onToggleRefresh={() => setAutoRefresh(a => !a)}
         onImport={() => setShowImport(true)}
         onNew={() => { setQuickSell(null); setShowAddTx(true) }}
@@ -172,8 +163,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {!summary && !loadError && <Skeleton />}
-
       {isEmpty && (
         <div className="grid justify-items-start gap-3 py-12">
           <p className="text-ink-2">Todavía no cargaste operaciones.</p>
@@ -183,9 +172,10 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {summary && !isEmpty && (
+      {/* The chart and the movements ask with the page: while the summary loads, the holdings show a skeleton beside them. */}
+      {(summary ? !isEmpty : !loadError) && (
         <div className="grid gap-8">
-          <ValueSection figures={figures!} />
+          {figures && <ValueSection figures={figures} />}
 
           {/* Phone: every holding, then the rest.
               Wide screens: holdings take the main column and the rest sits beside them. */}
@@ -194,14 +184,16 @@ export default function DashboardPage() {
               <SectionHead
                 id="h-tenencias"
                 title="Tenencias"
-                count={rows.length + 1}
+                count={summary ? rows.length + 1 : undefined}
                 action={
                   <button type="button" onClick={() => setAsTable(t => !t)} className="inline-flex min-h-6 items-center text-[13px] font-medium text-accent-ink hover:underline hover:underline-offset-2 max-[819px]:min-h-11">
                     {asTable ? 'Ver como lista' : 'Ver todas las columnas'}
                   </button>
                 }
               />
-              {asTable
+              {!summary
+                ? <div className="pt-3"><Skeleton /></div>
+                : asTable
                 ? <div className="pt-3"><HoldingsTable rows={rows} sort={sort} onSort={setSort} onSell={sell} /></div>
                 : <HoldingsList
                     rows={rows}
@@ -219,7 +211,7 @@ export default function DashboardPage() {
               <ValueChart />
             </section>
 
-            <div className="min-w-0 [grid-area:dist]"><DistributionList items={distribution(summary, views, currency, rows)} prefix={figures!.prefix} /></div>
+            {summary && figures && <div className="min-w-0 [grid-area:dist]"><DistributionList items={distribution(summary, views, currency, rows)} prefix={figures.prefix} /></div>}
             <div className="min-w-0 [grid-area:moves]"><MovementsList refreshKey={movementsKey} onChanged={fetchPositions} /></div>
           </div>
         </div>

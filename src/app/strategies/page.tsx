@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, Suspense } from 'react'
+import { useState, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { ChevronRight, Plus } from 'lucide-react'
@@ -9,6 +9,7 @@ import { StrategyFormModal } from '@/components/strategies/StrategyFormModal'
 import { PriceAlertsTab } from '@/components/strategies/PriceAlertsTab'
 import { Chip, SectionHead } from '@/components/resumen/ui'
 import { ErrorNotice, SkeletonRows, page, pageTitle, primaryButton, tabClass } from '@/components/strategies/ui'
+import { cachedValue, useCached } from '@/lib/client-cache'
 
 export default function StrategiesPage() {
   return (
@@ -18,31 +19,27 @@ export default function StrategiesPage() {
   )
 }
 
+const LIST_KEY = 'strategies:list'
+
 function StrategiesContent() {
   const searchParams = useSearchParams()
   const activeTab = searchParams.get('tab') === 'alertas' ? 'alertas' : 'estrategias'
 
-  const [strategies, setStrategies] = useState<StrategyWithSetups[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
-
-  const loadStrategies = useCallback(async () => {
-    try {
-      setLoading(true)
-      setError(null)
-      const res = await fetch('/api/strategies')
-      if (!res.ok) throw new Error('Failed to load')
-      const data: StrategiesListResponse = await res.json()
-      setStrategies(data.strategies)
-    } catch {
-      setError('No se pudieron cargar las estrategias.')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { loadStrategies() }, [loadStrategies])
+  // Seen before in this tab, the list shows at once and refreshes behind (odd/tasks/rendimiento.md S9).
+  const list = useCached(LIST_KEY, async () => {
+    const res = await fetch('/api/strategies')
+    if (!res.ok) throw new Error('Failed to load')
+    const data: StrategiesListResponse = await res.json()
+    return data.strategies
+  })
+  const strategies = list.data ?? []
+  const loading = !list.data && list.loading
+  const error = !list.data && list.error ? 'No se pudieron cargar las estrategias.' : null
+  const loadStrategies = list.reload
+  // From the latest remembered list, like a state updater, so a change never undoes one made meanwhile.
+  const setStrategies = (update: (prev: StrategyWithSetups[]) => StrategyWithSetups[]) =>
+    list.mutate(update(cachedValue<StrategyWithSetups[]>(LIST_KEY) ?? []))
 
   return (
     <div className={page}>

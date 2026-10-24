@@ -1,34 +1,31 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { cn, formatNumber } from '@/lib/utils'
-import { buildChart, HISTORY_NOTE, nearestIndex, PLOT, RANGES, type HistoryPoint, type RangeId } from '@/lib/resumen/chart'
-
-type Load = { status: 'loading' } | { status: 'error' } | { status: 'ready'; points: HistoryPoint[] }
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { argentinaDate, cn, formatNumber } from '@/lib/utils'
+import { useCached } from '@/lib/client-cache'
+import { buildChart, HISTORY_NOTE, nearestIndex, PLOT, pointsInRange, RANGES, type HistoryPoint, type RangeId } from '@/lib/resumen/chart'
 
 const longDate = (iso: string) =>
   new Date(iso + 'T12:00:00').toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
 
+async function fetchHistory(): Promise<HistoryPoint[]> {
+  const res = await fetch('/api/portfolio-history?days=all&universe=total')
+  if (!res.ok) throw new Error(String(res.status))
+  const d: { data?: HistoryPoint[] } = await res.json()
+  return d.data ?? []
+}
+
 export default function ValueChart() {
   const [range, setRange] = useState<RangeId>('3M')
-  const [load, setLoad] = useState<Load>({ status: 'loading' })
   const [width, setWidth] = useState(0)
   const [active, setActive] = useState<number | null>(null)
   const wrap = useRef<HTMLDivElement>(null)
 
-  // Each request carries its own range; a late answer for an older range is dropped.
-  const latest = useRef<RangeId>(range)
-
-  const fetchHistory = useCallback((r: RangeId) => {
-    latest.current = r
-    const days = RANGES.find(x => x.id === r)!.days
-    fetch(`/api/portfolio-history?days=${days}&universe=total`)
-      .then(res => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
-      .then((d: { data?: HistoryPoint[] }) => { if (latest.current === r) setLoad({ status: 'ready', points: d.data ?? [] }) })
-      .catch(() => { if (latest.current === r) setLoad({ status: 'error' }) })
-  }, [])
-
-  useEffect(() => { fetchHistory(range) }, [range, fetchHistory])
+  // The whole series, asked once per visit and shown at once on the next; each period is cut from it.
+  const history = useCached('resumen:history', fetchHistory)
+  // A retry shows the loading state again until its answer.
+  const [retried, setRetried] = useState<unknown>(null)
+  const status = history.data ? 'ready' : history.error && history.error !== retried ? 'error' : 'loading'
 
   useEffect(() => {
     const el = wrap.current
@@ -39,12 +36,11 @@ export default function ValueChart() {
   }, [])
 
   function changeRange(r: RangeId) {
-    setLoad({ status: 'loading' })
     setActive(null)
     setRange(r)
   }
 
-  const points = load.status === 'ready' ? load.points : []
+  const points = useMemo(() => (history.data ? pointsInRange(history.data, range, argentinaDate()) : []), [history.data, range])
   const height = width && width < 560 ? 180 : 220
   const chart = width ? buildChart(points, width, height) : null
   const point = active !== null ? points[active] : null
@@ -77,22 +73,22 @@ export default function ValueChart() {
       </div>
 
       <div ref={wrap} className="relative mt-3" style={{ minHeight: height }}>
-        {load.status === 'loading' && <span className="block animate-pulse rounded bg-surface-2" style={{ height }} aria-label="Cargando historia" role="status" />}
+        {status === 'loading' && <span className="block animate-pulse rounded bg-surface-2" style={{ height }} aria-label="Cargando historia" role="status" />}
 
-        {load.status === 'error' && (
+        {status === 'error' && (
           <div className="flex items-center gap-3 py-8 text-sm text-ink-2" role="alert">
             No se pudo cargar la historia.
-            <button type="button" onClick={() => { setLoad({ status: 'loading' }); fetchHistory(range) }} className="font-medium text-accent-ink underline underline-offset-2">
+            <button type="button" onClick={() => { setRetried(history.error); history.reload() }} className="font-medium text-accent-ink underline underline-offset-2">
               Reintentar
             </button>
           </div>
         )}
 
-        {load.status === 'ready' && !chart && width > 0 && (
+        {status === 'ready' && !chart && width > 0 && (
           <p className="py-8 text-sm text-ink-3">Todavía no hay historia para este período.</p>
         )}
 
-        {load.status === 'ready' && chart && (
+        {status === 'ready' && chart && (
           <>
             <svg
               width={width}
@@ -148,7 +144,7 @@ export default function ValueChart() {
         )}
       </div>
 
-      {load.status === 'ready' && points.length > 0 && <p className="mt-2 text-[13px] text-ink-3">{HISTORY_NOTE}</p>}
+      {status === 'ready' && points.length > 0 && <p className="mt-2 text-[13px] text-ink-3">{HISTORY_NOTE}</p>}
     </div>
   )
 }

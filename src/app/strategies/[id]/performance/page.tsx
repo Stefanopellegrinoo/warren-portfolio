@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
@@ -8,6 +8,7 @@ import { getSetupColor } from '@/lib/setup-color'
 import { Chip } from '@/components/resumen/ui'
 import { ErrorNotice, Segmented, SkeletonRows, field, page, pageTitle, tabClass, textLink } from '@/components/strategies/ui'
 import { cn, formatNumber } from '@/lib/utils'
+import { useCached } from '@/lib/client-cache'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -27,6 +28,8 @@ interface SetupPerformance {
 interface PerformanceResponse {
   setups: SetupPerformance[]
   best_setup_id: string | null
+  /** What the page shows of the strategy: it comes with its performance (odd/tasks/rendimiento.md S9). */
+  strategy?: { id: string; name: string; tickers: string[]; setups: Array<{ id: string; name: string; active: boolean }> }
 }
 
 interface Signal {
@@ -61,15 +64,6 @@ interface PaperTrade {
 
 interface PaperTradesResponse {
   trades: PaperTrade[]
-}
-
-interface Strategy {
-  id: string
-  name: string
-  tickers: string[]
-  timeframes: string[]
-  active: boolean
-  indicator_setups: Array<{ id: string; name: string; active: boolean }>
 }
 
 // ─── Date formatting ──────────────────────────────────────────────────────────
@@ -441,103 +435,48 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'paper-trades', label: 'Paper trades' },
 ]
 
+/** One GET whose failure is thrown, so the client cache never remembers it. */
+async function getJson<T>(url: string): Promise<T> {
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(String(res.status))
+  return res.json()
+}
+
 export default function PerformancePage() {
   const params = useParams<{ id: string }>()
   const strategyId = params.id
-
-  const [strategy, setStrategy] = useState<Strategy | null>(null)
-  const [performance, setPerformance] = useState<PerformanceResponse | null>(null)
-  const [signals, setSignals] = useState<Signal[]>([])
-  const [paperTrades, setPaperTrades] = useState<PaperTrade[]>([])
-
-  const [loadingStrategy, setLoadingStrategy] = useState(true)
-  const [loadingPerformance, setLoadingPerformance] = useState(true)
-  const [loadingSignals, setLoadingSignals] = useState(true)
-  const [loadingPaperTrades, setLoadingPaperTrades] = useState(false)
-  const [errorPaperTrades, setErrorPaperTrades] = useState(false)
-  const [errorStrategy, setErrorStrategy] = useState(false)
-  const [errorSignals, setErrorSignals] = useState(false)
 
   const [activeTab, setActiveTab] = useState<Tab>('comparison')
   const [period, setPeriod] = useState<Period>('30d')
   const [ticker, setTicker] = useState<string>('all')
   const [signalType, setSignalType] = useState<SignalType>('all')
+  // Paper trades load the first time their tab opens, and stay (odd/tasks/rendimiento.md S9).
+  const [tradesWanted, setTradesWanted] = useState(false)
 
-  const loadStrategy = useCallback(async () => {
-    try {
-      setLoadingStrategy(true)
-      setErrorStrategy(false)
-      const res = await fetch(`/api/strategies/${strategyId}`)
-      if (!res.ok) { setErrorStrategy(true); return }
-      const data = await res.json() as { strategy: Strategy }
-      setStrategy(data.strategy)
-    } catch {
-      setErrorStrategy(true)
-    } finally {
-      setLoadingStrategy(false)
-    }
-  }, [strategyId])
+  // Seen before in this tab, each part shows at once and refreshes behind (S9).
+  const base = `/api/strategies/${strategyId}`
+  const performanceQuery = useCached(`strategies:${strategyId}:performance`, () => getJson<PerformanceResponse>(`${base}/performance`))
+  const signalParams = new URLSearchParams({ period })
+  if (ticker !== 'all') signalParams.set('ticker', ticker)
+  if (signalType !== 'all') signalParams.set('type', signalType)
+  const signalsQuery = useCached(`strategies:${strategyId}:signals:${signalParams}`, () => getJson<SignalsResponse>(`${base}/signals?${signalParams}`))
+  // Both states in parallel: one round trip, not two in a row.
+  const tradesQuery = useCached(tradesWanted ? `strategies:${strategyId}:paper-trades` : null, async () => {
+    const [open, closed] = await Promise.all([
+      getJson<PaperTradesResponse>(`${base}/paper-trades?status=OPEN`),
+      getJson<PaperTradesResponse>(`${base}/paper-trades?status=CLOSED`),
+    ])
+    return [...open.trades, ...closed.trades]
+  })
 
-  const loadPerformance = useCallback(async () => {
-    try {
-      setLoadingPerformance(true)
-      const res = await fetch(`/api/strategies/${strategyId}/performance`)
-      if (!res.ok) return
-      const data = await res.json() as PerformanceResponse
-      setPerformance(data)
-    } catch {
-      // performance stays null: the comparison tab shows the error with Reintentar.
-    } finally {
-      setLoadingPerformance(false)
-    }
-  }, [strategyId])
+  const performance = performanceQuery.data ?? null
+  const strategy = performance?.strategy ?? null
+  const isLoading = !performance && performanceQuery.loading
 
-  const loadSignals = useCallback(async () => {
-    try {
-      setLoadingSignals(true)
-      setErrorSignals(false)
-      const params = new URLSearchParams({ period })
-      if (ticker !== 'all') params.set('ticker', ticker)
-      if (signalType !== 'all') params.set('type', signalType)
-      const res = await fetch(`/api/strategies/${strategyId}/signals?${params.toString()}`)
-      if (!res.ok) { setErrorSignals(true); return }
-      const data = await res.json() as SignalsResponse
-      setSignals(data.signals)
-    } catch {
-      setErrorSignals(true)
-    } finally {
-      setLoadingSignals(false)
-    }
-  }, [strategyId, period, ticker, signalType])
-
-  const loadPaperTrades = useCallback(async () => {
-    try {
-      setLoadingPaperTrades(true)
-      setErrorPaperTrades(false)
-      const res = await fetch(`/api/strategies/${strategyId}/paper-trades?status=OPEN`)
-      if (!res.ok) { setErrorPaperTrades(true); return }
-      const openData = await res.json() as PaperTradesResponse
-
-      const res2 = await fetch(`/api/strategies/${strategyId}/paper-trades?status=CLOSED`)
-      if (!res2.ok) { setErrorPaperTrades(true); return }
-      const closedData = await res2.json() as PaperTradesResponse
-
-      setPaperTrades([...openData.trades, ...closedData.trades])
-    } catch {
-      setErrorPaperTrades(true)
-    } finally {
-      setLoadingPaperTrades(false)
-    }
-  }, [strategyId])
-
-  useEffect(() => { loadStrategy() }, [loadStrategy])
-  useEffect(() => { loadPerformance() }, [loadPerformance])
-  useEffect(() => { loadSignals() }, [loadSignals])
-  useEffect(() => {
-    if (activeTab === 'paper-trades') { loadPaperTrades() }
-  }, [activeTab, loadPaperTrades])
-
-  const isLoading = loadingStrategy || loadingPerformance
+  function selectTab(tab: Tab) {
+    setActiveTab(tab)
+    if (tab === 'paper-trades') setTradesWanted(true)
+  }
 
   // Arrow keys move between tabs, as the tab pattern expects.
   function onTabKey(e: React.KeyboardEvent) {
@@ -545,7 +484,7 @@ export default function PerformancePage() {
     e.preventDefault()
     const i = TABS.findIndex((t) => t.id === activeTab)
     const next = TABS[(i + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length]
-    setActiveTab(next.id)
+    selectTab(next.id)
     document.getElementById(`tab-${next.id}`)?.focus()
   }
 
@@ -562,7 +501,6 @@ export default function PerformancePage() {
 
       {isLoading ? <SkeletonRows label="Cargando el rendimiento" /> : (
         <>
-          {errorStrategy && <div className="mb-6"><ErrorNotice onRetry={loadStrategy}>No se pudo cargar la estrategia.</ErrorNotice></div>}
           <div role="tablist" aria-label="Vistas" onKeyDown={onTabKey} className="mb-6 flex gap-6 overflow-x-auto border-b border-line">
             {TABS.map((t) => (
               <button
@@ -573,7 +511,7 @@ export default function PerformancePage() {
                 aria-selected={activeTab === t.id}
                 aria-controls={`panel-${t.id}`}
                 tabIndex={activeTab === t.id ? 0 : -1}
-                onClick={() => setActiveTab(t.id)}
+                onClick={() => selectTab(t.id)}
                 className={`${tabClass(activeTab === t.id)} whitespace-nowrap`}
               >
                 {t.label}
@@ -585,7 +523,7 @@ export default function PerformancePage() {
             {activeTab === 'comparison' && (
               performance
                 ? <ComparisonTab setups={performance.setups} bestSetupId={performance.best_setup_id} />
-                : <ErrorNotice onRetry={loadPerformance}>No se pudo cargar la comparación.</ErrorNotice>
+                : <ErrorNotice onRetry={performanceQuery.reload}>No se pudo cargar la comparación.</ErrorNotice>
             )}
 
             {activeTab === 'signals' && (
@@ -609,17 +547,22 @@ export default function PerformancePage() {
                     <Segmented name="signals-period" legend="Período" options={PERIOD_OPTIONS} value={period} onChange={setPeriod} />
                   </div>
                 </div>
-                <SignalsTab signals={signals} loading={loadingSignals} error={errorSignals} onRetry={loadSignals} />
+                <SignalsTab
+                  signals={signalsQuery.data?.signals ?? []}
+                  loading={!signalsQuery.data && signalsQuery.loading}
+                  error={!signalsQuery.data && !!signalsQuery.error}
+                  onRetry={signalsQuery.reload}
+                />
               </div>
             )}
 
             {activeTab === 'paper-trades' && (
               <PaperTradesTab
-                trades={paperTrades}
-                loading={loadingPaperTrades}
-                error={errorPaperTrades}
-                onRetry={loadPaperTrades}
-                setups={strategy?.indicator_setups ?? []}
+                trades={tradesQuery.data ?? []}
+                loading={!tradesQuery.data && tradesQuery.loading}
+                error={!tradesQuery.data && !!tradesQuery.error}
+                onRetry={tradesQuery.reload}
+                setups={strategy?.setups ?? []}
               />
             )}
           </div>

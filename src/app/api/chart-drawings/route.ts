@@ -40,8 +40,21 @@ export async function GET(req: NextRequest) {
     .maybeSingle()
 
   if (error) return serverError("API /chart-drawings", error)
-  // null = never saved: the client converts the legacy chart_drawings rows.
-  return NextResponse.json({ drawings: data?.drawings ?? null })
+  if (data) return NextResponse.json({ drawings: data.drawings })
+
+  // Never saved: the legacy chart_drawings rows come in this same response for the client to
+  // convert and save, instead of a second request from the phone (odd/tasks/rendimiento.md S2).
+  const legacy = await supabase
+    .from("chart_drawings")
+    .select("id, type, points, style, label")
+    .eq("user_id", user.id)
+    .eq("ticker", parsed.data.toUpperCase())
+    .order("created_at", { ascending: true })
+  if (legacy.error) return serverError("API /chart-drawings", legacy.error)
+  return NextResponse.json({
+    drawings: null,
+    legacy: (legacy.data ?? []).map((r) => ({ id: r.id, type: r.type, points: r.points, style: r.style ?? {}, ...(r.label ? { label: r.label } : {}) })),
+  })
 }
 
 export async function PUT(req: NextRequest) {

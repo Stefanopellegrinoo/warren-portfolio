@@ -3,12 +3,19 @@ import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { toast } from 'sonner'
 import StrategyDetailPage from '../[id]/page'
+import { forgetCached } from '@/lib/client-cache'
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock('next/navigation', () => ({ useParams: () => ({ id: 's1' }), useRouter: () => ({ push: vi.fn() }) }))
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.mocked(toast.success).mockClear(); vi.mocked(toast.error).mockClear(); document.body.innerHTML = '' })
+// A request left hanging would stay in flight for the next test (the cache shares in-flight loads): end it.
+const hanging: (() => void)[] = []
+afterEach(async () => {
+  hanging.splice(0).forEach(end => end())
+  await new Promise(r => setTimeout(r, 0))
+  vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.mocked(toast.success).mockClear(); vi.mocked(toast.error).mockClear(); forgetCached(); document.body.innerHTML = ''
+})
 
 const QUESTION = '¿Eliminar este setup? Esta acción no se puede deshacer.'
 const strategy = {
@@ -22,11 +29,12 @@ const strategy = {
 const flush = () => act(async () => { await new Promise(r => setTimeout(r, 0)) })
 const button = (text: string) => [...document.querySelectorAll('button')].find(b => b.textContent?.trim() === text)
 
-async function mount(deleteResponse: () => Response = () => new Response(null, { status: 204 })) {
+async function mount(deleteResponse: () => Response = () => new Response(null, { status: 204 }), hang = false) {
   const calls: { url: string; method: string }[] = []
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET'
     calls.push({ url, method })
+    if (hang) await new Promise<void>(end => { hanging.push(end) })
     if (url === '/api/strategies/s1' && method === 'GET') return new Response(JSON.stringify({ strategy }))
     if (url === '/api/strategies/s1/setups/u1' && method === 'DELETE') return deleteResponse()
     throw new Error(`unexpected fetch ${method} ${url}`)
@@ -85,6 +93,21 @@ describe('Strategy detail: deleting a setup asks inside the app', () => {
     expect(toast.success).not.toHaveBeenCalled()
     expect(el.textContent).toContain('Cruce EMA')
     expect(trigger()!.disabled).toBe(false)
+    unmount()
+  })
+})
+
+describe('Strategy detail: seen before in the tab (odd/tasks/rendimiento.md S9)', () => {
+  it('shows the strategy at once while it refreshes, with the last change made to it', async () => {
+    const first = await mount()
+    act(() => first.trigger()!.click())
+    await act(async () => { button('Sí, eliminar')!.click() })
+    await flush()
+    first.unmount()
+
+    const { el, unmount } = await mount(undefined, true)
+    expect(el.querySelector('h1')!.textContent).toBe('Momentum')
+    expect(el.textContent).toContain('Esta estrategia todavía no tiene setups.')
     unmount()
   })
 })

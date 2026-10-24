@@ -25,7 +25,8 @@ vi.mock('@/lib/yahoo-finance', () => ({
   fetchQuotesWithFallback: async () => new Map([['AAPL', { ticker: 'AAPL', price: 150, change: 1, changePercent: 0.01, previousClose: 149 }]]),
 }))
 vi.mock('@/lib/data912-client', () => ({ fetchONQuotesWithFallback: async () => new Map() }))
-vi.mock('@/lib/currency-views', () => ({
+vi.mock('@/lib/currency-views', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/currency-views')>()),
   loadCurrencyContext: (...a: unknown[]) => mockCtx(...a),
   currencyViewsFor: (...a: unknown[]) => mockViews(...a),
 }))

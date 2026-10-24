@@ -30,8 +30,11 @@ vi.mock('@/lib/snapshot-series', () => ({
   fetchSnapshotSeries: (...args: unknown[]) => mockFetchSnapshotSeries(...args),
 }))
 
+const mockFullDownload = vi.fn(async () => { throw new Error('uncached data912 download') })
+const mockOnQuotes = vi.fn()
 vi.mock('@/lib/data912-client', () => ({
-  fetchONQuotes: () => Promise.resolve(new Map()),
+  fetchONQuotes: (...a: unknown[]) => mockFullDownload(...(a as [])),
+  fetchONQuotesWithFallback: (...a: unknown[]) => mockOnQuotes(...a),
 }))
 
 const mockFetchFlowTransactions = vi.fn()
@@ -67,6 +70,7 @@ beforeEach(() => {
   mockSeries([])
   mockFetchFlowTransactions.mockResolvedValue([])
   mockFetchIncomeMovements.mockResolvedValue([])
+  mockOnQuotes.mockResolvedValue(new Map())
 })
 
 describe('GET /api/statistics/ons — positions and trades from the ledger core', () => {
@@ -208,5 +212,39 @@ describe('GET /api/statistics/ons — coupons', () => {
   it('returns 500 when the income fetch fails', async () => {
     mockFetchIncomeMovements.mockRejectedValue(new Error('boom'))
     expect((await GET()).status).toBe(500)
+  })
+})
+
+describe('GET /api/statistics/ons — reads', () => {
+  it('values ONs with the Redis-first quotes, never the full data912 download', async () => {
+    mockRequireUser.mockResolvedValue({
+      supabase: fakeSupabase({ transactions: [trade({ ticker: 'ONA', asset_type: 'ON', quantity: 10, price: 95 })] }),
+      user: { id: 'u1' },
+    })
+    mockOnQuotes.mockResolvedValue(new Map([['ONA', { ticker: 'ONA', price: 99, change: 0, changePercent: 0, previousClose: 99 }]]))
+
+    const body = await (await GET()).json()
+
+    expect(mockFullDownload).not.toHaveBeenCalled()
+    expect(mockOnQuotes).toHaveBeenCalledWith(['ONA'])
+    expect(body.totalPortfolioValue).toBe(990)
+  })
+
+  it('asks the portfolio, the derived series and the declared flows together', async () => {
+    const log: string[] = []
+    mockRequireUser.mockResolvedValue({ supabase: ledgerSupabase({}, log), user: { id: 'u1' } })
+    let answerSeries!: (v: unknown) => void
+    mockGetDerivedSeries.mockReturnValue(new Promise(r => { answerSeries = r }))
+
+    const pending = GET()
+    // The series has not answered yet: the ledger read and both flow reads have started.
+    await vi.waitFor(() => {
+      expect(log).toContain('transactions')
+      expect(mockFetchFlowTransactions).toHaveBeenCalledTimes(1)
+      expect(mockFetchIncomeMovements).toHaveBeenCalledTimes(1)
+    })
+    answerSeries({ rows: ONS_ROWS, income: [], degraded: false, flags: {} })
+
+    expect((await pending).status).toBe(200)
   })
 })

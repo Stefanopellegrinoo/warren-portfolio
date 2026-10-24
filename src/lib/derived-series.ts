@@ -87,6 +87,7 @@ async function readAll<T>(build: () => any, orderBy: string[]): Promise<T[]> {
 }
 
 const norm = (t: string) => String(t).trim().toUpperCase()
+const isOn = (t: LedgerTrade) => String(t.asset_type ?? '').toUpperCase() === 'ON'
 
 function inRange(rows: DerivedRow[], { fromDate, toDate }: SeriesRange): DerivedRow[] {
   return rows.filter(r => (!fromDate || r.snapshot_date >= fromDate) && (!toDate || r.snapshot_date <= toDate))
@@ -184,6 +185,14 @@ async function backfillMissing(
   return true
 }
 
+/**
+ * Builds in flight, keyed by user, day and the ledger version read before the build: concurrent
+ * callers of one user (the statistics page asks four routes at once) share one build, and a
+ * caller after a mutation (version bumped) starts its own. Cleared when the build settles, so a
+ * failure is never kept. Without Redis there is no version to tell a mutation by: no sharing.
+ */
+const building = new Map<string, Promise<DerivedSeries>>()
+
 export async function getDerivedSeries(
   supabase: SupabaseClient,
   userId: string,
@@ -197,45 +206,108 @@ export async function getDerivedSeries(
 
   const startVersion = await readVersion(userId)
 
-  const transactions = await readAll<LedgerTrade>(
-    () => supabase.from('transactions')
-      .select('ticker, operation, quantity, price, commission, date, asset_type, created_at').eq('user_id', userId),
-    ['id']
-  )
-  const movements = await readAll<LedgerMovement>(
-    () => supabase.from('cash_movements').select('type, amount, date').eq('user_id', userId),
-    ['id']
-  )
-  const overrides = await loadOverrides(supabase, userId)
+  const key = startVersion === undefined ? null : `${userId}|${today}|${startVersion ?? ''}`
+  let build = key ? building.get(key) : undefined
+  if (!build) {
+    build = buildSeries(supabase, userId, today, startVersion, deps)
+    if (key) {
+      build = build.finally(() => building.delete(key))
+      building.set(key, build)
+    }
+  }
+  const { rows, degraded, flags, income } = await build
+  return { rows: inRange(rows, range), degraded, flags, income }
+}
+
+/** The ON closes from `firstDate` on, backfilled on demand when a held ON lacks them. */
+async function readOnCloses(
+  onTickers: string[], transactions: LedgerTrade[], firstDate: string, today: string, deps: DerivedDeps
+): Promise<{ closes: Map<string, DailyBar[]>; degraded: boolean }> {
+  const closes = new Map<string, DailyBar[]>()
+  const market = createServiceClient()
+  const firstTrade = new Map<string, string>()
+  for (const t of transactions.filter(isOn)) {
+    const d = String(t.date).slice(0, 10)
+    if (!firstTrade.has(norm(t.ticker)) || d < firstTrade.get(norm(t.ticker))!) firstTrade.set(norm(t.ticker), d)
+  }
+  try {
+    let prices = await readOnPrices(market, onTickers, firstDate)
+    const missing = onTickers.filter(t => {
+      const earliest = prices.filter(p => norm(p.ticker) === t).map(p => String(p.price_date).slice(0, 10)).sort()[0]
+      return !earliest || earliest > addDays(firstTrade.get(t)!, COVERED_WITHIN_DAYS)
+    })
+    if (missing.length > 0 && (await backfillMissing(market, missing, firstTrade, today, deps))) {
+      prices = await readOnPrices(market, onTickers, firstDate)
+    }
+    for (const p of prices) {
+      const list = closes.get(norm(p.ticker)) ?? []
+      list.push({ date: String(p.price_date).slice(0, 10), close: Number(p.close) })
+      closes.set(norm(p.ticker), list)
+    }
+    return { closes, degraded: false }
+  } catch (err) {
+    console.warn('[Derived] ON prices unreadable, ONs at cost:', err instanceof Error ? err.message : err)
+    return { closes: new Map(), degraded: true }
+  }
+}
+
+async function buildSeries(
+  supabase: SupabaseClient,
+  userId: string,
+  today: string,
+  startVersion: string | null | undefined,
+  deps: DerivedDeps
+): Promise<DerivedSeries> {
+  // The ledger and the ticker catalog do not depend on each other: read them together.
+  const [transactions, movements, overrides, catalogRows] = await Promise.all([
+    readAll<LedgerTrade>(
+      () => supabase.from('transactions')
+        .select('ticker, operation, quantity, price, commission, date, asset_type, created_at').eq('user_id', userId),
+      ['id']
+    ),
+    readAll<LedgerMovement>(
+      () => supabase.from('cash_movements').select('type, amount, date').eq('user_id', userId),
+      ['id']
+    ),
+    loadOverrides(supabase, userId),
+    listCatalogued(supabase).catch(err => {
+      console.warn('[Derived] ticker catalog unreadable, normalizing tickers instead:', err instanceof Error ? err.message : err)
+      return []
+    }),
+  ])
 
   let degraded = false
   // The history starts at the first ledger date: a trade, or a deposit before it.
   const firstDate = [...transactions, ...movements].map(r => String(r.date).slice(0, 10)).sort()[0] ?? today
 
-  const isOn = (t: LedgerTrade) => String(t.asset_type ?? '').toUpperCase() === 'ON'
   const stockTickers = Array.from(new Set(transactions.filter(t => !isOn(t)).map(t => norm(t.ticker))))
   const onTickers = Array.from(new Set(transactions.filter(isOn).map(t => norm(t.ticker))))
 
   // Which Yahoo symbol to ask for: the confirmed one, else the exchange-normalized string.
   const catalog = new Map<string, string>()
-  try {
-    for (const row of await listCatalogued(supabase)) catalog.set(norm(row.ticker), String(row.yahoo_symbol).trim())
-  } catch (err) {
-    console.warn('[Derived] ticker catalog unreadable, normalizing tickers instead:', err instanceof Error ? err.message : err)
-  }
+  for (const row of catalogRows) catalog.set(norm(row.ticker), String(row.yahoo_symbol).trim())
   const symbolOf = new Map(stockTickers.map(t => [t, catalog.get(t) ?? normalizeTickerForYahoo(t)]))
-
-  const charts = await (deps.getBars ?? getBars)(Array.from(new Set(symbolOf.values())), new Date(firstDate))
-
   const needsCcl = Array.from(symbolOf.values()).some(s => s.endsWith('.BA'))
-  let ccl = new Map<string, number>()
-  if (needsCcl) {
-    try {
-      ccl = await (deps.getHistoricalCCL ?? getHistoricalCCL)(new Date(firstDate))
-    } catch {
-      // empty map -> every ARS bar is dropped and flagged below
-    }
-  }
+
+  // Bars, CCL, ON closes (from the first trade on: other days of the feed must not widen the
+  // calendar), the schedules that pay ON coupons and amortizations, and today's quotes: all
+  // independent, read together.
+  const [charts, ccl, onCloses, schedules, todayQuotes] = await Promise.all([
+    (deps.getBars ?? getBars)(Array.from(new Set(symbolOf.values())), new Date(firstDate)),
+    // A failure leaves an empty map: every ARS bar is dropped and flagged below.
+    needsCcl
+      ? (deps.getHistoricalCCL ?? getHistoricalCCL)(new Date(firstDate)).catch(() => new Map<string, number>())
+      : new Map<string, number>(),
+    onTickers.length > 0 ? readOnCloses(onTickers, transactions, firstDate, today, deps) : { closes: new Map<string, DailyBar[]>(), degraded: false },
+    onTickers.length > 0
+      ? (deps.loadSchedules ?? loadSchedules)(supabase, onTickers, today).catch(err => {
+          console.warn('[Derived] ON schedules unreadable, no automatic payments:', err instanceof Error ? err.message : err)
+          return null
+        })
+      : new Map<string, FlowRow[]>(),
+    (deps.fetchQuotes ?? fetchQuotes)([...stockTickers, ...onTickers]),
+  ])
+  if (onCloses.degraded || schedules === null) degraded = true
 
   const barsByTicker = new Map<string, DailyBar[]>()
   for (const [ticker, symbol] of symbolOf) {
@@ -250,48 +322,9 @@ export async function getDerivedSeries(
     barsByTicker.set(ticker, bars)
   }
 
-    // ON closes from the first trade on (other days of the feed must not widen the calendar), fetched
-  // on demand when a held ON lacks them; and the schedules that pay its coupons and amortizations.
-  const onPricesByTicker = new Map<string, DailyBar[]>()
-  let schedules = new Map<string, FlowRow[]>()
-  if (onTickers.length > 0) {
-    const market = createServiceClient()
-    const firstTrade = new Map<string, string>()
-    for (const t of transactions.filter(isOn)) {
-      const d = String(t.date).slice(0, 10)
-      if (!firstTrade.has(norm(t.ticker)) || d < firstTrade.get(norm(t.ticker))!) firstTrade.set(norm(t.ticker), d)
-    }
-    try {
-      let prices = await readOnPrices(market, onTickers, firstDate)
-      const missing = onTickers.filter(t => {
-        const earliest = prices.filter(p => norm(p.ticker) === t).map(p => String(p.price_date).slice(0, 10)).sort()[0]
-        return !earliest || earliest > addDays(firstTrade.get(t)!, COVERED_WITHIN_DAYS)
-      })
-      if (missing.length > 0 && (await backfillMissing(market, missing, firstTrade, today, deps))) {
-        prices = await readOnPrices(market, onTickers, firstDate)
-      }
-      for (const p of prices) {
-        const list = onPricesByTicker.get(norm(p.ticker)) ?? []
-        list.push({ date: String(p.price_date).slice(0, 10), close: Number(p.close) })
-        onPricesByTicker.set(norm(p.ticker), list)
-      }
-    } catch (err) {
-      console.warn('[Derived] ON prices unreadable, ONs at cost:', err instanceof Error ? err.message : err)
-      onPricesByTicker.clear()
-      degraded = true
-    }
-    try {
-      schedules = await (deps.loadSchedules ?? loadSchedules)(supabase, onTickers, today)
-    } catch (err) {
-      console.warn('[Derived] ON schedules unreadable, no automatic payments:', err instanceof Error ? err.message : err)
-      degraded = true
-    }
-  }
-
-  const todayQuotes = await (deps.fetchQuotes ?? fetchQuotes)([...stockTickers, ...onTickers])
-
   const { rows, flags, income } = (deps.derive ?? deriveHistory)({
-    userId, transactions, movements, schedules, overrides, barsByTicker, onPricesByTicker, today, todayQuotes,
+    userId, transactions, movements, schedules: schedules ?? new Map(), overrides, barsByTicker,
+    onPricesByTicker: onCloses.closes, today, todayQuotes,
   })
   if (flags.failure != null) degraded = true
   // A stock without a live quote leaves today's row at its last close: never cache it. ONs have
@@ -300,5 +333,5 @@ export async function getDerivedSeries(
 
   if (!degraded && startVersion !== undefined) await writeCache(userId, startVersion, today, rows, flags, income)
 
-  return { rows: inRange(rows, range), degraded, flags, income }
+  return { rows, degraded, flags, income }
 }

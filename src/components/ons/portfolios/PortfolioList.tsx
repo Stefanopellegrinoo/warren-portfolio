@@ -1,10 +1,11 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { fmtDate } from '@/lib/on-format'
 import { SectionHead } from '@/components/resumen/ui'
-import { api } from './api'
+import { forgetCached, useCached } from '@/lib/client-cache'
+import { api, apiData } from './api'
 import { btnPrimary, btnQuiet, btnSecondary, field, label, Loading, LoadError, notice } from '../ui'
 
 interface Item { id: string; name: string; itemCount: number; updatedAt: string }
@@ -43,7 +44,7 @@ function CreateForm({ onCancel }: { onCancel?: () => void }) {
   )
 }
 
-function Row({ p, onDeleted }: { p: Item; onDeleted: () => Promise<void> }) {
+function Row({ p, onDeleted }: { p: Item; onDeleted: () => void }) {
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -54,7 +55,7 @@ function Row({ p, onDeleted }: { p: Item; onDeleted: () => Promise<void> }) {
     setBusy(false)
     setConfirming(false)
     if (!r.ok) return setError(r.error)
-    await onDeleted()
+    onDeleted()
   }
 
   return (
@@ -80,20 +81,18 @@ function Row({ p, onDeleted }: { p: Item; onDeleted: () => Promise<void> }) {
 }
 
 export default function PortfolioList() {
-  const [data, setData] = useState<Listing | null>(null)
-  const [failed, setFailed] = useState(false)
+  // The list seen before in this tab shows at once and refreshes behind (odd/tasks/rendimiento.md S9).
+  const list = useCached('ons:test-portfolios', () => apiData<Listing>('/api/test-portfolios'))
   const [creating, setCreating] = useState(false)
+  const data = list.data
 
-  const load = useCallback(async () => {
-    const r = await api<Listing>('/api/test-portfolios')
-    if (!r.ok) return setFailed(true)
-    setFailed(false)
-    setData(r.data)
-  }, [])
-  useEffect(() => { void load() }, [load])
-
-  if (failed) return <LoadError message="No se pudieron cargar tus carteras de prueba." onRetry={() => void load()} />
+  if (!data && list.error) return <LoadError message="No se pudieron cargar tus carteras de prueba." onRetry={list.reload} />
   if (!data) return <Loading label="Cargando carteras" />
+  // A deleted portfolio leaves the list here, without asking for it again; its remembered view goes too.
+  const deleted = (id: string) => {
+    forgetCached(`ons:test-portfolio:${id}`)
+    list.mutate({ ...data, portfolios: data.portfolios.filter((p) => p.id !== id) })
+  }
 
   const { portfolios, limits } = data
   const full = portfolios.length >= limits.portfolios
@@ -112,7 +111,7 @@ export default function PortfolioList() {
         <section aria-labelledby="pl-list">
           <SectionHead id="pl-list" title="Mis carteras de prueba" count={portfolios.length} />
           <ul aria-label="Mis carteras de prueba">
-            {portfolios.map((p) => <Row key={p.id} p={p} onDeleted={load} />)}
+            {portfolios.map((p) => <Row key={p.id} p={p} onDeleted={() => deleted(p.id)} />)}
           </ul>
           <div className="mt-4 border-t border-line pt-4">
             {full ? <p className={notice('warn')}>Llegaste al máximo de {limits.portfolios} carteras. Eliminá una para crear otra.</p>

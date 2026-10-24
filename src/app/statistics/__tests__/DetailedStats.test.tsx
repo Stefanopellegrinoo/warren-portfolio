@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import DetailedStats, { type StatData } from '../DetailedStats'
+import { CumulativeChart } from '../DetailedCharts'
 
 // Recharts draws nothing without a measured size; this stand-in prints what the
 // axis tick and the tooltip label would show for each point of the line chart.
@@ -51,10 +52,9 @@ describe('DetailedStats', () => {
     expect(html).toContain('US$ 7.500,00')
   })
 
+  // The chart loads on its own (odd/tasks/rendimiento.md S9), so its drawing is read from its module.
   it('shows a close date as that day, not the previous one in Argentina (S4)', () => {
-    const html = renderToStaticMarkup(
-      <DetailedStats data={{ ...data, cumulativePnl: [{ date: '2026-10-24', ticker: 'DUK', pnl: 50, cumulative: 50 }] }} assetLabel="Acciones" />,
-    )
+    const html = renderToStaticMarkup(<CumulativeChart data={[{ date: '2026-10-24', ticker: 'DUK', pnl: 50, cumulative: 50 }]} />)
     expect(html).toContain('tick 24/10;')
     expect(html).toContain('label 24/10/2026;')
   })

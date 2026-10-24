@@ -115,15 +115,15 @@ describe('GET /api/klines', () => {
     expect(mockGetCandles).not.toHaveBeenCalled()
   })
 
-  it('caches every interval for 30 s, keyed by ticker, interval and days', async () => {
+  it('keeps a full history 10 minutes and a recent window (days) 30 s, keyed by ticker, interval and days', async () => {
     const { GET } = await import('./route')
     mockGetCandles.mockResolvedValue([fakeCandle])
 
     await GET(makeRequest({ ticker: 'AAPL', interval: '15m' }))
-    await GET(makeRequest({ ticker: 'aapl', interval: '1d', days: '90' }))
+    await GET(makeRequest({ ticker: 'aapl', interval: '1d', days: '14' }))
 
-    expect(mockCached.mock.calls[0].slice(0, 2)).toEqual(['klines:AAPL:15m:59', 30])
-    expect(mockCached.mock.calls[1].slice(0, 2)).toEqual(['klines:AAPL:1d:90', 30])
+    expect(mockCached.mock.calls[0].slice(0, 2)).toEqual(['klines:AAPL:15m:59', 600])
+    expect(mockCached.mock.calls[1].slice(0, 2)).toEqual(['klines:AAPL:1d:14', 30])
   })
 
   it('calls provider with from date when days=90 is provided', async () => {

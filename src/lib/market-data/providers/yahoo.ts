@@ -7,7 +7,9 @@ import { getHistoricalCCL, getCCLRate } from '../../currency'
 async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn()
-  } catch (_firstErr) {
+  } catch (firstErr) {
+    // A ticker Yahoo does not know stays unknown: asking again only doubles the wait.
+    if (classifyError(firstErr).code === 'NOT_FOUND') throw firstErr
     // Retry exactly once
     return await fn()
   }

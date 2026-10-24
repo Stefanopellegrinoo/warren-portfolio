@@ -56,9 +56,10 @@ export async function loadOverrides(sb: SupabaseClient, userId: string): Promise
     sb.from('on_payment_overrides').select('ticker, pay_date, kind, amount').eq('user_id', userId))).map(toOverride)
 }
 
-export async function loadLedger(sb: SupabaseClient, userId: string): Promise<UserLedger> {
+/** `columns`: the trade columns to read, TRADE_COLUMNS or a superset of them. */
+export async function loadLedger(sb: SupabaseClient, userId: string, columns: string = TRADE_COLUMNS): Promise<UserLedger> {
   const [trades, movements, overrides] = await Promise.all([
-    readAll<LedgerTrade>(() => sb.from('transactions').select(TRADE_COLUMNS).eq('user_id', userId)),
+    readAll<LedgerTrade>(() => sb.from('transactions').select(columns).eq('user_id', userId)),
     readAll<LedgerMovement>(() => sb.from('cash_movements').select('type, amount, date').eq('user_id', userId)),
     loadOverrides(sb, userId),
   ])
@@ -167,9 +168,16 @@ export function portfolioNowFrom(userId: string, ledger: UserLedger, state: Ledg
 
 /** One user's portfolio now, through the caller's client (RLS applies). */
 export async function loadPortfolioNow(sb: SupabaseClient, userId: string, today: string): Promise<PortfolioNow> {
-  const ledger = await loadLedger(sb, userId)
+  return (await loadPortfolioAndLedger(sb, userId, today)).now
+}
+
+/** loadPortfolioNow plus the ledger and ON schedules it was built from, for a caller that needs them again. */
+export async function loadPortfolioAndLedger(
+  sb: SupabaseClient, userId: string, today: string, columns: string = TRADE_COLUMNS
+): Promise<{ now: PortfolioNow; ledger: UserLedger; schedules: Map<string, FlowRow[]> }> {
+  const ledger = await loadLedger(sb, userId, columns)
   const schedules = await loadSchedules(sb, onTickersOf(ledger.trades), today)
-  return portfolioNowFrom(userId, ledger, ledgerNowFrom(ledger, schedules, today))
+  return { now: portfolioNowFrom(userId, ledger, ledgerNowFrom(ledger, schedules, today)), ledger, schedules }
 }
 
 /**

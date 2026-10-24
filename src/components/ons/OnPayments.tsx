@@ -1,13 +1,14 @@
 'use client'
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useId, useState } from 'react'
 import { fmtDate } from '@/lib/on-format'
 import { formatUSD } from '@/lib/utils'
 import type { MissingGroup, PaymentLine } from '@/lib/on-payments'
 import type { PaymentKind } from '@/lib/ledger-core'
 import { EsNumberInput } from '@/components/ui/es-number-input'
 import { SectionHead } from '@/components/resumen/ui'
-import { api } from './portfolios/api'
+import { useCached } from '@/lib/client-cache'
+import { api, apiData } from './portfolios/api'
 import { btnPrimary, btnQuiet, btnSecondary, field, hint, label, LoadError, notice } from './ui'
 
 // ONs → Mi cartera, "Pagos cobrados" (odd/tasks/nucleo-ledger.md S8, S10): the automatic coupons and
@@ -176,29 +177,23 @@ function PaymentForm({ title, ticker, options, kind: initialKind, initial, notRe
   )
 }
 
-/** Loads the paid and missing payments and saves corrections; shared by Mis ONs (its summary shows what is missing). */
+/**
+ * Loads the paid and missing payments and saves corrections; shared by Mis ONs (its summary shows what is missing).
+ * Seen before in this tab, they show at once; a change answers with the payments after it (odd/tasks/rendimiento.md S9).
+ */
 export function useOnPayments() {
-  const [data, setData] = useState<OnPaymentsData | null>(null)
-  const [failed, setFailed] = useState(false)
-  const mounted = useRef(true)
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
-  const load = useCallback(async () => {
-    const r = await api<OnPaymentsData>('/api/ons/pagos')
-    if (!mounted.current) return
-    if (!r.ok) return setFailed(true)
-    setFailed(false)
-    setData(r.data)
-  }, [])
-  useEffect(() => { void load() }, [load])
+  const { data, error, reload, mutate } = useCached('ons:payments', () => apiData<OnPaymentsData>('/api/ons/pagos'))
 
-  const after = async (r: { ok: boolean; error?: string }) => {
+  const after = (r: { ok: boolean; error?: string; data?: Partial<OnPaymentsData> }) => {
     if (!r.ok) return r.error ?? 'No se pudo guardar'
-    await load()
+    // Without the payments in the answer, ask for them again.
+    if (r.data?.payments && r.data.missing) mutate({ payments: r.data.payments, missing: r.data.missing })
+    else reload()
     return null
   }
-  const onSave: Save = async (body) => after(await api('/api/ons/pagos', { method: 'PUT', body }))
-  const onRevert: Revert = async (k) => after(await api(`/api/ons/pagos?${new URLSearchParams(k)}`, { method: 'DELETE' }))
-  return { data, failed, load, onSave, onRevert }
+  const onSave: Save = async (body) => after(await api<Partial<OnPaymentsData>>('/api/ons/pagos', { method: 'PUT', body }))
+  const onRevert: Revert = async (k) => after(await api<Partial<OnPaymentsData> | undefined>(`/api/ons/pagos?${new URLSearchParams({ ...k, view: '1' })}`, { method: 'DELETE' }))
+  return { data, failed: !data && !!error, load: reload, onSave, onRevert }
 }
 
 export default function OnPayments({ state }: { state: ReturnType<typeof useOnPayments> }) {

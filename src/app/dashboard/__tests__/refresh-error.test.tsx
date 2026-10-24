@@ -2,9 +2,11 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
+import { forgetCached } from '@/lib/client-cache'
 
 // The page's sections are not under test: only what it shows when a refresh fails.
-for (const m of ['SummaryHeader', 'ValueSection', 'HoldingsList', 'HoldingsTable', 'DistributionList', 'MovementsList', 'AdjustCashDialog', 'ValueChart']) {
+// The header stays real: its countdown is what asks for the refresh.
+for (const m of ['ValueSection', 'HoldingsList', 'HoldingsTable', 'DistributionList', 'MovementsList', 'AdjustCashDialog', 'ValueChart']) {
   vi.doMock(`@/components/resumen/${m}`, () => ({ default: () => null }))
 }
 vi.mock('@/lib/utils', async (orig) => ({ ...(await orig<object>()), isMarketOpen: () => true }))
@@ -12,7 +14,7 @@ vi.mock('@/lib/resumen/currency', async (orig) => ({ ...(await orig<object>()), 
 vi.mock('@/lib/resumen/holdings', async (orig) => ({ ...(await orig<object>()), buildHoldings: () => [], distribution: () => [] }))
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); document.body.innerHTML = '' })
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); forgetCached(); document.body.innerHTML = '' })
 
 const STALE = 'No se pudieron actualizar los precios. Lo que ves puede estar desactualizado.'
 

@@ -128,3 +128,37 @@ describe('/api/ons/pagos', () => {
     expect(mockInvalidate).not.toHaveBeenCalled()
   })
 })
+
+describe('/api/ons/pagos — a change answers with the payments after it (odd/tasks/rendimiento.md S9)', () => {
+  const after = { payments: [{ ticker: 'VSCXD', date: '2026-10-09', kind: 'coupon', amount: 1140.5, corrected: true }], missing: [] }
+
+  it('PUT keeps `ok` and adds the payments and missing ones, read after the write and the cache invalidation', async () => {
+    const { client } = fakeSupabase(['VSCXD'])
+    mockRequireUser.mockResolvedValue({ supabase: client, user: { id: 'u1' } })
+    mockLoad.mockResolvedValue(after)
+    const res = await PUT(put({ ticker: 'VSCXD', pay_date: '2026-10-09', kind: 'coupon', amount: 1140.5 }))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true, ...after })
+    expect(mockLoad).toHaveBeenCalledWith(client, 'u1', expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/))
+    expect(mockInvalidate.mock.invocationCallOrder[0]).toBeLessThan(mockLoad.mock.invocationCallOrder[0])
+  })
+
+  it('DELETE answers with the payments when asked (?view=1), and stays 204 otherwise', async () => {
+    mockRequireUser.mockResolvedValue({ supabase: fakeSupabase(['VSCXD']).client, user: { id: 'u1' } })
+    mockLoad.mockResolvedValue(after)
+    const res = await DELETE(del('ticker=VSCXD&pay_date=2026-10-09&kind=coupon&view=1'))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual(after)
+    expect((await DELETE(del('ticker=VSCXD&pay_date=2026-10-09&kind=coupon'))).status).toBe(204)
+  })
+
+  it('a saved change whose payments cannot be read still says it was saved', async () => {
+    mockRequireUser.mockResolvedValue({ supabase: fakeSupabase(['VSCXD']).client, user: { id: 'u1' } })
+    mockLoad.mockRejectedValue(new Error('down'))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await PUT(put({ ticker: 'VSCXD', pay_date: '2026-10-09', kind: 'coupon', amount: 10 }))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+    expect((await DELETE(del('ticker=VSCXD&pay_date=2026-10-09&kind=coupon&view=1'))).status).toBe(204)
+  })
+})

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { fetchQuotes } from '@/lib/yahoo-finance'
-import { fetchONQuotes } from '@/lib/data912-client'
+import { fetchONQuotesWithFallback } from '@/lib/data912-client'
 import { getCachedRoute, cacheRoute } from '@/lib/redis'
 import { getFullPortfolio } from '@/lib/portfolio-engine'
 import { enrichPositionsForStats } from '@/lib/position-stats'
@@ -27,8 +27,11 @@ export async function GET(req: NextRequest) {
     const portfolio = await getFullPortfolio(supabase, user.id)
     const stockPositions = portfolio.stockPositions
     const onPositions = portfolio.onPositions
-    const stockQuotes = await fetchQuotes(stockPositions.map(p => p.ticker))
-    const onQuotes = await fetchONQuotes(onPositions.map(p => p.ticker))
+    // ON quotes Redis-first (the worker's last-known prices), data912 only for what is missing.
+    const [stockQuotes, onQuotes] = await Promise.all([
+      fetchQuotes(stockPositions.map(p => p.ticker)),
+      fetchONQuotesWithFallback(onPositions.map(p => p.ticker)),
+    ])
 
     const stocks = enrichPositionsForStats(stockPositions, stockQuotes).totals
     const ons = enrichPositionsForStats(onPositions, onQuotes, await loadLastCloses(supabase, onPositions, onQuotes)).totals

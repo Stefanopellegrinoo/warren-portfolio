@@ -1,25 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { fetchQuotesWithFallback } from '@/lib/yahoo-finance'
 import { fetchONQuotesWithFallback } from '@/lib/data912-client'
-import { getFullPortfolio } from '@/lib/portfolio-engine'
 import { valuePortfolio } from '@/lib/portfolio-valuation'
 import { loadLastCloses } from '@/lib/ledger-now'
 import { getRedis, ensureRedisConnected } from '@/lib/redis'
 import type { Position, ONPosition } from '@/types'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
-import { currencyViewsFor, loadCurrencyContext } from '@/lib/currency-views'
+import { currencyViewsFor, loadCurrencyContext, loadPortfolioForViews, type CurrencyContext, type ViewsLedger } from '@/lib/currency-views'
+import { setSummaryIfVersion, summaryPayload } from '@/lib/summary-cache'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { serverError } from '@/lib/api/errors'
+import { argentinaDate } from '@/lib/utils'
 
 /** The Pesos / MEP / Cable views; their failure never fails the response. */
 async function currencyViews(
   supabase: SupabaseClient,
   userId: string,
-  valued: { positions: Position[]; onPositions: ONPosition[]; cashBalance: number }
+  ctx: CurrencyContext | null,
+  valued: { positions: Position[]; onPositions: ONPosition[]; cashBalance: number },
+  ledger: ViewsLedger
 ) {
   try {
-    const ctx = await loadCurrencyContext(supabase)
-    return ctx ? { currencies: await currencyViewsFor(supabase, userId, ctx, valued) } : {}
+    return ctx ? { currencies: await currencyViewsFor(supabase, userId, ctx, valued, ledger) } : {}
   } catch (err) {
     console.error('[positions] currency views failed:', err)
     return {}
@@ -36,28 +38,30 @@ export async function GET(req: NextRequest) {
 
     // ENSURE REDIS IS CONNECTED before any reads
     const redisOk = await ensureRedisConnected()
+    const redis = redisOk ? getRedis() : null
 
-    // 1. TRY REDIS CACHE (Sub-10ms path)
-    if (redisOk) {
-      const redis = getRedis()
-      const cached = await redis?.get(`summary:${user.id}`)
-      if (cached) {
-        console.log(`[Cache Hit] Serving summary for ${user.id} from Redis`)
-        const data = JSON.parse(cached)
-        const lr = await redis?.get('system:last-refresh')
-        return NextResponse.json({ ...data, lastRefresh: lr || null })
-      }
+    // 1. TRY REDIS CACHE (Sub-10ms path). One round trip also reads, BEFORE any ledger read, the
+    //    version that guards leaving the summary computed below in Redis (same compare-and-set
+    //    the worker and the derived series use), and whether an import is running.
+    const [cached, lastRefreshRaw, version, importing] = redis
+      ? await redis.mget(`summary:${user.id}`, 'system:last-refresh', `summary:version:${user.id}`, `importing:${user.id}`)
+      : [null, null, null, null]
+    const lastRefresh = lastRefreshRaw || null
+    if (cached) {
+      console.log(`[Cache Hit] Serving summary for ${user.id} from Redis`)
+      const data = JSON.parse(cached)
+      return NextResponse.json({ ...data, lastRefresh })
     }
 
-    // 2. The portfolio now, from the ledger core (never the stored tables)
-    const portfolio = await getFullPortfolio(supabase, user.id)
-
-    // Get last refresh timestamp
-    let lastRefresh: string | null = null
-    if (redisOk) {
-      const lr = await getRedis()?.get('system:last-refresh')
-      if (lr) lastRefresh = lr
-    }
+    // 2. The portfolio now, from the ledger core (never the stored tables), read once for its
+    //    currency views too; and today's dollar rates, which do not depend on it.
+    const [{ portfolio, ledger }, currencyCtx] = await Promise.all([
+      loadPortfolioForViews(supabase, user.id, argentinaDate()),
+      loadCurrencyContext(supabase).catch(err => {
+        console.error('[positions] currency views failed:', err)
+        return null
+      }),
+    ])
 
     // Handle empty portfolio case
     if (portfolio.stockPositions.length === 0 && portfolio.onPositions.length === 0) {
@@ -66,7 +70,7 @@ export async function GET(req: NextRequest) {
         { positions: [], onPositions: [], cashBalance: portfolio.cashBalance, realized: 0, onRealized: 0 },
         { stockQuotes: new Map(), onQuotes: new Map() }
       )
-      const views = await currencyViews(supabase, user.id, { positions, onPositions, cashBalance: portfolio.cashBalance })
+      const views = await currencyViews(supabase, user.id, currencyCtx, { positions, onPositions, cashBalance: portfolio.cashBalance }, ledger)
       return NextResponse.json({ positions, onPositions, summary, lastRefresh, ...views })
     }
 
@@ -89,7 +93,7 @@ export async function GET(req: NextRequest) {
 
     // 5. Complete portfolio summary — one valuation rule (S3): live quote, else
     // last close, else the position's own cost. Unpriced positions are counted.
-    const { positions, onPositions, summary, unpricedCount, unpricedTickers } = valuePortfolio(
+    const valued = valuePortfolio(
       {
         positions: portfolio.stockPositions,
         onPositions: portfolio.onPositions,
@@ -100,13 +104,23 @@ export async function GET(req: NextRequest) {
       { stockQuotes, onQuotes },
       await loadLastCloses(supabase, portfolio.onPositions, onQuotes)
     )
+    const { positions, onPositions, summary, unpricedCount, unpricedTickers } = valued
 
-    // 6. NEVER cache from the API route — the worker is the single source of truth.
-    //    If the API route cached here, it could race with invalidateUserCache()
-    //    and produce inconsistent snapshots (e.g. missing positions after a buy).
-    //    The worker's cacheUserSummaries is the only writer for summary:* keys.
+    const views = await currencyViews(supabase, user.id, currencyCtx, { positions, onPositions, cashBalance: portfolio.cashBalance }, ledger)
 
-    const views = await currencyViews(supabase, user.id, { positions, onPositions, cashBalance: portfolio.cashBalance })
+    // 6. Leave the summary in Redis so the next request is a hit even when the worker does not
+    //    run (evenings, weekends). Same payload and TTL as the worker, and the same guard: the
+    //    write is discarded if invalidateUserCache bumped the version since it was read above.
+    //    Not during an import (the worker skips it too), and not with a transient state that the
+    //    TTL would pin while the next miss brings today's: no currency views, or a dollar answered
+    //    from its last known value. A holding without any quote is no such state: quotes fall back
+    //    to their last known value for 7 days, so only a ticker with no source at all is left
+    //    unpriced, and the worker caches that summary too.
+    if (redis && !importing && views.currencies && !currencyCtx?.stale) {
+      await setSummaryIfVersion(user.id, summaryPayload(valued, views.currencies), version)
+        .catch(err => console.warn('[positions] summary cache write failed:', err))
+    }
+
     return NextResponse.json({ positions, onPositions, summary, unpricedCount, unpricedTickers, lastRefresh, ...views })
   } catch (err) {
     return serverError('API /positions', err)

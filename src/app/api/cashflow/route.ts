@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Cashflow } from '@/types'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { invalidateUserCache } from '@/lib/redis'
@@ -14,18 +15,15 @@ const ALLOWED_CATEGORIES = [
 
 export const dynamic = 'force-dynamic'
 
-export async function GET(req: NextRequest) {
-  const authResult = await requireUser()
-  if (isAuthFailure(authResult)) return authResult.error
-  const { supabase, user } = authResult
-
+/** The user's expenses with the pending total and the overdue count: what GET answers, and what a change answers too. */
+async function readList(supabase: SupabaseClient, userId: string) {
   const { data, error, count } = await supabase
     .from('cashflow')
     .select('*', { count: 'exact' })
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
     .order('date', { ascending: false })
 
-  if (error) return serverError('API /cashflow', error)
+  if (error) return { error }
 
   const cashflowData = (data as Cashflow[] | null) ?? []
   const pending = cashflowData.filter((c: Cashflow) => c.status === 'PENDIENTE')
@@ -34,7 +32,24 @@ export async function GET(req: NextRequest) {
   const today = argentinaDate()
   const overdue = pending.filter((c: Cashflow) => c.date < today)
 
-  return NextResponse.json({ data, count, totalPending, overdueCount: overdue.length })
+  return { list: { data, count, totalPending, overdueCount: overdue.length } }
+}
+
+/** After a change: the user's cache is dropped and the list read again; one that cannot be read is left out and the page asks for it. */
+async function listAfterChange(supabase: SupabaseClient, userId: string) {
+  const [, { list, error }] = await Promise.all([invalidateUserCache(userId), readList(supabase, userId)])
+  if (error) console.error('[API /cashflow] list after a change:', error)
+  return list
+}
+
+export async function GET(req: NextRequest) {
+  const authResult = await requireUser()
+  if (isAuthFailure(authResult)) return authResult.error
+  const { supabase, user } = authResult
+
+  const { list, error } = await readList(supabase, user.id)
+  if (error) return serverError('API /cashflow', error)
+  return NextResponse.json(list)
 }
 
 export async function POST(req: NextRequest) {
@@ -104,8 +119,8 @@ export async function PATCH(req: NextRequest) {
 
   if (error) return serverError('API /cashflow', error)
   if (!data) return NextResponse.json({ error: 'No encontramos ese gasto' }, { status: 404 })
-  await invalidateUserCache(user.id)
-  return NextResponse.json(data)
+  const list = await listAfterChange(supabase, user.id)
+  return NextResponse.json(list ? { ...data, list } : data)
 }
 
 export async function DELETE(req: NextRequest) {
@@ -123,6 +138,6 @@ export async function DELETE(req: NextRequest) {
     .eq('user_id', user.id)
 
   if (error) return serverError('API /cashflow', error)
-  await invalidateUserCache(user.id)
-  return NextResponse.json({ ok: true })
+  const list = await listAfterChange(supabase, user.id)
+  return NextResponse.json(list ? { ok: true, list } : { ok: true })
 }

@@ -34,7 +34,8 @@ export async function GET() {
       nombre: c.activos?.nombre ?? c.ticker
     })) ?? []
 
-    return NextResponse.json(transformed)
+    // A global catalog that changes rarely: the browser keeps it an hour (private: behind a session).
+    return NextResponse.json(transformed, { headers: { 'Cache-Control': 'private, max-age=3600' } })
   } catch (err) {
     return serverError('API /cedears', err)
   }

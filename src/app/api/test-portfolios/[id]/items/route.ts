@@ -3,10 +3,14 @@ import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { loadOnAnalyses } from '@/lib/on-catalog'
 import { ItemCreateSchema } from '@/lib/schemas/test-portfolio'
 import { BAD_ID, dbFail, fail, itemRefusal, parseBody, toItem, validId } from '@/lib/test-portfolios'
+import { viewAfterEdit, type Catalog } from '../view'
 
 export const dynamic = 'force-dynamic'
 
-/** POST /api/test-portfolios/[id]/items: adds an ON. Floating, non-USD and lot-rule violations are rejected here (A7, A8, R4.1). */
+/**
+ * POST /api/test-portfolios/[id]/items: adds an ON. Floating, non-USD and lot-rule violations are rejected here (A7, A8, R4.1).
+ * Answers `{ item, view }`: the view is GET's body, so the page does not ask again (absent if it could not be built).
+ */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   const auth = await requireUser()
   if (isAuthFailure(auth)) return auth.error
@@ -15,9 +19,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (bad) return bad
 
   let refusal: string | null
+  let catalog: Catalog
   try {
-    const { analyses } = await loadOnAnalyses(auth.supabase, { isin: body.isin })
-    const analysis = analyses[0]
+    // The whole catalog, once: it validates this ON and computes the view.
+    catalog = await loadOnAnalyses(auth.supabase)
+    const analysis = catalog.analyses.find((a) => a.row.isin === body.isin)
     if (!analysis) return fail('No encontramos esa ON en el catálogo', 404)
     refusal = itemRefusal(analysis, body)
   } catch (e) {
@@ -32,5 +38,5 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     .select('id, isin, input_mode, amount, manual_price')
     .single()
   if (error) return dbFail(error, 'item')
-  return NextResponse.json({ item: toItem(data) }, { status: 201 })
+  return NextResponse.json({ item: toItem(data), ...await viewAfterEdit(auth.supabase, params.id, catalog) }, { status: 201 })
 }
