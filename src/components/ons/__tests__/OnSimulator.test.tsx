@@ -27,7 +27,7 @@ const render = (a = build(), initial = {}) => renderToStaticMarkup(<OnSimulator 
 describe('OnSimulator', () => {
   it('has labelled inputs for the amount kind, the amount and the manual price', () => {
     const html = render()
-    expect(html).toContain('Simulador de pagos')
+    expect(html).toContain('¿Cuánto cobrás?')
     expect(html).toMatch(/<label[^>]*for="sim-amount"/)
     expect(html).toContain('id="sim-amount"')
     expect(html).toMatch(/<label[^>]*for="sim-price"/)
@@ -50,7 +50,7 @@ describe('OnSimulator', () => {
     expect(html).toContain('10.819,30') // total collected
     expect(html).toContain('819,38') // profit vs cost
     expect(html).toContain('Sin impuestos ni reinversión')
-    expect(html).toContain('exentas de Ganancias')
+    expect(html).not.toContain('exentas de Ganancias') // TAX_COPY lives once, in the detail page's Impuestos section
   })
 
   it('states the payment plaza and warns when the line bought does not match it (no canje)', () => {
@@ -149,7 +149,7 @@ describe('OnSimulator', () => {
 
   it('without a today prop nothing is computed on the server render (client sets it after mount)', () => {
     const html = renderToStaticMarkup(<OnSimulator analysis={build()} initial={{ mode: 'usd', amount: '10000' }} />)
-    expect(html).toContain('Simulador de pagos')
+    expect(html).toContain('¿Cuánto cobrás?')
     expect(html).not.toContain('Total cobrado')
   })
 
@@ -165,6 +165,57 @@ describe('OnSimulator', () => {
 
   it('is part of the detail page', () => {
     const html = renderToStaticMarkup(<OnDetail analysis={build()} history={[]} asOf="2026-10-20" stale={false} prices={{ ok: true, fetchedAt: '2026-10-21T15:00:00Z' }} />)
-    expect(html).toContain('Simulador de pagos')
+    expect(html).toContain('¿Cuánto cobrás?')
+  })
+
+  it('the own price sits behind "Usar otro precio"; it is open with a manual price or without a market price', () => {
+    const closed = render()
+    expect(closed).toContain('Usar otro precio')
+    expect(closed).toMatch(/<div id="sim-price-box" hidden=""/)
+    expect(closed).toMatch(/aria-expanded="false"[^>]*aria-controls="sim-price-box"|aria-controls="sim-price-box"[^>]*aria-expanded="false"/)
+    const open = render(build(), { manualPrice: '98' })
+    expect(open).toContain('Volver al precio de hoy')
+    expect(open).not.toMatch(/id="sim-price-box" hidden/)
+    const noPrice = render(build({ price: null }))
+    expect(noPrice).not.toContain('Usar otro precio')
+    expect(noPrice).not.toMatch(/id="sim-price-box" hidden/)
+  })
+
+  it('leads with what you buy, pay, collect, gain and the TIR; the calculation details are collapsed', () => {
+    const html = render()
+    const lead = html.slice(0, html.indexOf('<details'))
+    const labels = [...lead.matchAll(/<dt[^>]*>([^<]*)<\/dt>/g)].map((m) => m[1])
+    expect(labels).toEqual(['Comprás', 'Pagás', 'Cobrás en total', 'Ganancia', 'TIR (rinde por año)'])
+    expect(lead).toContain('+USD 819,38')
+    const details = html.slice(html.indexOf('<details'))
+    expect(details).toContain('Detalle del cálculo')
+    expect(details).toContain('Precio sucio usado')
+    expect(details).toContain('Intereses devengados')
+    expect(html).not.toMatch(/<details[^>]*open/)
+  })
+
+  it('payments: a list on phones, a table without a forced width on desktop', () => {
+    const html = render()
+    expect(html).toMatch(/<ul aria-label="Pagos futuros de la tenencia simulada, en dólares" class="[^"]*min-\[1281px\]:hidden"/)
+    expect(html).toMatch(/aria-label="Pagos futuros de la tenencia simulada \(desplazable\)" class="[^"]*max-\[1280px\]:hidden/)
+    expect(html).not.toMatch(/min-w-\[\d+px\]/)
+    expect(html).toContain('USD 3.673,44</p></li>') // the list's total of the first payment: VN 10.204 × (3 + 33)%
+  })
+
+  it('explains a moved pay date and a skipped coupon in visible text, not a tooltip', () => {
+    expect(render()).toContain('día hábil siguiente al 22/04/2028')
+    const a = build({ overrides: [ov('record_offset_days', 10)] })
+    const html = renderToStaticMarkup(<OnSimulator analysis={a} today="2027-04-13" initial={{ mode: 'vn', amount: '1000' }} />)
+    expect(html).toContain('no cobrás el cupón: los USD')
+    expect(html).not.toContain('title=')
+  })
+
+  it('starts at USD 1.000, or at what the minimum lot costs today when that is more, so it opens on a result', () => {
+    const plain = renderToStaticMarkup(<OnSimulator analysis={build()} today={TODAY} />)
+    expect(plain).toContain('value="1000"')
+    const lot = renderToStaticMarkup(<OnSimulator analysis={build({ overrides: [ov('min_denomination', 10_000), ov('increment', 1_000)] })} today={TODAY} />)
+    expect(lot).toContain('value="9800"') // VN 10.000 at 98
+    expect(lot).toContain('Cobrás en total')
+    expect(lot).not.toContain('Mínimo: VN')
   })
 })
