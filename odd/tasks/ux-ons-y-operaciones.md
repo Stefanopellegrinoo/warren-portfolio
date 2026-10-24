@@ -19,8 +19,8 @@ User's words in L1-L2. Evidence: the 2026-10-23 ONs audit (engram `ux/audit-2026
 
 ## Tasks
 
-- [ ] T1 · S1, S6 · inline · shared primitives (`Disclosure`, `OnsTabs`, `Glossary`, `Bars`) and the menu entry
-- [ ] T2 · S2 · inline · Mis ONs
+- [x] T1 · S1, S6 · inline · shared primitives (`Disclosure`, `OnsTabs`, `Glossary`, `Bars`) and the menu entry · `590f3f9` (RED 3 → GREEN)
+- [x] T2 · S2 · inline · Mis ONs (summary, missing payments, next payments, your ONs, collapsed calendar and analysis; paid payments on two lines, five at a time) · `ad1f097` (RED 4+2 → GREEN) · 11 widths × 2 themes, no overflow
 - [ ] T3 · S3, S6 · delegated (writer trigger (a): parallel with T4-T6, disjoint surfaces) · ON detail and simulator
 - [ ] T4 · S4, S6 · delegated (writer trigger (a)) · explorer
 - [ ] T5 · S5 · delegated (writer trigger (a)) · test portfolios
@@ -32,3 +32,4 @@ User's words in L1-L2. Evidence: the 2026-10-23 ONs audit (engram `ux/audit-2026
 - L1 (2026-10-23, user): first request of project 1, verbatim in `odd/tasks/ux-base-global.md` L1 ("Fíjate más que nada en la página de ONS, que es todo un choclo...").
 - L2 (2026-10-24, user, after "¿Commiteo esta base y arranco con ONs, que es donde el cambio se va a ver?"): "Dale y no frenes. También fíjate los modales para agregar operaciones"
 - L3: decisions taken without stopping, per L2 (marked "decided by me" for the user to review): the ONs menu entry opens Mis ONs; three tabs; collapsed sections use native `<details>`; the native review consent for the `feat/ux-base` slice is presented at the end of the turn instead of mid-work.
+- L4: T2 visual check on a preview with 7 ONs computed by the real `analyzeOn`/`buildMyOnPortfolio`: the paid-payment rows wrapped unevenly on phones and the history would grow without bound; rows now read on two aligned lines and page five at a time (same pattern as the Resumen movements). A type error (`concept(next)`) slipped past vitest, which does not type-check: caught by `tsc` before the commit.
