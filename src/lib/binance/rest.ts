@@ -10,8 +10,9 @@ export async function fetchKlines(
   symbol: string,
   interval: Timeframe,
   limit = 1000,
+  base = BASE,
 ): Promise<Candle[]> {
-  const url = `${BASE}/klines?symbol=${symbol.toUpperCase()}&interval=${interval}&limit=${limit}`;
+  const url = `${base}/klines?symbol=${encodeURIComponent(symbol.toUpperCase())}&interval=${interval}&limit=${limit}`;
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`klines ${res.status}`);
   const data = (await res.json()) as unknown[][];
@@ -59,6 +60,24 @@ export async function fetchTickers24h(symbols: string[], base = BASE): Promise<T
     volume: parseFloat(t.volume),
     quoteVolume: parseFloat(t.quoteVolume),
   }));
+}
+
+/**
+ * Candles for the price worker (indicator alerts), from the hosts its US server can reach. Only the
+ * public host's own 400 says Binance has no such symbol; Binance.US lists far fewer pairs, so its 400
+ * after the public host failed is still that failure (a transient one), not an unknown ticker.
+ */
+export async function fetchServerKlines(symbol: string, interval: Timeframe, limit = 1000): Promise<Candle[]> {
+  let firstError: unknown;
+  for (const [i, base] of SERVER_BASES.entries()) {
+    try {
+      return await fetchKlines(symbol, interval, limit, base);
+    } catch (err) {
+      if (i === 0 && err instanceof Error && err.message === "klines 400") throw err;
+      firstError ??= err;
+    }
+  }
+  throw firstError;
 }
 
 /** Crypto quotes for the price worker, in the same shape as the stock quotes. */

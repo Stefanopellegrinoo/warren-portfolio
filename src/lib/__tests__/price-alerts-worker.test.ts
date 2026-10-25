@@ -1,4 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { Candle } from '../binance/types'
+import { INDICATOR_SPECS } from '../chart/indicator-specs'
+import { DEFAULT_CONFIG } from '../store/chart-store'
+import { MarketDataError } from '../market-data/types'
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -36,9 +40,23 @@ vi.mock('../portfolio-valuation', () => ({
   splitQuotesByAssetClass: (m: Map<string, unknown>) => ({ stockQuotes: m, onQuotes: new Map() }),
 }))
 let mockMarketOpen = true
-vi.mock('../utils', () => ({ isMarketOpen: () => mockMarketOpen, argentinaDate: () => '2026-10-22' }))
+vi.mock('../utils', async () => ({
+  ...(await vi.importActual<typeof import('../utils')>('../utils')),
+  isMarketOpen: () => mockMarketOpen,
+  argentinaDate: () => '2026-10-22',
+}))
 const mockFetchCrypto = vi.fn(async () => new Map())
-vi.mock('../binance/rest', () => ({ fetchCryptoQuotes: (...a: unknown[]) => mockFetchCrypto(...(a as [])) }))
+// Candles of the alerts on an indicator line (odd/tasks/chart-customization.md S7): Binance for crypto, the market-data provider for the rest.
+const mockFetchKlines = vi.fn(async (..._a: unknown[]): Promise<Candle[]> => [])
+vi.mock('../binance/rest', () => ({
+  fetchCryptoQuotes: (...a: unknown[]) => mockFetchCrypto(...(a as [])),
+  fetchServerKlines: (...a: unknown[]) => mockFetchKlines(...a),
+}))
+const mockGetCandles = vi.fn(async (..._a: unknown[]): Promise<unknown[]> => [])
+vi.mock('../market-data', async () => ({
+  getMarketDataProvider: () => ({ getCandles: (...a: unknown[]) => mockGetCandles(...a) }),
+  MarketDataError: (await import('../market-data/types')).MarketDataError,
+}))
 vi.mock('../import-worker', () => ({ startImportWorker: vi.fn() }))
 vi.mock('../signals-worker', () => ({ startSignalsWorker: vi.fn() }))
 vi.mock('../job-health', () => ({ beat: vi.fn(), alertJobFailure: vi.fn(), recordRefresh: vi.fn() }))
@@ -57,6 +75,10 @@ let mockAlertTickerRows: { ticker: string }[] = []
 const mockSingle = vi.fn()
 const mockUpdate = vi.fn()
 const mockEqUpdate = vi.fn()
+const mockEqActive = vi.fn()
+const mockSelectColumns = vi.fn()
+// The database guard: an update `.eq('status', 'active')` changes a row once; ids here already left 'active'.
+let mockLeftActive = new Set<string>()
 const mockIn = vi.fn()
 const mockEqStatus = vi.fn()
 const mockEqType = vi.fn()
@@ -73,22 +95,45 @@ beforeEach(() => {
   mockMarketOpen = true
 
   // select chain: .from('price_alerts').select('*').eq('status',…).eq('type',…).in('ticker',…)
+  // mockReset drops a once-answer a test left unused, so it cannot leak into the next test.
+  mockIn.mockReset()
   mockIn.mockResolvedValue({ data: mockAlertsData, error: mockFetchError })
+  mockFetchKlines.mockReset()
+  mockFetchKlines.mockResolvedValue([])
+  mockGetCandles.mockReset()
+  mockGetCandles.mockResolvedValue([])
   mockEqType.mockReturnValue({ in: mockIn })
   mockEqStatus.mockReturnValue({ eq: mockEqType })
 
-  // update chain: .from('price_alerts').update(…).eq('id',…)
-  mockEqUpdate.mockResolvedValue({ error: mockUpdateError })
+  // update chain: .from('price_alerts').update(…).eq('id',…).eq('status','active').select('id')
+  mockLeftActive = new Set()
+  mockEqUpdate.mockImplementation((_column: string, id: string) => ({
+    eq: (...a: unknown[]) => {
+      mockEqActive(...a)
+      return {
+        select: async () => {
+          if (mockUpdateError) return { data: null, error: mockUpdateError }
+          if (mockLeftActive.has(id)) return { data: [], error: null }
+          mockLeftActive.add(id)
+          return { data: [{ id }], error: null }
+        },
+      }
+    },
+  }))
   mockUpdate.mockReturnValue({ eq: mockEqUpdate })
+  forgetConditionState()
 })
 
 const mockFrom = vi.fn().mockImplementation((table: string) => {
   if (table === 'price_alerts') {
     return {
       // select('ticker') is the alert-ticker lookup of the price job; select('*') the evaluation
-      select: vi.fn((cols: string) => cols === 'ticker'
-        ? { eq: () => ({ eq: async () => ({ data: mockAlertTickerRows, error: null }) }) }
-        : { eq: mockEqStatus }),
+      select: vi.fn((cols: string) => {
+        mockSelectColumns(cols)
+        return cols === 'ticker'
+          ? { eq: () => ({ eq: async () => ({ data: mockAlertTickerRows, error: null }) }) }
+          : { eq: mockEqStatus }
+      }),
       update: mockUpdate,
     }
   }
@@ -114,6 +159,7 @@ vi.mock('../supabase-server', () => ({
 // ── Import evaluatePriceAlerts after mocks are set up ─────────────────────────
 
 const { evaluatePriceAlerts } = await import('../price-worker')
+const { forgetConditionState } = await import('../alert-evaluator')
 // Let the startup fetch in main() settle before the first test clears the mocks
 await new Promise(r => setTimeout(r, 0))
 
@@ -129,7 +175,6 @@ describe('evaluatePriceAlerts', () => {
       name: 'AAPL-price-190-above',
     })
     mockIn.mockResolvedValueOnce({ data: mockAlertsData, error: null })
-    mockEqUpdate.mockResolvedValueOnce({ error: null })
 
     await evaluatePriceAlerts({ AAPL: 195 }, { AAPL: 185 })
 
@@ -153,7 +198,6 @@ describe('evaluatePriceAlerts', () => {
       name: 'MSFT-price-300-below',
     })
     mockIn.mockResolvedValueOnce({ data: mockAlertsData, error: null })
-    mockEqUpdate.mockResolvedValueOnce({ error: null })
 
     await evaluatePriceAlerts({ MSFT: 298 }, { MSFT: 305 })
 
@@ -209,7 +253,6 @@ describe('evaluatePriceAlerts', () => {
       name: 'AAPL-price-180-above',
     })
     mockIn.mockResolvedValueOnce({ data: mockAlertsData, error: null })
-    mockEqUpdate.mockResolvedValueOnce({ error: null })
 
     await evaluatePriceAlerts({ AAPL: 182 }, { AAPL: 175 })
 
@@ -230,7 +273,6 @@ describe('evaluatePriceAlerts', () => {
       name: 'TSLA-price-250-above',
     })
     mockIn.mockResolvedValueOnce({ data: mockAlertsData, error: null })
-    mockEqUpdate.mockResolvedValueOnce({ error: null })
 
     await evaluatePriceAlerts({ TSLA: 255.5 }, { TSLA: 240 })
 
@@ -268,7 +310,6 @@ describe('evaluatePriceAlerts push', () => {
   it('sends the push to the owner of the alert, after marking it triggered', async () => {
     mockAlertsData.push({ id: 'alert-p1', user_id: 'owner-1', ticker: 'AAPL', operator: 'crosses_above', value: 190, name: 'x' })
     mockIn.mockResolvedValueOnce({ data: mockAlertsData, error: null })
-    mockEqUpdate.mockResolvedValueOnce({ error: null })
 
     await evaluatePriceAlerts({ AAPL: 195.5 }, { AAPL: 185 })
 
@@ -288,7 +329,6 @@ describe('evaluatePriceAlerts push', () => {
       { id: 'alert-p3', user_id: 'owner-2', ticker: 'MSFT', operator: 'crosses_below', value: 400, name: 'y' },
     )
     mockIn.mockResolvedValueOnce({ data: mockAlertsData, error: null })
-    mockEqUpdate.mockResolvedValue({ error: null })
 
     await evaluatePriceAlerts({ AAPL: 195, MSFT: 390 }, { AAPL: 185, MSFT: 410 })
 
@@ -304,7 +344,6 @@ describe('evaluatePriceAlerts push', () => {
     mockSendPush.mockResolvedValueOnce({ ok: false, error: 'no devices' })
     mockAlertsData.push({ id: 'alert-p4', user_id: 'owner-1', ticker: 'AAPL', operator: 'crosses_above', value: 190, name: 'x' })
     mockIn.mockResolvedValueOnce({ data: mockAlertsData, error: null })
-    mockEqUpdate.mockResolvedValueOnce({ error: null })
 
     await evaluatePriceAlerts({ AAPL: 195 }, { AAPL: 185 })
 
@@ -393,6 +432,28 @@ describe('periodic price job', () => {
   })
 })
 
+describe('periodic price job with condition alerts', () => {
+  it('checks a condition alert whose ticker got no price, and an unknown ticker gets its one notice', async () => {
+    mockAlertTickerRows = [{ ticker: 'NOPE' }]
+    mockGetCandles.mockRejectedValueOnce(new MarketDataError('NOT_FOUND', 'No data found, symbol may be delisted'))
+    mockIn.mockResolvedValueOnce({
+      data: [{ id: 'nope-1', user_id: 'owner-1', ticker: 'NOPE', operator: 'crosses', value: null, source: 'price', target: 'ema50.ema50', timeframe: '1d', periods: { ema50: 50 }, name: 'n' }],
+      error: null,
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await processor({ name: 'repeat', data: {} })
+
+    expect(mockIn.mock.calls[0][1]).toEqual(['NOPE'])
+    expect(mockUpdate).toHaveBeenCalledWith({ status: 'unavailable' })
+    expect(mockEqUpdate).toHaveBeenCalledWith('id', 'nope-1')
+    const why = 'No se encuentra NOPE. No se vigila hasta que la reactives.'
+    expect(mockSendPush).toHaveBeenCalledWith(expect.anything(), 'owner-1', { title: 'No se puede revisar: NOPE', body: `Precio cruza EMA 50 (1D) · cualquiera. ${why}`, url: '/trading?symbol=NOPE', tag: 'price-alert-nope-1' })
+    expect(mockSendTelegram).toHaveBeenCalledWith(`⚠️ No se puede revisar la alerta de NOPE: Precio cruza EMA 50 (1D) · cualquiera\n${why}`)
+    warn.mockRestore()
+  })
+})
+
 describe('crypto alerts', () => {
   const btcAlert = { id: 'btc-1', user_id: 'owner-btc', ticker: 'BTCUSDT', operator: 'crosses_above', value: 80000, name: 'n' }
 
@@ -432,5 +493,110 @@ describe('crypto alerts', () => {
     expect(errorSpy).toHaveBeenCalledWith('[Worker] Crypto alerts failed:', expect.any(Error))
     expect(mockFetchYahoo).toHaveBeenCalledOnce()
     errorSpy.mockRestore()
+  })
+})
+
+// odd/tasks/chart-customization.md S6/S7: the price against a value fires on this cycle's quotes, as always;
+// every other condition is checked on its candles (alert-evaluator.ts), never on the price crossing a number.
+describe('evaluatePriceAlerts with conditions', () => {
+  const evaluate = async (alert: Record<string, unknown>, now: number, before: number) => {
+    mockIn.mockResolvedValueOnce({ data: [{ id: 'c1', user_id: 'owner-1', ticker: 'FXI', name: 'n', ...alert }], error: null })
+    await evaluatePriceAlerts({ FXI: now }, { FXI: before })
+  }
+  const nothingFired = () => {
+    expect(mockUpdate).not.toHaveBeenCalled()
+    expect(mockSendTelegram).not.toHaveBeenCalled()
+    expect(mockSendPush).not.toHaveBeenCalled()
+  }
+
+  // Daily bars; what the EMA 50 is comes from the chart's own line.
+  const bars = (closes: number[]): Candle[] => closes.map((close, i) => ({ time: 1_760_000_000 + i * 86_400, open: close, high: close + 1, low: close - 1, close, volume: 1000 }))
+  const FLAT = bars(Array.from({ length: 60 }, (_, i) => 100 + (i % 2)))
+  const FALL_RISE = bars([...Array.from({ length: 100 }, (_, i) => 200 - i), ...Array.from({ length: 60 }, (_, i) => 101 + 2 * i)])
+  const aboveEma50 = (c: Candle[]) => c.at(-1)!.close >= INDICATOR_SPECS.ema50.lines(c, DEFAULT_CONFIG)[0].data.at(-1)!.value
+  const crossUp = Array.from({ length: FALL_RISE.length }, (_, n) => n).find((n) => n > 50 && !aboveEma50(FALL_RISE.slice(0, n - 1)) && aboveEma50(FALL_RISE.slice(0, n)))!
+
+  it('an indicator source is checked on its candles: the price crossing 70 never fires "RSI crosses 70"', async () => {
+    mockGetCandles.mockResolvedValue(FLAT)
+    const rsi = { source: 'rsi.rsi', target: 'value', operator: 'crosses_above', value: 70, timeframe: '1h', periods: { rsi: 14 } }
+
+    await evaluate(rsi, 65, 60)
+    await evaluate(rsi, 75, 65)
+
+    expect(mockGetCandles).toHaveBeenCalledTimes(2)
+    expect(mockGetCandles).toHaveBeenCalledWith('FXI', '1h', expect.any(Date))
+    nothingFired()
+  })
+
+  it('the price against a line fires on its candles, between one cycle and the next, once', async () => {
+    mockGetCandles.mockResolvedValueOnce(FALL_RISE.slice(0, crossUp - 1)).mockResolvedValueOnce(FALL_RISE.slice(0, crossUp)).mockResolvedValueOnce(FALL_RISE.slice(0, crossUp + 1))
+    const ema = { source: 'price', target: 'ema50.ema50', operator: 'crosses_above', value: null, timeframe: '1d', periods: { ema50: 50 } }
+
+    await evaluate(ema, 1, 0)
+    expect(mockUpdate).not.toHaveBeenCalled()
+    await evaluate(ema, 1, 0)
+    await evaluate(ema, 1, 0)
+
+    expect(mockUpdate).toHaveBeenCalledOnce()
+    expect(mockUpdate).toHaveBeenCalledWith({ status: 'triggered', triggered_at: expect.any(String) })
+    expect(mockEqUpdate).toHaveBeenCalledWith('id', 'c1')
+    expect(mockEqActive).toHaveBeenCalledWith('status', 'active')
+    expect(mockSendPush).toHaveBeenCalledOnce()
+    expect(mockSendPush).toHaveBeenCalledWith(expect.anything(), 'owner-1', expect.objectContaining({ title: 'Alerta: FXI', url: '/trading?symbol=FXI', tag: 'price-alert-c1' }))
+    expect(mockSendTelegram).toHaveBeenCalledOnce()
+    expect(mockSendTelegram.mock.calls[0][0]).toMatch(/^🔔 Alerta disparada: FXI: Precio cruza EMA 50 \(1D\) · para arriba\nAhora: Precio [\d.,]+ · EMA 50 [\d.,]+$/)
+  })
+
+  // T6 review R3: a row read without source and target would look like the price against a value, so
+  // "RSI crosses 70" would fire when the price crosses 70 and a line target would be Number(null) = 0.
+  it('reads every column a condition needs (migration 052), or the whole row', async () => {
+    const needed = ['id', 'user_id', 'ticker', 'operator', 'value', 'source', 'target', 'timeframe', 'periods']
+
+    await evaluate({ source: 'price', target: 'value', operator: 'crosses_above', value: 32.5 }, 33, 32)
+
+    const columns = mockSelectColumns.mock.calls.map((c) => c[0] as string).filter((c) => c !== 'ticker')
+    expect(columns).toHaveLength(1)
+    const read = columns[0].trim() === '*' ? needed : columns[0].split(',').map((c) => c.trim())
+    expect(read).toEqual(expect.arrayContaining(needed))
+  })
+
+  it('a price alert whose row already left "active" (another cycle or worker fired it) sends nothing', async () => {
+    mockLeftActive.add('c1')
+
+    await evaluate({ source: 'price', target: 'value', operator: 'crosses_above', value: 32.5 }, 33, 32)
+
+    expect(mockEqUpdate).toHaveBeenCalledWith('id', 'c1')
+    expect(mockEqActive).toHaveBeenCalledWith('status', 'active')
+    expect(mockSendTelegram).not.toHaveBeenCalled()
+    expect(mockSendPush).not.toHaveBeenCalled()
+  })
+
+  it('the price crossing a value either way fires going up, and says it went up', async () => {
+    await evaluate({ source: 'price', target: 'value', operator: 'crosses', value: 32.5 }, 33, 32)
+
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: 'triggered', triggered_at: expect.any(String) }))
+    expect(mockEqUpdate).toHaveBeenCalledWith('id', 'c1')
+    expect(mockSendTelegram).toHaveBeenCalledWith('🔔 Alerta disparada: FXI ↑ 32.5\nPrecio actual: 33')
+    expect(mockSendPush).toHaveBeenCalledWith(expect.anything(), 'owner-1', expect.objectContaining({ body: 'Superó 32,5. Ahora: 33' }))
+  })
+
+  it('and going down, and says it went down', async () => {
+    await evaluate({ source: 'price', target: 'value', operator: 'crosses', value: 32.5 }, 32, 33)
+
+    expect(mockEqUpdate).toHaveBeenCalledWith('id', 'c1')
+    expect(mockSendTelegram).toHaveBeenCalledWith('🔔 Alerta disparada: FXI ↓ 32.5\nPrecio actual: 32')
+    expect(mockSendPush).toHaveBeenCalledWith(expect.anything(), 'owner-1', expect.objectContaining({ body: 'Bajó de 32,5. Ahora: 32' }))
+  })
+
+  it('either way does not fire without a cross', async () => {
+    await evaluate({ source: 'price', target: 'value', operator: 'crosses', value: 32.5 }, 34, 33)
+
+    nothingFired()
+  })
+
+  it('a price alert with the new columns at their defaults fires as before', async () => {
+    await evaluate({ source: 'price', target: 'value', operator: 'crosses_above', value: 32.5, timeframe: null, periods: null, color: '#f23645' }, 33, 32)
+
+    expect(mockSendTelegram).toHaveBeenCalledWith('🔔 Alerta disparada: FXI ↑ 32.5\nPrecio actual: 33')
   })
 })

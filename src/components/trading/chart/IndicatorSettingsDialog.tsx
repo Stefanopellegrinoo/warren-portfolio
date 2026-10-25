@@ -1,264 +1,313 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Dialog } from "@/components/ui/dialog";
-import { TradingDialog, field, ghostButton, primaryButton } from "@/components/trading/ui";
+import { useState } from "react";
+import type { Drawing, DrawingStyle } from "lightweight-charts-drawing";
+import { cn } from "@/lib/utils";
+import { field, ghostButton } from "@/components/trading/ui";
+import { DEFAULT_CONFIG, useChartStore, type IndicatorConfig, type IndicatorKey } from "@/lib/store/chart-store";
+import { INDICATOR_SPECS } from "@/lib/chart/indicator-specs";
+import { effectiveConfig, fillLook, indicatorValues, levelLooks, lineLook, type LineLook } from "@/lib/chart/indicator-style";
+import { getPreferences, setIndicatorSettings } from "@/lib/chart/preferences";
 import {
-  useChartStore,
-  DEFAULT_CONFIG,
-  type IndicatorKey,
-} from "@/lib/store/chart-store";
+	INDICATOR_STYLE_PARTS,
+	INDICATOR_VALUE_BOUNDS,
+	type IndicatorFillStyle,
+	type IndicatorLevelStyle,
+	type IndicatorLineStyle,
+	type IndicatorStyle,
+} from "@/lib/chart/preferences-schema";
+import { ChartSheet } from "./ChartSheet";
+import { FillControls, Swatches, Toggle, Widths } from "./DrawingSettings";
+import { useChartPreferences } from "./useChartPreferences";
 
-const TITLES: Record<IndicatorKey, string> = {
-  ema20: "EMA 1",
-  ema50: "EMA 2",
-  ema200: "EMA 3",
-  rsi: "RSI",
-  macd: "MACD",
-  volume: "Volumen",
-  bollinger: "Bollinger Bands",
-  obv: "OBV",
-  stochastic: "Stochastic",
-  adx: "ADX",
+const VALUE_LABELS: Record<keyof IndicatorConfig, string> = {
+	ema20: "Período",
+	ema50: "Período",
+	ema200: "Período",
+	rsi: "Período",
+	macdFast: "Rápida",
+	macdSlow: "Lenta",
+	macdSignal: "Señal",
+	bbPeriod: "Período",
+	bbStdDev: "Desv. estándar",
+	stochK: "K",
+	stochSmooth: "Suavizado",
+	stochD: "D",
+	adxPeriod: "Período",
 };
+const COLUMNS = ["", "grid-cols-1", "grid-cols-2", "grid-cols-3"];
+// By the ids of INDICATOR_SPECS; an EMA's one line is "Línea".
+const PART_NAMES: Record<string, string> = {
+	upper: "Banda superior",
+	middle: "Media",
+	lower: "Banda inferior",
+	rsi: "RSI",
+	macd: "MACD",
+	signal: "Señal",
+	histogram: "Histograma",
+	volume: "Barras",
+	k: "%K",
+	d: "%D",
+	adx: "ADX",
+	plusDI: "+DI",
+	minusDI: "−DI",
+	obv: "OBV",
+	bands: "Fondo entre bandas",
+	levels: "Fondo entre niveles",
+};
+// In the order of INDICATOR_SPECS' levels (RSI: 30, 70); the sheet lists the upper one first.
+const LEVEL_NAMES = ["Nivel inferior", "Nivel superior"];
 
+const captionClass = "pt-1 text-[13px] text-ink-2";
+const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
+
+/** The chart's values (this device's under the account's) and the indicator's saved style, read now. */
+function current(key: IndicatorKey) {
+	const saved = getPreferences().indicatorSettings;
+	return { config: effectiveConfig(useChartStore.getState().config, saved), style: saved[key]?.style };
+}
+
+/**
+ * Saves the indicator's settings to the account (odd/tasks/chart-customization.md S4): its values as the chart
+ * uses them now with `values` on top, and its style after `restyle`. From then on they apply on every device.
+ */
+function save(key: IndicatorKey, values: Partial<IndicatorConfig>, restyle?: (style: IndicatorStyle) => IndicatorStyle) {
+	const { config, style } = current(key);
+	const next = restyle ? restyle(style ?? {}) : style;
+	const all = { ...indicatorValues(key, config), ...values };
+	setIndicatorSettings(key, { ...(Object.keys(all).length > 0 && { values: all }), ...(next && { style: next }) });
+}
+
+/** Every level in full, so a saved one keeps its place (RSI's lower one first). */
+const withLevel = (key: IndicatorKey, style: IndicatorStyle, at: number, change: Partial<IndicatorLevelStyle>): IndicatorLevelStyle[] =>
+	(INDICATOR_SPECS[key].levels ?? []).map((value, i) => ({ value, ...style.levels?.[i], ...(i === at && change) }));
+
+/** What was typed: saved when it differs from what the chart shows, kept within today's limits. */
+function saveTyped(key: IndicatorKey, draft: Record<string, string>) {
+	const { config, style } = current(key);
+	const values: Partial<IndicatorConfig> = {};
+	for (const [f, [min, max]] of Object.entries(INDICATOR_VALUE_BOUNDS[key]) as [keyof IndicatorConfig, readonly [number, number]][]) {
+		const n = parseInt(draft[f] ?? "", 10);
+		if (!isNaN(n) && clamp(n, min, max) !== config[f]) values[f] = clamp(n, min, max);
+	}
+	const bounds = INDICATOR_STYLE_PARTS[key].levels;
+	const moved = levelLooks(key, style, "").map((level, i) => {
+		const n = parseFloat(draft[`level${i}`] ?? "");
+		return bounds && !isNaN(n) && clamp(n, bounds.min, bounds.max) !== level.value ? clamp(n, bounds.min, bounds.max) : null;
+	});
+	const levelsMoved = moved.some((n) => n !== null);
+	if (Object.keys(values).length === 0 && !levelsMoved) return;
+	save(key, values, levelsMoved ? (s) => moved.reduce((acc, n, i) => (n === null ? acc : { ...acc, levels: withLevel(key, acc, i, { value: n }) }), s) : undefined);
+}
+
+/** "Volver al de fábrica": the account forgets the indicator and this device goes back to its factory values. */
+function reset(key: IndicatorKey) {
+	setIndicatorSettings(key, null);
+	useChartStore.getState().setConfig(indicatorValues(key, DEFAULT_CONFIG));
+}
+
+/**
+ * An indicator's settings (odd/tasks/chart-customization.md S5), from the ⚙ next to it in the legend: Valores
+ * (its numbers) and Estilo (each line, its levels and fills). A style change applies and is saved at once, as a
+ * drawing's; a typed number is saved on Enter, when its field loses the focus, or when the sheet closes in any
+ * way, so closing never loses it.
+ */
 export function IndicatorSettingsDialog() {
-  const target = useChartStore((s) => s.settingsTarget);
-  const setTarget = useChartStore((s) => s.setSettingsTarget);
-  const config = useChartStore((s) => s.config);
-  const setConfig = useChartStore((s) => s.setConfig);
+	const target = useChartStore((s) => s.settingsTarget);
+	const setTarget = useChartStore((s) => s.setSettingsTarget);
+	const device = useChartStore((s) => s.config);
+	const saved = useChartPreferences().preferences.indicatorSettings;
+	const config = effectiveConfig(device, saved);
+	const [draft, setDraft] = useState<Record<string, string>>({});
 
-  const open = target !== null;
+	const commit = () => {
+		if (target) saveTyped(target, draft);
+		setDraft({});
+	};
 
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        if (!v) setTarget(null);
-      }}
-    >
-      <TradingDialog title={target ? `Configurar ${TITLES[target]}` : ""} width={384}>
-        {target && (
-          <SettingsForm
-            target={target}
-            config={config}
-            onSave={(patch) => {
-              setConfig(patch);
-              setTarget(null);
-            }}
-            onReset={() => {
-              setConfig(DEFAULT_CONFIG);
-              setTarget(null);
-            }}
-          />
-        )}
-      </TradingDialog>
-    </Dialog>
-  );
+	return (
+		<ChartSheet
+			open={target !== null}
+			onOpenChange={(open) => {
+				if (open) return;
+				commit();
+				setTarget(null);
+			}}
+			title={target ? INDICATOR_SPECS[target].label(config) : ""}
+			footer={
+				target && (
+					<div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+						<p className="text-[13px] text-ink-3">Se guarda en tu cuenta, igual en todos tus dispositivos.</p>
+						<button
+							type="button"
+							onClick={() => {
+								reset(target);
+								setDraft({});
+							}}
+							className={ghostButton}
+						>
+							Volver al de fábrica
+						</button>
+					</div>
+				)
+			}
+		>
+			{target && (
+				<Settings
+					target={target}
+					config={config}
+					style={saved[target]?.style}
+					draft={draft}
+					onDraft={(name, value) => setDraft((d) => ({ ...d, [name]: value }))}
+					onCommit={commit}
+					onPreset={(values) => {
+						save(target, values);
+						setDraft({});
+					}}
+				/>
+			)}
+		</ChartSheet>
+	);
 }
 
-interface FormProps {
-  target: IndicatorKey;
-  config: typeof DEFAULT_CONFIG;
-  onSave: (patch: Partial<typeof DEFAULT_CONFIG>) => void;
-  onReset: () => void;
-}
-
-function SettingsForm({ target, config, onSave, onReset }: FormProps) {
-  // Local draft state to avoid recalculating chart on every keystroke
-  const [draft, setDraft] = useState({
-    ema20: config.ema20,
-    ema50: config.ema50,
-    ema200: config.ema200,
-    rsi: config.rsi,
-    macdFast: config.macdFast,
-    macdSlow: config.macdSlow,
-    macdSignal: config.macdSignal,
-    bbPeriod: config.bbPeriod,
-    bbStdDev: config.bbStdDev,
-    stochK: config.stochK,
-    stochSmooth: config.stochSmooth,
-    stochD: config.stochD,
-    adxPeriod: config.adxPeriod,
-  });
-
-  useEffect(() => {
-    setDraft({
-      ema20: config.ema20,
-      ema50: config.ema50,
-      ema200: config.ema200,
-      rsi: config.rsi,
-      macdFast: config.macdFast,
-      macdSlow: config.macdSlow,
-      macdSignal: config.macdSignal,
-      bbPeriod: config.bbPeriod,
-      bbStdDev: config.bbStdDev,
-      stochK: config.stochK,
-      stochSmooth: config.stochSmooth,
-      stochD: config.stochD,
-      adxPeriod: config.adxPeriod,
-    });
-  }, [config, target]);
-
-  function save() {
-    if (target === "ema20") onSave({ ema20: clamp(draft.ema20, 2, 500) });
-    else if (target === "ema50") onSave({ ema50: clamp(draft.ema50, 2, 500) });
-    else if (target === "ema200") onSave({ ema200: clamp(draft.ema200, 2, 500) });
-    else if (target === "rsi") onSave({ rsi: clamp(draft.rsi, 2, 100) });
-    else if (target === "macd")
-      onSave({
-        macdFast: clamp(draft.macdFast, 2, 100),
-        macdSlow: clamp(draft.macdSlow, 2, 200),
-        macdSignal: clamp(draft.macdSignal, 2, 100),
-      });
-    else if (target === "volume") onSave({});
-    else if (target === "bollinger")
-      onSave({ bbPeriod: clamp(draft.bbPeriod, 2, 500), bbStdDev: clamp(draft.bbStdDev, 1, 5) });
-    else if (target === "obv") onSave({});
-    else if (target === "stochastic")
-      onSave({
-        stochK: clamp(draft.stochK, 1, 100),
-        stochSmooth: clamp(draft.stochSmooth, 1, 20),
-        stochD: clamp(draft.stochD, 1, 20),
-      });
-    else if (target === "adx") onSave({ adxPeriod: clamp(draft.adxPeriod, 2, 100) });
-  }
-
-  return (
-    <div className="flex flex-col gap-3 p-4">
-      {(target === "ema20" || target === "ema50" || target === "ema200") && (
-        <Field
-          label="Período"
-          value={draft[target]}
-          onChange={(n) => setDraft((d) => ({ ...d, [target]: n }))}
-        />
-      )}
-      {target === "rsi" && (
-        <Field
-          label="Período"
-          value={draft.rsi}
-          onChange={(n) => setDraft((d) => ({ ...d, rsi: n }))}
-        />
-      )}
-      {target === "macd" && (
-        <div className="grid grid-cols-3 gap-2">
-          <Field
-            label="Rápida"
-            value={draft.macdFast}
-            onChange={(n) => setDraft((d) => ({ ...d, macdFast: n }))}
-          />
-          <Field
-            label="Lenta"
-            value={draft.macdSlow}
-            onChange={(n) => setDraft((d) => ({ ...d, macdSlow: n }))}
-          />
-          <Field
-            label="Señal"
-            value={draft.macdSignal}
-            onChange={(n) => setDraft((d) => ({ ...d, macdSignal: n }))}
-          />
-        </div>
-      )}
-      {target === "volume" && (
-        <p className="text-[13px] text-ink-3">
-          El indicador de volumen no tiene parámetros configurables en esta
-          versión.
-        </p>
-      )}
-      {target === "bollinger" && (
-        <div className="grid grid-cols-2 gap-2">
-          <Field
-            label="Período"
-            value={draft.bbPeriod}
-            onChange={(n) => setDraft((d) => ({ ...d, bbPeriod: n }))}
-          />
-          <Field
-            label="Desv. estándar"
-            value={draft.bbStdDev}
-            onChange={(n) => setDraft((d) => ({ ...d, bbStdDev: n }))}
-          />
-        </div>
-      )}
-      {target === "obv" && (
-        <p className="text-[13px] text-ink-3">
-          OBV no tiene parámetros configurables.
-        </p>
-      )}
-      {target === "stochastic" && (
-        <div className="flex flex-col gap-2">
-          <div className="grid grid-cols-3 gap-2">
-            <Field
-              label="K"
-              value={draft.stochK}
-              onChange={(n) => setDraft((d) => ({ ...d, stochK: n }))}
-            />
-            <Field
-              label="Suavizado"
-              value={draft.stochSmooth}
-              onChange={(n) => setDraft((d) => ({ ...d, stochSmooth: n }))}
-            />
-            <Field
-              label="D"
-              value={draft.stochD}
-              onChange={(n) => setDraft((d) => ({ ...d, stochD: n }))}
-            />
-          </div>
-          <button
-            type="button"
-            onClick={() => setDraft((d) => ({ ...d, stochK: 21, stochSmooth: 5, stochD: 5 }))}
-            className={`${ghostButton} self-start`}
-          >
-            Largo plazo (21, 5, 5)
-          </button>
-        </div>
-      )}
-      {target === "adx" && (
-        <Field
-          label="Período"
-          value={draft.adxPeriod}
-          onChange={(n) => setDraft((d) => ({ ...d, adxPeriod: n }))}
-        />
-      )}
-
-      <div className="mt-2 flex items-center justify-between">
-        <button type="button" onClick={onReset} className={ghostButton}>
-          Restablecer valores
-        </button>
-        <button type="button" onClick={save} className={primaryButton}>
-          Aplicar
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
+function Settings({
+	target,
+	config,
+	style,
+	draft,
+	onDraft,
+	onCommit,
+	onPreset,
 }: {
-  label: string;
-  value: number;
-  onChange: (n: number) => void;
+	target: IndicatorKey;
+	config: IndicatorConfig;
+	style: IndicatorStyle | undefined;
+	draft: Record<string, string>;
+	onDraft: (name: string, value: string) => void;
+	onCommit: () => void;
+	onPreset: (values: Partial<IndicatorConfig>) => void;
 }) {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="text-[13px] font-medium text-ink-2">{label}</span>
-      <input
-        type="number"
-        min={2}
-        max={500}
-        value={value}
-        onChange={(e) => {
-          const n = parseInt(e.target.value, 10);
-          if (!isNaN(n)) onChange(n);
-        }}
-        className={field}
-      />
-    </label>
-  );
+	const fields = Object.entries(INDICATOR_VALUE_BOUNDS[target]) as [keyof IndicatorConfig, readonly [number, number]][];
+	const lines = INDICATOR_SPECS[target].lines([], config);
+	const parts = INDICATOR_STYLE_PARTS[target];
+	// Only RSI's levels are editable; the stochastic's and ADX's stay as they are. Until a color is picked the
+	// chart draws them in the theme's ink-3 (useChartTheme), the color the sheet shows as theirs.
+	const levels = parts.levels ? levelLooks(target, style, getComputedStyle(document.documentElement).getPropertyValue("--ink-3").trim()) : [];
+	const typing = (name: string) => ({
+		onChange: (e: React.ChangeEvent<HTMLInputElement>) => onDraft(name, e.target.value),
+		onBlur: onCommit,
+		onKeyDown: (e: React.KeyboardEvent) => {
+			if (e.key === "Enter") onCommit();
+		},
+	});
+	const setLine = (id: string, change: IndicatorLineStyle) =>
+		save(target, {}, (s) => ({ ...s, lines: { ...s.lines, [id]: { ...s.lines?.[id], ...change } } }));
+	const setLevel = (i: number, change: Partial<IndicatorLevelStyle>) => save(target, {}, (s) => ({ ...s, levels: withLevel(target, s, i, change) }));
+	const setFill = (id: string, change: IndicatorFillStyle) =>
+		save(target, {}, (s) => ({ ...s, fills: { ...s.fills, [id]: { ...s.fills?.[id], ...change } } }));
+
+	return (
+		<>
+			<section className="border-b border-line py-2">
+				<h3 className="pb-1 text-[12px] font-medium text-ink-3">Valores</h3>
+				{fields.length === 0 ? (
+					<p className="text-[13px] text-ink-3">No tiene valores para configurar.</p>
+				) : (
+					<div className={cn("grid gap-2", COLUMNS[fields.length])}>
+						{fields.map(([f, [min, max]]) => (
+							<label key={f} className="flex flex-col gap-1">
+								<span className="text-[13px] font-medium text-ink-2">{VALUE_LABELS[f]}</span>
+								<input type="number" min={min} max={max} value={draft[f] ?? String(config[f])} {...typing(f)} className={field} />
+							</label>
+						))}
+					</div>
+				)}
+				{target === "stochastic" && (
+					<button type="button" onClick={() => onPreset({ stochK: 21, stochSmooth: 5, stochD: 5 })} className={cn(ghostButton, "mt-2")}>
+						Largo plazo (21, 5, 5)
+					</button>
+				)}
+			</section>
+			<section className="py-2">
+				<h3 className="pb-1 text-[12px] font-medium text-ink-3">Estilo</h3>
+				{lines.map((line) => (
+					<LinePart
+						key={line.id}
+						name={PART_NAMES[line.id] ?? "Línea"}
+						look={lineLook(line, style?.lines?.[line.id])}
+						bars={line.type === "histogram"}
+						toggle={target !== "volume"}
+						onChange={(change) => setLine(line.id, change)}
+					/>
+				))}
+				{levels
+					.map((level, i) => (
+						<Part key={`level${i}`} name={LEVEL_NAMES[i]}>
+							<div className="flex items-center gap-2">
+								<Toggle label={LEVEL_NAMES[i]} checked={level.visible} onChange={(visible) => setLevel(i, { visible })} />
+								<input
+									type="number"
+									aria-label={`Valor del ${LEVEL_NAMES[i].toLowerCase()}`}
+									min={parts.levels?.min}
+									max={parts.levels?.max}
+									value={draft[`level${i}`] ?? String(level.value)}
+									{...typing(`level${i}`)}
+									className={cn(field, "ml-auto w-24")}
+								/>
+							</div>
+							<Swatches label="Color" value={level.color} showCurrent onPick={(color) => setLevel(i, { color })} />
+						</Part>
+					))
+					.reverse()}
+				{parts.fills?.map((id) => {
+					const look = fillLook(id, style);
+					// The same Fondo as a drawing's (S2): visible, color, transparency.
+					const asDrawing = { kind: "rectangle", style: { fillBackground: look.visible, backgroundColor: look.color, transparency: look.transparency } } as unknown as Drawing;
+					return (
+						<Part key={id} name={PART_NAMES[id]}>
+							<p className={captionClass}>{PART_NAMES[id]}</p>
+							<FillControls
+								drawing={asDrawing}
+								showCurrent
+								onStyle={(p: Partial<DrawingStyle>) =>
+									setFill(id, {
+										...(p.fillBackground !== undefined && { visible: p.fillBackground }),
+										...(p.backgroundColor && { color: p.backgroundColor }),
+										...(p.transparency !== undefined && { transparency: p.transparency }),
+									})
+								}
+							/>
+						</Part>
+					);
+				})}
+			</section>
+		</>
+	);
 }
 
-function clamp(n: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, n));
+const Part = ({ name, children }: { name: string; children: React.ReactNode }) => (
+	<div role="group" aria-label={name} className="flex flex-col gap-1 border-t border-line py-2 first-of-type:border-t-0">
+		{children}
+	</div>
+);
+
+function LinePart({ name, look, bars, toggle, onChange }: { name: string; look: LineLook; bars: boolean; toggle: boolean; onChange: (change: IndicatorLineStyle) => void }) {
+	return (
+		<Part name={name}>
+			{toggle ? <Toggle label={name} checked={look.visible} onChange={(visible) => onChange({ visible })} /> : <p className={captionClass}>{name}</p>}
+			{bars ? (
+				<>
+					<p className={captionClass}>Cuando sube</p>
+					<Swatches label="Color cuando sube" value={look.upColor} showCurrent onPick={(upColor) => onChange({ upColor })} />
+					<p className={captionClass}>Cuando baja</p>
+					<Swatches label="Color cuando baja" value={look.downColor} showCurrent onPick={(downColor) => onChange({ downColor })} />
+				</>
+			) : (
+				<>
+					<Swatches label="Color" value={look.color} showCurrent onPick={(color) => onChange({ color })} />
+					<Widths value={look.width} onPick={(width) => onChange({ width })} />
+				</>
+			)}
+		</Part>
+	);
 }

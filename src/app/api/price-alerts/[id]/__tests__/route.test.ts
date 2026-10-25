@@ -15,6 +15,13 @@ vi.mock('@/lib/redis', () => ({
   invalidateUserCache: mockInvalidateUserCache,
 }))
 
+// ── Rate limit: allowed unless a test says otherwise ──────────────────────────
+const mockRateLimit = vi.fn(async () => true)
+vi.mock('@/lib/rate-limit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/rate-limit')>()),
+  rateLimit: (...a: unknown[]) => mockRateLimit(...(a as [])),
+}))
+
 // ── Supabase mock ─────────────────────────────────────────────────────────────
 const mockFrom = vi.fn()
 const mockSupabase = { from: mockFrom }
@@ -157,12 +164,36 @@ describe('PATCH /api/price-alerts/[id]', () => {
 
   function makeChain(result: { data: unknown; error: unknown }) {
     const single = vi.fn().mockResolvedValue(result)
-    const select = vi.fn().mockReturnValue({ single })
-    const eqUserId = vi.fn().mockReturnValue({ select })
-    const eqAlertId = vi.fn().mockReturnValue({ eq: eqUserId })
-    const update = vi.fn().mockReturnValue({ eq: eqAlertId })
-    return { from: vi.fn().mockReturnValue({ update }) }
+    const filters: [string, unknown][] = []
+    const query: { eq: ReturnType<typeof vi.fn>; select: ReturnType<typeof vi.fn> } = {
+      eq: vi.fn((column: string, value: unknown) => { filters.push([column, value]); return query }),
+      select: vi.fn().mockReturnValue({ single }),
+    }
+    const update = vi.fn().mockReturnValue(query)
+    return { from: vi.fn().mockReturnValue({ update }), filters }
   }
+
+  it("an old client's drag (a value alone) only reaches an alert on the price against a value", async () => {
+    const chain = makeChain({ data: null, error: { code: 'PGRST116', message: 'no rows' } })
+    mockFrom.mockImplementation(chain.from)
+
+    const { PATCH } = await import('../route')
+    const res = await PATCH(makePatchRequest(ALERT_ID, { value: 72.3, operator: 'crosses_above', name: 'FXI cruza por encima de 72,30' }), { params: { id: ALERT_ID } })
+
+    expect(chain.filters).toEqual(expect.arrayContaining([['source', 'price'], ['target', 'value']]))
+    expect(res.status).toBe(404)
+  })
+
+  it('a whole condition from the sheet is not limited to price alerts', async () => {
+    const chain = makeChain({ data: { id: ALERT_ID }, error: null })
+    mockFrom.mockImplementation(chain.from)
+
+    const { PATCH } = await import('../route')
+    const res = await PATCH(makePatchRequest(ALERT_ID, { source: 'rsi.rsi', target: 'value', operator: 'crosses_above', value: 72, timeframe: '1h', periods: { rsi: 14 } }), { params: { id: ALERT_ID } })
+
+    expect(res.status).toBe(200)
+    expect(chain.filters).toEqual([['id', ALERT_ID], ['user_id', 'user-1']])
+  })
 
   it('returns 200 with updated alert on partial update (value only)', async () => {
     const updatedAlert = { id: ALERT_ID, value: 150.5, operator: 'crosses_above' }
@@ -264,6 +295,109 @@ describe('PATCH /api/price-alerts/[id]', () => {
 
     expect(res.status).toBe(400)
     const body = await res.json()
-    expect(body.error).toBe('Elegí una condición: que el precio suba por encima o baje por debajo del valor')
+    expect(body.error).toBe('Elegí cómo tiene que cruzar: para arriba, para abajo o cualquiera')
+  })
+})
+
+// odd/tasks/chart-customization.md S6: the alert sheet edits the price by hand, the color and the crossing,
+// and replaces a condition whole; today's partial changes (move, rearm) still change just their columns.
+describe('PATCH /api/price-alerts/[id] conditions', () => {
+  let chain: { from: ReturnType<typeof vi.fn<(...a: unknown[]) => { update: ReturnType<typeof vi.fn> }>> }
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockRequireUser.mockResolvedValue({ user: fakeUser, supabase: mockSupabase })
+    mockIsAuthFailure.mockReturnValue(false)
+    mockInvalidateUserCache.mockResolvedValue(undefined)
+    mockRateLimit.mockResolvedValue(true)
+    const single = vi.fn(async () => ({ data: { id: ALERT_ID, ...update.mock.calls[0][0] }, error: null }))
+    const query: { eq: ReturnType<typeof vi.fn>; select: ReturnType<typeof vi.fn> } = { eq: vi.fn(() => query), select: vi.fn().mockReturnValue({ single }) }
+    const update = vi.fn().mockReturnValue(query)
+    chain = { from: vi.fn().mockReturnValue({ update }) }
+    mockFrom.mockImplementation((...a: unknown[]) => chain.from(...a))
+  })
+  const updated = () => chain.from.mock.results[0]?.value.update.mock.calls[0]?.[0]
+  const patch = async (body: unknown) => {
+    const { PATCH } = await import('../route')
+    const res = await PATCH(makePatchRequest(ALERT_ID, body), { params: { id: ALERT_ID } })
+    return { status: res.status, body: await res.json() }
+  }
+  const priceValue = { source: 'price', target: 'value', operator: 'crosses_above', value: 33.1, timeframe: null, periods: null }
+
+  it('the price typed by hand, with its color and crossing: the whole condition is written', async () => {
+    const { status, body } = await patch({ ...priceValue, color: '#f23645', name: 'FXI cruza por encima de 33,10' })
+
+    expect(status).toBe(200)
+    expect(updated()).toEqual({ ...priceValue, color: '#f23645', name: 'FXI cruza por encima de 33,10' })
+    expect(body.alert).toMatchObject({ value: 33.1, color: '#f23645' })
+    expect(mockRateLimit).toHaveBeenCalledWith('rl:price-alerts:user-1', 30, 60)
+  })
+
+  it('a color alone changes only the color', async () => {
+    const { status } = await patch({ color: '#089981' })
+
+    expect(status).toBe(200)
+    expect(updated()).toEqual({ color: '#089981' })
+  })
+
+  it('back to the default color', async () => {
+    await patch({ color: null })
+
+    expect(updated()).toEqual({ color: null })
+  })
+
+  it('the crossing alone: either way', async () => {
+    const { status } = await patch({ operator: 'crosses' })
+
+    expect(status).toBe(200)
+    expect(updated()).toEqual({ operator: 'crosses' })
+  })
+
+  it('a value alert becomes "price crosses EMA 50": the value is cleared, timeframe and period written', async () => {
+    const { status } = await patch({ source: 'price', target: 'ema50.ema50', operator: 'crosses', value: 33.1, timeframe: '1d', periods: { ema50: 50 }, name: 'n' })
+
+    expect(status).toBe(200)
+    expect(updated()).toEqual({ source: 'price', target: 'ema50.ema50', operator: 'crosses', value: null, timeframe: '1d', periods: { ema50: 50 }, name: 'n' })
+  })
+
+  it("today's move still writes just value, operator and name", async () => {
+    await patch({ value: 31, operator: 'crosses_below', name: 'FXI cruza por debajo de 31,00' })
+
+    expect(updated()).toEqual({ value: 31, operator: 'crosses_below', name: 'FXI cruza por debajo de 31,00' })
+  })
+
+  it.each([
+    ['a bad color', { color: 'blue' }, 'Elegí un color de la paleta'],
+    ['a bad crossing', { operator: 'either' }, 'Elegí cómo tiene que cruzar: para arriba, para abajo o cualquiera'],
+    ['a condition sent in part', { source: 'rsi.rsi', value: 70 }, 'Revisá la condición de la alerta y probá de nuevo.'],
+    ['an unknown line', { ...priceValue, target: 'sma50.sma50' }, 'Elegí contra qué: un valor o otra línea'],
+    ['no value against a value', { ...priceValue, value: null }, 'Completá el ticker, el tipo, la condición, el valor y el nombre de la alerta'],
+    ['a value that is not a number', { value: '33' }, 'El valor de la alerta tiene que ser un número'],
+    ['a null value with no condition', { value: null }, 'El valor de la alerta tiene que ser un número'],
+  ])('refuses %s, writing nothing', async (_what, body, message) => {
+    const res = await patch(body)
+
+    expect(res.status).toBe(400)
+    expect(res.body.error).toBe(message)
+    expect(chain.from).not.toHaveBeenCalled()
+  })
+
+  it('a condition the database refuses answers 400, not "not found"', async () => {
+    const single = vi.fn(async () => ({ data: null, error: { code: '23514', message: 'violates check constraint "price_alerts_value_check"' } }))
+    const query: Record<string, unknown> = { eq: () => query, select: () => ({ single }) }
+    mockFrom.mockReturnValue({ update: () => query })
+
+    const res = await patch({ ...priceValue, target: 'ema50.ema50', value: null, timeframe: '1d', periods: { ema50: 50 } })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error).toBe('Esa condición no es válida para esta alerta.')
+  })
+
+  it('answers 429 past the limit, writing nothing', async () => {
+    mockRateLimit.mockResolvedValueOnce(false)
+
+    const res = await patch({ color: '#089981' })
+
+    expect(res.status).toBe(429)
+    expect(chain.from).not.toHaveBeenCalled()
   })
 })

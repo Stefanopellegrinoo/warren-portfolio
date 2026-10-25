@@ -51,7 +51,7 @@ const q = (ticker: string, price: number, updatedAt = '2026-10-16T12:00:00Z') =>
 beforeEach(() => { vi.clearAllMocks() })
 
 describe('price job without a CCL rate', () => {
-  it('keeps the BCBA last-good price, skips alerts for tickers with no price, still builds summaries', async () => {
+  it('keeps the BCBA last-good price, never prices the unpriced ticker, still builds summaries', async () => {
     mockFetchLkp.mockResolvedValue(new Map([['BCBA:GGAL', q('BCBA:GGAL', 5, '2026-10-10T15:00:00Z')]]))
     mockFetchFresh.mockResolvedValue(new Map([['AAPL', q('AAPL', 200)]])) // BCBA dropped by fetchQuotesFromYahoo
 
@@ -62,6 +62,8 @@ describe('price job without a CCL rate', () => {
     expect(summaryStocks.get('AAPL')!.price).toBe(200)
     expect(summaryStocks.has('BCBA:NOLKP')).toBe(false)      // never invented
     expect(alertIn).toHaveBeenCalledTimes(1)
-    expect(alertIn.mock.calls[0][0].sort()).toEqual(['AAPL', 'BCBA:GGAL']) // no alert evaluation on the unpriced one
+    // Every ticker of the cycle is read: a price alert on the unpriced one still never fires (no price),
+    // and a condition alert on it is checked on its candles, so it cannot look armed forever.
+    expect(alertIn.mock.calls[0][0].sort()).toEqual(['AAPL', 'BCBA:GGAL', 'BCBA:NOLKP'])
   })
 })

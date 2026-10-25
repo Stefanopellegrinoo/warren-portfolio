@@ -379,6 +379,22 @@ describe('YahooProvider.searchTickers', () => {
     expect(results.find(r => r.symbol === 'GOOG')?.shortname).toBe('')
   })
 
+  it('returns results when Yahoo answers in a shape the library schema rejects', async () => {
+    const { YahooProvider } = await import('./yahoo')
+    const provider = new YahooProvider()
+
+    // yahoo-finance2 3.13.2 rejects every search Yahoo answers today (2026-10-25)
+    // unless the caller turns its result validation off.
+    mockSearch.mockImplementation(async (_q: string, _opts: unknown, moduleOpts?: { validateResult?: boolean }) => {
+      if (moduleOpts?.validateResult !== false) throw new Error('Failed Yahoo Schema validation')
+      return { quotes: [makeFakeSearchQuote({ symbol: 'NVDA' })] }
+    })
+
+    const results = await provider.searchTickers('nvda')
+
+    expect(results.map(r => r.symbol)).toEqual(['NVDA'])
+  })
+
   it('does NOT call normalizeTickerForYahoo for search queries (only used in getCandles)', async () => {
     const { YahooProvider } = await import('./yahoo')
     const provider = new YahooProvider()

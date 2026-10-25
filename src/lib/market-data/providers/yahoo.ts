@@ -206,8 +206,10 @@ export class YahooProvider implements MarketDataProvider {
     try {
       const yahooFinance = await getYahooFinanceInstance()
 
+      // yahoo-finance2's search schema no longer matches Yahoo's answer and fails every query;
+      // the filter and map below already check each field this reads.
       const response = await withRetry(() =>
-        (yahooFinance as any).search(q, { quotesCount: 10, newsCount: 0 })
+        (yahooFinance as any).search(q, { quotesCount: 10, newsCount: 0 }, { validateResult: false })
       ) as { quotes: any[] }
 
       const quotes: any[] = response?.quotes ?? []

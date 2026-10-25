@@ -5,7 +5,8 @@ import Link from "next/link";
 import { Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Chip, SectionHead } from "@/components/resumen/ui";
-import { formatNumber } from "@/lib/utils";
+import { conditionText } from "@/lib/chart/alerts";
+import type { AlertCondition } from "@/lib/chart/alert-condition";
 import { ErrorNotice, SkeletonRows, ghostButton, iconButton } from "./ui";
 import { PushSettings } from "./PushSettings";
 
@@ -14,20 +15,35 @@ export interface PriceAlert {
   ticker: string;
   type: string;
   operator: string;
-  value: number;
+  value: number | null;
   name: string;
   status: string;
   created_at: string;
   triggered_at: string | null;
+  // Migration 052 (odd/tasks/chart-customization.md S6); a row from before has none: the price against its value.
+  source?: string;
+  target?: string;
+  timeframe?: string | null;
+  periods?: Record<string, number> | null;
+  color?: string | null;
 }
 
-const price = (v: number) => formatNumber(v, { decimals: Math.abs(v) < 1 ? 4 : 2 });
+// The condition in words: "Supera 195,00" as always, "Precio cruza EMA 50 (1D) · cualquiera" for the new ones.
+const formatCondition = (a: PriceAlert) =>
+  conditionText({
+    source: a.source ?? "price",
+    target: a.target ?? "value",
+    operator: a.operator as AlertCondition["operator"],
+    value: a.value,
+    timeframe: (a.timeframe ?? null) as AlertCondition["timeframe"],
+    periods: a.periods ?? null,
+  });
 
-function formatCondition(operator: string, value: number): string {
-  if (operator === "crosses_above") return `Supera ${price(value)}`;
-  if (operator === "crosses_below") return `Baja de ${price(value)}`;
-  return `${operator} ${price(value)}`;
-}
+const STATES: Record<string, { label: string; tone: "ok" | "neutral" | "danger" }> = {
+  active: { label: "Activa", tone: "ok" },
+  triggered: { label: "Disparada", tone: "neutral" },
+  unavailable: { label: "No se puede revisar", tone: "danger" },
+};
 
 const when = (iso: string) =>
   new Date(iso).toLocaleString("es-AR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -42,6 +58,7 @@ export function AlertsList({ alerts, busyId, onDelete, onRearm }: {
     <ul>
       {alerts.map((a) => {
         const triggered = a.status === "triggered";
+        const state = STATES[a.status] ?? STATES.active;
         const busy = busyId === a.id;
         return (
           <li key={a.id} className="grid min-h-[56px] grid-cols-[96px_minmax(0,1fr)_auto_auto] items-center gap-x-4 gap-y-1 border-b border-line py-2 last:border-b-0 max-[819px]:grid-cols-[minmax(0,1fr)_auto]">
@@ -49,16 +66,16 @@ export function AlertsList({ alerts, busyId, onDelete, onRearm }: {
               {a.ticker}
             </Link>
             <span className="min-w-0 tabular-nums max-[819px]:order-3">
-              {formatCondition(a.operator, a.value)}
+              {formatCondition(a)}
               {triggered && a.triggered_at && (
                 <small className="ml-2 text-[13px] text-ink-3">el {when(a.triggered_at)}</small>
               )}
             </span>
-            <Chip tone={triggered ? "neutral" : "ok"} className="justify-self-start max-[819px]:order-2 max-[819px]:justify-self-end">
-              {triggered ? "Disparada" : "Activa"}
+            <Chip tone={state.tone} className="justify-self-start max-[819px]:order-2 max-[819px]:justify-self-end">
+              {state.label}
             </Chip>
             <span className="flex items-center justify-end gap-1 max-[819px]:order-4">
-              {triggered && (
+              {a.status !== "active" && (
                 <button type="button" onClick={() => onRearm(a.id)} disabled={busy} aria-busy={busy} aria-label={`Reactivar la alerta de ${a.ticker}`} className={ghostButton}>
                   Reactivar
                 </button>
