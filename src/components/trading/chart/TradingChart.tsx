@@ -375,8 +375,9 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			<DrawingTools manager={manager} alertMode={alertMode} onAlertMode={setAlertMode} phoneBar={phoneBar} />
 			<div className="relative min-h-0 min-w-0 flex-1">
 				{/* touch-none: the chart pans and zooms itself; left to the browser, a finger drag on a
-				    drawing or an alert is taken over as a page scroll and cancelled halfway. */}
-				<div ref={boxRef} data-chart-box className={cn("absolute inset-0 touch-none", alertMode && "cursor-crosshair")} />
+				    drawing or an alert is taken over as a page scroll and cancelled halfway. isolate: the
+				    library's pane separators sit at z-index 50, above the app menu, unless kept in here. */}
+				<div ref={boxRef} data-chart-box className={cn("absolute inset-0 isolate touch-none", alertMode && "cursor-crosshair")} />
 
 				<div className="pointer-events-none absolute left-3 top-2 z-10 flex max-w-[calc(100%-5rem)] flex-col gap-1 text-[13px]">
 					<div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 tabular-nums">

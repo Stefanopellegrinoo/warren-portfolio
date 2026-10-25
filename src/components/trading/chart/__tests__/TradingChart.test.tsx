@@ -189,6 +189,13 @@ describe('TradingChart pane heights', () => {
     unmount()
   })
 
+  // The separators' z-index 50 drew their grab pills over the open app menu (seen in Chromium).
+  it('keeps the separators under the app menu', async () => {
+    const { box, unmount } = await render()
+    expect(box.classList).toContain('isolate')
+    unmount()
+  })
+
   // globals.css widens the separator by its place in the library's DOM (inline styles, no class),
   // checked on 5.2.0 with a finger in Chromium: another version has to be checked again.
   it("the separator override matches the library's DOM", async () => {
