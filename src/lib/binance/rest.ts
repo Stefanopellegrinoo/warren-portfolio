@@ -12,7 +12,7 @@ export async function fetchKlines(
   limit = 1000,
   base = BASE,
 ): Promise<Candle[]> {
-  const url = `${base}/klines?symbol=${symbol.toUpperCase()}&interval=${interval}&limit=${limit}`;
+  const url = `${base}/klines?symbol=${encodeURIComponent(symbol.toUpperCase())}&interval=${interval}&limit=${limit}`;
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`klines ${res.status}`);
   const data = (await res.json()) as unknown[][];

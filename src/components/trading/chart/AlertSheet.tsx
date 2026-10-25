@@ -104,8 +104,9 @@ export function AlertSheet({
 	const toSave = { ...condition, value: round(condition.value) };
 	// What the sheet opened with: closing an edited alert keeps the edit, like the other sheets.
 	const [opened] = useState(() => JSON.stringify(toSave));
-	// A close saves once; if that save failed the sheet is still open, and the next close leaves.
-	const [closeSaved, setCloseSaved] = useState(false);
+	// A close saves the edit once; if that save failed the sheet is still open, and closing again with
+	// the same edit leaves (a new edit is saved again).
+	const [closeTried, setCloseTried] = useState<string | null>(null);
 	const save = async () => {
 		if (!valid || saving) return;
 		setSaving(true);
@@ -118,8 +119,9 @@ export function AlertSheet({
 			open={open}
 			onOpenChange={(next, ...rest) => {
 				// A new alert is only created by Guardar: closing it is how it is cancelled.
-				if (!next && alert && valid && !closeSaved && JSON.stringify(toSave) !== opened) {
-					setCloseSaved(true);
+				const now = JSON.stringify(toSave);
+				if (!next && alert && valid && now !== opened && now !== closeTried) {
+					setCloseTried(now);
 					void save();
 				} else (onOpenChange as (o: boolean, ...r: unknown[]) => void)(next, ...rest);
 			}}

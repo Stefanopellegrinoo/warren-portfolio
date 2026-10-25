@@ -248,3 +248,28 @@ describe('closing after a save that failed', () => {
     unmount()
   })
 })
+
+describe('closing after a save that did not close the sheet', () => {
+  it('a new edit is saved again on the next close; the same edit is not retried', async () => {
+    const { onSave, onOpenChange, unmount } = await open({ alert: EXISTING })
+    const esc = () => act(() => { sheet().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    setValue(byLabel<HTMLInputElement>('Valor'), '33,75')
+    await flush()
+    esc()
+    await flush()
+
+    setValue(byLabel<HTMLInputElement>('Valor'), '34')
+    await flush()
+    esc()
+    await flush()
+    expect(onSave).toHaveBeenCalledTimes(2)
+    expect(onSave).toHaveBeenLastCalledWith(expect.objectContaining({ value: 34 }))
+    expect(onOpenChange).not.toHaveBeenCalled()
+
+    esc()
+    await flush()
+    expect(onSave).toHaveBeenCalledTimes(2)
+    expect(onOpenChange).toHaveBeenCalledWith(false, expect.anything())
+    unmount()
+  })
+})
