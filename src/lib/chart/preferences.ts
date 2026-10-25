@@ -25,6 +25,10 @@ import {
  * - Writes go only after the account answered in this tab: the outbox is stamped with its account, and
  *   another account's outbox on the same browser is dropped instead of sent, as is one saved before the
  *   device ever reached an account (it has no owner to check).
+ * - Tabs of this browser share the device copy: every write reads it first and adds this tab's change to
+ *   what another tab stored for the same account, a save takes out only the values the account
+ *   confirmed, and a tab shows another tab's change when it lands (the `storage` event). Two tabs may
+ *   send the same entry: the account merges per key, so that costs a request, never a value.
  */
 const ENDPOINT = '/api/chart-preferences'
 const STORAGE_KEY = 'warren:chart-preferences'
@@ -41,31 +45,65 @@ let state: ChartPreferences = EMPTY_PREFERENCES
 let pending: PreferencesPatch = {}
 let sending: PreferencesPatch | null = null
 let timer: ReturnType<typeof setTimeout> | null = null
+// The device copy as this tab last read or wrote it: anything else was written by another tab.
+let seen: string | null = null
 const listeners = new Set<() => void>()
 
 const notify = () => listeners.forEach((l) => l())
 
-function readDevice() {
+/**
+ * Takes the device copy when another tab changed it, so this tab's next write adds to it instead of
+ * replacing it. Answers whether this tab's preferences changed.
+ */
+function readDevice(): boolean {
+  let raw: string | null
   try {
-    const saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? 'null')
-    if (!saved) return
-    state = parsePreferences(saved.preferences)
-    owner = typeof saved.owner === 'string' ? saved.owner : null
-    // An outbox saved before this device ever reached an account has no owner to check on load: it
-    // would go to whichever account signs in next, so it stays on the device and is never sent.
-    pending = owner ? cleanPatch(saved.pending) : {}
+    raw = window.localStorage.getItem(STORAGE_KEY)
   } catch {
-    // No storage (private mode, blocked site data) or a broken copy: this tab keeps them in memory.
+    return false // No storage (private mode, blocked site data): this tab keeps them in memory.
   }
+  // Unchanged since this tab's last write; also keeps this tab's changes when that write failed (quota).
+  if (raw === seen) return false
+  seen = raw
+  let saved: { owner?: unknown; preferences?: unknown; pending?: unknown } | null
+  try {
+    saved = JSON.parse(raw ?? 'null')
+  } catch {
+    return false // A broken copy: same.
+  }
+  if (!saved || typeof saved !== 'object') return false
+  const savedOwner = typeof saved.owner === 'string' ? saved.owner : null
+  // Another account's copy, or one that never reached an account, is not this tab's to show or send.
+  if (owner && savedOwner !== owner) return false
+  // Until the account answers, what this tab changed is its own and goes on top of the device copy.
+  const own = owner ? {} : pending
+  state = applyPatch(parsePreferences(saved.preferences), own)
+  // An outbox saved before this device ever reached an account has no owner to check on load: it
+  // would go to whichever account signs in next, so it stays on the device and is never sent.
+  pending = mergePatch(savedOwner ? cleanPatch(saved.pending) : {}, own)
+  owner = savedOwner
+  return true
 }
 
 function writeDevice() {
   try {
-    const outbox = sending ? mergePatch(sending, pending) : pending
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ owner, preferences: state, pending: outbox }))
+    const json = JSON.stringify({ owner, preferences: state, pending })
+    window.localStorage.setItem(STORAGE_KEY, json)
+    seen = json
   } catch {
     // Same: memory only.
   }
+}
+
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+
+/** The outbox without what the account confirmed; an entry changed since (here or in another tab) stays. */
+function unsent(outbox: PreferencesPatch, sent: PreferencesPatch): PreferencesPatch {
+  const left = Object.entries(outbox).map(([section, entries]) => {
+    const confirmed: Record<string, unknown> = sent[section as keyof PreferencesPatch] ?? {}
+    return [section, Object.fromEntries(Object.entries(entries ?? {}).filter(([key, value]) => !same(confirmed[key], value)))] as const
+  })
+  return Object.fromEntries(left.filter(([, entries]) => Object.keys(entries).length > 0))
 }
 
 function init() {
@@ -76,6 +114,8 @@ function init() {
   const leave = () => { if (timer) flush(true) }
   window.addEventListener('pagehide', leave)
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') leave() })
+  // Another tab changed the device copy: show its change now, and add to it on this tab's next write.
+  window.addEventListener('storage', () => { if (readDevice()) notify() })
 }
 
 function load(): Promise<void> {
@@ -84,11 +124,12 @@ function load(): Promise<void> {
       if (!res.ok) throw new Error(`Error ${res.status}`)
       const body = await res.json()
       if (typeof body?.userId !== 'string') throw new Error('No account')
+      readDevice()
       if (owner && owner !== body.userId) pending = {}
       owner = body.userId
       loaded = true
       // What this tab changed while loading (or saved before, offline) wins over the account's copy.
-      state = applyPatch(applyPatch(parsePreferences(body.preferences), sending ?? {}), pending)
+      state = applyPatch(parsePreferences(body.preferences), pending)
       writeDevice()
       notify()
       if (!isEmptyPatch(pending)) schedule()
@@ -110,11 +151,13 @@ function flush(leaving = false) {
   timer = null
   if (sending) return // one save at a time; what changed meanwhile goes when it answers
   if (!loaded) { void load(); return } // a successful load schedules the outbox itself
+  if (readDevice()) notify() // the outbox as it is now: another tab may have sent part of it or changed it
   if (isEmptyPatch(pending)) return
 
+  // What goes stays in the outbox until the account confirms it.
+  // ponytail: two tabs' saves in flight at once can land out of order for one key; a Web Lock around the save if that shows.
   const body = JSON.stringify(pending)
   sending = pending
-  pending = {}
   fetch(ENDPOINT, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
@@ -124,9 +167,12 @@ function flush(leaving = false) {
     // A 400 would never pass: dropping it keeps one bad entry from blocking every later save.
     .then((res) => res.ok || res.status === 400, () => false)
     .then((done) => {
-      if (!done) pending = mergePatch(sending!, pending)
+      if (done) {
+        if (readDevice()) notify()
+        pending = unsent(pending, sending!)
+        writeDevice()
+      }
       sending = null
-      writeDevice()
       if (done && !isEmptyPatch(pending)) schedule()
     })
 }
@@ -135,6 +181,7 @@ function change(patch: PreferencesPatch) {
   init()
   const valid = cleanPatch(patch)
   if (isEmptyPatch(valid)) return
+  readDevice()
   state = applyPatch(state, valid)
   pending = mergePatch(pending, valid)
   writeDevice()
