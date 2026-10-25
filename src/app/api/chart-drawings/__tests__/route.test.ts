@@ -82,6 +82,33 @@ describe('GET /api/chart-drawings', () => {
     expect(legacy.order).toHaveBeenCalledWith('created_at', { ascending: true })
   })
 
+  it('reads the legacy table as production has it: no label column', async () => {
+    // PostgREST answers 400 when the select names a column the table lacks.
+    const PROD_COLUMNS = ['id', 'user_id', 'ticker', 'type', 'points', 'style', 'created_at', 'updated_at']
+    const sets = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }) }
+    const row = { id: 'r1', user_id: 'user-1', ticker: 'FXI', type: 'trendline', points: [{ time: 1, price: 2 }, { time: 3, price: 4 }], style: {} }
+    let columns = '*'
+    const legacy = {
+      select: vi.fn((c: string) => ((columns = c), legacy)),
+      eq: vi.fn().mockReturnThis(),
+      order: vi.fn(async () =>
+        columns === '*' || columns.split(',').every((c) => PROD_COLUMNS.includes(c.trim()))
+          ? { data: [row], error: null }
+          : { data: null, error: { message: 'column chart_drawings.label does not exist' } }
+      ),
+    }
+    mockFrom.mockImplementation((table: string) => (table === 'chart_drawing_sets' ? sets : legacy))
+    const { GET } = await import('../route')
+
+    const res = await GET(new NextRequest(url('fxi')))
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      drawings: null,
+      legacy: [{ id: 'r1', type: 'trendline', points: [{ time: 1, price: 2 }, { time: 3, price: 4 }], style: {} }],
+    })
+  })
+
   it('a saved ticker never reads the legacy table', async () => {
     selectChain({ data: { drawings: [trendLine] }, error: null })
     const { GET } = await import('../route')
