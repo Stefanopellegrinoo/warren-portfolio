@@ -23,12 +23,15 @@ export function ChartSheet({
 	onOpenChange,
 	title,
 	footer,
+	action,
 	children,
 }: {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	title: React.ReactNode;
 	footer?: React.ReactNode;
+	/** Replaces Listo in the header, for a sheet whose changes are only kept on purpose (an alert). */
+	action?: { label: string; onClick: () => void; disabled?: boolean };
 	children: React.ReactNode;
 }) {
 	return (
@@ -39,7 +42,13 @@ export function ChartSheet({
 				<DialogPrimitive.Popup className={sheetClass}>
 					<div className="flex shrink-0 items-center gap-3 border-b border-line py-1.5 pl-4 pr-2">
 						<DialogTitle className="min-w-0 flex-1 truncate">{title}</DialogTitle>
-						<DialogClose className={cn(ghostButton, "font-medium text-accent-ink")}>Listo</DialogClose>
+						{action ? (
+							<button type="button" onClick={action.onClick} disabled={action.disabled} className={cn(ghostButton, "font-medium text-accent-ink disabled:opacity-50")}>
+								{action.label}
+							</button>
+						) : (
+							<DialogClose className={cn(ghostButton, "font-medium text-accent-ink")}>Listo</DialogClose>
+						)}
 					</div>
 					<div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2">{children}</div>
 					{footer && <div className="shrink-0 border-t border-line px-4 py-3">{footer}</div>}

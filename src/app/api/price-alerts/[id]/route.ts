@@ -29,13 +29,17 @@ export async function PATCH(
     return NextResponse.json({ error: 'No hay cambios para guardar' }, { status: 400 })
   }
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('price_alerts')
     .update(patch)
     .eq('id', alertId)
     .eq('user_id', user.id)
-    .select()
-    .single()
+  // A value alone is a dragged line from a client that predates 052: only an alert on the price against
+  // a value has that line, so on any other it would turn "RSI crosses 70" into a price.
+  if (patch.value !== undefined && patch.source === undefined) {
+    query = query.eq('source', 'price').eq('target', 'value')
+  }
+  const { data, error } = await query.select().single()
 
   if (error?.code === CHECK_VIOLATION) return NextResponse.json({ error: INVALID_CONDITION }, { status: 400 })
   if (error || !data) {

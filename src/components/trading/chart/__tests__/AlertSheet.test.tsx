@@ -35,16 +35,17 @@ async function open({ alert, timeframe = '1d', config = DEFAULT_CONFIG }: { aler
   const onSave = vi.fn(async () => true)
   const onDelete = vi.fn()
   const onRearm = vi.fn()
+  const onOpenChange = vi.fn()
   const el = document.createElement('div')
   document.body.appendChild(el)
   const root = createRoot(el)
   await act(async () => {
     root.render(
-      <AlertSheet open onOpenChange={() => {}} ticker="FXI" alert={alert} timeframe={timeframe} config={config} lastValue={(l) => LAST[l] ?? null} onSave={onSave} onDelete={onDelete} onRearm={onRearm} />,
+      <AlertSheet open onOpenChange={onOpenChange} ticker="FXI" alert={alert} timeframe={timeframe} config={config} lastValue={(l) => LAST[l] ?? null} onSave={onSave} onDelete={onDelete} onRearm={onRearm} />,
     )
   })
   await flush()
-  return { onSave, onDelete, onRearm, unmount: () => act(() => root.unmount()) }
+  return { onSave, onDelete, onRearm, onOpenChange, unmount: () => act(() => root.unmount()) }
 }
 
 const EXISTING: ChartAlert = {
@@ -178,6 +179,54 @@ describe('an existing alert', () => {
     act(() => button('Reactivar').click())
 
     expect(onRearm).toHaveBeenCalledOnce()
+    unmount()
+  })
+})
+
+describe('closing', () => {
+  const esc = () => act(() => { sheet().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+
+  it('saves from the header, where the other sheets say Listo: no button there drops the edit', async () => {
+    const { onSave, unmount } = await open({ alert: EXISTING })
+    setValue(byLabel<HTMLInputElement>('Valor'), '33,75')
+    await flush()
+
+    expect(button('Listo')).toBeUndefined()
+    expect([...sheet().querySelectorAll('button')].filter((b) => b.textContent === 'Guardar')).toHaveLength(1)
+    act(() => button('Guardar').click())
+    await flush()
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ value: 33.75 }))
+    unmount()
+  })
+
+  it('Esc on an edited alert saves the change instead of dropping it', async () => {
+    const { onSave, unmount } = await open({ alert: EXISTING })
+    setValue(byLabel<HTMLInputElement>('Valor'), '33,75')
+    await flush()
+
+    esc()
+    await flush()
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ value: 33.75 }))
+    unmount()
+  })
+
+  it('Esc on an alert left as it was saves nothing and closes', async () => {
+    const { onSave, onOpenChange, unmount } = await open({ alert: EXISTING })
+
+    esc()
+    await flush()
+    expect(onSave).not.toHaveBeenCalled()
+    expect(onOpenChange).toHaveBeenCalledWith(false, expect.anything())
+    unmount()
+  })
+
+  it('Esc on a new alert creates nothing', async () => {
+    const { onSave, onOpenChange, unmount } = await open()
+
+    esc()
+    await flush()
+    expect(onSave).not.toHaveBeenCalled()
+    expect(onOpenChange).toHaveBeenCalledWith(false, expect.anything())
     unmount()
   })
 })

@@ -164,12 +164,36 @@ describe('PATCH /api/price-alerts/[id]', () => {
 
   function makeChain(result: { data: unknown; error: unknown }) {
     const single = vi.fn().mockResolvedValue(result)
-    const select = vi.fn().mockReturnValue({ single })
-    const eqUserId = vi.fn().mockReturnValue({ select })
-    const eqAlertId = vi.fn().mockReturnValue({ eq: eqUserId })
-    const update = vi.fn().mockReturnValue({ eq: eqAlertId })
-    return { from: vi.fn().mockReturnValue({ update }) }
+    const filters: [string, unknown][] = []
+    const query: { eq: ReturnType<typeof vi.fn>; select: ReturnType<typeof vi.fn> } = {
+      eq: vi.fn((column: string, value: unknown) => { filters.push([column, value]); return query }),
+      select: vi.fn().mockReturnValue({ single }),
+    }
+    const update = vi.fn().mockReturnValue(query)
+    return { from: vi.fn().mockReturnValue({ update }), filters }
   }
+
+  it("an old client's drag (a value alone) only reaches an alert on the price against a value", async () => {
+    const chain = makeChain({ data: null, error: { code: 'PGRST116', message: 'no rows' } })
+    mockFrom.mockImplementation(chain.from)
+
+    const { PATCH } = await import('../route')
+    const res = await PATCH(makePatchRequest(ALERT_ID, { value: 72.3, operator: 'crosses_above', name: 'FXI cruza por encima de 72,30' }), { params: { id: ALERT_ID } })
+
+    expect(chain.filters).toEqual(expect.arrayContaining([['source', 'price'], ['target', 'value']]))
+    expect(res.status).toBe(404)
+  })
+
+  it('a whole condition from the sheet is not limited to price alerts', async () => {
+    const chain = makeChain({ data: { id: ALERT_ID }, error: null })
+    mockFrom.mockImplementation(chain.from)
+
+    const { PATCH } = await import('../route')
+    const res = await PATCH(makePatchRequest(ALERT_ID, { source: 'rsi.rsi', target: 'value', operator: 'crosses_above', value: 72, timeframe: '1h', periods: { rsi: 14 } }), { params: { id: ALERT_ID } })
+
+    expect(res.status).toBe(200)
+    expect(chain.filters).toEqual([['id', ALERT_ID], ['user_id', 'user-1']])
+  })
 
   it('returns 200 with updated alert on partial update (value only)', async () => {
     const updatedAlert = { id: ALERT_ID, value: 150.5, operator: 'crosses_above' }
@@ -286,7 +310,8 @@ describe('PATCH /api/price-alerts/[id] conditions', () => {
     mockInvalidateUserCache.mockResolvedValue(undefined)
     mockRateLimit.mockResolvedValue(true)
     const single = vi.fn(async () => ({ data: { id: ALERT_ID, ...update.mock.calls[0][0] }, error: null }))
-    const update = vi.fn().mockReturnValue({ eq: vi.fn().mockReturnValue({ eq: vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue({ single }) }) }) })
+    const query: { eq: ReturnType<typeof vi.fn>; select: ReturnType<typeof vi.fn> } = { eq: vi.fn(() => query), select: vi.fn().mockReturnValue({ single }) }
+    const update = vi.fn().mockReturnValue(query)
     chain = { from: vi.fn().mockReturnValue({ update }) }
     mockFrom.mockImplementation((...a: unknown[]) => chain.from(...a))
   })
@@ -356,11 +381,12 @@ describe('PATCH /api/price-alerts/[id] conditions', () => {
     expect(chain.from).not.toHaveBeenCalled()
   })
 
-  it('a value moved onto an alert against a line is refused by the database: 400, not "not found"', async () => {
+  it('a condition the database refuses answers 400, not "not found"', async () => {
     const single = vi.fn(async () => ({ data: null, error: { code: '23514', message: 'violates check constraint "price_alerts_value_check"' } }))
-    mockFrom.mockReturnValue({ update: () => ({ eq: () => ({ eq: () => ({ select: () => ({ single }) }) }) }) })
+    const query: Record<string, unknown> = { eq: () => query, select: () => ({ single }) }
+    mockFrom.mockReturnValue({ update: () => query })
 
-    const res = await patch({ value: 30 })
+    const res = await patch({ ...priceValue, target: 'ema50.ema50', value: null, timeframe: '1d', periods: { ema50: 50 } })
 
     expect(res.status).toBe(400)
     expect(res.body.error).toBe('Esa condición no es válida para esta alerta.')

@@ -5,7 +5,7 @@ import type { IndicatorConfig } from "@/lib/store/chart-store";
 import type { Timeframe } from "@/lib/binance/types";
 import { cn } from "@/lib/utils";
 import { EsNumberInput } from "@/components/ui/es-number-input";
-import { field, ghostButton, primaryButton } from "@/components/trading/ui";
+import { field, ghostButton } from "@/components/trading/ui";
 import { ALERT_LINES, indicatorsOf, type AlertOperator } from "@/lib/chart/alert-condition";
 import { indicatorValues } from "@/lib/chart/indicator-style";
 import { lineLabel, priceDecimals, restate, timeframeLabel, type ChartAlert } from "@/lib/chart/alerts";
@@ -101,31 +101,32 @@ export function AlertSheet({
 	const others = LINES.filter((l) => l !== draft.source);
 	const label = (line: string) => lineLabel(line, periodsFrom);
 
+	const toSave = { ...condition, value: round(condition.value) };
+	// What the sheet opened with: closing an edited alert keeps the edit, like the other sheets.
+	const [opened] = useState(() => JSON.stringify(toSave));
 	const save = async () => {
 		if (!valid || saving) return;
 		setSaving(true);
-		await onSave({ ...condition, value: round(condition.value) });
+		await onSave(toSave);
 		setSaving(false);
 	};
 
 	return (
 		<ChartSheet
 			open={open}
-			onOpenChange={onOpenChange}
+			onOpenChange={(next, ...rest) => {
+				// A new alert is only created by Guardar: closing it is how it is cancelled.
+				if (!next && alert && valid && JSON.stringify(toSave) !== opened) void save();
+				else (onOpenChange as (o: boolean, ...r: unknown[]) => void)(next, ...rest);
+			}}
 			title={`${alert ? "Alerta" : "Nueva alerta"} · ${ticker}`}
+			action={{ label: "Guardar", onClick: save, disabled: !valid || saving }}
 			footer={
-				<div className="flex flex-wrap items-center justify-between gap-2">
-					{alert && onDelete ? (
-						<button type="button" onClick={onDelete} className={cn(ghostButton, "text-danger hover:bg-danger-soft hover:text-danger")}>
-							Borrar alerta
-						</button>
-					) : (
-						<span />
-					)}
-					<button type="button" onClick={save} disabled={!valid || saving} className={primaryButton}>
-						Guardar
+				alert && onDelete ? (
+					<button type="button" onClick={onDelete} className={cn(ghostButton, "text-danger hover:bg-danger-soft hover:text-danger")}>
+						Borrar alerta
 					</button>
-				</div>
+				) : undefined
 			}
 		>
 			{alert && alert.status !== "active" && (
