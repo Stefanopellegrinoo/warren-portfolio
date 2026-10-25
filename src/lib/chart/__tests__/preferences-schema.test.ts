@@ -27,3 +27,17 @@ describe('preferences schema', () => {
     expect(prefs.toolStyles.ray?.color).toBeUndefined()
   })
 })
+
+describe('preferences schema, nesting', () => {
+  // A 10 KB body can nest 5000 levels: the check must refuse it, not overflow the stack (a 500).
+  const deep = JSON.parse('{"a":' + '['.repeat(30000) + ']'.repeat(30000) + '}')
+
+  it('refuses a deeply nested style as a bad request instead of throwing', () => {
+    expect(() => parsePatch({ toolStyles: { ray: deep } })).not.toThrow()
+    expect(parsePatch({ toolStyles: { ray: deep } })).toBeNull()
+  })
+
+  it('drops a deeply nested stored entry instead of throwing', () => {
+    expect(parsePreferences({ toolStyles: { ray: deep, text: { color: '#2962ff' } } }).toolStyles).toEqual({ text: { color: '#2962ff' } })
+  })
+})

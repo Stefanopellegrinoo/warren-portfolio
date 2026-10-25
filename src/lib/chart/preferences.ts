@@ -23,7 +23,8 @@ import {
  *   next change (or the next tab), so a missing table (migration 051 not applied) costs one request
  *   per change, never a loop, and shows no error.
  * - Writes go only after the account answered in this tab: the outbox is stamped with its account, and
- *   another account's outbox on the same browser is dropped instead of sent.
+ *   another account's outbox on the same browser is dropped instead of sent, as is one saved before the
+ *   device ever reached an account (it has no owner to check).
  */
 const ENDPOINT = '/api/chart-preferences'
 const STORAGE_KEY = 'warren:chart-preferences'
@@ -49,8 +50,10 @@ function readDevice() {
     const saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? 'null')
     if (!saved) return
     state = parsePreferences(saved.preferences)
-    pending = cleanPatch(saved.pending)
     owner = typeof saved.owner === 'string' ? saved.owner : null
+    // An outbox saved before this device ever reached an account has no owner to check on load: it
+    // would go to whichever account signs in next, so it stays on the device and is never sent.
+    pending = owner ? cleanPatch(saved.pending) : {}
   } catch {
     // No storage (private mode, blocked site data) or a broken copy: this tab keeps them in memory.
   }

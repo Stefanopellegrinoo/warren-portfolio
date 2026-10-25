@@ -101,13 +101,17 @@ const byteSize = (value: unknown) => new TextEncoder().encode(JSON.stringify(val
  * MAX_ENTRY_BYTES. Checked on the input, not zod's output: zod turns a JSON "__proto__" field into the
  * output's prototype, where a check of the output never sees it.
  */
+// Far deeper than any style nests; it stops the walk before a 10 KB body of brackets overflows the stack.
+const MAX_WALK_DEPTH = 8
+
 function plainEntry(value: unknown): boolean {
-  const walk = (v: unknown): boolean => {
-    if (Array.isArray(v)) return v.every(walk)
+  const walk = (v: unknown, depth: number): boolean => {
+    if (depth > MAX_WALK_DEPTH) return false
+    if (Array.isArray(v)) return v.every((x) => walk(x, depth + 1))
     if (!v || typeof v !== 'object') return true
-    return Object.entries(v).every(([k, x]) => KEY_RE.test(k) && (typeof x !== 'string' || !COLOR_FIELD_RE.test(k) || COLOR_RE.test(x)) && walk(x))
+    return Object.entries(v).every(([k, x]) => KEY_RE.test(k) && (typeof x !== 'string' || !COLOR_FIELD_RE.test(k) || COLOR_RE.test(x)) && walk(x, depth + 1))
   }
-  return walk(value) && byteSize(value) <= MAX_ENTRY_BYTES
+  return walk(value, 0) && byteSize(value) <= MAX_ENTRY_BYTES
 }
 
 // The fields every tool shares are typed; the rest of DrawingStyle is open but bounded.

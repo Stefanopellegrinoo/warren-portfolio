@@ -188,12 +188,11 @@ describe('when the API fails', () => {
     expect(patches()).toEqual([{ favorites: { rectangle: true } }, { favorites: { text: true } }])
   })
 
-  it('a change made offline is sent by the next tab that reaches the account', async () => {
-    const first = await openTab('offline')
+  it('a change made offline is sent by the next tab that reaches the same account', async () => {
+    const first = await openTab(ok(), 'offline')
     await settle()
     first.prefs.setFavorite('rectangle', true)
     await vi.advanceTimersByTimeAsync(60_000)
-    expect(patches()).toEqual([])
 
     fetchMock.mockClear()
     const next = await openTab(ok(), saved())
@@ -201,6 +200,21 @@ describe('when the API fails', () => {
     expect(next.prefs.getPreferences().favorites).toEqual({ ray: true, rectangle: true })
     await vi.advanceTimersByTimeAsync(800)
     expect(patches()).toEqual([{ favorites: { rectangle: true } }])
+  })
+
+  it('a change made before this device ever reached an account is not sent to whichever account loads next', async () => {
+    const first = await openTab('offline')
+    await settle()
+    first.prefs.setFavorite('rectangle', true)
+    first.prefs.setToolStyle('ray', { color: '#ff0000' })
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    fetchMock.mockClear()
+    const next = await openTab(ok(ACCOUNT, 'B'), saved())
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(patches()).toEqual([])
+    expect(next.prefs.getPreferences()).toEqual(ACCOUNT)
+    expect(device()).toEqual({ owner: 'B', preferences: ACCOUNT, pending: {} })
   })
 
   it("another account's pending changes on this device are never sent to this one", async () => {
