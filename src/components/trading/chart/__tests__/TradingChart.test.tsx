@@ -48,6 +48,7 @@ vi.mock('lightweight-charts-drawing', () => ({
     setInterval() {}
     destroy() {}
   },
+  setDefaultStyleOverride: vi.fn(),
 }))
 vi.mock('@/lib/chart/select-before-move', async (importOriginal) => {
   const real = await importOriginal<typeof import('@/lib/chart/select-before-move')>()
@@ -72,6 +73,8 @@ vi.mock('../DrawingTools', () => ({
 }))
 
 const { TradingChart } = await import('../TradingChart')
+const { setDefaultStyleOverride } = await import('lightweight-charts-drawing')
+const { setToolStyle } = await import('@/lib/chart/preferences')
 
 afterEach(() => { vi.clearAllMocks(); vi.unstubAllGlobals(); setupOrder.length = 0; alertsApi.alerts = []; series.priceToCoordinate.mockReturnValue(null); document.body.innerHTML = '' })
 
@@ -97,6 +100,21 @@ describe('TradingChart on a touch screen', () => {
 
     expect(box.classList).toContain('touch-none')
     unmount()
+  })
+})
+
+describe('TradingChart remembered drawing styles (S2)', () => {
+  it('while it is open, a new drawing takes the style remembered for its tool', async () => {
+    const { unmount } = await render()
+    const styleFor = vi.mocked(setDefaultStyleOverride).mock.calls.at(-1)![0]
+    setToolStyle('parallel-channel', { color: '#f23645' })
+
+    expect(styleFor('parallel-channel')).toEqual({ color: '#f23645' })
+    expect(styleFor('trend-line')).toBeUndefined()
+
+    unmount()
+    expect(vi.mocked(setDefaultStyleOverride).mock.calls.at(-1)![0]('parallel-channel')).toBeUndefined()
+    setToolStyle('parallel-channel', null)
   })
 })
 

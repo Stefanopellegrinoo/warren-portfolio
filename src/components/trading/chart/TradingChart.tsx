@@ -25,6 +25,7 @@ import { INDICATOR_ORDER, INDICATOR_SPECS } from "@/lib/chart/indicator-specs";
 import { hitTestAlert, priceDecimals, type ChartAlert } from "@/lib/chart/alerts";
 import { touchDrawing } from "@/lib/chart/touch-drawing";
 import { onTap, selectBeforeMove } from "@/lib/chart/select-before-move";
+import { applyRememberedStyles } from "@/lib/chart/remembered-style";
 import type { Candle, Timeframe } from "@/lib/binance/types";
 import { cn, formatNumber } from "@/lib/utils";
 import { useCandles } from "./useCandles";
@@ -192,6 +193,8 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		// Before the drawing layer, so a finger's press reaches it first (its events come later,
 		// once `drawings` exists).
 		const offSelect = selectBeforeMove(chart.chartElement(), () => drawings);
+		// A new drawing comes out with the style last chosen for its tool (S2).
+		const offStyles = applyRememberedStyles();
 		const drawings = new DrawingManager(chart, series, { magnet: "off" });
 		// A text drawing asks for its editor on the press that places it, but the chart blurs
 		// whatever has the focus when a press starts (its touchstart and mousedown come after
@@ -224,6 +227,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			offText();
 			offTouch();
 			offSelect();
+			offStyles();
 			box.removeEventListener("pointerdown", onPress, true);
 			window.removeEventListener("pointerup", onRelease, true);
 			chart.unsubscribeCrosshairMove(onMove);

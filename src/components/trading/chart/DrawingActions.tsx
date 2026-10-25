@@ -2,27 +2,12 @@
 
 import { useEffect, useState } from "react";
 import type { Drawing, DrawingManager, DrawingStyle } from "lightweight-charts-drawing";
-import { Check, Lock, Trash2, Type, Unlock } from "lucide-react";
+import { Lock, PaintBucket, Settings2, Trash2, Type, Unlock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-
-// TradingView's drawing palette.
-const COLORS = [
-	{ value: "#2962ff", label: "azul" },
-	{ value: "#089981", label: "verde" },
-	{ value: "#f23645", label: "rojo" },
-	{ value: "#ff9800", label: "naranja" },
-	{ value: "#9c27b0", label: "violeta" },
-	{ value: "#00bcd4", label: "celeste" },
-	{ value: "#787b86", label: "gris" },
-	{ value: "#131722", label: "negro" },
-];
-const WIDTHS = [1, 2, 3, 4];
-const LINE_STYLES: { value: DrawingStyle["lineStyle"]; label: string; dash?: string }[] = [
-	{ value: "solid", label: "Sólida" },
-	{ value: "dashed", label: "Discontinua", dash: "6 4" },
-	{ value: "dotted", label: "Punteada", dash: "2 3" },
-];
+import { LINE_STYLES, drawingOptions, linePatch } from "@/lib/chart/drawing-options";
+import { resetToFactory, restyle } from "@/lib/chart/remembered-style";
+import { DrawingSettings, FillControls, LineControls, Swatches, type LineChange } from "./DrawingSettings";
 
 // Long enough to notice a wrong tap, short enough not to linger.
 const UNDO_MS = 5000;
@@ -31,17 +16,19 @@ const barClass =
 	"absolute bottom-3 left-1/2 z-20 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-0.5 overflow-x-auto rounded border border-line bg-surface p-1 shadow-[var(--shadow-pop)]";
 const actionClass =
 	"grid h-8 min-w-8 shrink-0 place-items-center rounded px-1.5 text-ink-2 hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring max-[819px]:h-11 max-[819px]:min-w-11";
-const optionClass = "grid h-8 place-items-center rounded hover:bg-hover max-[819px]:h-11";
 
 /**
  * The selected drawing's actions (odd/tasks/grafico-celular.md S3). The drawing layer edits a
  * drawing with the Delete key, a double click and a right click, none of which a phone has.
+ * Fondo and ⚙ (every option of its tool) come from odd/tasks/chart-customization.md S2.
  */
 export function DrawingActions({ manager, onEditText }: { manager: DrawingManager | null; onEditText: (drawing: Drawing) => void }) {
 	const [selected, setSelected] = useState<Drawing[]>([]);
 	// The drawings just deleted, offered back in this same bar: a toast at the bottom of a
 	// phone would sit over the next thing the finger taps (the Dibujar list, this bar).
 	const [deleted, setDeleted] = useState<Drawing[] | null>(null);
+	// The drawing whose settings are open: they close when another one is selected.
+	const [settingsFor, setSettingsFor] = useState<string | null>(null);
 
 	useEffect(() => {
 		if (!manager) return;
@@ -81,7 +68,11 @@ export function DrawingActions({ manager, onEditText }: { manager: DrawingManage
 		);
 	}
 	const first = selected[0];
-	const restyle = (style: Partial<DrawingStyle>) => selected.forEach((d) => manager.update({ ...d, style: { ...d.style, ...style } }));
+	const one = selected.length === 1;
+	const options = drawingOptions(first.kind);
+	// Every change becomes the style of its tool (S2): the next drawing comes out the same.
+	const onLine = (change: LineChange) => restyle(manager, selected, (d) => linePatch(d, change));
+	const onStyle = (style: Partial<DrawingStyle>) => restyle(manager, [first], () => style);
 	const remove = () => {
 		selected.forEach((d) => manager.remove(d.id));
 		setDeleted(selected);
@@ -93,16 +84,21 @@ export function DrawingActions({ manager, onEditText }: { manager: DrawingManage
 				<PopoverTrigger aria-label="Color" title="Color" className={actionClass}>
 					<span className="h-[18px] w-[18px] rounded-full border border-line-strong" style={{ background: first.style.color }} aria-hidden />
 				</PopoverTrigger>
-				<PopoverContent className="grid w-auto grid-cols-4 gap-1 p-2">
-					{COLORS.map((c) => (
-						<button key={c.value} type="button" aria-label={`Color ${c.label}`} onClick={() => restyle({ color: c.value, textColor: c.value })} className={cn(optionClass, "w-8 max-[819px]:w-11")}>
-							<span className="grid h-5 w-5 place-items-center rounded-full" style={{ background: c.value }} aria-hidden>
-								{first.style.color === c.value && <Check className="h-3.5 w-3.5 text-white" aria-hidden />}
-							</span>
-						</button>
-					))}
+				<PopoverContent className="w-auto p-2">
+					<Swatches label="Color" value={first.style.color} onPick={(color) => onLine({ color })} className="w-auto grid-cols-4 max-[819px]:grid-cols-4" />
 				</PopoverContent>
 			</Popover>
+
+			{one && options?.fill && (
+				<Popover>
+					<PopoverTrigger aria-label="Fondo" title="Fondo" className={actionClass}>
+						<PaintBucket className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
+					</PopoverTrigger>
+					<PopoverContent className="w-auto p-3">
+						<FillControls drawing={first} onStyle={onStyle} />
+					</PopoverContent>
+				</Popover>
+			)}
 
 			<Popover>
 				<PopoverTrigger aria-label="Línea" title="Línea" className={actionClass}>
@@ -111,25 +107,18 @@ export function DrawingActions({ manager, onEditText }: { manager: DrawingManage
 					</svg>
 				</PopoverTrigger>
 				<PopoverContent className="flex w-auto flex-col gap-1 p-2">
-					<div className="flex gap-1">
-						{WIDTHS.map((w) => (
-							<button key={w} type="button" aria-label={`Grosor ${w}`} aria-pressed={first.style.width === w} onClick={() => restyle({ width: w })} className={cn(optionClass, "w-10 max-[819px]:w-11", first.style.width === w && "bg-accent-soft")}>
-								<span className="w-6 rounded-full bg-ink" style={{ height: w }} aria-hidden />
-							</button>
-						))}
-					</div>
-					{LINE_STYLES.map((s) => (
-						<button key={s.value} type="button" aria-label={s.label} aria-pressed={first.style.lineStyle === s.value} onClick={() => restyle({ lineStyle: s.value })} className={cn(optionClass, "flex gap-2 px-2 text-[13px] text-ink", first.style.lineStyle === s.value && "bg-accent-soft")}>
-							<svg width="28" height="4" aria-hidden><line x1="0" y1="2" x2="28" y2="2" stroke="currentColor" strokeWidth="2" strokeDasharray={s.dash} /></svg>
-							{s.label}
-						</button>
-					))}
+					<LineControls style={first.style} onLine={onLine} />
 				</PopoverContent>
 			</Popover>
 
-			{selected.length === 1 && first.kind === "text" && (
+			{one && first.kind === "text" && (
 				<button type="button" aria-label="Editar texto" title="Editar texto" onClick={() => onEditText(first)} className={actionClass}>
 					<Type className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
+				</button>
+			)}
+			{one && options && (
+				<button type="button" aria-label="Configuración" title="Configuración" onClick={() => setSettingsFor(first.id)} className={actionClass}>
+					<Settings2 className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
 				</button>
 			)}
 			<button
@@ -149,6 +138,15 @@ export function DrawingActions({ manager, onEditText }: { manager: DrawingManage
 			<button type="button" aria-label="Listo" onClick={() => manager.select([])} className={cn(actionClass, "px-3 text-[13px] font-medium text-ink")}>
 				Listo
 			</button>
+			{one && (
+				<DrawingSettings
+					drawing={first}
+					open={settingsFor === first.id}
+					onOpenChange={(open) => setSettingsFor(open ? first.id : null)}
+					onStyle={onStyle}
+					onReset={() => resetToFactory(manager, first)}
+				/>
+			)}
 		</div>
 	);
 }
