@@ -65,3 +65,19 @@ describe('IndicatorMenu', () => {
     unmount()
   })
 })
+
+describe('IndicatorMenu: Mostrar operaciones', () => {
+  const tradesSwitch = () => [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((i) => i.textContent?.includes('Mostrar operaciones'))
+
+  it('is on from the start, and a click hides the trades on this device and keeps the menu open', async () => {
+    const { unmount } = await openMenu()
+    expect(tradesSwitch()!.getAttribute('aria-checked')).toBe('true')
+
+    await act(async () => { tradesSwitch()!.click() })
+
+    expect(useChartStore.getState().showTrades).toBe(false)
+    expect(tradesSwitch()!.getAttribute('aria-checked')).toBe('false')
+    expect(JSON.parse(localStorage.getItem('tv-gratis-chart-state')!).state.showTrades).toBe(false)
+    unmount()
+  })
+})

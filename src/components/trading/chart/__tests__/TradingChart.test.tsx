@@ -32,14 +32,20 @@ const chart = {
   applyOptions: vi.fn(),
   subscribeCrosshairMove: vi.fn(),
   unsubscribeCrosshairMove: vi.fn(),
-  timeScale: () => ({ setVisibleLogicalRange: vi.fn() }),
+  // A bar's x is its time, for the trade card's finger slop.
+  timeScale: () => ({ setVisibleLogicalRange: vi.fn(), timeToCoordinate: (t: number) => t }),
+  subscribeClick: vi.fn(),
+  unsubscribeClick: vi.fn(),
   panes: vi.fn(() => []),
   removeSeries: vi.fn(),
   remove: vi.fn(),
   chartElement: () => document.createElement('div'),
 }
+// The trade arrows the chart last set on the candles.
+const markers = { setMarkers: vi.fn() }
 vi.mock('lightweight-charts', () => ({
   createChart: vi.fn(() => chart),
+  createSeriesMarkers: vi.fn(() => markers),
   CandlestickSeries: {}, HistogramSeries: {}, LineSeries: {},
   CrosshairMode: { Normal: 0 }, LineStyle: { Solid: 0, Dashed: 2 },
   TickMarkType: { Year: 0, Month: 1, DayOfMonth: 2, Time: 3, TimeWithSeconds: 4 },
@@ -47,13 +53,18 @@ vi.mock('lightweight-charts', () => ({
 // The drawing layer's events, so a test can raise them.
 const drawingEvents: Record<string, (...a: unknown[]) => void> = {}
 const drawingSelect = vi.fn()
+const drawingSetTool = vi.fn()
+// What the drawing layer holds: the armed tool and the selected drawings.
+const drawingState = { tool: null as string | null, selection: [] as string[] }
 // What the chart set up, in order.
 const setupOrder: string[] = []
 vi.mock('lightweight-charts-drawing', () => ({
   DrawingManager: class {
     constructor() { setupOrder.push('drawing layer') }
     on(event: string, cb: (...a: unknown[]) => void) { drawingEvents[event] = cb; return () => {} }
-    tool() { return null }
+    tool() { return drawingState.tool }
+    selection() { return drawingState.selection }
+    setTool(kind: string | null) { drawingSetTool(kind) }
     select(ids: string[]) { drawingSelect(ids) }
     setInterval() {}
     destroy() {}
@@ -66,8 +77,9 @@ vi.mock('@/lib/chart/select-before-move', async (importOriginal) => {
 })
 
 const candle = { time: 1, open: 1, high: 2, low: 0.5, close: 1.5 }
+const bars = { candles: [candle] as typeof candle[] }
 vi.mock('../useCandles', () => ({
-  useCandles: () => ({ status: 'ready', candles: [candle], change: { kind: 'set' }, retry: () => {} }),
+  useCandles: () => ({ status: 'ready', candles: bars.candles, change: { kind: 'set' }, retry: () => {} }),
 }))
 vi.mock('../useDrawings', () => ({ useDrawings: () => 'ready' }))
 // What useChartAlerts gives an alert from before the conditions: the price against its value, no color.
@@ -100,7 +112,7 @@ const { useChartStore, DEFAULT_CONFIG } = await import('@/lib/store/chart-store'
 const { INDICATOR_KEYS } = await import('@/lib/chart/preferences-schema')
 const lwc = await import('lightweight-charts')
 
-afterEach(() => { vi.clearAllMocks(); vi.unstubAllGlobals(); setupOrder.length = 0; alertsApi.alerts = []; series.priceToCoordinate.mockReturnValue(null); document.body.innerHTML = '' })
+afterEach(() => { vi.clearAllMocks(); vi.unstubAllGlobals(); setupOrder.length = 0; alertsApi.alerts = []; bars.candles = [candle]; drawingState.tool = null; drawingState.selection = []; series.priceToCoordinate.mockReturnValue(null); document.body.innerHTML = '' })
 
 const onPhone = (phone: boolean) => vi.stubGlobal('matchMedia', (q: string) => ({ matches: phone && q.includes('max-width'), media: q, addEventListener() {}, removeEventListener() {} }))
 const panes = (n: number) => Array.from({ length: n }, () => ({ setStretchFactor: vi.fn() }))
@@ -813,6 +825,218 @@ describe('TradingChart alert sheet', () => {
 
     expect(alertTitles()).toEqual([])
     expect(document.querySelector('[role="dialog"][aria-label="BTCUSDT cruza por encima de 90.000"]')).toBeNull()
+    unmount()
+  })
+})
+
+// The user's buys and sells on the candles, from the app's operations (the Historial's).
+const { forgetCached } = await import('@/lib/client-cache')
+describe('TradingChart trade markers', () => {
+  const day = (date: string) => Date.parse(`${date}T00:00:00Z`) / 1000
+  const DAYS = ['2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22', '2026-10-23']
+  const TRADES = [
+    { id: 't3', date: '2026-10-22', operation: 'VENTA', quantity: 5, price: 1300 },
+    { id: 't2', date: '2026-10-20', operation: 'COMPRA', quantity: 4, price: 1240.5 },
+    { id: 't1', date: '2026-10-20', operation: 'COMPRA', quantity: 6, price: 1234.5 },
+    { id: 't0', date: '2026-10-21', operation: 'DIVIDENDO', quantity: 1, price: 12 },
+  ]
+  let answer: () => Response
+  const tradeRequests = () => vi.mocked(fetch).mock.calls.map(([u]) => String(u)).filter((u) => u.startsWith('/api/transactions'))
+  beforeEach(() => {
+    forgetCached()
+    useChartStore.setState({ showTrades: true })
+    bars.candles = DAYS.map((d) => ({ ...candle, time: day(d) }))
+    answer = () => Response.json({ data: TRADES, pagination: { page: 1, limit: 500, total: 4, totalPages: 1 } })
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (String(url).startsWith('/api/transactions') ? answer() : new Response(null, { status: 404 }))))
+  })
+  const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+  async function mount(symbol = 'BCBA:GGAL', timeframe: '1d' | '1w' = '1d') {
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    const draw = (tf: typeof timeframe) => act(async () => { root.render(<TradingChart symbol={symbol} timeframe={tf} />) })
+    await draw(timeframe)
+    await settle()
+    const box = vi.mocked(createChart).mock.calls[0][0] as HTMLElement
+    return { box, rerender: draw, unmount: () => act(() => root.unmount()) }
+  }
+  const lastMarkers = () => markers.setMarkers.mock.calls.at(-1)![0]
+  const click = (time: number | undefined, x = time ?? 0, y = 200) =>
+    act(() => { (chart.subscribeClick.mock.calls.at(-1) as unknown as [(p: unknown) => void])[0]({ time, point: { x, y }, paneIndex: 0 }) })
+  const card = () => document.querySelector('[role="dialog"][aria-label="Operaciones"]')
+  const press = (box: HTMLElement, pointerType = 'mouse') => act(() => {
+    box.dispatchEvent(new PointerEvent('pointerdown', { clientY: 200, pointerType, bubbles: true }))
+    window.dispatchEvent(new PointerEvent('pointerup', { clientY: 200, pointerType }))
+  })
+
+  it("asks for the symbol's operations and draws a green arrow under the buys and a red one over the sells", async () => {
+    const { unmount } = await mount()
+
+    expect(tradeRequests()).toEqual(['/api/transactions?ticker=BCBA%3AGGAL&limit=500'])
+    expect(lastMarkers()).toEqual([
+      { time: day('2026-10-20'), position: 'belowBar', shape: 'arrowUp', color: '#0f0', text: 'C 10' },
+      { time: day('2026-10-22'), position: 'aboveBar', shape: 'arrowDown', color: '#f00', text: 'V 5' },
+    ])
+    unmount()
+  })
+
+  it('a timeframe change moves the arrows to the new bars without asking again', async () => {
+    const { rerender, unmount } = await mount()
+    bars.candles = [{ ...candle, time: day('2026-10-19') }]
+
+    await rerender('1w')
+    await settle()
+
+    expect(tradeRequests()).toHaveLength(1)
+    expect(lastMarkers().map((m: { time: number; text: string }) => [m.time, m.text])).toEqual([[day('2026-10-19'), 'C 10'], [day('2026-10-19'), 'V 5']])
+    unmount()
+  })
+
+  it('a failed request shows no arrows and no error', async () => {
+    answer = () => Response.json({ error: 'x' }, { status: 500 })
+    const { unmount } = await mount()
+
+    expect(markers.setMarkers.mock.calls.every(([m]) => m.length === 0)).toBe(true)
+    expect(document.querySelector('[role="alert"]')).toBeNull()
+    unmount()
+  })
+
+  it('Mostrar operaciones off hides the arrows, and on shows them again', async () => {
+    const { unmount } = await mount()
+
+    await act(async () => { useChartStore.getState().toggleShowTrades() })
+    expect(lastMarkers()).toEqual([])
+
+    await act(async () => { useChartStore.getState().toggleShowTrades() })
+    await settle()
+    expect(lastMarkers()).toHaveLength(2)
+    unmount()
+  })
+
+  it("a click on an arrow's bar shows each operation in it: date, operation, quantity and price", async () => {
+    const { box, unmount } = await mount()
+    press(box)
+
+    click(day('2026-10-20'))
+
+    const rows = [...card()!.querySelectorAll('tbody tr')].map((r) => [...r.querySelectorAll('td')].map((c) => c.textContent))
+    expect(rows).toEqual([['20/10/2026', 'Compra', '4', '1.240,50'], ['20/10/2026', 'Compra', '6', '1.234,50']])
+    unmount()
+  })
+
+  it('a click elsewhere closes it, and so does Cerrar', async () => {
+    const { box, unmount } = await mount()
+    press(box)
+    click(day('2026-10-22'))
+    expect(card()).not.toBeNull()
+
+    press(box)
+    click(day('2026-10-19'))
+    expect(card()).toBeNull()
+
+    press(box)
+    click(day('2026-10-22'))
+    act(() => card()!.querySelector<HTMLButtonElement>('button[aria-label="Cerrar"]')!.click())
+    expect(card()).toBeNull()
+    unmount()
+  })
+
+  it("a finger only has to land near the arrow's bar", async () => {
+    const { box, unmount } = await mount()
+    press(box, 'touch')
+
+    click(day('2026-10-19'), day('2026-10-22') - 20)
+
+    expect(card()).not.toBeNull()
+    unmount()
+  })
+
+  it('does not open while a drawing tool is armed', async () => {
+    const { box, unmount } = await mount()
+    drawingState.tool = 'trend-line'
+    press(box)
+
+    click(day('2026-10-20'))
+
+    expect(card()).toBeNull()
+    unmount()
+  })
+
+  it('does not open on the press that places an alert', async () => {
+    const { box, unmount } = await mount()
+    act(() => button('Alerta').click())
+    press(box)
+
+    click(day('2026-10-20'))
+
+    expect(alertsApi.create).toHaveBeenCalled()
+    expect(card()).toBeNull()
+    unmount()
+  })
+
+  it('does not open when the click selects a drawing', async () => {
+    const { box, unmount } = await mount()
+    drawingState.selection = ['d1']
+    press(box)
+
+    click(day('2026-10-20'))
+
+    expect(card()).toBeNull()
+    unmount()
+  })
+})
+
+// odd/tasks/chart-customization.md L16: one thing selected or armed at a time.
+describe('TradingChart one selection at a time', () => {
+  const ALERT = { id: 'a1', ticker: 'BTCUSDT', operator: 'crosses_above', value: 90000, name: 'BTCUSDT cruza por encima de 90.000', status: 'active', ...PRICE_VALUE }
+  const bar = () => document.querySelector('[role="dialog"][aria-label="BTCUSDT cruza por encima de 90.000"]')
+  async function withSelectedAlert() {
+    alertsApi.alerts = [ALERT]
+    series.priceToCoordinate.mockReturnValue(100 as never)
+    const rendered = await render()
+    act(() => {
+      rendered.box.dispatchEvent(new PointerEvent('pointerdown', { clientY: 100, pointerType: 'touch', bubbles: true }))
+      window.dispatchEvent(new PointerEvent('pointerup', { clientY: 100, pointerType: 'touch' }))
+    })
+    await act(async () => {})
+    expect(bar()).not.toBeNull()
+    return rendered
+  }
+
+  it('arming a drawing tool (from the strip, the list or the favorites bar) lets go of the selected alert', async () => {
+    const { unmount } = await withSelectedAlert()
+
+    act(() => drawingEvents.tool('trend-line'))
+
+    expect(bar()).toBeNull()
+    unmount()
+  })
+
+  it('disarming a tool keeps the selected alert', async () => {
+    const { unmount } = await withSelectedAlert()
+
+    act(() => drawingEvents.tool(null))
+
+    expect(bar()).not.toBeNull()
+    unmount()
+  })
+
+  it('selecting an alert disarms the drawing tool and deselects the drawings', async () => {
+    const { unmount } = await withSelectedAlert()
+
+    expect(drawingSetTool).toHaveBeenCalledWith(null)
+    expect(drawingSelect).toHaveBeenCalledWith([])
+    unmount()
+  })
+
+  it('arming the alert placement lets go of the selected alert and the drawings', async () => {
+    const { unmount } = await withSelectedAlert()
+    drawingSelect.mockClear()
+
+    act(() => button('Alerta').click())
+
+    expect(bar()).toBeNull()
+    expect(drawingSelect).toHaveBeenCalledWith([])
     unmount()
   })
 })

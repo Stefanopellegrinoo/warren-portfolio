@@ -3,6 +3,7 @@
 import { Activity, Check } from "lucide-react";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
@@ -41,6 +42,8 @@ export function IndicatorMenu({ stacked = false }: { stacked?: boolean }) {
   const device = useChartStore((s) => s.config);
   const config = effectiveConfig(device, useChartPreferences().preferences.indicatorSettings);
   const toggle = useChartStore((s) => s.toggleIndicator);
+  const showTrades = useChartStore((s) => s.showTrades);
+  const toggleShowTrades = useChartStore((s) => s.toggleShowTrades);
 
   const groups = ENTRIES.reduce<Record<string, Entry[]>>((acc, i) => {
     (acc[i.group] ||= []).push(i);
@@ -94,6 +97,16 @@ export function IndicatorMenu({ stacked = false }: { stacked?: boolean }) {
             ))}
           </DropdownMenuGroup>
         ))}
+        <DropdownMenuSeparator className="-mx-1 my-1 h-px bg-line" />
+        {/* The user's buys and sells on the candles, per device like the indicators. */}
+        <DropdownMenuCheckboxItem
+          checked={showTrades}
+          onCheckedChange={toggleShowTrades}
+          closeOnClick={false}
+          className="flex min-h-8 cursor-pointer items-center justify-between rounded px-2 text-[13px] text-ink outline-none focus:bg-hover focus:text-ink data-[highlighted]:bg-hover max-[819px]:min-h-11 [&_[data-slot=dropdown-menu-checkbox-item-indicator]]:text-accent"
+        >
+          Mostrar operaciones
+        </DropdownMenuCheckboxItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
