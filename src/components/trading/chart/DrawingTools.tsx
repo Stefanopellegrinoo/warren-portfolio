@@ -13,6 +13,7 @@ import {
 	GitCommitHorizontal,
 	Magnet,
 	Minus,
+	MoreHorizontal,
 	MousePointer2,
 	MoveHorizontal,
 	MoveUpRight,
@@ -277,6 +278,11 @@ type AlertMenuProps = Omit<React.ComponentProps<typeof AlertMenu>, "side" | "tri
 
 const Divider = () => <span className="h-px w-6 shrink-0 bg-line max-[819px]:h-6 max-[819px]:w-px" aria-hidden />;
 
+// The strip's Más: its menu, the favorites list or the question of Borrar todos.
+type More = "menu" | "favorites" | "clear";
+// Swapping the menu for the list unmounts the focused item: the list's first control takes the focus.
+const focusFirst = (el: HTMLElement | null) => el?.querySelector<HTMLElement>("input, button")?.focus();
+
 /**
  * The drawing toolbar: a vertical strip on desktop, the PhoneTools in the
  * page's bottom bar (`phoneBar`) on phones. It reads and drives the
@@ -307,8 +313,7 @@ export function DrawingTools({
 	const [tool, setTool] = useState<DrawingKind | null>(null);
 	const [magnet, setMagnet] = useState(false);
 	const [visible, setVisible] = useState(true);
-	const [askingClear, setAskingClear] = useState(false);
-	const [choosing, setChoosing] = useState(false);
+	const [more, setMore] = useState<More | null>(null);
 	const { preferences, setFavorite } = useChartPreferences();
 	// Per device, like the bar's spot (screens differ); the stars are the account's.
 	const [barShown, setBarShown] = useState(() => readBar().shown);
@@ -389,21 +394,6 @@ export function DrawingTools({
 				</div>
 			))}
 			<Divider />
-			<Popover open={choosing} onOpenChange={setChoosing}>
-				<PopoverTrigger title="Elegir favoritos" aria-label="Elegir favoritos" className={toolClass}>
-					<Star className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
-				</PopoverTrigger>
-				<PopoverContent side="right" aria-label="Elegir favoritos" className="max-h-[min(80vh,40rem)] w-[min(18rem,calc(100vw-32px))] overflow-y-auto p-2">
-					<ToolList
-						{...favorites}
-						onPick={(kind) => {
-							setChoosing(false);
-							arm(kind);
-						}}
-					/>
-				</PopoverContent>
-			</Popover>
-			<Divider />
 			<AlertMenu
 				{...alertMenu}
 				side="right"
@@ -425,29 +415,61 @@ export function DrawingTools({
 				active={!visible}
 				onClick={() => manager?.setDrawingsVisible(!visible)}
 			/>
-			{/* InlineConfirm's question would widen the 40px vertical strip and shift the chart: same two steps in a popover. */}
-			<Popover open={askingClear} onOpenChange={(open) => setAskingClear(open && !!manager && manager.drawings().length > 0)}>
-				<PopoverTrigger title="Borrar todos los dibujos" aria-label="Borrar todos los dibujos" className={toolClass}>
-					<Trash2 className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
+			{/* Elegir favoritos and Borrar todos, used once in a while, share one button: with a button each the strip
+			    is taller than a 1280×800 window gives it (odd/tasks/chart-customization.md S8). */}
+			<Popover open={more !== null} onOpenChange={(open) => setMore(open ? "menu" : null)}>
+				<PopoverTrigger title="Más" aria-label="Más" className={toolClass}>
+					<MoreHorizontal className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
 				</PopoverTrigger>
-				<PopoverContent className="flex w-[min(16rem,calc(100vw-32px))] flex-col gap-2 p-3">
-					<p className="text-[13px] font-medium text-danger">¿Borrar todos los dibujos de este activo?</p>
-					<div className="flex flex-wrap justify-end gap-2">
+				{more === "favorites" ? (
+					<PopoverContent side="right" aria-label="Elegir favoritos" className="max-h-[min(80vh,40rem)] w-[min(18rem,calc(100vw-32px))] overflow-y-auto p-2">
+						<div ref={focusFirst}>
+							<ToolList
+								{...favorites}
+								onPick={(kind) => {
+									setMore(null);
+									arm(kind);
+								}}
+							/>
+						</div>
+					</PopoverContent>
+				) : more === "clear" ? (
+					// InlineConfirm's question would widen the 40px vertical strip and shift the chart: same two steps in a popover.
+					<PopoverContent side="right" className="flex w-[min(16rem,calc(100vw-32px))] flex-col gap-2 p-3">
+						<p className="text-[13px] font-medium text-danger">¿Borrar todos los dibujos de este activo?</p>
+						<div className="flex flex-wrap justify-end gap-2">
+							<button
+								type="button"
+								className={cn(buttonVariants({ variant: "destructive", size: "sm" }), "max-[819px]:h-11")}
+								onClick={() => {
+									setMore(null);
+									manager?.clear();
+								}}
+							>
+								Sí, borrar
+							</button>
+							<button type="button" autoFocus className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "max-[819px]:h-11")} onClick={() => setMore(null)}>
+								Cancelar
+							</button>
+						</div>
+					</PopoverContent>
+				) : (
+					<PopoverContent side="right" aria-label="Más" className="flex w-56 flex-col p-1">
+						<button type="button" className={listButton} onClick={() => setMore("favorites")}>
+							<Star className="h-[18px] w-[18px] text-ink-2" strokeWidth={1.75} aria-hidden />
+							Elegir favoritos
+						</button>
 						<button
 							type="button"
-							className={cn(buttonVariants({ variant: "destructive", size: "sm" }), "max-[819px]:h-11")}
-							onClick={() => {
-								setAskingClear(false);
-								manager?.clear();
-							}}
+							disabled={!manager || manager.drawings().length === 0}
+							className={cn(listButton, "text-danger disabled:pointer-events-none disabled:opacity-50")}
+							onClick={() => setMore("clear")}
 						>
-							Sí, borrar
+							<Trash2 className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
+							Borrar todos los dibujos
 						</button>
-						<button type="button" autoFocus className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "max-[819px]:h-11")} onClick={() => setAskingClear(false)}>
-							Cancelar
-						</button>
-					</div>
-				</PopoverContent>
+					</PopoverContent>
+				)}
 			</Popover>
 		</div>
 		</>

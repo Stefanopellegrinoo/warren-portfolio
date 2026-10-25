@@ -135,7 +135,9 @@ describe('the star in the Dibujar list', () => {
 
   it('on a computer, the list opens from the toolbar, stars without arming and arms by name', async () => {
     const { manager, unmount } = await render({ phoneBar: false })
-    act(() => button('Elegir favoritos').click())
+    act(() => button('Más').click())
+    await flush()
+    act(() => [...document.querySelectorAll<HTMLButtonElement>('[aria-label="Más"] button')].find(b => b.textContent === 'Elegir favoritos')!.click())
     await flush()
 
     act(() => button('Agregar Rectángulo a favoritos').click())

@@ -79,7 +79,9 @@ export function DrawingActions({ manager, onEditText }: { manager: DrawingManage
 	};
 
 	return (
-		<div role="toolbar" aria-label="Dibujo seleccionado" className={barClass}>
+		// Seven actions at 44px are wider than a 320px chart: the bar wraps to a second row there instead of
+		// hiding "Listo" behind a scroll (odd/tasks/chart-customization.md S8); where they fit it is one row as always.
+		<div role="toolbar" aria-label="Dibujo seleccionado" className={cn(barClass, "w-max flex-wrap justify-center")}>
 			<Popover>
 				<PopoverTrigger aria-label="Color" title="Color" className={actionClass}>
 					<span className="h-[18px] w-[18px] rounded-full border border-line-strong" style={{ background: first.style.color }} aria-hidden />

@@ -240,3 +240,74 @@ describe('saving to the account (S4)', () => {
     unmount()
   })
 })
+
+// odd/tasks/chart-customization.md S8 (L9): the sheet's switches and width row are the drawing settings' own,
+// not copies of them: same markup, same look.
+const { Toggle, Widths } = await import('../DrawingSettings')
+describe("the drawing settings' controls", () => {
+  const markup = async (node: React.ReactNode) => {
+    const el = document.createElement('div')
+    const root = createRoot(el)
+    await act(async () => { root.render(node) })
+    const html = el.innerHTML
+    act(() => root.unmount())
+    return html
+  }
+
+  it("a line's switch and widths are the drawing settings' Toggle and Widths", async () => {
+    await open('ema50')
+    const line = group('Línea')!
+
+    expect(line.querySelector('label')!.outerHTML).toBe(await markup(<Toggle label="Línea" checked onChange={() => {}} />))
+    expect(byLabel('Grosor 1', line).parentElement!.outerHTML).toBe(await markup(<Widths value={1} onPick={() => {}} />))
+    unmount()
+  })
+})
+
+// odd/tasks/chart-customization.md S8 (L9): most factory indicator colors are not among the 8 swatches, so no
+// swatch showed as chosen until one was picked. The line's color now shows first, chosen.
+describe('the current color', () => {
+  const css = (color: string) => { const s = document.createElement('span'); s.style.background = color; return s.style.background }
+  const chosen = (within: HTMLElement) => [...within.querySelectorAll('[aria-label]')].filter((s) => s.querySelector('svg')).map((s) => s.getAttribute('aria-label'))
+
+  it("a factory color not in the palette shows first, chosen; a palette color is picked and saved as before", async () => {
+    await open('rsi')
+    const line = group('RSI')!
+
+    expect(chosen(line)).toEqual(['Color actual'])
+    expect(byLabel<HTMLElement>('Color actual', line).querySelector('span')!.style.background).toBe(css('#7E57C2'))
+    act(() => byLabel('Color rojo', line).click())
+
+    expect(saved('rsi')).toEqual({ values: { rsi: 14 }, style: { lines: { rsi: { color: '#f23645' } } } })
+    expect(chosen(line)).toEqual(['Color rojo'])
+    expect(byLabel('Color actual', line)).toBeNull()
+    unmount()
+  })
+
+  it('a factory color in the palette in capitals is that swatch (Bollinger is azul, EMA 20 celeste)', async () => {
+    await open('bollinger')
+    expect(chosen(group('Banda superior')!)).toEqual(['Color azul'])
+    expect(chosen(group('Media')!)).toEqual(['Color actual'])
+    unmount()
+    await open('ema20')
+    expect(chosen(group('Línea')!)).toEqual(['Color celeste'])
+    unmount()
+  })
+
+  it("the histogram's rising and falling colors and a fill's color show theirs too", async () => {
+    await open('macd')
+    expect(chosen(group('Histograma')!)).toEqual(['Color cuando sube actual', 'Color cuando baja actual'])
+    unmount()
+    await open('rsi')
+    expect(chosen(group('Fondo entre niveles')!)).toEqual(['Color de fondo actual'])
+    unmount()
+  })
+
+  it("a level shows the chart's level color", async () => {
+    document.documentElement.style.setProperty('--ink-3', '#8a8478')
+    await open('rsi')
+    expect(chosen(group('Nivel superior')!)).toEqual(['Color actual'])
+    unmount()
+    document.documentElement.style.removeProperty('--ink-3')
+  })
+})

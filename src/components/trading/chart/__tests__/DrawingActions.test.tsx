@@ -125,3 +125,36 @@ describe('the selected drawing on a phone (S3)', () => {
     unmount()
   })
 })
+
+// odd/tasks/chart-customization.md S8 (L7): at 320px the bar's seven actions are wider than the chart and
+// scrolled inside the bar, hiding "Listo". jsdom lays nothing out: these pin the classes that do it, and the
+// probe measures it in Chromium at 320, 375 and 390.
+describe('the selected drawing bar on a 320px phone (S8)', () => {
+  // The bar as it was: one row, centered over the chart, no wider than the chart.
+  const BEFORE = 'absolute bottom-3 left-1/2 z-20 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-0.5 overflow-x-auto rounded border border-line bg-surface p-1 shadow-[var(--shadow-pop)]'
+
+  it('wraps to a second row instead of scrolling, as wide as its actions up to the chart; the same one row when they fit', async () => {
+    const { select, unmount } = await render()
+    select()
+    const classes = bar()!.className.split(' ')
+
+    // Every class of the one-row bar stays, none behind a breakpoint: where the actions fit (375 and up,
+    // the computer) nothing moves. w-max: its own width, not the half of the chart left of its center.
+    expect(classes).toEqual(expect.arrayContaining(BEFORE.split(' ')))
+    expect(classes.filter((c) => !BEFORE.split(' ').includes(c)).sort()).toEqual(['flex-wrap', 'justify-center', 'w-max'])
+    // Every action is the bar's own 44px button: none is hidden or moved elsewhere.
+    expect([...bar()!.querySelectorAll('button')].map((b) => b.getAttribute('aria-label'))).toEqual(['Color', 'Línea', 'Configuración', 'Bloquear', 'Borrar dibujo', 'Listo'])
+    bar()!.querySelectorAll('button').forEach((b) => expect(b.className).toContain('max-[819px]:h-11'))
+    unmount()
+  })
+
+  it('the undo offer keeps its look', async () => {
+    const { select, unmount } = await render()
+    select()
+    act(() => byLabel('Borrar dibujo')!.click())
+
+    expect(undoBar()!.className).not.toContain('flex-wrap')
+    expect(undoBar()!.className).not.toContain('w-max')
+    unmount()
+  })
+})

@@ -16,9 +16,8 @@ import {
 	type IndicatorLineStyle,
 	type IndicatorStyle,
 } from "@/lib/chart/preferences-schema";
-import { WIDTHS } from "@/lib/chart/drawing-options";
 import { ChartSheet } from "./ChartSheet";
-import { FillControls, Swatches } from "./DrawingSettings";
+import { FillControls, Swatches, Toggle, Widths } from "./DrawingSettings";
 import { useChartPreferences } from "./useChartPreferences";
 
 const VALUE_LABELS: Record<keyof IndicatorConfig, string> = {
@@ -59,7 +58,6 @@ const PART_NAMES: Record<string, string> = {
 // In the order of INDICATOR_SPECS' levels (RSI: 30, 70); the sheet lists the upper one first.
 const LEVEL_NAMES = ["Nivel inferior", "Nivel superior"];
 
-const rowClass = "flex min-h-9 cursor-pointer items-center gap-2 text-[14px] text-ink max-[819px]:min-h-11";
 const captionClass = "pt-1 text-[13px] text-ink-2";
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 
@@ -192,8 +190,9 @@ function Settings({
 	const fields = Object.entries(INDICATOR_VALUE_BOUNDS[target]) as [keyof IndicatorConfig, readonly [number, number]][];
 	const lines = INDICATOR_SPECS[target].lines([], config);
 	const parts = INDICATOR_STYLE_PARTS[target];
-	// Only RSI's levels are editable; the stochastic's and ADX's stay as they are.
-	const levels = parts.levels ? levelLooks(target, style, "") : [];
+	// Only RSI's levels are editable; the stochastic's and ADX's stay as they are. Until a color is picked the
+	// chart draws them in the theme's ink-3 (useChartTheme), the color the sheet shows as theirs.
+	const levels = parts.levels ? levelLooks(target, style, getComputedStyle(document.documentElement).getPropertyValue("--ink-3").trim()) : [];
 	const typing = (name: string) => ({
 		onChange: (e: React.ChangeEvent<HTMLInputElement>) => onDraft(name, e.target.value),
 		onBlur: onCommit,
@@ -256,7 +255,7 @@ function Settings({
 									className={cn(field, "ml-auto w-24")}
 								/>
 							</div>
-							<Swatches label="Color" value={style?.levels?.[i]?.color} onPick={(color) => setLevel(i, { color })} />
+							<Swatches label="Color" value={level.color} showCurrent onPick={(color) => setLevel(i, { color })} />
 						</Part>
 					))
 					.reverse()}
@@ -269,6 +268,7 @@ function Settings({
 							<p className={captionClass}>{PART_NAMES[id]}</p>
 							<FillControls
 								drawing={asDrawing}
+								showCurrent
 								onStyle={(p: Partial<DrawingStyle>) =>
 									setFill(id, {
 										...(p.fillBackground !== undefined && { visible: p.fillBackground }),
@@ -298,39 +298,16 @@ function LinePart({ name, look, bars, toggle, onChange }: { name: string; look: 
 			{bars ? (
 				<>
 					<p className={captionClass}>Cuando sube</p>
-					<Swatches label="Color cuando sube" value={look.upColor} onPick={(upColor) => onChange({ upColor })} />
+					<Swatches label="Color cuando sube" value={look.upColor} showCurrent onPick={(upColor) => onChange({ upColor })} />
 					<p className={captionClass}>Cuando baja</p>
-					<Swatches label="Color cuando baja" value={look.downColor} onPick={(downColor) => onChange({ downColor })} />
+					<Swatches label="Color cuando baja" value={look.downColor} showCurrent onPick={(downColor) => onChange({ downColor })} />
 				</>
 			) : (
 				<>
-					<Swatches label="Color" value={look.color} onPick={(color) => onChange({ color })} />
-					<div className="flex gap-1">
-						{WIDTHS.map((w) => (
-							<button
-								key={w}
-								type="button"
-								aria-label={`Grosor ${w}`}
-								aria-pressed={look.width === w}
-								onClick={() => onChange({ width: w })}
-								className={cn("grid h-8 w-10 place-items-center rounded hover:bg-hover max-[819px]:h-11 max-[819px]:w-11", look.width === w && "bg-accent-soft")}
-							>
-								<span className="w-6 rounded-full bg-ink" style={{ height: w }} aria-hidden />
-							</button>
-						))}
-					</div>
+					<Swatches label="Color" value={look.color} showCurrent onPick={(color) => onChange({ color })} />
+					<Widths value={look.width} onPick={(width) => onChange({ width })} />
 				</>
 			)}
 		</Part>
-	);
-}
-
-// The look of a drawing's switches (DrawingSettings), which that file keeps to itself.
-function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (on: boolean) => void }) {
-	return (
-		<label className={rowClass}>
-			<input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-4 w-4 shrink-0 cursor-pointer accent-[var(--accent)]" />
-			{label}
-		</label>
 	);
 }

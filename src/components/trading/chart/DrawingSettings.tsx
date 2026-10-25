@@ -27,15 +27,41 @@ const optionClass = "grid h-8 place-items-center rounded hover:bg-hover max-[819
 const rowClass = "flex min-h-9 cursor-pointer items-center gap-2 text-[14px] text-ink max-[819px]:min-h-11";
 const checkClass = "h-4 w-4 shrink-0 cursor-pointer accent-[var(--accent)]";
 
-/** The palette; `label` names what it colors ("Color de fondo" gives "Color de fondo rojo"). */
-export function Swatches({ label, value, onPick, className }: { label: string; value?: string; onPick: (color: string) => void; className?: string }) {
+/**
+ * The palette; `label` names what it colors ("Color de fondo" gives "Color de fondo rojo"). With `showCurrent`, a
+ * color that is not one of them (most of an indicator's factory colors) comes first, chosen, so the current color
+ * always shows (odd/tasks/chart-customization.md S5).
+ */
+export function Swatches({ label, value, onPick, className, showCurrent }: { label: string; value?: string; onPick: (color: string) => void; className?: string; showCurrent?: boolean }) {
+	const chosen = (color: string) => value?.toLowerCase() === color;
+	const current = showCurrent && value && !COLORS.some((c) => chosen(c.value)) ? value : undefined;
 	return (
-		<div className={cn("grid w-max grid-cols-8 gap-1 max-[819px]:grid-cols-4", className)}>
+		<div className={cn("grid w-max grid-cols-8 gap-1 max-[819px]:grid-cols-4", current && "grid-cols-9 max-[819px]:grid-cols-5", className)}>
+			{current && (
+				<span role="img" aria-label={`${label} actual`} className="grid h-8 w-8 place-items-center max-[819px]:h-11 max-[819px]:w-11">
+					<span className="grid h-5 w-5 place-items-center rounded-full" style={{ background: current }} aria-hidden>
+						<Check className="h-3.5 w-3.5 text-white" aria-hidden />
+					</span>
+				</span>
+			)}
 			{COLORS.map((c) => (
 				<button key={c.value} type="button" aria-label={`${label} ${c.label}`} onClick={() => onPick(c.value)} className={cn(optionClass, "w-8 max-[819px]:w-11")}>
 					<span className="grid h-5 w-5 place-items-center rounded-full" style={{ background: c.value }} aria-hidden>
-						{value === c.value && <Check className="h-3.5 w-3.5 text-white" aria-hidden />}
+						{chosen(c.value) && <Check className="h-3.5 w-3.5 text-white" aria-hidden />}
 					</span>
+				</button>
+			))}
+		</div>
+	);
+}
+
+/** The four thicknesses: the start of the bar's Línea, and an indicator line's widths. */
+export function Widths({ value, onPick }: { value: number; onPick: (width: number) => void }) {
+	return (
+		<div className="flex gap-1">
+			{WIDTHS.map((w) => (
+				<button key={w} type="button" aria-label={`Grosor ${w}`} aria-pressed={value === w} onClick={() => onPick(w)} className={cn(optionClass, "w-10 max-[819px]:w-11", value === w && "bg-accent-soft")}>
+					<span className="w-6 rounded-full bg-ink" style={{ height: w }} aria-hidden />
 				</button>
 			))}
 		</div>
@@ -46,13 +72,7 @@ export function Swatches({ label, value, onPick, className }: { label: string; v
 export function LineControls({ style, onLine, row }: { style: DrawingStyle; onLine: (change: LineChange) => void; row?: boolean }) {
 	return (
 		<>
-			<div className="flex gap-1">
-				{WIDTHS.map((w) => (
-					<button key={w} type="button" aria-label={`Grosor ${w}`} aria-pressed={style.width === w} onClick={() => onLine({ width: w })} className={cn(optionClass, "w-10 max-[819px]:w-11", style.width === w && "bg-accent-soft")}>
-						<span className="w-6 rounded-full bg-ink" style={{ height: w }} aria-hidden />
-					</button>
-				))}
-			</div>
+			<Widths value={style.width} onPick={(width) => onLine({ width })} />
 			<div className={cn("flex gap-1", row ? "flex-wrap" : "flex-col")}>
 				{LINE_STYLES.map((s) => (
 					<button key={s.value} type="button" aria-label={s.label} aria-pressed={style.lineStyle === s.value} onClick={() => onLine({ lineStyle: s.value })} className={cn(optionClass, "flex gap-2 px-2 text-[13px] text-ink", style.lineStyle === s.value && "bg-accent-soft")}>
@@ -65,7 +85,7 @@ export function LineControls({ style, onLine, row }: { style: DrawingStyle; onLi
 	);
 }
 
-function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (on: boolean) => void }) {
+export function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (on: boolean) => void }) {
 	return (
 		<label className={rowClass}>
 			<input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className={checkClass} />
@@ -87,16 +107,16 @@ function Transparency({ value, onChange }: { value: number; onChange: (value: nu
 const Caption = ({ children }: { children: React.ReactNode }) => <p className="pt-1 text-[13px] text-ink-2">{children}</p>;
 
 /** A drawing's fill: the bar's Fondo, and the Fondo of its settings. */
-export function FillControls({ drawing, onStyle }: { drawing: Drawing; onStyle: OnStyle }) {
+export function FillControls({ drawing, onStyle, showCurrent }: { drawing: Drawing; onStyle: OnStyle; showCurrent?: boolean }) {
 	const fill = drawingOptions(drawing.kind)?.fill;
 	if (fill === "position") {
 		const transparency = shown(drawing, "stopTransparency") ?? 80;
 		return (
 			<div className="flex flex-col gap-1">
 				<Caption>Stop</Caption>
-				<Swatches label="Color del stop" value={shown(drawing, "stopColor")} onPick={(c) => onStyle({ stopColor: c })} />
+				<Swatches label="Color del stop" value={shown(drawing, "stopColor")} showCurrent={showCurrent} onPick={(c) => onStyle({ stopColor: c })} />
 				<Caption>Objetivo</Caption>
-				<Swatches label="Color del objetivo" value={shown(drawing, "targetColor")} onPick={(c) => onStyle({ targetColor: c })} />
+				<Swatches label="Color del objetivo" value={shown(drawing, "targetColor")} showCurrent={showCurrent} onPick={(c) => onStyle({ targetColor: c })} />
 				<Transparency value={transparency} onChange={(t) => onStyle({ stopTransparency: t, targetTransparency: t })} />
 			</div>
 		);
@@ -105,7 +125,7 @@ export function FillControls({ drawing, onStyle }: { drawing: Drawing; onStyle: 
 		<div className="flex flex-col gap-1">
 			<Toggle label="Fondo visible" checked={shown(drawing, "fillBackground") !== false} onChange={(on) => onStyle({ fillBackground: on })} />
 			{/* A Fibonacci tool's bands take its level colors. */}
-			{fill === "color" && <Swatches label="Color de fondo" value={drawing.style.backgroundColor ?? drawing.style.color} onPick={(c) => onStyle({ backgroundColor: c })} />}
+			{fill === "color" && <Swatches label="Color de fondo" value={drawing.style.backgroundColor ?? drawing.style.color} showCurrent={showCurrent} onPick={(c) => onStyle({ backgroundColor: c })} />}
 			<Transparency value={shown(drawing, "transparency") ?? 80} onChange={(t) => onStyle({ transparency: t })} />
 		</div>
 	);
