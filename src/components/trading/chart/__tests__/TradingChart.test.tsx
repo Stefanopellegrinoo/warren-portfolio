@@ -190,9 +190,11 @@ describe('TradingChart pane heights', () => {
   })
 
   // The separators' z-index 50 drew their grab pills over the open app menu (seen in Chromium).
-  it('keeps the separators under the app menu', async () => {
+  // A phone only: on a computer the menu is a column, and isolating changed its text rendering.
+  it("keeps the separators under the phone's app menu", async () => {
     const { box, unmount } = await render()
-    expect(box.classList).toContain('isolate')
+    expect(box.classList).toContain('max-[819px]:isolate')
+    expect(box.classList).not.toContain('isolate')
     unmount()
   })
 
