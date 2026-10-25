@@ -84,6 +84,30 @@ describe('TradingPage', () => {
   })
 })
 
+// odd/tasks/grafico-espacio.md S2: on a phone the top bar is one row, the rest moves to the bottom bar.
+describe('TradingPage top bar on a phone', () => {
+  const header = () => host.querySelector('header')!
+
+  it('has the menu button, the symbol and the star', () => {
+    act(() => root.render(<TradingPage />))
+    expect(header().querySelector('button[aria-controls="sidebar"]')?.textContent).toBe('Abrir menú')
+    expect(header().querySelector('[aria-label^="Cambiar símbolo"]')).not.toBeNull()
+    expect(header().querySelector('[aria-label="SPY está en tu lista"]')).not.toBeNull()
+  })
+
+  it('leaves the timeframe, the indicators and the view switch to wider screens', () => {
+    act(() => root.render(<TradingPage />))
+    for (const name of ['Temporalidad', 'Indicadores', 'Vista']) {
+      expect(header().querySelector(`[aria-label="${name}"]`)!.closest('.max-\\[819px\\]\\:hidden'), name).not.toBeNull()
+    }
+  })
+
+  it('takes the whole screen height: there is no app bar above it', () => {
+    act(() => root.render(<TradingPage />))
+    expect((host.firstElementChild as HTMLElement).className).not.toContain('3.5rem')
+  })
+})
+
 describe('Watchlist', () => {
   it('selecting a row changes the chart symbol and tells the page', () => {
     const onSelect = vi.fn()

@@ -40,7 +40,7 @@ function Trading() {
   const [view, setView] = useState<View>("chart");
 
   return (
-    <div className="flex h-dvh flex-col max-[819px]:h-[calc(100dvh-3.5rem)]">
+    <div className="flex h-dvh flex-col">
       <h1 className="sr-only">Gráficos</h1>
 
       <Header view={view} onViewChange={setView} quote={quote} />

@@ -10,7 +10,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
 }))
 
-import AppShell from '../AppShell'
+import AppShell, { useShellMenu } from '../AppShell'
 
 const render = (path: string) => renderToStaticMarkup(<AppShell pathnameForTest={path}><p>contenido</p></AppShell>)
 
@@ -91,5 +91,38 @@ describe('AppShell — the search and the portfolio', () => {
     expect(urls).not.toContain('/api/positions')
     expect(options(el)).toEqual(['YPFEn cartera'])
     unmount()
+  })
+})
+
+// odd/tasks/grafico-espacio.md S2: on Gráficos the page's own phone bar carries the menu button.
+describe('AppShell — a page with its own phone bar', () => {
+  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  afterEach(() => { document.body.innerHTML = '' })
+
+  function PageBar() {
+    const { open, openMenu } = useShellMenu()
+    return <button type="button" aria-expanded={open} onClick={e => openMenu(e.currentTarget)}>Menú de la página</button>
+  }
+
+  it('renders no bar of its own on Gráficos', () => {
+    expect(render('/trading')).not.toContain('Abrir menú')
+    expect(render('/dashboard')).toContain('Abrir menú')
+  })
+
+  it("the page's button opens the menu, and gets the focus back when it closes", () => {
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    act(() => root.render(<AppShell pathnameForTest="/trading"><PageBar /></AppShell>))
+    const button = [...el.querySelectorAll('button')].find(b => b.textContent === 'Menú de la página')!
+
+    act(() => button.click())
+    expect(button.getAttribute('aria-expanded')).toBe('true')
+    expect(el.querySelector('#sidebar')!.className).toContain('max-[819px]:translate-x-0')
+
+    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })) })
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(button)
+    act(() => root.unmount())
   })
 })

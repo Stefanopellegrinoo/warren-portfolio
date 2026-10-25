@@ -1,6 +1,6 @@
 "use client";
 
-import { Star } from "lucide-react";
+import { Menu, Star } from "lucide-react";
 import { SymbolSelector } from "@/components/trading/chart/SymbolSelector";
 import { TimeframeSelector } from "@/components/trading/chart/TimeframeSelector";
 import { IndicatorMenu } from "@/components/trading/chart/IndicatorMenu";
@@ -9,6 +9,7 @@ import { useChartStore } from "@/lib/store/chart-store";
 import { addSymbolToCurrentWatchlist } from "@/lib/warren/watchlist";
 import { cn, formatPct } from "@/lib/utils";
 import { iconButton, priceText } from "@/components/trading/ui";
+import { useShellMenu } from "@/components/shell/AppShell";
 import type { Quote } from "./useQuote";
 
 export type View = "chart" | "list";
@@ -24,12 +25,15 @@ interface HeaderProps {
   quote: Quote | null;
 }
 
-/** The chart's top bar: symbol and quote, timeframe, indicators and the watchlist star. */
+/** The chart's top bar: symbol and quote, timeframe, indicators and the watchlist star. On a
+ *  phone it is one row (the app menu, the symbol, the star) and the rest sits in the bottom bar. */
 export function Header({ view, onViewChange, quote }: HeaderProps) {
   const symbol = useChartStore((s) => s.symbol);
 
   return (
-    <header className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line bg-canvas px-3 py-1.5 max-[819px]:gap-x-1 max-[819px]:px-2">
+    <header className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line bg-canvas px-3 py-1.5 max-[819px]:gap-x-1 max-[819px]:px-1 max-[819px]:py-0.5">
+      <MenuButton />
+
       <div className="flex min-w-0 items-center max-[1099px]:order-1 max-[1099px]:flex-1">
         <SymbolSelector onSymbolSelect={() => onViewChange("chart")}>
           {quote && (
@@ -41,11 +45,11 @@ export function Header({ view, onViewChange, quote }: HeaderProps) {
         </SymbolSelector>
       </div>
 
-      <div className={cn("min-w-0 overflow-x-auto max-[1099px]:order-5 max-[819px]:flex-1 [&>div]:w-fit", view === "list" && "max-[1099px]:hidden")}>
+      <div className={cn("min-w-0 overflow-x-auto max-[1099px]:order-5 max-[819px]:hidden [&>div]:w-fit", view === "list" && "max-[1099px]:hidden")}>
         <TimeframeSelector />
       </div>
 
-      <div className={cn("max-[1099px]:order-3", view === "list" && "max-[1099px]:hidden")}>
+      <div className={cn("max-[1099px]:order-3 max-[819px]:hidden", view === "list" && "max-[1099px]:hidden")}>
         <IndicatorMenu />
       </div>
 
@@ -54,9 +58,9 @@ export function Header({ view, onViewChange, quote }: HeaderProps) {
       </div>
 
       {/* Below 1100 px: symbol, star and indicators on one line; timeframe and view switch on the next. */}
-      <div aria-hidden="true" className="h-0 basis-full max-[1099px]:order-4 min-[1100px]:hidden" />
+      <div aria-hidden="true" className="h-0 basis-full max-[1099px]:order-4 max-[819px]:hidden min-[1100px]:hidden" />
 
-      <div role="radiogroup" aria-label="Vista" className="ml-auto inline-flex flex-none gap-0.5 rounded-md border border-line bg-surface-2 p-0.5 max-[1099px]:order-6 min-[1100px]:hidden">
+      <div role="radiogroup" aria-label="Vista" className="ml-auto inline-flex flex-none gap-0.5 rounded-md border border-line bg-surface-2 p-0.5 max-[1099px]:order-6 max-[819px]:hidden min-[1100px]:hidden">
         {VIEWS.map((v) => (
           <button
             key={v.id}
@@ -74,6 +78,16 @@ export function Header({ view, onViewChange, quote }: HeaderProps) {
         ))}
       </div>
     </header>
+  );
+}
+
+function MenuButton() {
+  const { open, openMenu } = useShellMenu();
+  return (
+    <button type="button" onClick={(e) => openMenu(e.currentTarget)} aria-controls="sidebar" aria-expanded={open} className={cn(iconButton, "min-[820px]:hidden")}>
+      <Menu className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />
+      <span className="sr-only">Abrir menú</span>
+    </button>
   );
 }
 

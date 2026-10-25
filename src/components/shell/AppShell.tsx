@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { Menu, X, LogOut, Search } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -17,6 +17,12 @@ const linkBase =
 const linkActive =
   'bg-surface font-medium text-ink shadow-[0_0_0_1px_var(--line)] before:absolute before:-left-3 before:bottom-2 before:top-2 before:w-0.5 before:rounded before:bg-accent'
 const sectionTitle = 'mb-1 px-2 text-xs font-medium uppercase tracking-[0.06em] text-ink-3'
+
+// Gráficos keeps the whole phone screen for the chart: its own bar carries the menu button
+// (odd/tasks/grafico-espacio.md S2), so the shell draws no bar there.
+const OWN_PHONE_BAR = ['/trading']
+const ShellMenu = createContext<{ open: boolean; openMenu: (from: HTMLElement) => void }>({ open: false, openMenu: () => {} })
+export const useShellMenu = () => useContext(ShellMenu)
 
 type Portfolio = Awaited<ReturnType<typeof getPortfolio>>
 // The search opens the stock chart, so it only offers stocks and CEDEARs.
@@ -41,7 +47,8 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
   const open = openOn === pathname
   const [askedHeld, setAskedHeld] = useState<string[]>([])
   const [searchOpen, setSearchOpen] = useState(false)
-  const openBtn = useRef<HTMLButtonElement>(null)
+  // The button that opened the menu takes the focus back when it closes.
+  const opener = useRef<HTMLElement | null>(null)
   const closeBtn = useRef<HTMLButtonElement>(null)
   // The portfolio this tab already has; changing section never asks for it again.
   const known = cachedValue<Portfolio>(POSITIONS_KEY)
@@ -71,9 +78,14 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
 
+  function openMenu(from: HTMLElement) {
+    opener.current = from
+    setOpenOn(pathname)
+  }
+
   function closeMenu() {
     setOpenOn(null)
-    openBtn.current?.focus()
+    opener.current?.focus()
   }
 
   async function handleLogout() {
@@ -88,11 +100,10 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
         Saltar al contenido
       </a>
 
-      <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-line bg-canvas px-2 min-[820px]:hidden">
+      {!OWN_PHONE_BAR.includes(current ?? '') && <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-line bg-canvas px-2 min-[820px]:hidden">
         <button
-          ref={openBtn}
           type="button"
-          onClick={() => setOpenOn(pathname)}
+          onClick={e => openMenu(e.currentTarget)}
           aria-controls="sidebar"
           aria-expanded={open}
           className="grid h-11 w-11 place-items-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
@@ -101,7 +112,7 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
           <span className="sr-only">Abrir menú</span>
         </button>
         <span className="font-serif text-xl font-medium leading-none">Warren</span>
-      </header>
+      </header>}
 
       <div
         aria-hidden="true"
@@ -179,7 +190,7 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
       <AssetSearch open={searchOpen} onClose={() => setSearchOpen(false)} held={known ? heldOf(known) : askedHeld} />
 
       <main id="main" className="min-w-0">
-        {children}
+        <ShellMenu.Provider value={{ open, openMenu }}>{children}</ShellMenu.Provider>
       </main>
     </div>
   )
