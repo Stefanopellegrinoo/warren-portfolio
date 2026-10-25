@@ -179,3 +179,15 @@
 @media (max-width: 600px) {
   body:has([data-phone-bar]) [data-sonner-toaster][data-y-position="bottom"] { bottom: calc(var(--mobile-offset-bottom) + 3.5rem + env(safe-area-inset-bottom)) !important; }
 }
+
+/* lightweight-charts 5.2.0 puts a 9px handle on the line between two panes (inline styles, no
+   class): too thin to catch with a finger. On touch screens it is 25px, centred on the line, with
+   a pill that says it can be dragged (odd/tasks/grafico-espacio.md S5). The library's DOM is
+   pinned by TradingChart.test.tsx. */
+@media (pointer: coarse) {
+  [data-chart-box] td[colspan="3"] > div:last-child { top: -12px !important; height: 25px !important; }
+  [data-chart-box] td[colspan="3"] > div:last-child::after {
+    content: ""; position: absolute; left: 50%; top: 50%; width: 36px; height: 4px; margin: -2px 0 0 -18px;
+    border-radius: 2px; background: var(--line-strong);
+  }
+}

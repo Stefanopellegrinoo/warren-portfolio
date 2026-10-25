@@ -163,6 +163,44 @@ describe('TradingChart price pane on a phone (S6)', () => {
   })
 })
 
+// odd/tasks/grafico-espacio.md S5: the panes are only sized when the indicators change, so the
+// heights a finger set stay from one symbol to the next.
+describe('TradingChart pane heights', () => {
+  it('a new symbol keeps the heights the user set', async () => {
+    onPhone(true)
+    const list = panes(3)
+    chart.panes.mockReturnValue(list as never)
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<TradingChart symbol="BTCUSDT" timeframe="1d" />) })
+    expect(list[0].setStretchFactor).toHaveBeenCalled()
+    list.forEach(p => p.setStretchFactor.mockClear())
+
+    await act(async () => { root.render(<TradingChart symbol="SPY" timeframe="1w" />) })
+
+    list.forEach(p => expect(p.setStretchFactor).not.toHaveBeenCalled())
+    act(() => root.unmount())
+  })
+
+  it('marks its box for the wider pane separators on touch screens', async () => {
+    const { box, unmount } = await render()
+    expect(box.hasAttribute('data-chart-box')).toBe(true)
+    unmount()
+  })
+
+  // globals.css widens the separator by its place in the library's DOM (inline styles, no class),
+  // checked on 5.2.0 with a finger in Chromium: another version has to be checked again.
+  it("the separator override matches the library's DOM", async () => {
+    const { readFileSync } = await import('node:fs')
+    const lib = 'node_modules/lightweight-charts'
+    expect(JSON.parse(readFileSync(`${lib}/package.json`, 'utf8')).version).toBe('5.2.0')
+    const bundle = readFileSync(`${lib}/dist/lightweight-charts.production.mjs`, 'utf8')
+    expect(bundle).toContain('setAttribute("colspan","3")')
+    expect(bundle).toMatch(/cursor="row-resize",this\.\w+\.appendChild\(\w\);const \w=document\.createElement\("div"\),\w=\w\.style;\w\.position="absolute",\w\.zIndex="50",\w\.top="-4px",\w\.height="9px"/)
+  })
+})
+
 describe('TradingChart price alerts (S7)', () => {
   async function placeAlertAt(price: number) {
     const { box, unmount } = await render()
