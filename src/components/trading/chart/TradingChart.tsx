@@ -21,7 +21,9 @@ import {
 import { DrawingManager, type Drawing } from "lightweight-charts-drawing";
 import { ChevronDown, Eye, EyeOff, Settings2, X } from "lucide-react";
 import { useChartStore, type IndicatorKey } from "@/lib/store/chart-store";
-import { INDICATOR_ORDER, INDICATOR_SPECS } from "@/lib/chart/indicator-specs";
+import { INDICATOR_ORDER, INDICATOR_SPECS, type IndicatorLine } from "@/lib/chart/indicator-specs";
+import { BandFill, effectiveConfig, fillLook, levelLooks, lineLook, seriesPoints } from "@/lib/chart/indicator-style";
+import { INDICATOR_STYLE_PARTS, type ChartPreferences } from "@/lib/chart/preferences-schema";
 import { hitTestAlert, priceDecimals, type ChartAlert } from "@/lib/chart/alerts";
 import { touchDrawing } from "@/lib/chart/touch-drawing";
 import { onTap, selectBeforeMove } from "@/lib/chart/select-before-move";
@@ -34,6 +36,7 @@ import { useChartAlerts } from "./useChartAlerts";
 import { useChartTheme, type ChartTheme } from "./useChartTheme";
 import { DrawingTools } from "./DrawingTools";
 import { DrawingActions } from "./DrawingActions";
+import { useChartPreferences } from "./useChartPreferences";
 
 const TZ = "America/Argentina/Buenos_Aires";
 const INTRADAY: Timeframe[] = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h"];
@@ -93,10 +96,18 @@ function chartOptions(t: ChartTheme, intraday: boolean) {
 interface IndicatorSeries {
 	key: IndicatorKey;
 	series: ISeriesApi<SeriesType>[];
+	levels: IPriceLine[];
+	fills: BandFill[];
 }
 
-/** Rebuilds the indicator series when the enabled set or a setting changes,
- *  then feeds every series the current candles. */
+/** What a fill spans: Bollinger's two bands, or RSI's two levels. */
+function fillEdges(id: string, lines: IndicatorLine[], levels: { value: number }[]) {
+	if (id === "bands") return { top: lines.find((l) => l.id === "upper")!.data, bottom: lines.find((l) => l.id === "lower")!.data };
+	return { top: levels[1].value, bottom: levels[0].value };
+}
+
+/** Rebuilds the indicator series when the enabled set or a setting changes, then feeds every
+ *  series the current candles and its style (a style change restyles, it never rebuilds the panes). */
 function syncIndicators(
 	chart: IChartApi,
 	built: { signature: string; list: IndicatorSeries[] },
@@ -104,6 +115,7 @@ function syncIndicators(
 	enabled: IndicatorKey[],
 	hidden: Record<IndicatorKey, boolean>,
 	config: Parameters<(typeof INDICATOR_SPECS)["ema20"]["lines"]>[1],
+	saved: ChartPreferences["indicatorSettings"],
 	theme: ChartTheme,
 	phone: boolean,
 ) {
@@ -127,10 +139,15 @@ function syncIndicators(
 							paneIndex,
 						),
 			);
-			spec.levels?.forEach((price) =>
+			const levels = (spec.levels ?? []).map((price) =>
 				series[0].createPriceLine({ price, color: theme.ink3, lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: false }),
 			);
-			return { key, series };
+			const fills = (INDICATOR_STYLE_PARTS[key].fills ?? []).map(() => {
+				const fill = new BandFill();
+				series[0].attachPrimitive(fill);
+				return fill;
+			});
+			return { key, series, levels, fills };
 		});
 		// The price pane keeps most of the height however many panes there are; on a phone,
 		// where height is scarce, at least two thirds of it.
@@ -139,11 +156,21 @@ function syncIndicators(
 		panes.forEach((p, i) => p.setStretchFactor(i === 0 ? price : 1));
 		built.signature = signature;
 	}
-	for (const { key, series } of built.list) {
+	for (const { key, series, levels, fills } of built.list) {
 		const lines = INDICATOR_SPECS[key].lines(candles, config);
+		const style = saved[key]?.style;
 		series.forEach((s, i) => {
-			s.setData(lines[i].data.map((p) => ({ time: asTime(p.time), value: p.value })));
-			s.applyOptions({ visible: !hidden[key] });
+			const look = lineLook(lines[i], style?.lines?.[lines[i].id]);
+			s.setData(seriesPoints(lines[i], look).map((p) => ({ ...p, time: asTime(p.time) })));
+			const visible = !hidden[key] && look.visible;
+			s.applyOptions(lines[i].type === "histogram" ? { visible, color: look.upColor } : { visible, color: look.color, lineWidth: look.width });
+		});
+		const looks = levelLooks(key, style, theme.ink3);
+		levels.forEach((l, i) => l.applyOptions({ price: looks[i].value, color: looks[i].color, lineVisible: looks[i].visible }));
+		fills.forEach((f, i) => {
+			const id = INDICATOR_STYLE_PARTS[key].fills![i];
+			const look = fillLook(id, style);
+			f.update({ ...look, visible: look.visible && !hidden[key], ...fillEdges(id, lines, looks) });
 		});
 	}
 }
@@ -169,7 +196,10 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	const intraday = INTRADAY.includes(timeframe);
 	const indicators = useChartStore((s) => s.indicators);
 	const hidden = useChartStore((s) => s.hidden);
-	const config = useChartStore((s) => s.config);
+	const device = useChartStore((s) => s.config);
+	// An indicator's settings saved in the account win over this device's values (S4).
+	const saved = useChartPreferences().preferences.indicatorSettings;
+	const config = useMemo(() => effectiveConfig(device, saved), [device, saved]);
 	const toggleHidden = useChartStore((s) => s.toggleHidden);
 	const removeIndicator = useChartStore((s) => s.removeIndicator);
 	const setSettingsTarget = useChartStore((s) => s.setSettingsTarget);
@@ -282,8 +312,8 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	useEffect(() => {
 		const chart = chartRef.current;
 		if (!chart || !theme || data.status !== "ready") return;
-		syncIndicators(chart, indicatorsRef.current, data.candles, enabled, hidden, config, theme, window.matchMedia(PHONE).matches);
-	}, [data.status, data.candles, enabled, hidden, config, theme, manager]);
+		syncIndicators(chart, indicatorsRef.current, data.candles, enabled, hidden, config, saved, theme, window.matchMedia(PHONE).matches);
+	}, [data.status, data.candles, enabled, hidden, config, saved, theme, manager]);
 
 	// Alert lines; the selected one is drawn thicker.
 	const selectedId = selectedAlert?.id;

@@ -5,6 +5,15 @@ import { createChart } from 'lightweight-charts'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
+// Node 25 ships a stub localStorage without methods; the persisted chart store needs a real one.
+vi.hoisted(() => {
+  const data = new Map<string, string>()
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v), removeItem: (k: string) => void data.delete(k) },
+  })
+})
+
 // lightweight-charts draws on canvas, which jsdom lacks: a recording stand-in.
 const priceScale = { applyOptions: vi.fn() }
 const series = {
@@ -14,6 +23,7 @@ const series = {
   update: vi.fn(),
   createPriceLine: vi.fn(() => ({ applyOptions: vi.fn() })),
   removePriceLine: vi.fn(),
+  attachPrimitive: vi.fn(),
   coordinateToPrice: vi.fn((y: number) => 100 - y / 10),
   priceToCoordinate: vi.fn(() => null),
 }
@@ -77,7 +87,10 @@ vi.mock('../DrawingTools', () => ({
 
 const { TradingChart } = await import('../TradingChart')
 const { setDefaultStyleOverride } = await import('lightweight-charts-drawing')
-const { setToolStyle } = await import('@/lib/chart/preferences')
+const { setToolStyle, setIndicatorSettings } = await import('@/lib/chart/preferences')
+const { useChartStore, DEFAULT_CONFIG } = await import('@/lib/store/chart-store')
+const { INDICATOR_KEYS } = await import('@/lib/chart/preferences-schema')
+const lwc = await import('lightweight-charts')
 
 afterEach(() => { vi.clearAllMocks(); vi.unstubAllGlobals(); setupOrder.length = 0; alertsApi.alerts = []; series.priceToCoordinate.mockReturnValue(null); document.body.innerHTML = '' })
 
@@ -500,6 +513,155 @@ describe('TradingChart alerts: select before move', () => {
     const { unmount } = await render()
 
     expect(setupOrder).toEqual(['select before move', 'drawing layer'])
+    unmount()
+  })
+})
+
+// odd/tasks/chart-customization.md S5: each indicator line takes its saved style without the chart
+// rebuilding its panes; S4: the account's settings for an indicator win over this device's values;
+// S8: with nothing saved, every series looks exactly as before.
+describe('TradingChart indicator styles', () => {
+  type Rec = Record<string, unknown>
+  interface Made { type: unknown; pane: number; options: Rec; data: Rec[]; lines: { options: Rec }[]; fills: { paneViews: () => { renderer: () => unknown }[] }[] }
+  let made: Made[]
+  const initial = useChartStore.getState()
+  // One recording series per indicator line, in the order the chart adds them; the candles keep the shared one.
+  beforeEach(() => {
+    made = []
+    chart.addSeries.mockImplementation(((type: unknown, options: Rec, pane = 0) => {
+      if (type === lwc.CandlestickSeries) return series
+      const m: Made = { type, pane, options: { ...options }, data: [], lines: [], fills: [] }
+      made.push(m)
+      return {
+        applyOptions: (o: Rec) => Object.assign(m.options, o),
+        setData: (d: Rec[]) => { m.data = d },
+        createPriceLine: (o: Rec) => {
+          const line = { options: { ...o }, applyOptions: (p: Rec) => Object.assign(line.options, p) }
+          m.lines.push(line)
+          return line
+        },
+        attachPrimitive: (p: Made['fills'][number] & { attached: (h: unknown) => void }) => {
+          p.attached({ chart: { timeScale: () => ({ timeToCoordinate: (t: number) => t }) }, series: { priceToCoordinate: (v: number) => 100 - v }, requestUpdate() {} })
+          m.fills.push(p)
+        },
+      }
+    }) as never)
+  })
+  afterEach(() => {
+    chart.addSeries.mockImplementation(() => series)
+    INDICATOR_KEYS.forEach((k) => setIndicatorSettings(k, null))
+    useChartStore.setState(initial, true)
+  })
+  const options = () => made.map((m) => m.options)
+  const legend = () => document.querySelector('[data-chart-legend]')!.textContent
+  const lineOptions = (color: string) => ({ color, lineWidth: 1, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false, priceFormat: expect.objectContaining({ type: 'custom' }), visible: true })
+  const barOptions = (color: string, volume = false) => ({ color, priceLineVisible: false, lastValueVisible: false, priceFormat: volume ? { type: 'volume' } : expect.objectContaining({ type: 'custom' }), visible: true })
+  const drawsFill = (m: Made) => m.fills.some((f) => f.paneViews()[0].renderer() !== null)
+
+  it("with nothing saved, every line has today's color and width, the levels today's look, and no fill (S8)", async () => {
+    const { unmount } = await render()
+
+    // The indicators the store turns on, in INDICATOR_ORDER.
+    expect(options()).toEqual([
+      lineOptions('#00BCD4'), lineOptions('#FF9800'), lineOptions('#E91E63'),
+      barOptions('#787b86', true),
+      lineOptions('#7E57C2'),
+      lineOptions('#2196F3'), lineOptions('#e0904a'), barOptions('#8f887e'),
+      lineOptions('#2196F3'), lineOptions('#e0904a'),
+      lineOptions('#B0BEC5'), lineOptions('#3f8c45'), lineOptions('#c8382a'),
+    ])
+    // lineVisible: the library's default, true.
+    expect(made.flatMap((m) => m.lines.map(({ options: { lineVisible, ...o } }) => (lineVisible === false ? 'hidden' : o)))).toEqual(
+      [30, 70, 20, 80, 25].map((price) => ({ price, color: '#222', lineStyle: 2, lineWidth: 1, axisLabelVisible: false })),
+    )
+    expect(made.some((m) => m.data.some((p) => 'color' in p))).toBe(false)
+    expect(made.some(drawsFill)).toBe(false)
+    unmount()
+  })
+
+  it("a saved line color, width and visibility restyle that series only, without rebuilding the panes", async () => {
+    const list = panes(6)
+    chart.panes.mockReturnValue(list as never)
+    const { unmount } = await render()
+    list.forEach((p) => p.setStretchFactor.mockClear())
+
+    act(() => setIndicatorSettings('ema50', { values: { ema50: 50 }, style: { lines: { ema50: { color: '#f23645', width: 3, visible: false } } } }))
+
+    expect(made[1].options).toMatchObject({ color: '#f23645', lineWidth: 3, visible: false })
+    expect(made[0].options).toMatchObject({ color: '#00BCD4', lineWidth: 1, visible: true })
+    expect(made).toHaveLength(13)
+    expect(chart.removeSeries).not.toHaveBeenCalled()
+    list.forEach((p) => expect(p.setStretchFactor).not.toHaveBeenCalled())
+    unmount()
+  })
+
+  it('RSI levels take their saved value and color, and the fill between them follows', async () => {
+    const { unmount } = await render()
+    const rsi = made[4]
+    expect(drawsFill(rsi)).toBe(false)
+
+    act(() => setIndicatorSettings('rsi', { style: { levels: [{ value: 30 }, { value: 80, color: '#f23645' }], fills: { levels: { visible: true, color: '#9c27b0', transparency: 50 } } } }))
+
+    expect(rsi.lines.map((l) => [l.options.price, l.options.color])).toEqual([[30, '#222'], [80, '#f23645']])
+    const calls: unknown[][] = []
+    const ctx = new Proxy({} as Rec, { get: (t, k) => (k in t ? t[k as string] : (...a: unknown[]) => calls.push([k, ...a])), set: (t, k, v) => { t[k as string] = v; return true } })
+    const renderer = rsi.fills[0].paneViews()[0].renderer() as { draw: (t: unknown) => void }
+    renderer.draw({ useMediaCoordinateSpace: (f: (s: unknown) => void) => f({ context: ctx, mediaSize: { width: 300, height: 100 } }) })
+    expect(ctx.fillStyle).toBe('#9c27b0')
+    expect(calls).toContainEqual(['fillRect', 0, 20, 300, 50]) // y(80) = 20 to y(30) = 70
+    unmount()
+  })
+
+  it('the MACD histogram takes its rising color and can be hidden; volume bars take the rising color of their candle', async () => {
+    const { unmount } = await render()
+
+    act(() => {
+      setIndicatorSettings('macd', { style: { lines: { histogram: { upColor: '#089981', downColor: '#089981', visible: false } } } })
+      setIndicatorSettings('volume', { style: { lines: { volume: { upColor: '#089981', downColor: '#f23645' } } } })
+    })
+
+    expect(made[7].options).toMatchObject({ color: '#089981', visible: false })
+    expect(made[3].data).toEqual([{ time: 1, value: undefined, color: '#089981' }]) // the one candle closed up
+    unmount()
+  })
+
+  it('the Bollinger fill is drawn when turned on and gone when turned off', async () => {
+    useChartStore.setState({ indicators: { ...initial.indicators, bollinger: true } })
+    const { unmount } = await render()
+    const upper = made.find((m) => m.options.color === '#2962FF')!
+
+    act(() => setIndicatorSettings('bollinger', { style: { fills: { bands: { visible: true } } } }))
+    expect(drawsFill(upper)).toBe(true)
+
+    act(() => setIndicatorSettings('bollinger', { style: { fills: { bands: { visible: false } } } }))
+    expect(drawsFill(upper)).toBe(false)
+    unmount()
+  })
+
+  it("an indicator's saved values win over this device's; the other indicators keep the device's (S4)", async () => {
+    // Two indicators: the legend lists them open.
+    const only = Object.fromEntries(Object.keys(initial.indicators).map((k) => [k, k === 'ema20' || k === 'rsi'])) as typeof initial.indicators
+    useChartStore.setState({ indicators: only, config: { ...DEFAULT_CONFIG, ema20: 30, rsi: 9 } })
+    const { unmount } = await render()
+    expect(legend()).toContain('RSI 9')
+
+    act(() => setIndicatorSettings('rsi', { values: { rsi: 21 } }))
+
+    expect(legend()).toContain('RSI 21')
+    expect(legend()).toContain('EMA 30')
+    expect(useChartStore.getState().config.rsi).toBe(9)
+    unmount()
+  })
+
+  it("the legend's eye still hides every line of an indicator, whatever its saved style (S8)", async () => {
+    const { unmount } = await render()
+    act(() => setIndicatorSettings('rsi', { style: { lines: { rsi: { visible: true } }, fills: { levels: { visible: true } } } }))
+
+    act(() => useChartStore.getState().toggleHidden('rsi'))
+
+    expect(made[4].options.visible).toBe(false)
+    expect(drawsFill(made[4])).toBe(false)
+    expect(made[0].options.visible).toBe(true)
     unmount()
   })
 })

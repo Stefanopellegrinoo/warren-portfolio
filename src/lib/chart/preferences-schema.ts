@@ -46,14 +46,39 @@ export const INDICATOR_VALUE_BOUNDS: Record<IndicatorKey, Partial<Record<keyof I
 /** A remembered style: the subset of the library's DrawingStyle the user last chose for a tool. */
 export type RememberedStyle = Partial<DrawingStyle>
 
-/** One line of an indicator; T5 names the lines (upper, signal, histogramUp, …). */
-export interface IndicatorLineStyle { color?: string; width?: number; visible?: boolean }
+/** One line of an indicator, by its id in INDICATOR_SPECS; a histogram has a color for rising bars and one for falling. */
+export interface IndicatorLineStyle { color?: string; width?: number; visible?: boolean; upColor?: string; downColor?: string }
+/** A reference level (RSI's 30 and 70), in the order of INDICATOR_SPECS' levels. */
+export interface IndicatorLevelStyle { value: number; color?: string; visible?: boolean }
+export interface IndicatorFillStyle { visible?: boolean; color?: string; transparency?: number }
 export interface IndicatorStyle {
   lines?: Record<string, IndicatorLineStyle>
-  levels?: { value: number; color?: string; visible?: boolean }[]
-  fills?: Record<string, { visible?: boolean; color?: string; transparency?: number }>
-  [field: string]: unknown
+  levels?: IndicatorLevelStyle[]
+  fills?: Record<string, IndicatorFillStyle>
 }
+
+/**
+ * What each indicator lets the user restyle (S5): its lines and histograms, by the ids INDICATOR_SPECS gives
+ * them (a test keeps them equal), how many of its levels and within what bounds, and its fills.
+ */
+export const INDICATOR_STYLE_PARTS: Record<IndicatorKey, {
+  lines?: readonly string[]
+  histograms?: readonly string[]
+  levels?: { count: number; min: number; max: number }
+  fills?: readonly string[]
+}> = {
+  ema20: { lines: ['ema20'] },
+  ema50: { lines: ['ema50'] },
+  ema200: { lines: ['ema200'] },
+  rsi: { lines: ['rsi'], levels: { count: 2, min: 0, max: 100 }, fills: ['levels'] },
+  macd: { lines: ['macd', 'signal'], histograms: ['histogram'] },
+  volume: { histograms: ['volume'] },
+  bollinger: { lines: ['upper', 'middle', 'lower'], fills: ['bands'] },
+  obv: { lines: ['obv'] },
+  stochastic: { lines: ['k', 'd'] },
+  adx: { lines: ['adx', 'plusDI', 'minusDI'] },
+}
+
 export interface IndicatorSettings { values?: Partial<IndicatorConfig>; style?: IndicatorStyle }
 
 export interface ChartPreferences {
@@ -144,22 +169,30 @@ const drawingStyle = z
   })
   .catchall(openValue)
 
-const fieldMap = <T extends z.ZodType>(value: T) => z.record(z.string().regex(KEY_RE), value)
-// Open for T5, which defines the exact lines, levels and fills of each indicator.
-const indicatorStyle = z
-  .object({
-    lines: fieldMap(z.strictObject({ color: color.optional(), width: z.number().int().min(1).max(4).optional(), visible: flag })).optional(),
-    levels: z.array(z.strictObject({ value: z.number().min(-1e9).max(1e9), color: color.optional(), visible: flag })).max(8).optional(),
-    fills: fieldMap(z.strictObject({ visible: flag, color: color.optional(), transparency: percent.optional() })).optional(),
+// Exactly the parts INDICATOR_STYLE_PARTS gives each indicator: anything else (enabled, hidden, another
+// indicator's line) is refused.
+const lineLook = z.strictObject({ color: color.optional(), width: z.number().int().min(1).max(4).optional(), visible: flag })
+const barsLook = z.strictObject({ upColor: color.optional(), downColor: color.optional(), visible: flag })
+const fillLook = z.strictObject({ visible: flag, color: color.optional(), transparency: percent.optional() })
+const byId = (ids: readonly string[], schema: z.ZodType) => Object.fromEntries(ids.map((id) => [id, schema.optional()]))
+
+function indicatorStyle(key: IndicatorKey) {
+  const { lines = [], histograms = [], levels, fills } = INDICATOR_STYLE_PARTS[key]
+  return z.strictObject({
+    lines: z.strictObject({ ...byId(lines, lineLook), ...byId(histograms, barsLook) }).optional(),
+    ...(levels && {
+      levels: z.array(z.strictObject({ value: z.number().min(levels.min).max(levels.max), color: color.optional(), visible: flag })).max(levels.count).optional(),
+    }),
+    ...(fills && { fills: z.strictObject(byId(fills, fillLook)).optional() }),
   })
-  .catchall(openValue)
+}
 
 const indicatorSchemas = new Map<string, z.ZodType>(
   INDICATOR_KEYS.map((key) => {
     const values = z.strictObject(
       Object.fromEntries(Object.entries(INDICATOR_VALUE_BOUNDS[key]).map(([field, [min, max]]) => [field, z.number().min(min).max(max).optional()])),
     )
-    return [key, z.strictObject({ values: values.optional(), style: indicatorStyle.optional() })]
+    return [key, z.strictObject({ values: values.optional(), style: indicatorStyle(key).optional() })]
   }),
 )
 const toolKinds = new Set<string>(TOOL_KINDS)

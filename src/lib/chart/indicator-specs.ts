@@ -7,6 +7,8 @@ export interface IndicatorLine {
   type: 'line' | 'histogram'
   color: string
   data: IndicatorPoint[]
+  /** A histogram's bars that rise (true) or fall, for its two colors (S5). */
+  up?: boolean[]
 }
 
 export interface IndicatorSpec {
@@ -49,7 +51,11 @@ export const INDICATOR_SPECS: Record<IndicatorKey, IndicatorSpec> = {
   volume: {
     label: () => 'Volumen',
     pane: 'own',
-    lines: (candles) => [{ id: 'volume', type: 'histogram', color: INDICATOR_COLORS.volume, data: candles.map((k) => ({ time: k.time, value: k.volume })) }],
+    lines: (candles) => [{
+      id: 'volume', type: 'histogram', color: INDICATOR_COLORS.volume,
+      data: candles.map((k) => ({ time: k.time, value: k.volume })),
+      up: candles.map((k) => k.close >= k.open),
+    }],
   },
   rsi: {
     label: (c) => `RSI ${c.rsi}`,
@@ -62,10 +68,12 @@ export const INDICATOR_SPECS: Record<IndicatorKey, IndicatorSpec> = {
     pane: 'own',
     lines: (candles, c) => {
       const m = macd(candles, c.macdFast, c.macdSlow, c.macdSignal)
+      const bars = pick(m, (p) => p.histogram)
       return [
         line('macd', INDICATOR_COLORS.macd, pick(m, (p) => p.macd)),
         line('signal', SIGNAL, pick(m, (p) => p.signal)),
-        { id: 'histogram', type: 'histogram', color: MUTED, data: pick(m, (p) => p.histogram) },
+        // A bar rises when it is higher than the one before it (TradingView's "grow").
+        { id: 'histogram', type: 'histogram', color: MUTED, data: bars, up: bars.map((p, i) => i === 0 || p.value >= bars[i - 1].value) },
       ]
     },
   },

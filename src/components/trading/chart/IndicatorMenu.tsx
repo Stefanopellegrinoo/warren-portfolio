@@ -12,6 +12,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useChartStore, type IndicatorKey, type IndicatorConfig } from "@/lib/store/chart-store";
 import { barButton } from "@/components/trading/ui";
+import { effectiveConfig } from "@/lib/chart/indicator-style";
+import { useChartPreferences } from "./useChartPreferences";
 
 interface Entry {
   key: IndicatorKey;
@@ -35,7 +37,9 @@ const ENTRIES: Entry[] = [
 /** `stacked`: the phone's bottom bar button, its name under the icon and the menu above it. */
 export function IndicatorMenu({ stacked = false }: { stacked?: boolean }) {
   const indicators = useChartStore((s) => s.indicators);
-  const config = useChartStore((s) => s.config);
+  // Named by the values the chart uses: an indicator's settings saved in the account win (S4).
+  const device = useChartStore((s) => s.config);
+  const config = effectiveConfig(device, useChartPreferences().preferences.indicatorSettings);
   const toggle = useChartStore((s) => s.toggleIndicator);
 
   const groups = ENTRIES.reduce<Record<string, Entry[]>>((acc, i) => {
