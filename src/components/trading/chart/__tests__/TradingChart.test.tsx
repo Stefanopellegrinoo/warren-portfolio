@@ -6,7 +6,9 @@ import { createChart } from 'lightweight-charts'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 // lightweight-charts draws on canvas, which jsdom lacks: a recording stand-in.
+const priceScale = { applyOptions: vi.fn() }
 const series = {
+  priceScale: () => priceScale,
   applyOptions: vi.fn(),
   setData: vi.fn(),
   update: vi.fn(),
@@ -86,6 +88,38 @@ describe('TradingChart on a touch screen', () => {
 
     expect(box.classList).toContain('touch-none')
     unmount()
+  })
+})
+
+describe('TradingChart price scale', () => {
+  // A finger dragged on the price axis turns the chart's auto scale off (checked on the
+  // real library): without a reset, SPY opened inside the range BTC left behind.
+  it('a new ticker fits its own prices, even after the price axis was scaled by hand', async () => {
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<TradingChart symbol="BTCUSDT" timeframe="1d" />) })
+    priceScale.applyOptions.mockClear()
+
+    await act(async () => { root.render(<TradingChart symbol="SPY" timeframe="1d" />) })
+
+    expect(priceScale.applyOptions).toHaveBeenCalledWith({ autoScale: true })
+    act(() => root.unmount())
+  })
+
+  it('a reload of the same ticker keeps the scale the user chose', async () => {
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<TradingChart symbol="SPY" timeframe="1d" />) })
+    priceScale.applyOptions.mockClear()
+    series.setData.mockClear()
+
+    await act(async () => { root.render(<TradingChart symbol="SPY" timeframe="1d" />) })
+
+    expect(series.setData).toHaveBeenCalled()
+    expect(priceScale.applyOptions).not.toHaveBeenCalled()
+    act(() => root.unmount())
   })
 })
 

@@ -259,6 +259,9 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 				fittedRef.current = key;
 				const n = data.candles.length;
 				chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - VISIBLE_BARS), to: n + 5 });
+				// Scaling the price axis by hand turns auto scale off, and it would keep the last
+				// ticker's price range: BTC's 80k with SPY's candles out of sight.
+				series.priceScale().applyOptions({ autoScale: true });
 			}
 		}
 		manager?.setInterval(timeframe);
