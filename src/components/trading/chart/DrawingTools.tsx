@@ -23,6 +23,7 @@ import {
 	Ruler,
 	SeparatorVertical,
 	Slash,
+	Star,
 	Trash2,
 	TrendingDown,
 	TrendingUp,
@@ -34,9 +35,13 @@ import { buttonVariants } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { InlineConfirm } from "@/components/ui/InlineConfirm";
 import { barButton } from "@/components/trading/ui";
+import type { ToolKind } from "@/lib/chart/preferences-schema";
+import { readBar, saveBar } from "@/lib/chart/favorites-bar";
+import { useChartPreferences } from "./useChartPreferences";
+import { FavoritesBar } from "./FavoritesBar";
 
 interface Tool {
-	kind: DrawingKind;
+	kind: ToolKind;
 	label: string;
 	icon: LucideIcon;
 }
@@ -70,9 +75,10 @@ const GROUPS: Tool[][] = [
 ];
 
 const GROUP_NAMES = ["Líneas", "Canales y Fibonacci", "Formas y texto", "Medir y posiciones"];
+const TOOLS = GROUPS.flat();
 
 export const TOOL_LABELS: Partial<Record<DrawingKind, string>> = Object.fromEntries(
-	GROUPS.flat().map((t) => [t.kind, t.label]),
+	TOOLS.map((t) => [t.kind, t.label]),
 );
 
 const ONE_POINT: DrawingKind[] = ["horizontal-line", "horizontal-ray", "vertical-line", "text", "long-position", "short-position"];
@@ -116,6 +122,55 @@ function ToolButton({
 
 const rowButton = cn(buttonVariants({ variant: "ghost", size: "sm" }), "h-11 shrink-0 gap-2 px-3 text-[14px]");
 const listButton = "flex h-11 items-center gap-2 rounded px-2 text-left text-[14px] text-ink hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring";
+const starButton =
+	"grid h-9 w-9 shrink-0 place-items-center rounded hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring max-[819px]:h-11 max-[819px]:w-11";
+
+interface Favorites {
+	starred: Partial<Record<ToolKind, true>>;
+	onStar: (kind: ToolKind, starred: boolean) => void;
+	barShown: boolean;
+	onBarShown: (shown: boolean) => void;
+}
+
+/**
+ * Every tool by its name, which arms it, with a star that makes it a favorite without arming it, and
+ * the switch of the favorites bar on top (odd/tasks/chart-customization.md S3).
+ */
+function ToolList({ starred, onStar, barShown, onBarShown, onPick }: Favorites & { onPick: (kind: ToolKind) => void }) {
+	return (
+		<>
+			<label className="flex min-h-11 cursor-pointer items-center justify-between gap-2 border-b border-line px-2 pb-1 text-[14px] text-ink">
+				Barra de favoritos
+				<input type="checkbox" role="switch" checked={barShown} onChange={(e) => onBarShown(e.target.checked)} className="h-4 w-4 shrink-0 cursor-pointer accent-[var(--accent)]" />
+			</label>
+			{GROUPS.map((group, i) => (
+				<section key={GROUP_NAMES[i]} aria-label={GROUP_NAMES[i]}>
+					<h3 className="px-2 pb-1 pt-2 text-[12px] font-medium text-ink-3">{GROUP_NAMES[i]}</h3>
+					{group.map((t) => {
+						const on = !!starred[t.kind];
+						return (
+							<div key={t.kind} className="flex items-center">
+								<button type="button" className={cn(listButton, "h-9 min-w-0 flex-1 max-[819px]:h-11")} onClick={() => onPick(t.kind)}>
+									<t.icon className="h-[18px] w-[18px] shrink-0 text-ink-2" strokeWidth={1.75} aria-hidden />
+									{t.label}
+								</button>
+								<button
+									type="button"
+									aria-label={on ? `Sacar ${t.label} de favoritos` : `Agregar ${t.label} a favoritos`}
+									aria-pressed={on}
+									onClick={() => onStar(t.kind, !on)}
+									className={cn(starButton, on ? "text-accent" : "text-ink-3 hover:text-ink")}
+								>
+									<Star className={cn("h-[18px] w-[18px]", on && "fill-current")} strokeWidth={1.75} aria-hidden />
+								</button>
+							</div>
+						);
+					})}
+				</section>
+			))}
+		</>
+	);
+}
 
 /**
  * Below 820px the 21 icons do not fit and have no names (a phone shows no tooltip): one
@@ -132,6 +187,7 @@ function PhoneTools({
 	arm,
 	onAlertMode,
 	onMagnet,
+	favorites,
 }: {
 	manager: DrawingManager | null;
 	tool: DrawingKind | null;
@@ -141,9 +197,10 @@ function PhoneTools({
 	arm: (kind: DrawingKind | null) => void;
 	onAlertMode: (on: boolean) => void;
 	onMagnet: () => void;
+	favorites: Favorites;
 }) {
 	const [open, setOpen] = useState(false);
-	const armed = tool ? GROUPS.flat().find((t) => t.kind === tool) : undefined;
+	const armed = tool ? TOOLS.find((t) => t.kind === tool) : undefined;
 	const toggleVisible = (
 		<button type="button" className={listButton} onClick={() => manager?.setDrawingsVisible(!visible)}>
 			{visible ? <EyeOff className="h-[18px] w-[18px] text-ink-2" strokeWidth={1.75} aria-hidden /> : <Eye className="h-[18px] w-[18px] text-ink-2" strokeWidth={1.75} aria-hidden />}
@@ -174,27 +231,13 @@ function PhoneTools({
 							Dibujar
 						</PopoverTrigger>
 						<PopoverContent side="top" aria-label="Herramientas" className="max-h-[min(70vh,34rem)] w-[min(24rem,calc(100vw-16px))] overflow-y-auto p-2">
-							{GROUPS.map((group, i) => (
-								<section key={GROUP_NAMES[i]} aria-label={GROUP_NAMES[i]}>
-									<h3 className="px-2 pb-1 pt-2 text-[12px] font-medium text-ink-3">{GROUP_NAMES[i]}</h3>
-									<div className="grid grid-cols-2 gap-0.5">
-										{group.map((t) => (
-											<button
-												key={t.kind}
-												type="button"
-												className={listButton}
-												onClick={() => {
-													setOpen(false);
-													arm(t.kind);
-												}}
-											>
-												<t.icon className="h-[18px] w-[18px] shrink-0 text-ink-2" strokeWidth={1.75} aria-hidden />
-												{t.label}
-											</button>
-										))}
-									</div>
-								</section>
-							))}
+							<ToolList
+								{...favorites}
+								onPick={(kind) => {
+									setOpen(false);
+									arm(kind);
+								}}
+							/>
 							<div className="mt-2 grid grid-cols-2 gap-0.5 border-t border-line pt-2">
 								<button type="button" aria-pressed={magnet} className={cn(listButton, magnet && "bg-accent-soft")} onClick={onMagnet}>
 									<Magnet className="h-[18px] w-[18px] text-ink-2" strokeWidth={1.75} aria-hidden />
@@ -238,16 +281,32 @@ export function DrawingTools({
 	alertMode,
 	onAlertMode,
 	phoneBar = null,
+	chartArea = null,
 }: {
 	manager: DrawingManager | null;
 	alertMode: boolean;
 	onAlertMode: (on: boolean) => void;
 	phoneBar?: HTMLElement | null;
+	chartArea?: HTMLElement | null;
 }) {
 	const [tool, setTool] = useState<DrawingKind | null>(null);
 	const [magnet, setMagnet] = useState(false);
 	const [visible, setVisible] = useState(true);
 	const [askingClear, setAskingClear] = useState(false);
+	const [choosing, setChoosing] = useState(false);
+	const { preferences, setFavorite } = useChartPreferences();
+	// Per device, like the bar's spot (screens differ); the stars are the account's.
+	const [barShown, setBarShown] = useState(() => readBar().shown);
+	const favorites: Favorites = {
+		starred: preferences.favorites,
+		onStar: setFavorite,
+		barShown,
+		onBarShown: (shown) => {
+			setBarShown(shown);
+			saveBar({ shown });
+		},
+	};
+	const starred = TOOLS.filter((t) => preferences.favorites[t.kind]);
 
 	useEffect(() => {
 		if (!manager) return;
@@ -271,7 +330,15 @@ export function DrawingTools({
 
 	return (
 		<>
-		{phoneBar && createPortal(<PhoneTools manager={manager} tool={tool} magnet={magnet} visible={visible} alertMode={alertMode} arm={arm} onAlertMode={onAlertMode} onMagnet={toggleMagnet} />, phoneBar)}
+		{phoneBar && createPortal(<PhoneTools manager={manager} tool={tool} magnet={magnet} visible={visible} alertMode={alertMode} arm={arm} onAlertMode={onAlertMode} onMagnet={toggleMagnet} favorites={favorites} />, phoneBar)}
+		{chartArea && barShown && starred.length > 0 && createPortal(
+			<FavoritesBar area={chartArea}>
+				{starred.map((t) => (
+					<ToolButton key={t.kind} label={t.label} icon={t.icon} active={tool === t.kind} onClick={() => arm(tool === t.kind ? null : t.kind)} />
+				))}
+			</FavoritesBar>,
+			chartArea,
+		)}
 		<div
 			role="toolbar"
 			aria-label="Herramientas de dibujo"
@@ -287,6 +354,21 @@ export function DrawingTools({
 					))}
 				</div>
 			))}
+			<Divider />
+			<Popover open={choosing} onOpenChange={setChoosing}>
+				<PopoverTrigger title="Elegir favoritos" aria-label="Elegir favoritos" className={toolClass}>
+					<Star className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
+				</PopoverTrigger>
+				<PopoverContent side="right" aria-label="Elegir favoritos" className="max-h-[min(80vh,40rem)] w-[min(18rem,calc(100vw-32px))] overflow-y-auto p-2">
+					<ToolList
+						{...favorites}
+						onPick={(kind) => {
+							setChoosing(false);
+							arm(kind);
+						}}
+					/>
+				</PopoverContent>
+			</Popover>
 			<Divider />
 			<ToolButton
 				label="Alerta de precio: tocá el gráfico en el precio"

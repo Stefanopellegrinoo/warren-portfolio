@@ -162,7 +162,8 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	const [selectedAlert, setSelectedAlert] = useState<{ id: string; y: number } | null>(null);
 	const [textEdit, setTextEdit] = useState<{ drawing: Drawing; x: number; y: number } | null>(null);
 	const [legendOpen, setLegendOpen] = useState(true);
-
+	// Where the favorites bar floats: over the chart, in its container (S3).
+	const [area, setArea] = useState<HTMLDivElement | null>(null);
 
 	const theme = useChartTheme();
 	const intraday = INTRADAY.includes(timeframe);
@@ -399,15 +400,15 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 
 	return (
 		<div className="flex min-h-0 flex-1">
-			<DrawingTools manager={manager} alertMode={alertMode} onAlertMode={setAlertMode} phoneBar={phoneBar} />
-			<div className="relative min-h-0 min-w-0 flex-1">
+			<DrawingTools manager={manager} alertMode={alertMode} onAlertMode={setAlertMode} phoneBar={phoneBar} chartArea={area} />
+			<div ref={setArea} className="relative min-h-0 min-w-0 flex-1">
 				{/* touch-none: the chart pans and zooms itself; left to the browser, a finger drag on a
 				    drawing or an alert is taken over as a page scroll and cancelled halfway. isolate: the
 				    library's pane separators sit at z-index 50, above the phone's app menu, unless kept in
 				    here; only there, as a computer's text rendering changes with it. */}
 				<div ref={boxRef} data-chart-box className={cn("absolute inset-0 touch-none max-[819px]:isolate", alertMode && "cursor-crosshair")} />
 
-				<div className="pointer-events-none absolute left-3 top-2 z-10 flex max-w-[calc(100%-5rem)] flex-col gap-1 text-[13px]">
+				<div data-chart-legend className="pointer-events-none absolute left-3 top-2 z-10 flex max-w-[calc(100%-5rem)] flex-col gap-1 text-[13px]">
 					<div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 tabular-nums">
 						{shown && (
 							<>

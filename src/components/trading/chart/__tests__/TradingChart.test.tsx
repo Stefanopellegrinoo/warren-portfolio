@@ -65,11 +65,14 @@ vi.mock('../useChartAlerts', () => ({ useChartAlerts: () => alertsApi }))
 vi.mock('../useChartTheme', () => ({
   useChartTheme: () => ({ bg: '#fff', ink: '#000', ink2: '#111', ink3: '#222', line: '#ddd', lineStrong: '#ccc', accent: '#0a0', up: '#0f0', down: '#f00', font: 'sans' }),
 }))
-// The toolbar has its own tests; here it only switches the alert mode on.
+// The toolbar has its own tests; here it only switches the alert mode on, and shows where the
+// chart lets it float the favorites bar.
+let favoritesArea: HTMLElement | null | undefined
 vi.mock('../DrawingTools', () => ({
-  DrawingTools: ({ onAlertMode }: { onAlertMode: (on: boolean) => void }) => (
-    <button type="button" onClick={() => onAlertMode(true)}>Alerta</button>
-  ),
+  DrawingTools: ({ onAlertMode, chartArea }: { onAlertMode: (on: boolean) => void; chartArea?: HTMLElement | null }) => {
+    favoritesArea = chartArea
+    return <button type="button" onClick={() => onAlertMode(true)}>Alerta</button>
+  },
 }))
 
 const { TradingChart } = await import('../TradingChart')
@@ -99,6 +102,16 @@ describe('TradingChart on a touch screen', () => {
     const { box, unmount } = await render()
 
     expect(box.classList).toContain('touch-none')
+    unmount()
+  })
+})
+
+describe('TradingChart favorites bar (S3)', () => {
+  it('floats the bar in the chart box\'s container, over the chart, where the legend it keeps clear of is', async () => {
+    const { box, unmount } = await render()
+
+    expect(favoritesArea).toBe(box.parentElement)
+    expect(favoritesArea!.querySelector('[data-chart-legend]')!.textContent).toContain('Cie')
     unmount()
   })
 })
