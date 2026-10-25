@@ -230,3 +230,21 @@ describe('closing', () => {
     unmount()
   })
 })
+
+describe('closing after a save that failed', () => {
+  it('a second close leaves without saving again, so a failing network cannot trap the sheet', async () => {
+    const { onSave, onOpenChange, unmount } = await open({ alert: EXISTING })
+    setValue(byLabel<HTMLInputElement>('Valor'), '33,75')
+    await flush()
+    const esc = () => act(() => { sheet().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+
+    esc()
+    await flush()
+    esc()
+    await flush()
+
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(onOpenChange).toHaveBeenCalledWith(false, expect.anything())
+    unmount()
+  })
+})
