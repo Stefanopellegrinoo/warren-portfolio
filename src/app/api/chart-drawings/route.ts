@@ -44,9 +44,11 @@ export async function GET(req: NextRequest) {
 
   // Never saved: the legacy chart_drawings rows come in this same response for the client to
   // convert and save, instead of a second request from the phone (odd/tasks/rendimiento.md S2).
+  // "*", never a column list: production's table lacks the label column of migration 027,
+  // and PostgREST answers 400 to a select naming it.
   const legacy = await supabase
     .from("chart_drawings")
-    .select("id, type, points, style, label")
+    .select("*")
     .eq("user_id", user.id)
     .eq("ticker", parsed.data.toUpperCase())
     .order("created_at", { ascending: true })

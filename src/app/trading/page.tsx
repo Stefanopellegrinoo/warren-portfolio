@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Header, type View } from "@/components/trading/layout/Header";
+import { PhoneBar } from "@/components/trading/layout/PhoneBar";
 import { RightSidebar } from "@/components/trading/layout/RightSidebar";
 import { useQuote } from "@/components/trading/layout/useQuote";
 import { TradingChart } from "@/components/trading/chart/TradingChart";
@@ -38,9 +39,11 @@ function Trading() {
   const quote = useQuote(symbol);
   // Below 1100 px the chart and the list share the screen through the Gráfico / Lista switch.
   const [view, setView] = useState<View>("chart");
+  // The bottom bar's place for the chart's drawing controls, which the chart owns.
+  const [drawingSlot, setDrawingSlot] = useState<HTMLDivElement | null>(null);
 
   return (
-    <div className="flex h-dvh flex-col max-[819px]:h-[calc(100dvh-3.5rem)]">
+    <div className="flex h-dvh flex-col">
       <h1 className="sr-only">Gráficos</h1>
 
       <Header view={view} onViewChange={setView} quote={quote} />
@@ -48,7 +51,7 @@ function Trading() {
       <div className="flex min-h-0 flex-1">
         {/* One chart instance: the list view only hides it, it never mounts twice. */}
         <div data-pane="chart" className={cn("flex min-h-0 min-w-0 flex-1 flex-col", view === "list" && "max-[1099px]:hidden")}>
-          <TradingChart symbol={symbol} timeframe={timeframe} />
+          <TradingChart symbol={symbol} timeframe={timeframe} phoneBar={drawingSlot} />
         </div>
         <RightSidebar
           price={quote?.price ?? null}
@@ -56,6 +59,8 @@ function Trading() {
           className={cn(view === "chart" && "max-[1099px]:hidden")}
         />
       </div>
+
+      <PhoneBar view={view} onViewChange={setView} drawingSlot={setDrawingSlot} />
 
       <IndicatorSettingsDialog />
     </div>

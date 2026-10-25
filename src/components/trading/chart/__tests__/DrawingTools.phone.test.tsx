@@ -9,8 +9,8 @@ import { DrawingTools } from '../DrawingTools'
 afterEach(() => { document.body.innerHTML = '' })
 
 const flush = () => act(async () => { await new Promise(r => setTimeout(r, 0)) })
-// The phone bar: the desktop strip is the other toolbar, hidden by CSS below 820px.
-const phone = () => document.querySelector<HTMLElement>('[role="toolbar"][aria-label="Dibujos"]')!
+// The phone controls, in the bar the page gives them; the desktop strip is the toolbar hidden by CSS below 820px.
+const phone = () => document.querySelector<HTMLElement>('[role="group"][aria-label="Dibujos"]')!
 const inPhone = (name: string) => [...phone().querySelectorAll('button')].find(b => (b.getAttribute('aria-label') ?? b.textContent) === name)
 const option = (name: string) => [...document.querySelectorAll<HTMLButtonElement>('[aria-label="Herramientas"] button')].find(b => b.textContent?.trim() === name)
 
@@ -18,12 +18,13 @@ async function render({ alertMode = false } = {}) {
   const { manager } = fakeChart()
   const onAlertMode = vi.fn()
   const el = document.createElement('div')
-  document.body.appendChild(el)
+  const bar = document.createElement('div')
+  document.body.append(el, bar)
   const root = createRoot(el)
-  const draw = (mode: boolean) => root.render(<DrawingTools manager={manager} alertMode={mode} onAlertMode={onAlertMode} />)
+  const draw = (mode: boolean) => root.render(<DrawingTools manager={manager} alertMode={mode} onAlertMode={onAlertMode} phoneBar={bar} />)
   await act(async () => { draw(alertMode) })
   const openTools = async () => { act(() => inPhone('Dibujar')!.click()); await flush() }
-  return { manager, onAlertMode, openTools, rerender: (mode: boolean) => act(() => draw(mode)), unmount: () => act(() => root.unmount()) }
+  return { manager, bar, onAlertMode, openTools, rerender: (mode: boolean) => act(() => draw(mode)), unmount: () => act(() => root.unmount()) }
 }
 
 describe('drawing tools on a phone (S5)', () => {
@@ -76,6 +77,30 @@ describe('drawing tools on a phone (S5)', () => {
     expect(phone().textContent).toContain('Tocá el gráfico en el precio de la alerta')
     act(() => inPhone('Cancelar')!.click())
     expect(onAlertMode).toHaveBeenLastCalledWith(false)
+    unmount()
+  })
+
+  it('goes in the bar the page gives it', async () => {
+    const { bar, unmount } = await render()
+    expect(bar.contains(phone())).toBe(true)
+    unmount()
+  })
+
+  // odd/tasks/grafico-espacio.md S4: the armed state takes the whole bar, as the row did.
+  it('armed, what to do covers the whole bar', async () => {
+    const { openTools, unmount } = await render()
+    await openTools()
+    act(() => option('Rectángulo')!.click())
+    expect(phone().querySelector('[role="status"]')!.parentElement!.className).toMatch(/\babsolute\b.*\binset-x-0\b/)
+    unmount()
+  })
+
+  it('hidden drawings show on the Dibujar button', async () => {
+    const { manager, unmount } = await render()
+    act(() => manager.setDrawingsVisible(false))
+    expect(inPhone('Dibujar (dibujos ocultos)')).toBeDefined()
+    act(() => manager.setDrawingsVisible(true))
+    expect(inPhone('Dibujar')).toBeDefined()
     unmount()
   })
 

@@ -38,11 +38,13 @@ function PopoverPositioner({ className, ...props }: PopoverPrimitive.Positioner.
 function PopoverContent({
   className,
   children,
+  side,
+  align,
   ...props
-}: PopoverPrimitive.Popup.Props) {
+}: PopoverPrimitive.Popup.Props & Pick<PopoverPrimitive.Positioner.Props, "side" | "align">) {
   return (
     <PopoverPortal>
-      <PopoverPositioner>
+      <PopoverPositioner {...(side && { side })} {...(align && { align })}>
         <PopoverPrimitive.Popup
           data-slot="popover-content"
           className={cn(

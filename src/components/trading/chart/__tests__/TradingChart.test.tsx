@@ -6,7 +6,9 @@ import { createChart } from 'lightweight-charts'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 // lightweight-charts draws on canvas, which jsdom lacks: a recording stand-in.
+const priceScale = { applyOptions: vi.fn() }
 const series = {
+  priceScale: () => priceScale,
   applyOptions: vi.fn(),
   setData: vi.fn(),
   update: vi.fn(),
@@ -89,6 +91,38 @@ describe('TradingChart on a touch screen', () => {
   })
 })
 
+describe('TradingChart price scale', () => {
+  // A finger dragged on the price axis turns the chart's auto scale off (checked on the
+  // real library): without a reset, SPY opened inside the range BTC left behind.
+  it('a new ticker fits its own prices, even after the price axis was scaled by hand', async () => {
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<TradingChart symbol="BTCUSDT" timeframe="1d" />) })
+    priceScale.applyOptions.mockClear()
+
+    await act(async () => { root.render(<TradingChart symbol="SPY" timeframe="1d" />) })
+
+    expect(priceScale.applyOptions).toHaveBeenCalledWith({ autoScale: true })
+    act(() => root.unmount())
+  })
+
+  it('a reload of the same ticker keeps the scale the user chose', async () => {
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<TradingChart symbol="SPY" timeframe="1d" />) })
+    priceScale.applyOptions.mockClear()
+    series.setData.mockClear()
+
+    await act(async () => { root.render(<TradingChart symbol="SPY" timeframe="1d" />) })
+
+    expect(series.setData).toHaveBeenCalled()
+    expect(priceScale.applyOptions).not.toHaveBeenCalled()
+    act(() => root.unmount())
+  })
+})
+
 describe('TradingChart text editor', () => {
   it('stays inside the chart when the text sits near the right edge of a phone (S3)', async () => {
     const { box, unmount } = await render()
@@ -126,6 +160,53 @@ describe('TradingChart price pane on a phone (S6)', () => {
 
     expect(list[0].setStretchFactor).toHaveBeenLastCalledWith(6)
     unmount()
+  })
+})
+
+// odd/tasks/grafico-espacio.md S5: the panes are only sized when the indicators change, so the
+// heights a finger set stay from one symbol to the next.
+describe('TradingChart pane heights', () => {
+  it('a new symbol keeps the heights the user set', async () => {
+    onPhone(true)
+    const list = panes(3)
+    chart.panes.mockReturnValue(list as never)
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<TradingChart symbol="BTCUSDT" timeframe="1d" />) })
+    expect(list[0].setStretchFactor).toHaveBeenCalled()
+    list.forEach(p => p.setStretchFactor.mockClear())
+
+    await act(async () => { root.render(<TradingChart symbol="SPY" timeframe="1w" />) })
+
+    list.forEach(p => expect(p.setStretchFactor).not.toHaveBeenCalled())
+    act(() => root.unmount())
+  })
+
+  it('marks its box for the wider pane separators on touch screens', async () => {
+    const { box, unmount } = await render()
+    expect(box.hasAttribute('data-chart-box')).toBe(true)
+    unmount()
+  })
+
+  // The separators' z-index 50 drew their grab pills over the open app menu (seen in Chromium).
+  // A phone only: on a computer the menu is a column, and isolating changed its text rendering.
+  it("keeps the separators under the phone's app menu", async () => {
+    const { box, unmount } = await render()
+    expect(box.classList).toContain('max-[819px]:isolate')
+    expect(box.classList).not.toContain('isolate')
+    unmount()
+  })
+
+  // globals.css widens the separator by its place in the library's DOM (inline styles, no class),
+  // checked on 5.2.0 with a finger in Chromium: another version has to be checked again.
+  it("the separator override matches the library's DOM", async () => {
+    const { readFileSync } = await import('node:fs')
+    const lib = 'node_modules/lightweight-charts'
+    expect(JSON.parse(readFileSync(`${lib}/package.json`, 'utf8')).version).toBe('5.2.0')
+    const bundle = readFileSync(`${lib}/dist/lightweight-charts.production.mjs`, 'utf8')
+    expect(bundle).toContain('setAttribute("colspan","3")')
+    expect(bundle).toMatch(/cursor="row-resize",this\.\w+\.appendChild\(\w\);const \w=document\.createElement\("div"\),\w=\w\.style;\w\.position="absolute",\w\.zIndex="50",\w\.top="-4px",\w\.height="9px"/)
   })
 })
 
