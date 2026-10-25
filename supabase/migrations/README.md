@@ -43,3 +43,11 @@ The intended execution order is:
 ## Test portfolios (040)
 
 Re-run the RLS/limits proof (throwaway local postgres:15, never touches Supabase; not run in CI): `scripts/test-portfolios-rls-proof.sh`.
+
+## Chart preferences (051)
+
+`chart_preferences` (favorite drawing tools, remembered styles, saved indicator settings) is applied by
+hand in the SQL Editor right before the merge that deploys `/api/chart-preferences`; dev and prod share one
+Supabase. Until then the route answers 500 and the chart keeps each device's values (`src/lib/chart/preferences.ts`).
+Writes go through `patch_chart_preferences`, which merges per key; never replace a whole column from the app.
+Re-run its RLS/limits proof (throwaway local postgres:15, never touches Supabase; not run in CI): `scripts/test-chart-preferences-rls-proof.sh`.
