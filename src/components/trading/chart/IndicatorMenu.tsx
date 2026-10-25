@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useChartStore, type IndicatorKey, type IndicatorConfig } from "@/lib/store/chart-store";
+import { barButton } from "@/components/trading/ui";
 
 interface Entry {
   key: IndicatorKey;
@@ -31,7 +32,8 @@ const ENTRIES: Entry[] = [
   { key: "adx",        group: "Tendencia",        label: (c) => `ADX (${c.adxPeriod})` },
 ];
 
-export function IndicatorMenu() {
+/** `stacked`: the phone's bottom bar button, its name under the icon and the menu above it. */
+export function IndicatorMenu({ stacked = false }: { stacked?: boolean }) {
   const indicators = useChartStore((s) => s.indicators);
   const config = useChartStore((s) => s.config);
   const toggle = useChartStore((s) => s.toggleIndicator);
@@ -45,16 +47,30 @@ export function IndicatorMenu() {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger aria-label="Indicadores" className="flex min-h-8 items-center justify-center gap-1.5 rounded-md px-2 max-[819px]:min-w-11 text-[13px] text-ink-2 hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring max-[819px]:min-h-11">
-        <Activity className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
-        <span className="max-[819px]:hidden">Indicadores</span>
-        {activeCount > 0 && (
-          <span className="rounded bg-surface-2 px-1.5 text-xs font-medium tabular-nums text-ink-2 max-[819px]:hidden">
-            {activeCount}
+      {stacked ? (
+        <DropdownMenuTrigger aria-label="Indicadores" className={barButton}>
+          <span className="relative">
+            <Activity className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden="true" />
+            {activeCount > 0 && (
+              <span className="absolute -right-3.5 -top-1.5 rounded bg-surface-2 px-1 text-[10px] font-medium leading-[14px] tabular-nums text-ink-2">
+                {activeCount}
+              </span>
+            )}
           </span>
-        )}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-64 max-w-[calc(100vw-32px)] rounded-lg border border-line bg-surface p-1 text-ink shadow-pop ring-0">
+          Indicadores
+        </DropdownMenuTrigger>
+      ) : (
+        <DropdownMenuTrigger aria-label="Indicadores" className="flex min-h-8 items-center justify-center gap-1.5 rounded-md px-2 max-[819px]:min-w-11 text-[13px] text-ink-2 hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring max-[819px]:min-h-11">
+          <Activity className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+          <span className="max-[819px]:hidden">Indicadores</span>
+          {activeCount > 0 && (
+            <span className="rounded bg-surface-2 px-1.5 text-xs font-medium tabular-nums text-ink-2 max-[819px]:hidden">
+              {activeCount}
+            </span>
+          )}
+        </DropdownMenuTrigger>
+      )}
+      <DropdownMenuContent side={stacked ? "top" : "bottom"} align={stacked ? "end" : "start"} className="w-64 max-w-[calc(100vw-32px)] rounded-lg border border-line bg-surface p-1 text-ink shadow-pop ring-0">
         {Object.entries(groups).map(([group, items], idx) => (
           <DropdownMenuGroup key={group}>
             {idx > 0 && <DropdownMenuSeparator className="-mx-1 my-1 h-px bg-line" />}

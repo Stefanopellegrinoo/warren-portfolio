@@ -146,7 +146,8 @@ function syncIndicators(
 	}
 }
 
-export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe: Timeframe }) {
+/** `phoneBar`: where the page wants the phone's drawing controls, in its bottom bar. */
+export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: string; timeframe: Timeframe; phoneBar?: HTMLElement | null }) {
 	const boxRef = useRef<HTMLDivElement>(null);
 	const chartRef = useRef<IChartApi | null>(null);
 	const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -370,8 +371,8 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 	const selected: ChartAlert | undefined = selectedAlert ? alerts.find((a) => a.id === selectedAlert.id) : undefined;
 
 	return (
-		<div className="flex min-h-0 flex-1 max-[819px]:flex-col">
-			<DrawingTools manager={manager} alertMode={alertMode} onAlertMode={setAlertMode} />
+		<div className="flex min-h-0 flex-1">
+			<DrawingTools manager={manager} alertMode={alertMode} onAlertMode={setAlertMode} phoneBar={phoneBar} />
 			<div className="relative min-h-0 min-w-0 flex-1">
 				{/* touch-none: the chart pans and zooms itself; left to the browser, a finger drag on a
 				    drawing or an alert is taken over as a page scroll and cancelled halfway. */}
@@ -419,7 +420,7 @@ export function TradingChart({ symbol, timeframe }: { symbol: string; timeframe:
 				</div>
 
 				{alertMode && (
-					// A phone says it, with Cancelar, in its drawing bar; there is no Esc there.
+					// A phone says it, with Cancelar, in its bottom bar; there is no Esc there.
 					<p role="status" className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded bg-ink px-3 py-1.5 text-[13px] text-canvas shadow-[var(--shadow-toast)] max-[819px]:hidden">
 						Tocá el gráfico en el precio de la alerta<span className="[@media(pointer:coarse)]:hidden"> · Esc para cancelar</span>
 					</p>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import type { DrawingKind, DrawingManager } from "lightweight-charts-drawing";
 import {
 	ArrowRightToLine,
@@ -32,6 +33,7 @@ import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { InlineConfirm } from "@/components/ui/InlineConfirm";
+import { barButton } from "@/components/trading/ui";
 
 interface Tool {
 	kind: DrawingKind;
@@ -118,7 +120,8 @@ const listButton = "flex h-11 items-center gap-2 rounded px-2 text-left text-[14
 /**
  * Below 820px the 21 icons do not fit and have no names (a phone shows no tooltip): one
  * "Dibujar" list with every tool by its name, the alert, and, while a tool is armed, what to
- * do with it and Cancelar, because a phone has no Esc (odd/tasks/grafico-celular.md S5).
+ * do with it and Cancelar over the whole bar, because a phone has no Esc
+ * (odd/tasks/grafico-celular.md S5). They sit in the page's bottom bar (odd/tasks/grafico-espacio.md S3-S4).
  */
 function PhoneTools({
 	manager,
@@ -149,9 +152,9 @@ function PhoneTools({
 	);
 
 	return (
-		<div role="toolbar" aria-label="Dibujos" className="flex min-h-[52px] shrink-0 items-center gap-1 border-b border-line bg-surface px-2 py-1 min-[820px]:hidden">
+		<div role="group" aria-label="Dibujos" className="flex flex-1">
 			{alertMode || armed ? (
-				<>
+				<div className="absolute inset-x-0 top-0 z-10 flex h-14 items-center gap-1 bg-surface px-2">
 					<span className="grid h-11 w-11 shrink-0 place-items-center rounded bg-accent-soft text-accent-ink" aria-hidden>
 						{armed ? <armed.icon className="h-[18px] w-[18px]" strokeWidth={1.75} /> : <Bell className="h-[18px] w-[18px]" strokeWidth={1.75} />}
 					</span>
@@ -162,15 +165,15 @@ function PhoneTools({
 					<button type="button" className={rowButton} onClick={() => (armed ? arm(null) : onAlertMode(false))}>
 						Cancelar
 					</button>
-				</>
+				</div>
 			) : (
 				<>
 					<Popover open={open} onOpenChange={setOpen}>
-						<PopoverTrigger className={rowButton}>
-							<Pencil className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
+						<PopoverTrigger aria-label={visible ? undefined : "Dibujar (dibujos ocultos)"} className={barButton}>
+							{visible ? <Pencil className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden /> : <EyeOff className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />}
 							Dibujar
 						</PopoverTrigger>
-						<PopoverContent aria-label="Herramientas" className="max-h-[min(70vh,34rem)] w-[min(24rem,calc(100vw-16px))] overflow-y-auto p-2">
+						<PopoverContent side="top" aria-label="Herramientas" className="max-h-[min(70vh,34rem)] w-[min(24rem,calc(100vw-16px))] overflow-y-auto p-2">
 							{GROUPS.map((group, i) => (
 								<section key={GROUP_NAMES[i]} aria-label={GROUP_NAMES[i]}>
 									<h3 className="px-2 pb-1 pt-2 text-[12px] font-medium text-ink-3">{GROUP_NAMES[i]}</h3>
@@ -213,11 +216,10 @@ function PhoneTools({
 							</div>
 						</PopoverContent>
 					</Popover>
-					<button type="button" className={rowButton} onClick={() => onAlertMode(true)}>
+					<button type="button" className={barButton} onClick={() => onAlertMode(true)}>
 						<Bell className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
 						Alerta
 					</button>
-					{!visible && <div className="ml-auto">{toggleVisible}</div>}
 				</>
 			)}
 		</div>
@@ -227,18 +229,20 @@ function PhoneTools({
 const Divider = () => <span className="h-px w-6 shrink-0 bg-line max-[819px]:h-6 max-[819px]:w-px" aria-hidden />;
 
 /**
- * The drawing toolbar: a vertical strip on desktop, the PhoneTools bar on
- * phones. It reads and drives the DrawingManager; the alert tool is the
- * chart's own, passed in.
+ * The drawing toolbar: a vertical strip on desktop, the PhoneTools in the
+ * page's bottom bar (`phoneBar`) on phones. It reads and drives the
+ * DrawingManager; the alert tool is the chart's own, passed in.
  */
 export function DrawingTools({
 	manager,
 	alertMode,
 	onAlertMode,
+	phoneBar = null,
 }: {
 	manager: DrawingManager | null;
 	alertMode: boolean;
 	onAlertMode: (on: boolean) => void;
+	phoneBar?: HTMLElement | null;
 }) {
 	const [tool, setTool] = useState<DrawingKind | null>(null);
 	const [magnet, setMagnet] = useState(false);
@@ -267,7 +271,7 @@ export function DrawingTools({
 
 	return (
 		<>
-		<PhoneTools manager={manager} tool={tool} magnet={magnet} visible={visible} alertMode={alertMode} arm={arm} onAlertMode={onAlertMode} onMagnet={toggleMagnet} />
+		{phoneBar && createPortal(<PhoneTools manager={manager} tool={tool} magnet={magnet} visible={visible} alertMode={alertMode} arm={arm} onAlertMode={onAlertMode} onMagnet={toggleMagnet} />, phoneBar)}
 		<div
 			role="toolbar"
 			aria-label="Herramientas de dibujo"

@@ -13,7 +13,7 @@ vi.hoisted(() => {
 })
 
 // The URL's query and every symbol the chart was mounted with, for the ?symbol= tests.
-const nav = vi.hoisted(() => ({ query: new URLSearchParams(), charts: [] as string[] }))
+const nav = vi.hoisted(() => ({ query: new URLSearchParams(), charts: [] as string[], phoneBar: null as HTMLElement | null }))
 vi.mock('next/navigation', () => ({
   usePathname: () => '/trading',
   useSearchParams: () => nav.query,
@@ -21,7 +21,7 @@ vi.mock('next/navigation', () => ({
 }))
 // The chart core has its own tests; here it only has to mount once.
 vi.mock('@/components/trading/chart/TradingChart', () => ({
-  TradingChart: ({ symbol }: { symbol: string }) => { nav.charts.push(symbol); return <div data-chart={symbol} /> },
+  TradingChart: ({ symbol, phoneBar }: { symbol: string; phoneBar?: HTMLElement | null }) => { nav.charts.push(symbol); nav.phoneBar = phoneBar ?? null; return <div data-chart={symbol} /> },
 }))
 
 import TradingPage from '../page'
@@ -35,7 +35,7 @@ let root: Root
 
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn((url: string) => ok(String(url).includes('/lists') ? { lists: [] } : [])))
-  useChartStore.setState({ symbol: 'SPY', watchlist: ['SPY', 'QQQ'], activeWatchlistId: null })
+  useChartStore.setState({ symbol: 'SPY', timeframe: '1d', watchlist: ['SPY', 'QQQ'], activeWatchlistId: null })
   host = document.createElement('div')
   document.body.appendChild(host)
   root = createRoot(host)
@@ -105,6 +105,63 @@ describe('TradingPage top bar on a phone', () => {
   it('takes the whole screen height: there is no app bar above it', () => {
     act(() => root.render(<TradingPage />))
     expect((host.firstElementChild as HTMLElement).className).not.toContain('3.5rem')
+  })
+})
+
+// odd/tasks/grafico-espacio.md S3: the phone's tool bar under the chart.
+describe('TradingPage bottom bar on a phone', () => {
+  const flush = () => act(async () => { await new Promise(r => setTimeout(r, 0)) })
+  const bar = () => host.querySelector<HTMLElement>('[role="toolbar"][aria-label="Herramientas del gráfico"]')!
+  const inBar = (text: string) => [...bar().querySelectorAll('button')].find(b => b.textContent?.includes(text))
+
+  it('is a phone-only bar under the chart', () => {
+    act(() => root.render(<TradingPage />))
+    expect(bar().className).toContain('min-[820px]:hidden')
+    expect(host.querySelector('[data-pane="chart"]')!.compareDocumentPosition(bar()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('Intervalo shows the current one and opens the five to pick from', async () => {
+    act(() => root.render(<TradingPage />))
+    const intervalo = inBar('Intervalo')!
+    expect(intervalo.textContent).toBe('1DIntervalo')
+
+    act(() => intervalo.click())
+    await flush()
+    const popover = () => document.querySelector('[data-slot="popover-content"] [aria-label="Temporalidad"]')
+    const radios = [...popover()!.querySelectorAll('[role="radio"]')]
+    expect(radios.map(r => r.textContent)).toEqual(['15m', '1h', '1D', '1S', '1M'])
+
+    act(() => (radios[3] as HTMLButtonElement).click())
+    await flush()
+    expect(useChartStore.getState().timeframe).toBe('1w')
+    expect(inBar('Intervalo')!.textContent).toBe('1SIntervalo')
+    expect(popover()).toBeNull()
+  })
+
+  it('Indicadores opens the same menu as on a computer', async () => {
+    act(() => root.render(<TradingPage />))
+    act(() => bar().querySelector<HTMLButtonElement>('[aria-label="Indicadores"]')!.click())
+    await flush()
+    expect(document.body.textContent).toContain('RSI (14)')
+  })
+
+  it('the chart gets a place in the bar for its drawing controls', () => {
+    act(() => root.render(<TradingPage />))
+    expect(nav.phoneBar).not.toBeNull()
+    expect(bar().contains(nav.phoneBar)).toBe(true)
+  })
+
+  it('Lista shows the list, and the bar then offers only the way back', () => {
+    act(() => root.render(<TradingPage />))
+    act(() => inBar('Lista')!.click())
+    expect(host.querySelector('[data-pane="chart"]')!.className).toContain('max-[1099px]:hidden')
+    expect(inBar('Intervalo')).toBeUndefined()
+    expect(bar().querySelector('[aria-label="Indicadores"]')).toBeNull()
+    expect(nav.phoneBar!.className).toContain('hidden')
+
+    act(() => inBar('Gráfico')!.click())
+    expect(host.querySelector('[data-pane="chart"]')!.className).not.toContain('max-[1099px]:hidden')
+    expect(inBar('Intervalo')).toBeDefined()
   })
 })
 

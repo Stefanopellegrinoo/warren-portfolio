@@ -38,6 +38,10 @@ export const ghostButton =
   "inline-flex min-h-9 items-center justify-center rounded-md px-3 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink max-[819px]:min-h-11";
 export const dangerButton =
   "inline-flex min-h-9 items-center justify-center rounded-md bg-danger px-4 text-sm font-medium text-surface hover:opacity-90 max-[819px]:min-h-11";
+// A button of the phone's bottom bar: the icon over its name, a fifth of the width.
+export const barButton =
+  "flex h-14 min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded px-0.5 text-[11px] leading-none text-ink-2 hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring";
+
 export const iconButton =
   "grid h-8 w-8 flex-none place-items-center rounded-md text-ink-2 hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring max-[819px]:h-11 max-[819px]:w-11";
 

@@ -170,3 +170,12 @@
     grid-template-areas: "holdings holdings" "chart dist" "chart moves";
   }
 }
+
+/* Gráficos has its tool bar at the bottom of a phone: the notices rise above it instead of
+   covering it (sonner sets its offsets inline, hence !important). */
+@media (max-width: 819px) {
+  body:has([data-phone-bar]) [data-sonner-toaster][data-y-position="bottom"] { bottom: calc(var(--offset-bottom) + 3.5rem + env(safe-area-inset-bottom)) !important; }
+}
+@media (max-width: 600px) {
+  body:has([data-phone-bar]) [data-sonner-toaster][data-y-position="bottom"] { bottom: calc(var(--mobile-offset-bottom) + 3.5rem + env(safe-area-inset-bottom)) !important; }
+}
