@@ -33,6 +33,7 @@ import { ingestFxRates } from './fx-rates'
 import { loadHeldStockTickers, loadPortfolioNow } from './ledger-now'
 import { fetchCryptoQuotes } from './binance/rest'
 import { getProviderForSymbol } from './market-data/resolver'
+import { isPriceValue } from './chart/alert-condition'
 
 const REDIS_URL = process.env.REDIS_URL
 
@@ -170,14 +171,20 @@ export async function evaluatePriceAlerts(
   }
 
   for (const alert of alerts ?? []) {
+    // Only the price against a value, as before 052 (odd/tasks/chart-customization.md T7 adds the rest): an
+    // indicator line or a line target must never fire on the price crossing a number.
+    if (!isPriceValue({ source: alert.source ?? 'price', target: alert.target ?? 'value' })) continue
     const currentPrice = prices[alert.ticker]
     const previousPrice = previousPrices[alert.ticker]
     if (currentPrice === undefined || previousPrice === undefined) continue
 
     const value = Number(alert.value)
+    const up = previousPrice < value && currentPrice >= value
+    const down = previousPrice > value && currentPrice <= value
     const fired =
-      (alert.operator === 'crosses_above' && previousPrice < value && currentPrice >= value) ||
-      (alert.operator === 'crosses_below' && previousPrice > value && currentPrice <= value)
+      (alert.operator === 'crosses_above' && up) ||
+      (alert.operator === 'crosses_below' && down) ||
+      (alert.operator === 'crosses' && (up || down))
 
     if (!fired) continue
 
@@ -191,11 +198,12 @@ export async function evaluatePriceAlerts(
       continue
     }
 
-    // A user who never turned notifications on has no devices: that is not a failure.
-    const push = await sendPushToUser(supabase, alert.user_id, priceAlertPush(alert, value, currentPrice))
+    // Either way says which way it went. A user who never turned notifications on has no devices: that is not a failure.
+    const crossed = up ? 'crosses_above' : 'crosses_below'
+    const push = await sendPushToUser(supabase, alert.user_id, priceAlertPush({ ...alert, operator: crossed }, value, currentPrice))
     if (!push.ok && push.error !== 'no devices') console.warn(`[Worker] push for alert ${alert.id}: ${push.error}`)
 
-    const direction = alert.operator === 'crosses_above' ? '↑' : '↓'
+    const direction = up ? '↑' : '↓'
     const msg = `🔔 Alerta disparada: ${alert.ticker} ${direction} ${alert.value}\nPrecio actual: ${currentPrice}`
     await sendTelegram(msg)
   }

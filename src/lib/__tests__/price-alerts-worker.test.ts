@@ -434,3 +434,65 @@ describe('crypto alerts', () => {
     errorSpy.mockRestore()
   })
 })
+
+// odd/tasks/chart-customization.md S6/S7: until the worker evaluates indicator conditions (T7), it skips
+// them: an RSI alert must never fire because the price crossed 70.
+describe('evaluatePriceAlerts with conditions', () => {
+  const evaluate = async (alert: Record<string, unknown>, now: number, before: number) => {
+    mockIn.mockResolvedValueOnce({ data: [{ id: 'c1', user_id: 'owner-1', ticker: 'FXI', name: 'n', ...alert }], error: null })
+    mockEqUpdate.mockResolvedValueOnce({ error: null })
+    await evaluatePriceAlerts({ FXI: now }, { FXI: before })
+  }
+  const nothingFired = () => {
+    expect(mockUpdate).not.toHaveBeenCalled()
+    expect(mockSendTelegram).not.toHaveBeenCalled()
+    expect(mockSendPush).not.toHaveBeenCalled()
+  }
+
+  it('skips an indicator source: the price crossing 70 never fires "RSI crosses 70"', async () => {
+    await evaluate({ source: 'rsi.rsi', target: 'value', operator: 'crosses_above', value: 70, timeframe: '1h', periods: { rsi: 14 } }, 75, 65)
+
+    nothingFired()
+  })
+
+  it('skips the price against a line: no value is not a value of 0', async () => {
+    await evaluate({ source: 'price', target: 'ema50.ema50', operator: 'crosses_below', value: null, timeframe: '1d', periods: { ema50: 50 } }, 0, 1)
+
+    nothingFired()
+  })
+
+  it('skips a line against a line', async () => {
+    await evaluate({ source: 'ema20.ema20', target: 'ema50.ema50', operator: 'crosses', value: null, timeframe: '1d', periods: { ema20: 20, ema50: 50 } }, 0, 1)
+
+    nothingFired()
+  })
+
+  it('the price crossing a value either way fires going up, and says it went up', async () => {
+    await evaluate({ source: 'price', target: 'value', operator: 'crosses', value: 32.5 }, 33, 32)
+
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: 'triggered', triggered_at: expect.any(String) }))
+    expect(mockEqUpdate).toHaveBeenCalledWith('id', 'c1')
+    expect(mockSendTelegram).toHaveBeenCalledWith('🔔 Alerta disparada: FXI ↑ 32.5\nPrecio actual: 33')
+    expect(mockSendPush).toHaveBeenCalledWith(expect.anything(), 'owner-1', expect.objectContaining({ body: 'Superó 32,5. Ahora: 33' }))
+  })
+
+  it('and going down, and says it went down', async () => {
+    await evaluate({ source: 'price', target: 'value', operator: 'crosses', value: 32.5 }, 32, 33)
+
+    expect(mockEqUpdate).toHaveBeenCalledWith('id', 'c1')
+    expect(mockSendTelegram).toHaveBeenCalledWith('🔔 Alerta disparada: FXI ↓ 32.5\nPrecio actual: 32')
+    expect(mockSendPush).toHaveBeenCalledWith(expect.anything(), 'owner-1', expect.objectContaining({ body: 'Bajó de 32,5. Ahora: 32' }))
+  })
+
+  it('either way does not fire without a cross', async () => {
+    await evaluate({ source: 'price', target: 'value', operator: 'crosses', value: 32.5 }, 34, 33)
+
+    nothingFired()
+  })
+
+  it('a price alert with the new columns at their defaults fires as before', async () => {
+    await evaluate({ source: 'price', target: 'value', operator: 'crosses_above', value: 32.5, timeframe: null, periods: null, color: '#f23645' }, 33, 32)
+
+    expect(mockSendTelegram).toHaveBeenCalledWith('🔔 Alerta disparada: FXI ↑ 32.5\nPrecio actual: 33')
+  })
+})

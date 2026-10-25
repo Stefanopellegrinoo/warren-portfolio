@@ -70,7 +70,9 @@ vi.mock('../useCandles', () => ({
   useCandles: () => ({ status: 'ready', candles: [candle], change: { kind: 'set' }, retry: () => {} }),
 }))
 vi.mock('../useDrawings', () => ({ useDrawings: () => 'ready' }))
-const alertsApi = { alerts: [] as unknown[], create: vi.fn(), move: vi.fn(), rearm: vi.fn(), remove: vi.fn() }
+// What useChartAlerts gives an alert from before the conditions: the price against its value, no color.
+const PRICE_VALUE = { source: 'price', target: 'value', timeframe: null, periods: null, color: null }
+const alertsApi = { alerts: [] as unknown[], create: vi.fn(), save: vi.fn(async () => true), move: vi.fn(), rearm: vi.fn(), remove: vi.fn() }
 vi.mock('../useChartAlerts', () => ({ useChartAlerts: () => alertsApi }))
 vi.mock('../useChartTheme', () => ({
   useChartTheme: () => ({ bg: '#fff', ink: '#000', ink2: '#111', ink3: '#222', line: '#ddd', lineStrong: '#ccc', accent: '#0a0', up: '#0f0', down: '#f00', font: 'sans' }),
@@ -79,9 +81,15 @@ vi.mock('../useChartTheme', () => ({
 // chart lets it float the favorites bar.
 let favoritesArea: HTMLElement | null | undefined
 vi.mock('../DrawingTools', () => ({
-  DrawingTools: ({ onAlertMode, chartArea }: { onAlertMode: (on: boolean) => void; chartArea?: HTMLElement | null }) => {
+  DrawingTools: ({ onAlertMode, chartArea, alerts, onNewAlert, onOpenAlert }: { onAlertMode: (on: boolean) => void; chartArea?: HTMLElement | null; alerts?: { id: string }[]; onNewAlert?: () => void; onOpenAlert?: (id: string) => void }) => {
     favoritesArea = chartArea
-    return <button type="button" onClick={() => onAlertMode(true)}>Alerta</button>
+    return (
+      <>
+        <button type="button" onClick={() => onAlertMode(true)}>Alerta</button>
+        <button type="button" onClick={() => onNewAlert?.()}>Nueva alerta…</button>
+        {alerts?.map((a) => <button key={a.id} type="button" onClick={() => onOpenAlert?.(a.id)}>{`abrir ${a.id}`}</button>)}
+      </>
+    )
   },
 }))
 
@@ -289,7 +297,7 @@ describe('TradingChart price alerts (S7)', () => {
 
 describe('TradingChart alert lines under a finger (S4)', () => {
   async function pressNearAlert(pointerType: string) {
-    alertsApi.alerts = [{ id: 'a1', ticker: 'BTCUSDT', operator: 'crosses_above', value: 90000, name: 'BTCUSDT cruza por encima de 90.000', status: 'active' }]
+    alertsApi.alerts = [{ id: 'a1', ticker: 'BTCUSDT', operator: 'crosses_above', value: 90000, name: 'BTCUSDT cruza por encima de 90.000', status: 'active', ...PRICE_VALUE }]
     series.priceToCoordinate.mockReturnValue(100 as never)
     const { box, unmount } = await render()
     act(() => {
@@ -371,7 +379,7 @@ describe('TradingChart text editor after placing a text (S3)', () => {
 
 // odd/tasks/chart-customization.md S1: with a finger, an alert is selected before it moves.
 describe('TradingChart alerts: select before move', () => {
-  const ALERT = { id: 'a1', ticker: 'BTCUSDT', operator: 'crosses_above', value: 90000, name: 'BTCUSDT cruza por encima de 90.000', status: 'active' }
+  const ALERT = { id: 'a1', ticker: 'BTCUSDT', operator: 'crosses_above', value: 90000, name: 'BTCUSDT cruza por encima de 90.000', status: 'active', ...PRICE_VALUE }
   // The line sits at y 100; y 150 is price 85 on the stand-in (100 - y / 10).
   async function withAlert() {
     alertsApi.alerts = [ALERT]
@@ -540,6 +548,7 @@ describe('TradingChart indicator styles', () => {
           m.lines.push(line)
           return line
         },
+        removePriceLine: (line: unknown) => { m.lines = m.lines.filter((l) => l !== line) },
         attachPrimitive: (p: Made['fills'][number] & { attached: (h: unknown) => void }) => {
           p.attached({ chart: { timeScale: () => ({ timeToCoordinate: (t: number) => t }) }, series: { priceToCoordinate: (v: number) => 100 - v }, requestUpdate() {} })
           m.fills.push(p)
@@ -653,6 +662,30 @@ describe('TradingChart indicator styles', () => {
     unmount()
   })
 
+  // odd/tasks/chart-customization.md S6: an indicator against a value draws its line in that indicator's pane.
+  it('an RSI alert against 70 draws its line in the RSI pane, in its color', async () => {
+    alertsApi.alerts = [{ id: 'r1', ticker: 'BTCUSDT', name: 'n', status: 'active', color: '#089981', source: 'rsi.rsi', operator: 'crosses_above', target: 'value', value: 70, timeframe: '1h', periods: { rsi: 14 } }]
+    const { unmount } = await render()
+
+    const rsi = made[4]
+    expect(rsi.pane).toBe(2)
+    expect(rsi.lines.map((l) => l.options).filter((o) => o.title === 'Alerta')).toEqual([
+      { price: 70, color: '#089981', lineStyle: 0, lineWidth: 1, axisLabelVisible: true, title: 'Alerta' },
+    ])
+    expect(series.createPriceLine).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it('with RSI off, an RSI alert draws no line anywhere', async () => {
+    useChartStore.setState({ indicators: { ...initial.indicators, rsi: false } })
+    alertsApi.alerts = [{ id: 'r1', ticker: 'BTCUSDT', name: 'n', status: 'active', color: null, source: 'rsi.rsi', operator: 'crosses_above', target: 'value', value: 70, timeframe: '1h', periods: { rsi: 14 } }]
+    const { unmount } = await render()
+
+    expect(made.flatMap((m) => m.lines).filter((l) => l.options.title === 'Alerta')).toEqual([])
+    expect(series.createPriceLine).not.toHaveBeenCalled()
+    unmount()
+  })
+
   it("the legend's eye still hides every line of an indicator, whatever its saved style (S8)", async () => {
     const { unmount } = await render()
     act(() => setIndicatorSettings('rsi', { style: { lines: { rsi: { visible: true } }, fills: { levels: { visible: true } } } }))
@@ -662,6 +695,124 @@ describe('TradingChart indicator styles', () => {
     expect(made[4].options.visible).toBe(false)
     expect(drawsFill(made[4])).toBe(false)
     expect(made[0].options.visible).toBe(true)
+    unmount()
+  })
+})
+
+// odd/tasks/chart-customization.md S6: the alert sheet from the menu and from the selected alert's ⚙; colors on the lines.
+describe('TradingChart alert sheet', () => {
+  const ALERT = { id: 'a1', ticker: 'BTCUSDT', operator: 'crosses_above', value: 90000, name: 'BTCUSDT cruza por encima de 90.000', status: 'active', color: null, source: 'price', target: 'value', timeframe: null, periods: null }
+  const sheet = () => document.querySelector<HTMLElement>('[role="dialog"][aria-labelledby]')
+  const inSheet = (text: string) => [...(sheet()?.querySelectorAll('button') ?? [])].find((b) => b.textContent === text)
+  const alertTitles = () => (series.createPriceLine.mock.calls as unknown as [{ title?: string; color: string }][]).map(([o]) => o).filter((o) => o.title === 'Alerta')
+  const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 30)) })
+
+  it('"Nueva alerta…" opens the sheet with the last price; Guardar creates the alert and closes it', async () => {
+    const { unmount } = await render()
+
+    act(() => button('Nueva alerta…').click())
+    await flush()
+    expect(sheet()!.textContent).toContain('Nueva alerta · BTCUSDT')
+    expect(sheet()!.querySelector<HTMLInputElement>('[aria-label="Valor"]')!.value).toBe('1,5')
+
+    await act(async () => { inSheet('Guardar')!.click() })
+    await flush()
+
+    expect(alertsApi.save).toHaveBeenCalledWith(null, { source: 'price', operator: 'crosses', target: 'value', value: 1.5, timeframe: null, periods: null, color: null })
+    expect(sheet()).toBeNull()
+    unmount()
+  })
+
+  it("an indicator alert takes the chart's timeframe and the indicator's period the chart uses", async () => {
+    useChartStore.setState({ config: { ...DEFAULT_CONFIG, rsi: 21 } })
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<TradingChart symbol="BTCUSDT" timeframe="4h" />) })
+
+    act(() => button('Nueva alerta…').click())
+    await flush()
+    const when = sheet()!.querySelector<HTMLSelectElement>('[aria-label="Cuando"]')!
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(when, 'rsi.rsi')
+      when.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await act(async () => { inSheet('Guardar')!.click() })
+
+    expect(alertsApi.save).toHaveBeenCalledWith(null, expect.objectContaining({ source: 'rsi.rsi', timeframe: '4h', periods: { rsi: 21 } }))
+    act(() => root.unmount())
+    useChartStore.setState({ config: { ...DEFAULT_CONFIG } })
+  })
+
+  it("the selected alert's bar has ⚙, which opens its sheet", async () => {
+    alertsApi.alerts = [ALERT]
+    series.priceToCoordinate.mockReturnValue(100 as never)
+    const { box, unmount } = await render()
+    act(() => {
+      box.dispatchEvent(new PointerEvent('pointerdown', { clientY: 100, pointerType: 'touch', bubbles: true }))
+      window.dispatchEvent(new PointerEvent('pointerup', { clientY: 100, pointerType: 'touch' }))
+    })
+    await act(async () => {})
+
+    act(() => document.querySelector<HTMLButtonElement>('[role="dialog"][aria-label="BTCUSDT cruza por encima de 90.000"] [aria-label="Configuración"]')!.click())
+    await flush()
+
+    expect(sheet()!.textContent).toContain('Alerta · BTCUSDT')
+    expect(sheet()!.querySelector<HTMLInputElement>('[aria-label="Valor"]')!.value).toBe('90000')
+    unmount()
+  })
+
+  it('an alert from the menu list opens its sheet; Borrar alerta deletes it and closes the sheet', async () => {
+    alertsApi.alerts = [ALERT]
+    const { unmount } = await render()
+
+    act(() => button('abrir a1').click())
+    await flush()
+    act(() => inSheet('Borrar alerta')!.click())
+    await flush()
+
+    expect(alertsApi.remove).toHaveBeenCalledWith('a1')
+    expect(sheet()).toBeNull()
+    unmount()
+  })
+
+  it("an alert's color reaches its line; one with no color keeps the accent, as before", async () => {
+    alertsApi.alerts = [{ ...ALERT, color: '#f23645' }, { ...ALERT, id: 'a2', value: 80000 }]
+    const { unmount } = await render()
+
+    expect(alertTitles().slice(-2).map((o) => o.color)).toEqual(['#f23645', '#0a0']) // the lines drawn last
+    unmount()
+  })
+
+  it('redrawing the alert lines removes the ones drawn before, as it always did', async () => {
+    alertsApi.alerts = [ALERT]
+    series.priceToCoordinate.mockReturnValue(100 as never)
+    const { box, unmount } = await render()
+    const before = series.createPriceLine.mock.results.at(-1)!.value
+
+    act(() => {
+      box.dispatchEvent(new PointerEvent('pointerdown', { clientY: 100, pointerType: 'touch', bubbles: true }))
+      window.dispatchEvent(new PointerEvent('pointerup', { clientY: 100, pointerType: 'touch' }))
+    })
+    await act(async () => {})
+
+    expect(series.removePriceLine).toHaveBeenCalledWith(before)
+    unmount()
+  })
+
+  it('an alert against a line draws no line, and a finger on the price there selects nothing', async () => {
+    alertsApi.alerts = [{ ...ALERT, target: 'ema50.ema50', value: null, timeframe: '1d', periods: { ema50: 50 } }]
+    series.priceToCoordinate.mockReturnValue(100 as never)
+    const { box, unmount } = await render()
+
+    act(() => {
+      box.dispatchEvent(new PointerEvent('pointerdown', { clientY: 100, pointerType: 'touch', bubbles: true }))
+      window.dispatchEvent(new PointerEvent('pointerup', { clientY: 100, pointerType: 'touch' }))
+    })
+    await act(async () => {})
+
+    expect(alertTitles()).toEqual([])
+    expect(document.querySelector('[role="dialog"][aria-label="BTCUSDT cruza por encima de 90.000"]')).toBeNull()
     unmount()
   })
 })

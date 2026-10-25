@@ -37,8 +37,10 @@ import { InlineConfirm } from "@/components/ui/InlineConfirm";
 import { barButton } from "@/components/trading/ui";
 import type { ToolKind } from "@/lib/chart/preferences-schema";
 import { readBar, saveBar } from "@/lib/chart/favorites-bar";
+import type { ChartAlert } from "@/lib/chart/alerts";
 import { useChartPreferences } from "./useChartPreferences";
 import { FavoritesBar } from "./FavoritesBar";
+import { AlertMenu } from "./AlertMenu";
 
 interface Tool {
 	kind: ToolKind;
@@ -188,6 +190,7 @@ function PhoneTools({
 	onAlertMode,
 	onMagnet,
 	favorites,
+	alertMenu,
 }: {
 	manager: DrawingManager | null;
 	tool: DrawingKind | null;
@@ -198,6 +201,7 @@ function PhoneTools({
 	onAlertMode: (on: boolean) => void;
 	onMagnet: () => void;
 	favorites: Favorites;
+	alertMenu: AlertMenuProps;
 }) {
 	const [open, setOpen] = useState(false);
 	const armed = tool ? TOOLS.find((t) => t.kind === tool) : undefined;
@@ -259,15 +263,17 @@ function PhoneTools({
 							</div>
 						</PopoverContent>
 					</Popover>
-					<button type="button" className={barButton} onClick={() => onAlertMode(true)}>
+					<AlertMenu {...alertMenu} side="top" triggerClassName={barButton}>
 						<Bell className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
 						Alerta
-					</button>
+					</AlertMenu>
 				</>
 			)}
 		</div>
 	);
 }
+
+type AlertMenuProps = Omit<React.ComponentProps<typeof AlertMenu>, "side" | "triggerClassName" | "triggerLabel" | "children">;
 
 const Divider = () => <span className="h-px w-6 shrink-0 bg-line max-[819px]:h-6 max-[819px]:w-px" aria-hidden />;
 
@@ -282,12 +288,21 @@ export function DrawingTools({
 	onAlertMode,
 	phoneBar = null,
 	chartArea = null,
+	symbol = "",
+	alerts = [],
+	onNewAlert = () => {},
+	onOpenAlert = () => {},
 }: {
 	manager: DrawingManager | null;
 	alertMode: boolean;
 	onAlertMode: (on: boolean) => void;
 	phoneBar?: HTMLElement | null;
 	chartArea?: HTMLElement | null;
+	/** The chart's ticker and its alerts, for the Alerta menu (odd/tasks/chart-customization.md S6). */
+	symbol?: string;
+	alerts?: readonly ChartAlert[];
+	onNewAlert?: () => void;
+	onOpenAlert?: (id: string) => void;
 }) {
 	const [tool, setTool] = useState<DrawingKind | null>(null);
 	const [magnet, setMagnet] = useState(false);
@@ -323,6 +338,25 @@ export function DrawingTools({
 		manager?.setTool(kind);
 	};
 
+	const alertMenu: AlertMenuProps = {
+		symbol,
+		alerts,
+		armed: alertMode,
+		onQuick: () => {
+			manager?.setTool(null);
+			onAlertMode(true);
+		},
+		onCancel: () => onAlertMode(false),
+		onNew: () => {
+			arm(null);
+			onNewAlert();
+		},
+		onOpen: (id) => {
+			arm(null);
+			onOpenAlert(id);
+		},
+	};
+
 	const toggleMagnet = () => {
 		manager?.setMagnet(magnet ? "off" : "weak");
 		setMagnet(!magnet);
@@ -330,7 +364,7 @@ export function DrawingTools({
 
 	return (
 		<>
-		{phoneBar && createPortal(<PhoneTools manager={manager} tool={tool} magnet={magnet} visible={visible} alertMode={alertMode} arm={arm} onAlertMode={onAlertMode} onMagnet={toggleMagnet} favorites={favorites} />, phoneBar)}
+		{phoneBar && createPortal(<PhoneTools manager={manager} tool={tool} magnet={magnet} visible={visible} alertMode={alertMode} arm={arm} onAlertMode={onAlertMode} onMagnet={toggleMagnet} favorites={favorites} alertMenu={alertMenu} />, phoneBar)}
 		{chartArea && barShown && starred.length > 0 && createPortal(
 			<FavoritesBar area={chartArea}>
 				{starred.map((t) => (
@@ -370,15 +404,14 @@ export function DrawingTools({
 				</PopoverContent>
 			</Popover>
 			<Divider />
-			<ToolButton
-				label="Alerta de precio: tocá el gráfico en el precio"
-				icon={Bell}
-				active={alertMode}
-				onClick={() => {
-					manager?.setTool(null);
-					onAlertMode(!alertMode);
-				}}
-			/>
+			<AlertMenu
+				{...alertMenu}
+				side="right"
+				triggerLabel="Alertas"
+				triggerClassName={cn(toolClass, alertMode && "bg-accent-soft text-accent-ink hover:bg-accent-soft hover:text-accent-ink")}
+			>
+				<Bell className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
+			</AlertMenu>
 			<Divider />
 			<ToolButton
 				label={magnet ? "Imán activado" : "Imán"}

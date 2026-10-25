@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { serverError } from '@/lib/api/errors'
-import { INVALID_JSON } from '@/lib/api/validation'
+import { tooManyRequests } from '@/lib/rate-limit'
+import { parseAlertCreate } from '@/lib/chart/alert-condition'
+import { CHECK_VIOLATION, INVALID_CONDITION, WRITE_WINDOW_SEC, readAlertBody, writeAllowed } from './write'
 
 export async function GET(req: NextRequest) {
   const auth = await requireUser()
@@ -30,22 +32,16 @@ export async function POST(req: NextRequest) {
 
   const { supabase, user } = auth
 
-  let body: unknown
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: INVALID_JSON }, { status: 400 })
-  }
+  if (!(await writeAllowed(user.id))) return tooManyRequests(WRITE_WINDOW_SEC)
 
-  const { ticker, type, operator, value, name } = (body ?? {}) as Record<string, unknown>
+  const read = await readAlertBody(req)
+  if ('error' in read) return read.error
+  const parsed = parseAlertCreate(read.body)
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
+  const { ticker, type, operator, value, name, source, target, timeframe, periods, color } = parsed.data
 
-  if (!ticker || !type || !operator || value === undefined || value === null || !name) {
-    return NextResponse.json(
-      { error: 'Completá el ticker, el tipo, la condición, el valor y el nombre de la alerta' },
-      { status: 400 }
-    )
-  }
-
+  // Today's columns as before; the new ones only when they differ from the defaults of 052, so an
+  // alert like the ones before is written exactly as it was.
   const { data, error } = await supabase
     .from('price_alerts')
     .insert({
@@ -55,10 +51,15 @@ export async function POST(req: NextRequest) {
       operator,
       value,
       name,
+      ...(source !== 'price' && { source }),
+      ...(target !== 'value' && { target }),
+      ...(timeframe && { timeframe, periods }),
+      ...(color && { color }),
     })
     .select()
     .single()
 
+  if (error?.code === CHECK_VIOLATION) return NextResponse.json({ error: INVALID_CONDITION }, { status: 400 })
   if (error) return serverError('API /price-alerts', error)
 
   return NextResponse.json({ alert: data }, { status: 201 })

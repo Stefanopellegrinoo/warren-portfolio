@@ -51,3 +51,12 @@ hand in the SQL Editor right before the merge that deploys `/api/chart-preferenc
 Supabase. Until then the route answers 500 and the chart keeps each device's values (`src/lib/chart/preferences.ts`).
 Writes go through `patch_chart_preferences`, which merges per key; never replace a whole column from the app.
 Re-run its RLS/limits proof (throwaway local postgres:15, never touches Supabase; not run in CI): `scripts/test-chart-preferences-rls-proof.sh`.
+
+## Alert conditions (052)
+
+`price_alerts` gains what an alert watches (`source`, `target`, `operator` 'crosses' for either way, `timeframe`,
+`periods`), its `color`, and the status `unavailable` ("No se puede revisar"); `value` becomes null against a line.
+Old rows and old clients keep their meaning through the defaults (the price against its value, up or down). Applied by
+hand in the SQL Editor right before the merge that deploys the alert sheet; dev and prod share one Supabase. The
+`DROP CONSTRAINT`s use the names 026 got from Postgres and abort the migration if a name differs.
+Re-run its proof (throwaway local postgres:15, never touches Supabase; not run in CI): `scripts/test-alert-conditions-proof.sh`.

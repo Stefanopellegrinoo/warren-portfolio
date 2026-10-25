@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { invalidateUserCache } from '@/lib/redis'
 import { serverError } from '@/lib/api/errors'
-import { INVALID_JSON } from '@/lib/api/validation'
-
-const VALID_OPERATORS = ['crosses_above', 'crosses_below'] as const
+import { tooManyRequests } from '@/lib/rate-limit'
+import { parseAlertUpdate } from '@/lib/chart/alert-condition'
+import { CHECK_VIOLATION, INVALID_CONDITION, WRITE_WINDOW_SEC, readAlertBody, writeAllowed } from '../write'
 
 export async function PATCH(
   req: NextRequest,
@@ -16,40 +16,14 @@ export async function PATCH(
   const { supabase, user } = auth
   const alertId = params.id
 
-  let body: unknown
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: INVALID_JSON }, { status: 400 })
-  }
+  if (!(await writeAllowed(user.id))) return tooManyRequests(WRITE_WINDOW_SEC)
 
-  const { name, operator, value, channel, status } = (body ?? {}) as Record<string, unknown>
-
-  // Only re-arming is allowed: the worker owns the 'triggered' transition
-  if (status !== undefined && status !== 'active') {
-    return NextResponse.json({ error: 'Solo se puede reactivar la alerta' }, { status: 400 })
-  }
-
-  if (operator !== undefined && !VALID_OPERATORS.includes(operator as typeof VALID_OPERATORS[number])) {
-    return NextResponse.json(
-      { error: 'Elegí una condición: que el precio suba por encima o baje por debajo del valor' },
-      { status: 400 }
-    )
-  }
-
-  if (value !== undefined && (typeof value !== 'number' || !isFinite(value))) {
-    return NextResponse.json({ error: 'El valor de la alerta tiene que ser un número' }, { status: 400 })
-  }
-
-  const patch: Record<string, unknown> = {}
-  if (name !== undefined) patch.name = name
-  if (operator !== undefined) patch.operator = operator
-  if (value !== undefined) patch.value = value
-  if (channel !== undefined) patch.channel = channel
-  if (status === 'active') {
-    patch.status = 'active'
-    patch.triggered_at = null
-  }
+  const read = await readAlertBody(req)
+  if ('error' in read) return read.error
+  // Only re-arming is allowed: the worker owns 'triggered' and 'unavailable'.
+  const parsed = parseAlertUpdate(read.body)
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
+  const patch = parsed.data
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: 'No hay cambios para guardar' }, { status: 400 })
@@ -63,6 +37,7 @@ export async function PATCH(
     .select()
     .single()
 
+  if (error?.code === CHECK_VIOLATION) return NextResponse.json({ error: INVALID_CONDITION }, { status: 400 })
   if (error || !data) {
     return NextResponse.json({ error: 'No encontramos esa alerta' }, { status: 404 })
   }

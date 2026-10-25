@@ -74,3 +74,54 @@ describe('DrawingTools — "Borrar todos los dibujos" asks inside the app', () =
     unmount()
   })
 })
+
+// odd/tasks/chart-customization.md S6: on a computer the strip's bell opens the same menu; while the quick alert waits, it cancels it.
+describe('DrawingTools — the alert menu on a computer', () => {
+  async function renderAlerts(alertMode: boolean) {
+    const manager = { on: vi.fn(() => () => {}), drawings: vi.fn(() => []), setTool: vi.fn(), setMagnet: vi.fn(), setDrawingsVisible: vi.fn() }
+    const onAlertMode = vi.fn()
+    const onNewAlert = vi.fn()
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<DrawingTools manager={manager as unknown as DrawingManager} alertMode={alertMode} onAlertMode={onAlertMode} symbol="FXI" alerts={[]} onNewAlert={onNewAlert} onOpenAlert={() => {}} />) })
+    return { manager, onAlertMode, onNewAlert, unmount: () => act(() => root.unmount()) }
+  }
+  const bell = () => document.querySelector<HTMLButtonElement>('[role="toolbar"] button[aria-label="Alertas"]')!
+  const item = (text: string) => [...document.querySelectorAll<HTMLButtonElement>('[aria-label="Alertas"][role="dialog"] button')].find(b => b.textContent?.startsWith(text))
+
+  it('the bell opens the menu; "Tocar el precio en el gráfico" arms the quick alert with no drawing tool', async () => {
+    const { manager, onAlertMode, unmount } = await renderAlerts(false)
+
+    act(() => bell().click())
+    await flush()
+    act(() => item('Tocar el precio en el gráfico')!.click())
+
+    expect(manager.setTool).toHaveBeenCalledWith(null)
+    expect(onAlertMode).toHaveBeenCalledWith(true)
+    unmount()
+  })
+
+  it('"Nueva alerta…" asks for the sheet', async () => {
+    const { onNewAlert, unmount } = await renderAlerts(false)
+
+    act(() => bell().click())
+    await flush()
+    act(() => item('Nueva alerta…')!.click())
+
+    expect(onNewAlert).toHaveBeenCalledOnce()
+    unmount()
+  })
+
+  it('while the quick alert waits for its tap, the bell cancels it', async () => {
+    const { onAlertMode, unmount } = await renderAlerts(true)
+
+    expect(bell().getAttribute('aria-pressed')).toBe('true')
+    act(() => bell().click())
+    await flush()
+
+    expect(onAlertMode).toHaveBeenCalledWith(false)
+    expect(item('Nueva alerta…')).toBeUndefined()
+    unmount()
+  })
+})

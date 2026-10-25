@@ -25,6 +25,7 @@ import { INDICATOR_ORDER, INDICATOR_SPECS, type IndicatorLine } from "@/lib/char
 import { BandFill, effectiveConfig, fillLook, levelLooks, lineLook, seriesPoints } from "@/lib/chart/indicator-style";
 import { INDICATOR_STYLE_PARTS, type ChartPreferences } from "@/lib/chart/preferences-schema";
 import { hitTestAlert, priceDecimals, type ChartAlert } from "@/lib/chart/alerts";
+import { indicatorOf, isPriceValue, lineIdOf } from "@/lib/chart/alert-condition";
 import { touchDrawing } from "@/lib/chart/touch-drawing";
 import { onTap, selectBeforeMove } from "@/lib/chart/select-before-move";
 import { applyRememberedStyles } from "@/lib/chart/remembered-style";
@@ -37,6 +38,7 @@ import { useChartTheme, type ChartTheme } from "./useChartTheme";
 import { DrawingTools } from "./DrawingTools";
 import { DrawingActions } from "./DrawingActions";
 import { useChartPreferences } from "./useChartPreferences";
+import { AlertSheet } from "./AlertSheet";
 
 const TZ = "America/Argentina/Buenos_Aires";
 const INTRADAY: Timeframe[] = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h"];
@@ -56,6 +58,7 @@ const roundPrice = (p: number) => Number(p.toFixed(priceDecimals(p)));
 const PHONE = "(max-width: 819px)";
 const asTime = (t: number) => t as UTCTimestamp;
 const PRICE_FORMAT = { type: "custom" as const, formatter: priceText, minMove: 0.0001 };
+const ALERT_TITLES = { active: "Alerta", triggered: "Disparada", unavailable: "No se puede revisar" };
 
 const fmt = (opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("es-AR", { timeZone: TZ, ...opts });
 const DAY = fmt({ day: "numeric", month: "short", year: "numeric" });
@@ -187,6 +190,8 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	const [hover, setHover] = useState<Candle | null>(null);
 	const [alertMode, setAlertMode] = useState(false);
 	const [selectedAlert, setSelectedAlert] = useState<{ id: string; y: number } | null>(null);
+	// The alert sheet (S6): a new alert (id null) or an existing one.
+	const [sheet, setSheet] = useState<{ id: string | null } | null>(null);
 	const [textEdit, setTextEdit] = useState<{ drawing: Drawing; x: number; y: number } | null>(null);
 	const [legendOpen, setLegendOpen] = useState(true);
 	// Where the favorites bar floats: over the chart, in its container (S3).
@@ -212,7 +217,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	const data = useCandles(symbol, timeframe);
 	const last = data.candles.at(-1) ?? null;
 	const drawingsStatus = useDrawings(manager, symbol);
-	const { alerts, create, move, rearm, remove } = useChartAlerts(symbol, last?.close ?? null);
+	const { alerts, create, save, move, rearm, remove } = useChartAlerts(symbol, last?.close ?? null);
 
 	// The chart, its candle series and the drawing layer: created once.
 	const ready = theme !== null;
@@ -315,27 +320,38 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		syncIndicators(chart, indicatorsRef.current, data.candles, enabled, hidden, config, saved, theme, window.matchMedia(PHONE).matches);
 	}, [data.status, data.candles, enabled, hidden, config, saved, theme, manager]);
 
-	// Alert lines; the selected one is drawn thicker.
+	// Alert lines: only an alert against a value has one, in its color (the accent when it has none), the selected
+	// one thicker. The price's on the candles; an indicator's in that indicator's pane while it is on (S6). Removed on
+	// cleanup, before the indicator effect rebuilds the series they sit on.
 	const selectedId = selectedAlert?.id;
 	useEffect(() => {
-		const series = seriesRef.current;
-		if (!series || !theme) return;
-		alertLinesRef.current.forEach((l) => series.removePriceLine(l));
-		alertLinesRef.current.clear();
+		const candles = seriesRef.current;
+		if (!candles || !theme) return;
+		const draggable = alertLinesRef.current;
+		const made: [ISeriesApi<SeriesType>, IPriceLine][] = [];
 		for (const a of alerts) {
-			alertLinesRef.current.set(
-				a.id,
-				series.createPriceLine({
-					price: a.value,
-					color: a.status === "active" ? theme.accent : theme.ink3,
-					lineStyle: a.status === "active" ? LineStyle.Solid : LineStyle.Dashed,
-					lineWidth: a.id === selectedId ? 2 : 1,
-					axisLabelVisible: true,
-					title: a.status === "active" ? "Alerta" : "Disparada",
-				}),
-			);
+			if (a.target !== "value" || a.value === null) continue;
+			const host: ISeriesApi<SeriesType> | undefined =
+				a.source === "price" ? candles : indicatorsRef.current.list.find((i) => i.key === indicatorOf(a.source))?.series[0];
+			if (!host) continue;
+			const active = a.status === "active";
+			const line = host.createPriceLine({
+				price: a.value,
+				color: active ? (a.color ?? theme.accent) : theme.ink3,
+				lineStyle: active ? LineStyle.Solid : LineStyle.Dashed,
+				lineWidth: a.id === selectedId ? 2 : 1,
+				axisLabelVisible: true,
+				title: ALERT_TITLES[a.status],
+			});
+			made.push([host, line]);
+			if (host === candles) draggable.set(a.id, line);
 		}
-	}, [alerts, theme, manager, selectedId]);
+		return () => {
+			draggable.clear();
+			// After the chart is gone (unmount) there is nothing to remove them from.
+			if (chartRef.current) made.forEach(([series, line]) => series.removePriceLine(line));
+		};
+	}, [alerts, theme, manager, selectedId, enabled, config, data.status]);
 
 	// Alert placement and dragging. Capture phase: an alert under the pointer
 	// wins over the drawing layer and the chart's own panning.
@@ -349,6 +365,8 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		const chart = chartRef.current;
 		const series = seriesRef.current;
 		if (!box || !chart || !series) return;
+		// Only the price against a value has a line on the price pane to grab.
+		const lines = alerts.filter((a): a is ChartAlert & { value: number } => isPriceValue(a) && a.value !== null);
 
 		const onDown = (e: PointerEvent) => {
 			const y = e.clientY - box.getBoundingClientRect().top;
@@ -361,7 +379,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			}
 			if (manager?.tool()) return;
 			const touch = e.pointerType === "touch";
-			const id = hitTestAlert(alerts, y, (p) => series.priceToCoordinate(p), touch ? TOUCH_HIT_PX : undefined);
+			const id = hitTestAlert(lines, y, (p) => series.priceToCoordinate(p), touch ? TOUCH_HIT_PX : undefined);
 			// A finger only drags the selected alert (odd/tasks/chart-customization.md S1): across
 			// any other line, or off them, it pans the chart, and a tap selects or deselects.
 			if (touch && id !== selectedId) {
@@ -376,7 +394,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			e.stopPropagation();
 			e.preventDefault();
 			const line = alertLinesRef.current.get(id);
-			const original = alerts.find((a) => a.id === id)!.value;
+			const original = lines.find((a) => a.id === id)!.value;
 			let price = original;
 			let lastY = y;
 			let dragged = false;
@@ -421,7 +439,18 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		};
 	}, [alertMode, alerts, create, move, manager, selectedId]);
 
-	useEffect(() => setSelectedAlert(null), [symbol]);
+	useEffect(() => {
+		setSelectedAlert(null);
+		setSheet(null);
+	}, [symbol]);
+
+	// A line's last value on the chart, for the sheet to start from: the price, or an indicator's.
+	const lastValue = (line: string) => {
+		if (line === "price") return last?.close ?? null;
+		const found = INDICATOR_SPECS[indicatorOf(line)].lines(data.candles, config).find((l) => l.id === lineIdOf(line));
+		return found?.data.at(-1)?.value ?? null;
+	};
+	const sheetAlert = sheet?.id ? alerts.find((a) => a.id === sheet.id) : undefined;
 
 	const shown = hover ?? last;
 	const prevClose = data.candles.at(-2)?.close;
@@ -430,7 +459,17 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 
 	return (
 		<div className="flex min-h-0 flex-1">
-			<DrawingTools manager={manager} alertMode={alertMode} onAlertMode={setAlertMode} phoneBar={phoneBar} chartArea={area} />
+			<DrawingTools
+				manager={manager}
+				alertMode={alertMode}
+				onAlertMode={setAlertMode}
+				phoneBar={phoneBar}
+				chartArea={area}
+				symbol={symbol}
+				alerts={alerts}
+				onNewAlert={() => setSheet({ id: null })}
+				onOpenAlert={(id) => setSheet({ id })}
+			/>
 			<div ref={setArea} className="relative min-h-0 min-w-0 flex-1">
 				{/* touch-none: the chart pans and zooms itself; left to the browser, a finger drag on a
 				    drawing or an alert is taken over as a page scroll and cancelled halfway. isolate: the
@@ -496,11 +535,20 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 						style={{ top: selectedAlert.y > 80 ? selectedAlert.y - 72 : selectedAlert.y + 16 }}
 					>
 						<span className="text-ink">{selected.name}</span>
-						{selected.status === "triggered" && (
+						{selected.status !== "active" && (
 							<button type="button" onClick={() => rearm(selected.id)} className="rounded px-2 py-1 text-accent-ink hover:bg-accent-soft max-[819px]:min-h-11 max-[819px]:px-3">
 								Reactivar
 							</button>
 						)}
+						<button
+							type="button"
+							aria-label="Configuración"
+							title="Configuración"
+							onClick={() => setSheet({ id: selected.id })}
+							className="grid shrink-0 place-items-center rounded px-1.5 py-1 text-ink-2 hover:bg-hover hover:text-ink max-[819px]:min-h-11 max-[819px]:min-w-11"
+						>
+							<Settings2 className="h-4 w-4" aria-hidden />
+						</button>
 						<button
 							type="button"
 							onClick={() => {
@@ -518,6 +566,28 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 				)}
 
 				<DrawingActions manager={manager} onEditText={(drawing) => setTextEdit({ drawing, x: 12, y: 56 })} />
+
+				{sheet && (sheet.id === null || sheetAlert) && (
+					<AlertSheet
+						key={sheet.id ?? "new"}
+						open
+						onOpenChange={(open) => !open && setSheet(null)}
+						ticker={symbol}
+						alert={sheetAlert}
+						timeframe={timeframe}
+						config={config}
+						lastValue={lastValue}
+						onSave={async (draft) => {
+							if (await save(sheet.id, draft)) setSheet(null);
+						}}
+						onDelete={() => {
+							if (sheet.id) remove(sheet.id);
+							setSheet(null);
+							setSelectedAlert(null);
+						}}
+						onRearm={() => sheet.id && rearm(sheet.id)}
+					/>
+				)}
 
 				{textEdit && (
 					<input
