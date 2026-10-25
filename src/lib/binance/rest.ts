@@ -62,17 +62,22 @@ export async function fetchTickers24h(symbols: string[], base = BASE): Promise<T
   }));
 }
 
-/** Candles for the price worker (indicator alerts), from the hosts its US server can reach. */
+/**
+ * Candles for the price worker (indicator alerts), from the hosts its US server can reach. Only the
+ * public host's own 400 says Binance has no such symbol; Binance.US lists far fewer pairs, so its 400
+ * after the public host failed is still that failure (a transient one), not an unknown ticker.
+ */
 export async function fetchServerKlines(symbol: string, interval: Timeframe, limit = 1000): Promise<Candle[]> {
-  let lastError: unknown;
-  for (const base of SERVER_BASES) {
+  let firstError: unknown;
+  for (const [i, base] of SERVER_BASES.entries()) {
     try {
       return await fetchKlines(symbol, interval, limit, base);
     } catch (err) {
-      lastError = err;
+      if (i === 0 && err instanceof Error && err.message === "klines 400") throw err;
+      firstError ??= err;
     }
   }
-  throw lastError;
+  throw firstError;
 }
 
 /** Crypto quotes for the price worker, in the same shape as the stock quotes. */

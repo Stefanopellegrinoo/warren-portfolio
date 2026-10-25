@@ -58,7 +58,21 @@ describe('fetchServerKlines', () => {
     expect(await fetchServerKlines('BTCUSDT', '1h')).toHaveLength(1)
     expect(String(fetchMock.mock.calls[1][0])).toMatch(/^https:\/\/api\.binance\.us\/api\/v3\/klines\?symbol=BTCUSDT/)
 
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 400 })))
+  })
+
+  it("an unknown symbol is the public host's own 400: Binance.US is not asked", async () => {
+    const fetchMock = vi.fn(async () => new Response('', { status: 400 }))
+    vi.stubGlobal('fetch', fetchMock)
+
     await expect(fetchServerKlines('NOPEUSDT', '1h')).rejects.toThrow('klines 400')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("a failing public host stays a failure, even when Binance.US does not list the pair (its 400)", async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(new Response('', { status: 503 }))
+      .mockResolvedValueOnce(new Response('{"code":-1121,"msg":"Invalid symbol."}', { status: 400 })))
+
+    await expect(fetchServerKlines('PEPEUSDT', '1h')).rejects.toThrow('klines 503')
   })
 })
