@@ -1,11 +1,14 @@
 import { DrawingManager } from 'lightweight-charts-drawing'
 import type { IChartApi, ISeriesApi, SeriesType } from 'lightweight-charts'
 
-/** The smallest chart the drawing layer runs on in jsdom: time = x, price = 300 - y. */
-export function fakeChart() {
+/** The smallest chart the drawing layer runs on in jsdom: time = x, price = 300 - y.
+ *  `before` runs on the chart element before the drawing layer listens to it. `applied`: the
+ *  options the chart was given (the drawing layer holds the chart still with handleScroll: false). */
+export function fakeChart(before?: (el: HTMLElement) => void) {
   const el = document.createElement('div')
   document.body.appendChild(el)
   const stub = () => {}
+  const applied: unknown[] = []
   const chart = {
     chartElement: () => el,
     timeScale: () => ({
@@ -15,7 +18,7 @@ export function fakeChart() {
     priceScale: () => ({ width: () => 0, options: () => ({ mode: 0 }) }),
     paneSize: () => ({ width: 400, height: 300 }),
     options: () => ({ handleScroll: true, handleScale: true }),
-    applyOptions: stub,
+    applyOptions: (o: unknown) => { applied.push(o) },
   }
   const series = {
     attachPrimitive: stub, detachPrimitive: stub, data: () => [],
@@ -23,8 +26,9 @@ export function fakeChart() {
     getPane: () => ({ paneIndex: () => 0, getHTMLElement: () => el }),
     priceScale: () => ({ options: () => ({ mode: 0 }) }),
   }
+  before?.(el)
   const manager = new DrawingManager(chart as unknown as IChartApi, series as unknown as ISeriesApi<SeriesType>)
-  return { el, manager }
+  return { el, manager, applied }
 }
 
 /** A pointer event as the browser sends it; moves and lifts bubble to window like real ones. */

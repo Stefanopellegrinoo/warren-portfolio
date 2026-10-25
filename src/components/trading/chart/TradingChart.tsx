@@ -24,6 +24,7 @@ import { useChartStore, type IndicatorKey } from "@/lib/store/chart-store";
 import { INDICATOR_ORDER, INDICATOR_SPECS } from "@/lib/chart/indicator-specs";
 import { hitTestAlert, priceDecimals, type ChartAlert } from "@/lib/chart/alerts";
 import { touchDrawing } from "@/lib/chart/touch-drawing";
+import { onTap, selectBeforeMove } from "@/lib/chart/select-before-move";
 import type { Candle, Timeframe } from "@/lib/binance/types";
 import { cn, formatNumber } from "@/lib/utils";
 import { useCandles } from "./useCandles";
@@ -188,6 +189,9 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		if (!ready || !box) return;
 		const chart = createChart(box, { autoSize: true });
 		const series = chart.addSeries(CandlestickSeries, { priceLineVisible: true, priceFormat: PRICE_FORMAT });
+		// Before the drawing layer, so a finger's press reaches it first (its events come later,
+		// once `drawings` exists).
+		const offSelect = selectBeforeMove(chart.chartElement(), () => drawings);
 		const drawings = new DrawingManager(chart, series, { magnet: "off" });
 		// A text drawing asks for its editor on the press that places it, but the chart blurs
 		// whatever has the focus when a press starts (its touchstart and mousedown come after
@@ -219,6 +223,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		return () => {
 			offText();
 			offTouch();
+			offSelect();
 			box.removeEventListener("pointerdown", onPress, true);
 			window.removeEventListener("pointerup", onRelease, true);
 			chart.unsubscribeCrosshairMove(onMove);
@@ -275,7 +280,8 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		syncIndicators(chart, indicatorsRef.current, data.candles, enabled, hidden, config, theme, window.matchMedia(PHONE).matches);
 	}, [data.status, data.candles, enabled, hidden, config, theme, manager]);
 
-	// Alert lines.
+	// Alert lines; the selected one is drawn thicker.
+	const selectedId = selectedAlert?.id;
 	useEffect(() => {
 		const series = seriesRef.current;
 		if (!series || !theme) return;
@@ -288,17 +294,22 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 					price: a.value,
 					color: a.status === "active" ? theme.accent : theme.ink3,
 					lineStyle: a.status === "active" ? LineStyle.Solid : LineStyle.Dashed,
-					lineWidth: 1,
+					lineWidth: a.id === selectedId ? 2 : 1,
 					axisLabelVisible: true,
 					title: a.status === "active" ? "Alerta" : "Disparada",
 				}),
 			);
 		}
-	}, [alerts, theme, manager]);
+	}, [alerts, theme, manager, selectedId]);
 
 	// Alert placement and dragging. Capture phase: an alert under the pointer
 	// wins over the drawing layer and the chart's own panning.
 	useEffect(() => {
+		// One thing selected at a time: an alert takes the selection from the drawings.
+		const select = (id: string, y: number) => {
+			manager?.select([]);
+			setSelectedAlert({ id, y });
+		};
 		const box = boxRef.current;
 		const chart = chartRef.current;
 		const series = seriesRef.current;
@@ -316,6 +327,13 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			if (manager?.tool()) return;
 			const touch = e.pointerType === "touch";
 			const id = hitTestAlert(alerts, y, (p) => series.priceToCoordinate(p), touch ? TOUCH_HIT_PX : undefined);
+			// A finger only drags the selected alert (odd/tasks/chart-customization.md S1): across
+			// any other line, or off them, it pans the chart, and a tap selects or deselects.
+			if (touch && id !== selectedId) {
+				if (id) e.stopPropagation(); // the alert, not a drawing under it, takes the tap
+				onTap(e, TOUCH_DRAG_PX, () => (id ? select(id, y) : setSelectedAlert(null)));
+				return;
+			}
 			if (!id) {
 				setSelectedAlert(null);
 				return;
@@ -325,12 +343,14 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			const line = alertLinesRef.current.get(id);
 			const original = alerts.find((a) => a.id === id)!.value;
 			let price = original;
+			let lastY = y;
 			let dragged = false;
 			chart.applyOptions({ handleScroll: false, handleScale: false });
 			const onMovePtr = (ev: PointerEvent) => {
 				const yy = ev.clientY - box.getBoundingClientRect().top;
 				if (!dragged && Math.abs(yy - y) < (touch ? TOUCH_DRAG_PX : DRAG_THRESHOLD_PX)) return;
 				dragged = true;
+				lastY = yy;
 				const p = series.coordinateToPrice(yy);
 				if (p === null) return;
 				price = roundPrice(p);
@@ -341,10 +361,13 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 				window.removeEventListener("pointerup", onUp);
 				chart.applyOptions({ handleScroll: true, handleScale: true });
 				if (!dragged) {
-					setSelectedAlert({ id, y });
+					select(id, y);
 					return;
 				}
-				if (!(await move(id, price))) line?.applyOptions({ price: original });
+				const moved = await move(id, price);
+				if (!moved) line?.applyOptions({ price: original });
+				// The selected alert's bar goes with its line.
+				setSelectedAlert((s) => (s?.id === id ? { id, y: moved ? lastY : y } : s));
 			};
 			window.addEventListener("pointermove", onMovePtr);
 			window.addEventListener("pointerup", onUp);
@@ -361,7 +384,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			box.removeEventListener("pointerdown", onDown, true);
 			window.removeEventListener("keydown", onKey);
 		};
-	}, [alertMode, alerts, create, move, manager]);
+	}, [alertMode, alerts, create, move, manager, selectedId]);
 
 	useEffect(() => setSelectedAlert(null), [symbol]);
 
@@ -451,10 +474,10 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 							}}
 							className="rounded px-2 py-1 text-danger hover:bg-danger-soft max-[819px]:min-h-11 max-[819px]:px-3"
 						>
-							Eliminar
+							Borrar
 						</button>
-						<button type="button" aria-label="Cerrar" onClick={() => setSelectedAlert(null)} className="grid h-7 w-7 shrink-0 place-items-center rounded text-ink-3 hover:bg-hover max-[819px]:h-11 max-[819px]:w-11">
-							<X className="h-3.5 w-3.5" aria-hidden />
+						<button type="button" onClick={() => setSelectedAlert(null)} className="shrink-0 rounded px-2 py-1 font-medium text-ink hover:bg-hover max-[819px]:min-h-11 max-[819px]:px-3">
+							Listo
 						</button>
 					</div>
 				)}

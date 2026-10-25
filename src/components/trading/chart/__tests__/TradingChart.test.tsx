@@ -36,14 +36,23 @@ vi.mock('lightweight-charts', () => ({
 }))
 // The drawing layer's events, so a test can raise them.
 const drawingEvents: Record<string, (...a: unknown[]) => void> = {}
+const drawingSelect = vi.fn()
+// What the chart set up, in order.
+const setupOrder: string[] = []
 vi.mock('lightweight-charts-drawing', () => ({
   DrawingManager: class {
+    constructor() { setupOrder.push('drawing layer') }
     on(event: string, cb: (...a: unknown[]) => void) { drawingEvents[event] = cb; return () => {} }
     tool() { return null }
+    select(ids: string[]) { drawingSelect(ids) }
     setInterval() {}
     destroy() {}
   },
 }))
+vi.mock('@/lib/chart/select-before-move', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@/lib/chart/select-before-move')>()
+  return { ...real, selectBeforeMove: (...a: Parameters<typeof real.selectBeforeMove>) => { setupOrder.push('select before move'); return real.selectBeforeMove(...a) } }
+})
 
 const candle = { time: 1, open: 1, high: 2, low: 0.5, close: 1.5 }
 vi.mock('../useCandles', () => ({
@@ -64,7 +73,7 @@ vi.mock('../DrawingTools', () => ({
 
 const { TradingChart } = await import('../TradingChart')
 
-afterEach(() => { vi.clearAllMocks(); vi.unstubAllGlobals(); alertsApi.alerts = []; series.priceToCoordinate.mockReturnValue(null); document.body.innerHTML = '' })
+afterEach(() => { vi.clearAllMocks(); vi.unstubAllGlobals(); setupOrder.length = 0; alertsApi.alerts = []; series.priceToCoordinate.mockReturnValue(null); document.body.innerHTML = '' })
 
 const onPhone = (phone: boolean) => vi.stubGlobal('matchMedia', (q: string) => ({ matches: phone && q.includes('max-width'), media: q, addEventListener() {}, removeEventListener() {} }))
 const panes = (n: number) => Array.from({ length: n }, () => ({ setStretchFactor: vi.fn() }))
@@ -312,6 +321,154 @@ describe('TradingChart text editor after placing a text (S3)', () => {
     act(() => { window.dispatchEvent(new PointerEvent('pointerup', { pointerType: 'mouse' })) })
 
     expect(document.activeElement).toBe(editor())
+    unmount()
+  })
+})
+
+// odd/tasks/chart-customization.md S1: with a finger, an alert is selected before it moves.
+describe('TradingChart alerts: select before move', () => {
+  const ALERT = { id: 'a1', ticker: 'BTCUSDT', operator: 'crosses_above', value: 90000, name: 'BTCUSDT cruza por encima de 90.000', status: 'active' }
+  // The line sits at y 100; y 150 is price 85 on the stand-in (100 - y / 10).
+  async function withAlert() {
+    alertsApi.alerts = [ALERT]
+    series.priceToCoordinate.mockReturnValue(100 as never)
+    return render()
+  }
+  const bar = () => document.querySelector('[role="dialog"][aria-label="BTCUSDT cruza por encima de 90.000"]')
+  const find = (text: string) => [...document.querySelectorAll('button')].find(b => b.textContent === text)
+  const held = () => chart.applyOptions.mock.calls.some(([o]) => (o as { handleScroll?: boolean }).handleScroll === false)
+  const lineWidth = () => (series.createPriceLine.mock.calls.at(-1) as unknown as [{ lineWidth: number }])[0].lineWidth
+  const tapAt = async (box: HTMLElement, y: number, pointerType = 'touch') => {
+    act(() => {
+      box.dispatchEvent(new PointerEvent('pointerdown', { clientY: y, pointerType, bubbles: true }))
+      window.dispatchEvent(new PointerEvent('pointerup', { clientY: y, pointerType }))
+    })
+    await act(async () => {})
+  }
+  const dragFrom = async (box: HTMLElement, from: number, to: number, pointerType = 'touch') => {
+    act(() => {
+      box.dispatchEvent(new PointerEvent('pointerdown', { clientY: from, pointerType, bubbles: true }))
+      window.dispatchEvent(new PointerEvent('pointermove', { clientY: (from + to) / 2, pointerType }))
+      window.dispatchEvent(new PointerEvent('pointermove', { clientY: to, pointerType }))
+      window.dispatchEvent(new PointerEvent('pointerup', { clientY: to, pointerType }))
+    })
+    await act(async () => {})
+  }
+
+  it('a finger dragging across an alert that is not selected pans the chart: the alert stays, unselected', async () => {
+    const { box, unmount } = await withAlert()
+
+    await dragFrom(box, 100, 150)
+
+    expect(held()).toBe(false)
+    expect(alertsApi.move).not.toHaveBeenCalled()
+    expect(bar()).toBeNull()
+    unmount()
+  })
+
+  it('a finger tap selects it: the line is highlighted and a bar offers Borrar and Listo', async () => {
+    const { box, unmount } = await withAlert()
+    expect(lineWidth()).toBe(1)
+
+    await tapAt(box, 100)
+
+    expect(bar()).not.toBeNull()
+    expect(find('Borrar')).toBeDefined()
+    expect(find('Listo')).toBeDefined()
+    expect(find('Eliminar')).toBeUndefined()
+    expect(lineWidth()).toBe(2)
+    expect(alertsApi.move).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it('selecting an alert deselects the drawings: one thing selected at a time', async () => {
+    const { box, unmount } = await withAlert()
+
+    await tapAt(box, 100)
+
+    expect(drawingSelect).toHaveBeenCalledWith([])
+    unmount()
+  })
+
+  it('a finger drags the selected alert to a new price', async () => {
+    const { box, unmount } = await withAlert()
+    await tapAt(box, 100)
+    alertsApi.move.mockResolvedValueOnce(true)
+
+    await dragFrom(box, 100, 150)
+
+    expect(held()).toBe(true)
+    expect(alertsApi.move).toHaveBeenCalledWith('a1', 85)
+    expect(bar()).not.toBeNull()
+    expect((bar() as HTMLElement).style.top).toBe('78px') // the bar follows the line, now at y 150
+    unmount()
+  })
+
+  it('a tap on an empty part of the chart deselects', async () => {
+    const { box, unmount } = await withAlert()
+    await tapAt(box, 100)
+
+    await tapAt(box, 250)
+
+    expect(bar()).toBeNull()
+    expect(lineWidth()).toBe(1)
+    unmount()
+  })
+
+  it('panning the chart keeps the alert selected', async () => {
+    const { box, unmount } = await withAlert()
+    await tapAt(box, 100)
+
+    await dragFrom(box, 250, 200)
+
+    expect(bar()).not.toBeNull()
+    unmount()
+  })
+
+  it('Listo deselects', async () => {
+    const { box, unmount } = await withAlert()
+    await tapAt(box, 100)
+
+    act(() => find('Listo')!.click())
+
+    expect(bar()).toBeNull()
+    unmount()
+  })
+
+  it('Borrar deletes the alert', async () => {
+    const { box, unmount } = await withAlert()
+    await tapAt(box, 100)
+
+    act(() => find('Borrar')!.click())
+
+    expect(alertsApi.remove).toHaveBeenCalledWith('a1')
+    expect(bar()).toBeNull()
+    unmount()
+  })
+
+  it('the mouse still drags an alert straight away, selected or not', async () => {
+    const { box, unmount } = await withAlert()
+
+    await dragFrom(box, 100, 150, 'mouse')
+
+    expect(held()).toBe(true)
+    expect(alertsApi.move).toHaveBeenCalledWith('a1', 85)
+    unmount()
+  })
+
+  it('a mouse click selects it, as a tap does', async () => {
+    const { box, unmount } = await withAlert()
+
+    await tapAt(box, 100, 'mouse')
+
+    expect(bar()).not.toBeNull()
+    unmount()
+  })
+
+  it("a finger's press reaches select-before-move before the drawing layer", async () => {
+    const { unmount } = await render()
+
+    expect(setupOrder).toEqual(['select before move', 'drawing layer'])
     unmount()
   })
 })
