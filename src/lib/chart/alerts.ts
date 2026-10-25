@@ -1,5 +1,5 @@
-import { formatNumber } from '@/lib/utils'
-import { DEFAULT_CONFIG, type IndicatorConfig, type IndicatorKey } from '@/lib/store/chart-store'
+import { formatNumber } from '../utils'
+import { DEFAULT_CONFIG, type IndicatorConfig, type IndicatorKey } from '../store/chart-store'
 import type { Timeframe } from '@/lib/binance/types'
 import { INDICATOR_SPECS } from './indicator-specs'
 import { indicatorOf, isPriceValue, lineIdOf, type AlertCondition, type AlertStatus } from './alert-condition'

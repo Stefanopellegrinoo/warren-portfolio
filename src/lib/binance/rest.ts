@@ -10,8 +10,9 @@ export async function fetchKlines(
   symbol: string,
   interval: Timeframe,
   limit = 1000,
+  base = BASE,
 ): Promise<Candle[]> {
-  const url = `${BASE}/klines?symbol=${symbol.toUpperCase()}&interval=${interval}&limit=${limit}`;
+  const url = `${base}/klines?symbol=${symbol.toUpperCase()}&interval=${interval}&limit=${limit}`;
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`klines ${res.status}`);
   const data = (await res.json()) as unknown[][];
@@ -59,6 +60,19 @@ export async function fetchTickers24h(symbols: string[], base = BASE): Promise<T
     volume: parseFloat(t.volume),
     quoteVolume: parseFloat(t.quoteVolume),
   }));
+}
+
+/** Candles for the price worker (indicator alerts), from the hosts its US server can reach. */
+export async function fetchServerKlines(symbol: string, interval: Timeframe, limit = 1000): Promise<Candle[]> {
+  let lastError: unknown;
+  for (const base of SERVER_BASES) {
+    try {
+      return await fetchKlines(symbol, interval, limit, base);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError;
 }
 
 /** Crypto quotes for the price worker, in the same shape as the stock quotes. */

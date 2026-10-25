@@ -34,6 +34,7 @@ import { loadHeldStockTickers, loadPortfolioNow } from './ledger-now'
 import { fetchCryptoQuotes } from './binance/rest'
 import { getProviderForSymbol } from './market-data/resolver'
 import { isPriceValue } from './chart/alert-condition'
+import { claimAlert, crossingOf, evaluateConditionAlerts, firesOn, type ConditionAlertRow } from './alert-evaluator'
 
 const REDIS_URL = process.env.REDIS_URL
 
@@ -141,21 +142,25 @@ async function updateONPricesInDatabase(prices: Map<string, any>): Promise<void>
 
 
 /**
- * Evaluate all active price alerts against the latest fetched prices.
- * Fires only on a real cross: the previous price (the LKP before this update)
- * on one side of the line and the current price on or past it. A ticker with
- * no previous price never fires.
+ * Evaluate the active alerts of these tickers.
+ * The price against a value fires only on a real cross: the previous price (the
+ * LKP before this update) on one side of the line and the current price on or
+ * past it. A ticker with no previous price never fires.
+ * Every other condition (an indicator line, a line target) is checked on its
+ * candles by alert-evaluator.ts, for every ticker of the cycle, priced or not.
  * Uses createServiceClient (RLS bypass) since this runs in the worker.
- * On trigger: marks the alert as 'triggered', pushes it to the owner's devices and sends a Telegram message.
+ * On trigger: marks the alert as 'triggered' (only while it is active: the row is
+ * the guard against a second cycle or worker), pushes it to the owner's devices
+ * and sends a Telegram message.
  */
 export async function evaluatePriceAlerts(
   prices: Record<string, number>,
-  previousPrices: Record<string, number>
+  previousPrices: Record<string, number>,
+  tickers: string[] = Object.keys(prices)
 ): Promise<void> {
   const supabase = getSupabase()
   if (!supabase) return
 
-  const tickers = Object.keys(prices)
   if (tickers.length === 0) return
 
   const { data: alerts, error } = await supabase
@@ -170,43 +175,35 @@ export async function evaluatePriceAlerts(
     return
   }
 
+  const conditions: ConditionAlertRow[] = []
   for (const alert of alerts ?? []) {
-    // Only the price against a value, as before 052 (odd/tasks/chart-customization.md T7 adds the rest): an
-    // indicator line or a line target must never fire on the price crossing a number.
-    if (!isPriceValue({ source: alert.source ?? 'price', target: alert.target ?? 'value' })) continue
+    // The price against a value, on this cycle's quotes; an indicator line or a line target never fires on
+    // the price crossing a number: it goes to its candles (odd/tasks/chart-customization.md S7).
+    if (!isPriceValue({ source: alert.source ?? 'price', target: alert.target ?? 'value' })) {
+      conditions.push(alert)
+      continue
+    }
     const currentPrice = prices[alert.ticker]
     const previousPrice = previousPrices[alert.ticker]
     if (currentPrice === undefined || previousPrice === undefined) continue
 
     const value = Number(alert.value)
-    const up = previousPrice < value && currentPrice >= value
-    const down = previousPrice > value && currentPrice <= value
-    const fired =
-      (alert.operator === 'crosses_above' && up) ||
-      (alert.operator === 'crosses_below' && down) ||
-      (alert.operator === 'crosses' && (up || down))
+    const way = crossingOf(previousPrice - value, currentPrice - value)
+    if (!way || !firesOn(alert.operator, way)) continue
 
-    if (!fired) continue
-
-    const { error: updateError } = await supabase
-      .from('price_alerts')
-      .update({ status: 'triggered', triggered_at: new Date().toISOString() })
-      .eq('id', alert.id)
-
-    if (updateError) {
-      console.error(`[Worker] evaluatePriceAlerts: update failed for ${alert.id}`, updateError)
-      continue
-    }
+    if (!(await claimAlert(supabase, alert.id, { status: 'triggered', triggered_at: new Date().toISOString() }))) continue
 
     // Either way says which way it went. A user who never turned notifications on has no devices: that is not a failure.
-    const crossed = up ? 'crosses_above' : 'crosses_below'
+    const crossed = way === 'up' ? 'crosses_above' : 'crosses_below'
     const push = await sendPushToUser(supabase, alert.user_id, priceAlertPush({ ...alert, operator: crossed }, value, currentPrice))
     if (!push.ok && push.error !== 'no devices') console.warn(`[Worker] push for alert ${alert.id}: ${push.error}`)
 
-    const direction = up ? '↑' : '↓'
+    const direction = way === 'up' ? '↑' : '↓'
     const msg = `🔔 Alerta disparada: ${alert.ticker} ${direction} ${alert.value}\nPrecio actual: ${currentPrice}`
     await sendTelegram(msg)
   }
+
+  await evaluateConditionAlerts(supabase, conditions)
 }
 
 /**
@@ -238,7 +235,7 @@ async function checkCryptoAlerts(tickers: string[]): Promise<void> {
       cachePrice(ticker, quote).catch(e => console.error(`[Worker] Cache error for ${ticker}:`, e))
     })
     console.log(`[Worker] Crypto alerts: ${fresh.size}/${tickers.length} prices from Binance`)
-    await evaluatePriceAlerts(toPriceRecord(fresh), previousPrices)
+    await evaluatePriceAlerts(toPriceRecord(fresh), previousPrices, tickers)
   } catch (err) {
     console.error('[Worker] Crypto alerts failed:', err)
   }
@@ -439,8 +436,9 @@ const worker = new Worker(
 
     console.log(`[Worker] Done — ${freshYahooPrices.size + freshONPrices.size} fresh, ${allPrices.size - (freshYahooPrices.size + freshONPrices.size)} from LKP, ${missing.length} missing`)
 
-    // 4. EVALUATE PRICE ALERTS
-    await evaluatePriceAlerts(toPriceRecord(allPrices), previousPrices).catch(e =>
+    // 4. EVALUATE PRICE ALERTS — every ticker of the cycle: a condition alert is checked on its candles even
+    //    when its ticker got no price (an unknown ticker must say so, not wait forever)
+    await evaluatePriceAlerts(toPriceRecord(allPrices), previousPrices, [...tickers, ...onTickers]).catch(e =>
       console.error('[Worker] evaluatePriceAlerts failed:', e)
     )
 

@@ -1,5 +1,5 @@
-import { ema, rsi, macd, bollinger, obv, stochastic, adx, type IndicatorPoint } from '@/lib/indicators'
-import { INDICATOR_COLORS, type IndicatorConfig, type IndicatorKey } from '@/lib/store/chart-store'
+import { ema, rsi, macd, bollinger, obv, stochastic, adx, type IndicatorPoint } from '../indicators'
+import { INDICATOR_COLORS, type IndicatorConfig, type IndicatorKey } from '../store/chart-store'
 import type { Candle } from '@/lib/binance/types'
 
 export interface IndicatorLine {
