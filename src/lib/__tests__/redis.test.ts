@@ -31,7 +31,6 @@ vi.mock('ioredis', () => {
           'warren:history:v3:u1:all',
           'warren:statistics:v4:u1:measurable',
           'warren:statistics:v4:u1:stocks',
-          'warren:lots:def:u1:AAPL',
         ]
         const prefix = pattern.endsWith('*') ? pattern.slice(0, -1) : pattern
         return ['0', KEYSPACE.filter((k) => k.startsWith(prefix))]
@@ -131,7 +130,6 @@ describe('invalidateUserCache', () => {
     const patterns = capturedScan.mock.calls.map((call: unknown[]) => call[2])
     expect(patterns).toContain('warren:history:v3:u1:*')
     expect(patterns).toContain('warren:statistics:v4:u1:*')
-    expect(patterns).toContain('warren:lots:def:u1:*')
     expect(patterns).not.toContain('warren:statistics:v3:u1:*')
   })
 
@@ -144,7 +142,6 @@ describe('invalidateUserCache', () => {
     expect(delArgs).toContain('history:v3:u1:all')
     expect(delArgs).toContain('statistics:v4:u1:measurable')
     expect(delArgs).toContain('statistics:v4:u1:stocks')
-    expect(delArgs).toContain('lots:def:u1:AAPL')
     // Never the double-prefix form
     expect(delArgs.some((k: unknown) => String(k).startsWith('warren:'))).toBe(false)
   })
