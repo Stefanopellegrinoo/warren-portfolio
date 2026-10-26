@@ -74,6 +74,8 @@ const asTime = (t: number) => t as UTCTimestamp;
 const COMPARE_COLORS = ["#f59e0b", "#8b5cf6", "#06b6d4", "#ec4899", "#84cc16"];
 const NONE: string[] = [];
 const NO_ALERTS: ChartAlert[] = [];
+// A note over the chart: on its own background, so the lines under it never cross the words.
+const legendNote = "w-fit rounded bg-canvas px-1 text-ink-3";
 const pointOf = (line: boolean, c: Candle) => (line ? { time: asTime(c.time), value: c.close } : { ...c, time: asTime(c.time) });
 const PRICE_FORMAT = { type: "custom" as const, formatter: priceText, minMove: 0.0001 };
 const ALERT_TITLES = { active: "Alerta", triggered: "Disparada", unavailable: "No se puede revisar" };
@@ -705,7 +707,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 						)}
 					</div>
 					{compareRows.map((r) => (
-						<div key={r.symbol} className="pointer-events-auto flex items-center gap-1.5 tabular-nums text-ink-2">
+						<div key={r.symbol} className="pointer-events-auto flex w-fit items-center gap-1.5 rounded bg-canvas px-1 tabular-nums text-ink-2">
 							<span aria-hidden className="h-0.5 w-3 rounded" style={{ background: r.color }} />
 							<span className="text-ink">{seriesLabel(r.symbol)}</span>
 							{r.missing ? (
@@ -720,12 +722,12 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 							)}
 						</div>
 					))}
-					{percentMode && compared.status === "error" && <p className="text-ink-3">No se pudieron cargar las comparaciones.</p>}
-					{percentMode && priceOverlays.length > 0 && <p className="text-ink-3">Las medias y Bollinger se ocultan mientras comparás</p>}
-					{usd && <p className="text-ink-3">Dibujos y alertas en pausa mientras comparás en dólares</p>}
-					{!daily && others.length > 0 && <p className="text-ink-3">Las comparaciones se ven en diario, semanal o mensual</p>}
+					{percentMode && compared.status === "error" && <p className={legendNote}>No se pudieron cargar las comparaciones.</p>}
+					{percentMode && priceOverlays.length > 0 && <p className={legendNote}>Medias y Bollinger: ocultas al comparar</p>}
+					{usd && <p className={legendNote}>Dibujos y alertas: en pausa al comparar en dólares</p>}
+					{!daily && others.length > 0 && <p className={legendNote}>Las comparaciones se ven en diario, semanal o mensual</p>}
 					{daily && others.length < MAX_COMPARE && (
-						<button type="button" onClick={() => setCompareOpen(true)} className="pointer-events-auto inline-flex w-fit items-center rounded px-1 text-ink-3 hover:bg-hover hover:text-ink max-[819px]:min-h-8">
+						<button type="button" onClick={() => setCompareOpen(true)} className="pointer-events-auto inline-flex w-fit items-center rounded bg-canvas px-1 text-ink-2 hover:bg-hover hover:text-ink max-[819px]:min-h-8">
 							+ Comparar
 						</button>
 					)}

@@ -1215,7 +1215,7 @@ describe('TradingChart — comparing', () => {
     expect((chart.addSeries.mock.calls as unknown[][]).filter((c) => c[2] === 0)).toEqual([])
     expect((chart.addSeries.mock.calls as unknown[][]).some((c) => c[2] === 1)).toBe(true)
     expect(modes().lastIndexOf(0)).toBeGreaterThan(modes().indexOf(2))
-    expect(el.textContent).toContain('Las medias y Bollinger se ocultan mientras comparás')
+    expect(el.textContent).toContain('Medias y Bollinger: ocultas al comparar')
     act(() => root.unmount())
   })
 
@@ -1239,7 +1239,7 @@ describe('TradingChart — comparing', () => {
     expect(toolbar.manager).toBeNull()
     expect(toolbar.alertsOff).toBe(true)
     expect(drawingsVisible).toHaveBeenLastCalledWith(false)
-    expect(el.textContent).toContain('Dibujos y alertas en pausa mientras comparás en dólares')
+    expect(el.textContent).toContain('Dibujos y alertas: en pausa al comparar en dólares')
     unmount()
   })
 
