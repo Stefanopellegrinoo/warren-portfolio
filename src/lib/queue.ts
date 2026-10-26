@@ -238,7 +238,8 @@ export async function scheduleFxRatesIngestJob(pattern = '45 23 * * 1-5') {
   })
 
   // Once now as well: a fresh deploy (or an empty table) gets the history
-  // without waiting for the night. The ingest is an idempotent upsert.
+  // without waiting for the night. The ingest writes only new or changed days,
+  // so on a full table this run writes nothing.
   await queue.add(FX_RATES_JOB_NAME, {}, { removeOnComplete: true, removeOnFail: { age: 24 * 3600 } })
 
   console.log(`[Queue] FX rates ingest scheduled (${pattern} UTC) and queued once now`)

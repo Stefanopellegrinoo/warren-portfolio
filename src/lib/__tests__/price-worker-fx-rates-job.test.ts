@@ -30,7 +30,7 @@ await import('../price-worker')
 
 beforeEach(() => {
   h.ingest.mockReset().mockResolvedValue({ asOf: '2026-10-20', ons: 228, skipped: 0, sov: 15, checks: 200, flagged: 8, warnings: 0 })
-  h.fx.mockReset().mockResolvedValue({ mep: 2916, ccl: 5042 })
+  h.fx.mockReset().mockResolvedValue({ mep: 2916, ccl: 5042, written: 2 })
   vi.spyOn(console, 'log').mockImplementation(() => {})
 })
 

@@ -318,7 +318,7 @@ const worker = new Worker(
     if (job.name === FX_RATES_JOB_NAME) {
       // Failures propagate to the 'failed' handler; the table keeps last-good rows.
       const n = await ingestFxRates(createServiceClient())
-      console.log(`[Worker] FX rates: ${n.mep} MEP days, ${n.ccl} CCL days`)
+      console.log(`[Worker] FX rates: ${n.mep} MEP days, ${n.ccl} CCL days, ${n.written} written`)
       return
     }
 

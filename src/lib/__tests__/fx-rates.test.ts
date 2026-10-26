@@ -17,9 +17,23 @@ function fakeFetch(overrides: Partial<Record<keyof typeof series, unknown>> = {}
   })
 }
 
-function fakeDb(upsertError: unknown = null) {
+type Stored = { date: string; kind: string; buy: number | string; sell: number | string }
+
+/** fx_rates as stored (served in pages by `range`), and the upserts it receives. */
+function fakeDb({ upsertError = null, stored = [] as Stored[], readError = null }: { upsertError?: unknown; stored?: Stored[]; readError?: unknown } = {}) {
   const upsert = vi.fn().mockResolvedValue({ error: upsertError })
-  return { client: { from: vi.fn(() => ({ upsert })) }, upsert }
+  const ranges: [number, number][] = []
+  const select = vi.fn(() => {
+    let from = 0
+    let to = Infinity
+    const b: any = {
+      order: () => b,
+      range: (f: number, t: number) => { from = f; to = t; ranges.push([f, t]); return b },
+      then: (res: any, rej: any) => Promise.resolve(readError ? { data: null, error: readError } : { data: stored.slice(from, to + 1), error: null }).then(res, rej),
+    }
+    return b
+  })
+  return { client: { from: vi.fn(() => ({ upsert, select })) }, upsert, select, ranges }
 }
 
 describe('ingestFxRates', () => {
@@ -38,7 +52,63 @@ describe('ingestFxRates', () => {
       { date: '2026-10-22', kind: 'ccl', buy: 1635.1, sell: 1638, source: 'argentinadatos' },
     ])
     expect(db.upsert.mock.calls[0][1]).toEqual({ onConflict: 'date,kind' })
-    expect(result).toEqual({ mep: 2, ccl: 1 })
+    expect(result).toEqual({ mep: 2, ccl: 1, written: 3 })
+  })
+
+  it('with the history already stored, writes only the day that is new', async () => {
+    const db = fakeDb({ stored: [
+      { date: '2026-10-21', kind: 'mep', buy: 1540, sell: 1550 },
+      { date: '2026-10-22', kind: 'ccl', buy: '1635.1', sell: '1638' },
+    ] })
+
+    const result = await ingestFxRates(db.client as never, fakeFetch())
+
+    expect(db.upsert.mock.calls.flatMap((c) => c[0])).toEqual([
+      { date: '2026-10-22', kind: 'mep', buy: 1547.8, sell: 1553.8, source: 'argentinadatos' },
+    ])
+    expect(result).toEqual({ mep: 2, ccl: 1, written: 1 })
+  })
+
+  it('writes a stored day again when its rate changed', async () => {
+    const db = fakeDb({ stored: [
+      { date: '2026-10-21', kind: 'mep', buy: 1540, sell: 1550 },
+      { date: '2026-10-22', kind: 'mep', buy: 1547.8, sell: 1550 },
+      { date: '2026-10-22', kind: 'ccl', buy: 1635.1, sell: 1638 },
+    ] })
+
+    await ingestFxRates(db.client as never, fakeFetch())
+
+    expect(db.upsert.mock.calls.flatMap((c) => c[0]).map((r: { date: string; kind: string }) => `${r.kind} ${r.date}`)).toEqual(['mep 2026-10-22'])
+  })
+
+  it('with nothing new it writes nothing', async () => {
+    const db = fakeDb({ stored: [
+      { date: '2026-10-21', kind: 'mep', buy: 1540, sell: 1550 },
+      { date: '2026-10-22', kind: 'mep', buy: 1547.8, sell: 1553.8 },
+      { date: '2026-10-22', kind: 'ccl', buy: 1635.1, sell: 1638 },
+    ] })
+
+    const result = await ingestFxRates(db.client as never, fakeFetch())
+
+    expect(db.upsert).not.toHaveBeenCalled()
+    expect(result).toEqual({ mep: 2, ccl: 1, written: 0 })
+  })
+
+  it('reads the stored history in pages of 1000, so a long history is compared whole', async () => {
+    const days = Array.from({ length: 1500 }, (_, i) => new Date(Date.UTC(2020, 0, 1) + i * 86_400_000).toISOString().slice(0, 10))
+    const db = fakeDb({ stored: days.map((date) => ({ date, kind: 'mep', buy: 1, sell: 2 })) })
+
+    await ingestFxRates(db.client as never, fakeFetch({ bolsa: days.map((fecha) => ({ casa: 'bolsa', compra: 1, venta: 2, fecha })), contadoconliqui: [] }))
+
+    expect(db.ranges).toEqual([[0, 999], [1000, 1999]])
+    expect(db.upsert).not.toHaveBeenCalled()
+  })
+
+  it('fails loudly when the stored history cannot be read, writing nothing', async () => {
+    const db = fakeDb({ readError: { message: 'timeout' } })
+
+    await expect(ingestFxRates(db.client as never, fakeFetch())).rejects.toThrow(/fx_rates read.*timeout/)
+    expect(db.upsert).not.toHaveBeenCalled()
   })
 
   it('upserts in chunks so the full history fits in requests of at most 1000 rows', async () => {
@@ -69,7 +139,7 @@ describe('ingestFxRates', () => {
   })
 
   it('fails loudly when the upsert fails', async () => {
-    const db = fakeDb({ message: 'denied' })
+    const db = fakeDb({ upsertError: { message: 'denied' } })
 
     await expect(ingestFxRates(db.client as never, fakeFetch())).rejects.toThrow(/denied/)
   })
