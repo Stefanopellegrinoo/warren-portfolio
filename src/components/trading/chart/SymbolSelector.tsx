@@ -9,6 +9,7 @@ import { fetchExchangeSymbols } from "@/lib/binance/rest";
 import { getPortfolio, POSITIONS_KEY } from "@/lib/warren/positions";
 import { cachedValue } from "@/lib/client-cache";
 import { useChartStore } from "@/lib/store/chart-store";
+import { seriesLabel } from "@/lib/compare-series";
 import { cn } from "@/lib/utils";
 import { NO_CONNECTION, requestErrorMessage } from "@/lib/request-errors";
 import { LoadError } from "@/components/ons/ui";
@@ -164,11 +165,11 @@ export function SymbolSelector({ onSymbolSelect, children }: SymbolSelectorProps
   return (
     <Dialog open={open} onOpenChange={(v) => setOpen(v)}>
       <DialogTrigger
-        aria-label={`Cambiar símbolo, ahora ${symbol}`}
+        aria-label={`Cambiar símbolo, ahora ${seriesLabel(symbol)}`}
         className="group flex min-h-9 min-w-0 items-center gap-2 rounded-md px-2 text-base font-semibold text-ink hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring max-[819px]:min-h-11 max-[819px]:gap-1.5 max-[819px]:px-1"
       >
         <Search className="h-4 w-4 flex-none text-ink-3 group-hover:text-ink max-[819px]:hidden" strokeWidth={1.5} aria-hidden="true" />
-        <span className="flex-none tabular-nums">{symbol}</span>
+        <span className="flex-none tabular-nums">{seriesLabel(symbol)}</span>
         {children}
         <ChevronDown className="h-4 w-4 flex-none text-ink-3 max-[399px]:hidden" strokeWidth={1.5} aria-hidden="true" />
       </DialogTrigger>

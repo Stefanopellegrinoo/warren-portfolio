@@ -31,6 +31,8 @@ export function useQuote(symbol: string): Quote | null {
   useEffect(() => {
     let cancelled = false;
     setQuote(null);
+    // Mi cartera has no market quote: its value is on the chart.
+    if (getProviderForSymbol(symbol) === "portfolio") return;
     const tick = () =>
       load(symbol)
         .then((q) => { if (!cancelled && q) setQuote(q); })

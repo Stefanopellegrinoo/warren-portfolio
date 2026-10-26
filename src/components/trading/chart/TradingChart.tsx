@@ -311,6 +311,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			else open();
 		});
 		const offTouch = touchDrawing(drawings, chart.chartElement());
+		const compareLines = compareLinesRef.current;
 		const onMove = (p: MouseEventParams) => {
 			const d = p.seriesData.get(series) as (Candle & { value?: number }) | undefined;
 			// A line's point is one value: its legend reads it as a bar opening and closing there.
@@ -337,7 +338,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			alertLinesRef.current.clear();
 			// The next chart gets every bar drawn and fitted again, with its own compared lines.
 			fittedRef.current = "";
-			compareLinesRef.current.clear();
+			compareLines.clear();
 			percentRef.current = false;
 			setManager(null);
 		};

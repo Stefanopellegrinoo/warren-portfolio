@@ -5,7 +5,7 @@ import { SymbolSelector } from "@/components/trading/chart/SymbolSelector";
 import { TimeframeSelector } from "@/components/trading/chart/TimeframeSelector";
 import { IndicatorMenu } from "@/components/trading/chart/IndicatorMenu";
 import { Chip, toneOf } from "@/components/resumen/ui";
-import { useChartStore } from "@/lib/store/chart-store";
+import { CARTERA_LIST_ID, PORTFOLIO_SYMBOL, useChartStore } from "@/lib/store/chart-store";
 import { addSymbolToCurrentWatchlist } from "@/lib/warren/watchlist";
 import { cn, formatPct } from "@/lib/utils";
 import { iconButton, priceText } from "@/components/trading/ui";
@@ -94,6 +94,8 @@ function MenuButton() {
 function WatchStar({ symbol }: { symbol: string }) {
   const activeId = useChartStore((s) => s.activeWatchlistId);
   const local = useChartStore((s) => s.watchlist);
+  // Mi cartera is not a ticker to list, and Cartera builds itself from the stocks held.
+  if (symbol === PORTFOLIO_SYMBOL || activeId === CARTERA_LIST_ID) return null;
   // Membership is only known for the local list; a remote list answers on add.
   const inList = !activeId && local.includes(symbol);
   const label = inList ? `${symbol} está en tu lista` : `Agregar ${symbol} a la lista`;

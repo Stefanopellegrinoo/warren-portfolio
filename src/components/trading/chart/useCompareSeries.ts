@@ -11,30 +11,30 @@ export interface CompareState {
 }
 
 const IDLE: CompareState = { status: "idle", series: {} };
+const LOADING: CompareState = { status: "loading", series: {} };
 
 /** The daily USD series of the compared assets, in one request; nothing is asked for with nothing to compare. */
 export function useCompareSeries(symbols: string[], ccl: boolean): CompareState {
-	const [state, setState] = useState<CompareState>(IDLE);
-	const key = symbols.join(",");
+	const symbolsKey = symbols.join(",");
+	const request = symbolsKey ? `/api/compare-series?symbols=${encodeURIComponent(symbolsKey)}${ccl ? "&ccl=1" : ""}` : "";
+	// The answer to one request; another request reads as loading until its own answer lands.
+	const [answer, setAnswer] = useState<{ request: string; state: CompareState } | null>(null);
 
 	useEffect(() => {
-		if (!key) {
-			setState(IDLE);
-			return;
-		}
+		if (!request) return;
 		const ctrl = new AbortController();
-		setState((s) => ({ ...s, status: "loading" }));
-		fetch(`/api/compare-series?symbols=${encodeURIComponent(key)}${ccl ? "&ccl=1" : ""}`, { signal: ctrl.signal })
+		fetch(request, { signal: ctrl.signal })
 			.then(async (res) => {
 				if (!res.ok) throw new Error();
 				const body = (await res.json()) as CompareSeriesResponse;
-				setState({ status: "ready", series: body.series, ccl: body.ccl });
+				setAnswer({ request, state: { status: "ready", series: body.series, ccl: body.ccl } });
 			})
 			.catch(() => {
-				if (!ctrl.signal.aborted) setState({ status: "error", series: {} });
+				if (!ctrl.signal.aborted) setAnswer({ request, state: { status: "error", series: {} } });
 			});
 		return () => ctrl.abort();
-	}, [key, ccl]);
+	}, [request]);
 
-	return state;
+	if (!request) return IDLE;
+	return answer?.request === request ? answer.state : LOADING;
 }
