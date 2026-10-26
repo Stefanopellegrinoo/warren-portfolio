@@ -29,6 +29,9 @@ const serviceClient = { __client: 'service-role' }
 const mockCreateServiceClient = vi.fn(() => serviceClient)
 vi.mock('@/lib/supabase-server', () => ({ createServiceClient: () => mockCreateServiceClient() }))
 
+const mockLoadSplits = vi.fn()
+vi.mock('@/lib/stock-splits', () => ({ loadSplits: (...a: unknown[]) => mockLoadSplits(...a) }))
+
 function makeRequest(body: Record<string, unknown>) {
   return new NextRequest('http://localhost/api/transactions', {
     method: 'POST',
@@ -260,5 +263,65 @@ describe('POST /api/transactions — 500s are generic, domain errors keep their 
 
     expect(res.status).toBe(500)
     expect(await res.json()).toEqual({ error: message })
+  })
+})
+
+// odd/tasks/split-aware-ledger.md S5: the list adds `after_splits` to the stock and CEDEAR rows with
+// stored splits after their date, and leaves every other field and row as it was.
+describe('GET /api/transactions — after_splits', () => {
+  const row = (over: Record<string, unknown>) => ({
+    id: 'x', user_id: 'user-1', date: '2022-03-21', ticker: 'GOOGL', operation: 'COMPRA', quantity: 0.931, price: 2591.6,
+    commission: 0, total: 2412.78, avg_cost_after: null, notes: null, asset_type: 'CEDEAR', moneda: 'USD', created_at: '2022-03-21T15:00:00+00:00', ...over,
+  })
+  const GOOGL = [{ date: '2022-07-18', numerator: 20, denominator: 1 }]
+  const rows = [
+    row({ id: 'pre' }),
+    row({ id: 'post', date: '2023-01-04', quantity: 5, price: 88 }),
+    row({ id: 'ko', ticker: 'KO', asset_type: 'ACCION', quantity: 3, price: 60 }),
+    row({ id: 'on', ticker: 'GOOGL', asset_type: 'ON', quantity: 100, price: 1 }),
+  ]
+
+  beforeEach(() => {
+    const query: Record<string, unknown> = {}
+    for (const m of ['select', 'eq', 'order', 'range']) query[m] = vi.fn(() => query)
+    query.then = (ok: (v: unknown) => unknown) => Promise.resolve({ data: rows, error: null, count: rows.length }).then(ok)
+    ;(userClient as Record<string, unknown>).from = vi.fn(() => query)
+  })
+
+  const get = async () => {
+    const { GET } = await import('./route')
+    const res = await GET(new NextRequest('http://localhost/api/transactions?limit=1000'))
+    return { status: res.status, body: await res.json() }
+  }
+
+  it('adds after_splits only to the stock and CEDEAR rows dated before a stored split', async () => {
+    mockLoadSplits.mockResolvedValue(new Map([['GOOGL', GOOGL]]))
+
+    const { status, body } = await get()
+
+    expect(status).toBe(200)
+    expect(body.data[0]).toEqual({ ...rows[0], after_splits: { splits: GOOGL, factor: 20, quantity: 0.931 * 20, price: 2591.6 / 20 } })
+    for (const i of [1, 2, 3]) {
+      expect(body.data[i]).toEqual(rows[i])
+      expect(body.data[i]).not.toHaveProperty('after_splits')
+    }
+  })
+
+  it('an unreadable splits table still serves the rows, without after_splits', async () => {
+    mockLoadSplits.mockRejectedValue(new Error('stock_splits read: boom'))
+
+    const { status, body } = await get()
+
+    expect(status).toBe(200)
+    expect(body.data).toEqual(rows)
+  })
+
+  it('without stored splits the response is the previous one, field for field', async () => {
+    mockLoadSplits.mockResolvedValue(new Map())
+
+    const { status, body } = await get()
+
+    expect(status).toBe(200)
+    expect(body).toEqual({ data: rows, pagination: { page: 1, limit: 1000, total: 4, totalPages: 1 } })
   })
 })
