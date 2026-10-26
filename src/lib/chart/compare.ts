@@ -70,14 +70,17 @@ export function rangeStart(range: CompareRange, last: number): number | null {
   if (range === 'Todo') return null
   const d = new Date(last * 1000)
   if (range === 'YTD') return Date.UTC(d.getUTCFullYear(), 0, 1) / 1000
-  d.setUTCMonth(d.getUTCMonth() - MONTHS_BACK[range]!)
-  return d.getTime() / 1000
+  // Months back, on the same day, or the last day of a shorter month (Mar 31 − 1M = Feb 28).
+  const month = d.getUTCMonth() - MONTHS_BACK[range]!
+  const lastDay = new Date(Date.UTC(d.getUTCFullYear(), month + 1, 0)).getUTCDate()
+  return Date.UTC(d.getUTCFullYear(), month, Math.min(d.getUTCDate(), lastDay)) / 1000
 }
 
 /**
- * The day every line starts from, fixed: the first bar on or after the range start on which the chart
- * and every compared series have a value. It moves only with the range, never with the view, so
- * panning or zooming the chart never changes a number.
+ * The bar every line starts from, fixed: the one that closes right before the range starts (its
+ * close is where the range begins: Dec 31 for YTD, December's bar on a monthly chart), and never
+ * before the first bar on which the chart and every compared series have a value. It moves only
+ * with the range, never with the view, so panning or zooming the chart never changes a number.
  */
 export function compareBase(
   bars: { time: number; close: number }[],
@@ -86,9 +89,12 @@ export function compareBase(
 ): { index: number; time: number; close: number } | null {
   if (bars.length === 0) return null
   const firsts = lines.filter((l) => l.length > 0).map((l) => l[0].time)
-  const from = Math.max(rangeStart(range, bars[bars.length - 1].time) ?? -Infinity, bars[0].time, ...firsts)
-  const index = bars.findIndex((b) => b.time >= from)
-  return index < 0 ? null : { index, time: bars[index].time, close: bars[index].close }
+  const common = bars.findIndex((b) => b.time >= Math.max(bars[0].time, ...firsts))
+  if (common < 0) return null
+  const start = rangeStart(range, bars[bars.length - 1].time)
+  const inRange = start === null ? 0 : bars.findIndex((b) => b.time >= start)
+  const index = Math.max(common, inRange < 0 ? bars.length - 1 : inRange - 1)
+  return { index, time: bars[index].time, close: bars[index].close }
 }
 
 /**

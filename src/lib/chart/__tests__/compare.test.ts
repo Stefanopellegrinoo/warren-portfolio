@@ -92,6 +92,13 @@ describe('rangeStart', () => {
     expect(rangeStart('1A', last)).toBe(t('2025-10-26'))
   })
 
+  it('at a month\'s end it lands on the last day of the shorter month, never spills into the next', () => {
+    expect(rangeStart('1M', t('2026-03-31'))).toBe(t('2026-02-28'))
+    expect(rangeStart('3M', t('2026-05-31'))).toBe(t('2026-02-28'))
+    expect(rangeStart('6M', t('2026-08-31'))).toBe(t('2026-02-28'))
+    expect(rangeStart('1A', t('2028-02-29'))).toBe(t('2027-02-28'))
+  })
+
   it('YTD starts on January 1st of the last bar\'s year; Todo has no start', () => {
     expect(rangeStart('YTD', last)).toBe(t('2026-01-01'))
     expect(rangeStart('Todo', last)).toBeNull()
@@ -101,7 +108,17 @@ describe('rangeStart', () => {
 describe('compareBase', () => {
   const bars = ['2026-01-02', '2026-01-05', '2026-01-06', '2026-01-07'].map((d, i) => ({ time: t(d), close: 10 + i }))
 
-  it('is the first bar on or after the range start', () => {
+  it('is the bar that closes right before the range starts: its close is where the range begins', () => {
+    const daily = ['2025-12-30', '2025-12-31', '2026-01-02', '2026-01-05'].map((d, i) => ({ time: t(d), close: 10 + i }))
+    expect(compareBase(daily, [], 'YTD')).toEqual({ index: 1, time: t('2025-12-31'), close: 11 })
+  })
+
+  it('on a monthly chart YTD keeps January: the base is December\'s bar, whose close ends the year', () => {
+    const monthly = ['2025-11-01', '2025-12-01', '2026-01-01', '2026-02-01'].map((d, i) => ({ time: t(d), close: 10 + i }))
+    expect(compareBase(monthly, [], 'YTD')).toEqual({ index: 1, time: t('2025-12-01'), close: 11 })
+  })
+
+  it('a range reaching before the first bar starts at the first bar', () => {
     expect(compareBase(bars, [], '1M')).toEqual({ index: 0, time: t('2026-01-02'), close: 10 })
   })
 

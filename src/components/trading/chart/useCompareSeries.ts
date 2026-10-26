@@ -36,5 +36,8 @@ export function useCompareSeries(symbols: string[], ccl: boolean): CompareState 
 	}, [request]);
 
 	if (!request) return IDLE;
-	return answer?.request === request ? answer.state : LOADING;
+	if (answer?.request === request) return answer.state;
+	// A new set loading keeps the last answer on screen (its assets still compared stay drawn), so
+	// adding or taking out a line never blanks the others or the % scale.
+	return answer ? { ...answer.state, status: "loading" } : LOADING;
 }

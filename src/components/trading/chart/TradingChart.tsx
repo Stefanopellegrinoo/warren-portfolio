@@ -16,6 +16,7 @@ import {
 	type ISeriesMarkersPluginApi,
 	type ISeriesApi,
 	type MouseEventParams,
+	type SeriesPartialOptionsMap,
 	type SeriesType,
 	type Time,
 	type UTCTimestamp,
@@ -147,6 +148,7 @@ function syncIndicators(
 	saved: ChartPreferences["indicatorSettings"],
 	theme: ChartTheme,
 	phone: boolean,
+	priceFormat: SeriesPartialOptionsMap["Line"]["priceFormat"],
 ) {
 	const signature = JSON.stringify([enabled, config, theme.ink3]);
 	if (built.signature !== signature) {
@@ -193,6 +195,8 @@ function syncIndicators(
 			s.setData(seriesPoints(lines[i], look).map((p) => ({ ...p, time: asTime(p.time) })));
 			const visible = !hidden[key] && look.visible;
 			s.applyOptions(lines[i].type === "histogram" ? { visible, color: look.upColor } : { visible, color: look.color, lineWidth: look.width });
+			// Over the price, its label reads like the price scale: in % while comparing.
+			if (INDICATOR_SPECS[key].pane === "price") s.applyOptions({ priceFormat });
 		});
 		const looks = levelLooks(key, style, theme.ink3);
 		levels.forEach((l, i) => l.applyOptions({ price: looks[i].value, color: looks[i].color, lineVisible: looks[i].visible }));
@@ -279,6 +283,11 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		() => (comparing.length > 0 && aligned.size > 0 ? compareBase(drawn, [...aligned.values()], compareRange) : null),
 		[comparing.length, aligned, drawn, compareRange],
 	);
+	// The price scale's labels: in % from the base close while comparing, prices otherwise.
+	const baseClose = base?.close;
+	const scaleFormat = useMemo(() => (baseClose === undefined ? PRICE_FORMAT : percentFormat(baseClose)), [baseClose]);
+	// The bars on screen are this chart's (right after a switch they are still the last one's).
+	const fresh = data.key === `${symbol}:${timeframe}`;
 	// Mi cartera has no volume.
 	const drawnIndicators = useMemo(() => enabled.filter((k) => !(line && k === "volume")), [enabled, line]);
 	const compareLinesRef = useRef(new Map<string, ISeriesApi<"Line">>());
@@ -416,7 +425,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			chart.removeSeries(l);
 			lines.delete(s);
 		}
-		const format = base ? percentFormat(base.close) : PRICE_FORMAT;
+		const format = scaleFormat;
 		main.applyOptions({ priceFormat: format });
 		if (!base) return;
 		for (const [s, points] of aligned) {
@@ -428,17 +437,17 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			l.applyOptions({ color: COMPARE_COLORS[comparing.indexOf(s) % COMPARE_COLORS.length], priceFormat: format });
 			l.setData(scaleToBase(points, base.time, base.close).map((p) => ({ time: asTime(p.time), value: p.value })));
 		}
-	}, [aligned, base, comparing, manager]);
+	}, [aligned, base, comparing, manager, scaleFormat]);
 
 	// A new range (or a comparison that starts) shows the range whole, from its first day on.
 	useEffect(() => {
 		const chart = chartRef.current;
-		if (!chart || !base) return;
+		if (!chart || !base || !fresh) return;
 		const key = `${symbol}:${timeframe}:${compareRange}`;
 		if (zoomedRef.current === key) return;
 		zoomedRef.current = key;
 		chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, base.index - 1), to: drawn.length + 3 });
-	}, [base, symbol, timeframe, compareRange, drawn.length, manager]);
+	}, [base, fresh, symbol, timeframe, compareRange, drawn.length, manager]);
 	useEffect(() => {
 		if (!base) zoomedRef.current = "";
 	}, [base]);
@@ -518,8 +527,8 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	useEffect(() => {
 		const chart = chartRef.current;
 		if (!chart || !theme || data.status !== "ready") return;
-		syncIndicators(chart, indicatorsRef.current, data.candles, drawnIndicators, hidden, config, saved, theme, window.matchMedia(PHONE).matches);
-	}, [data.status, data.candles, drawnIndicators, hidden, config, saved, theme, manager]);
+		syncIndicators(chart, indicatorsRef.current, data.candles, drawnIndicators, hidden, config, saved, theme, window.matchMedia(PHONE).matches, scaleFormat);
+	}, [data.status, data.candles, drawnIndicators, hidden, config, saved, theme, manager, scaleFormat]);
 
 	// Alert lines: only an alert against a value has one, in its color (the accent when it has none), the selected
 	// one thicker. The price's on the candles; an indicator's in that indicator's pane while it is on (S6). Removed on

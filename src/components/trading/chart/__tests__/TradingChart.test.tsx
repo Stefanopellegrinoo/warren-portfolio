@@ -17,6 +17,8 @@ vi.hoisted(() => {
 // lightweight-charts draws on canvas, which jsdom lacks: a recording stand-in.
 // The visible time range, which the library applies lazily after a range is set.
 const getVisibleRange = vi.fn((): { from: number; to: number } | null => null)
+// Every logical range the chart asked to show (its fit on load, a comparison's range).
+const setVisibleLogicalRange = vi.fn()
 const priceScale = { applyOptions: vi.fn() }
 const series = {
   priceScale: () => priceScale,
@@ -35,7 +37,7 @@ const chart = {
   subscribeCrosshairMove: vi.fn(),
   unsubscribeCrosshairMove: vi.fn(),
   // A bar's x is its time, for the trade card's finger slop.
-  timeScale: () => ({ setVisibleLogicalRange: vi.fn(), timeToCoordinate: (t: number) => t, subscribeVisibleTimeRangeChange: vi.fn(), unsubscribeVisibleTimeRangeChange: vi.fn(), getVisibleRange }),
+  timeScale: () => ({ setVisibleLogicalRange, timeToCoordinate: (t: number) => t, subscribeVisibleTimeRangeChange: vi.fn(), unsubscribeVisibleTimeRangeChange: vi.fn(), getVisibleRange }),
   subscribeClick: vi.fn(),
   unsubscribeClick: vi.fn(),
   panes: vi.fn(() => []),
@@ -81,9 +83,9 @@ vi.mock('@/lib/chart/select-before-move', async (importOriginal) => {
 })
 
 const candle = { time: 1, open: 1, high: 2, low: 0.5, close: 1.5 }
-const bars = { candles: [candle] as typeof candle[], status: 'ready', error: undefined as string | undefined }
+const bars = { candles: [candle] as typeof candle[], status: 'ready', error: undefined as string | undefined, key: undefined as string | undefined }
 vi.mock('../useCandles', () => ({
-  useCandles: () => ({ status: bars.status, candles: bars.candles, error: bars.error, change: { kind: 'set' }, retry: () => {} }),
+  useCandles: (symbol: string, timeframe: string) => ({ status: bars.status, candles: bars.candles, error: bars.error, change: { kind: 'set' }, retry: () => {}, key: bars.key ?? `${symbol}:${timeframe}` }),
 }))
 vi.mock('../useDrawings', () => ({ useDrawings: () => 'ready' }))
 // The compared series the chart is given: a test sets what the endpoint answered.
@@ -125,7 +127,7 @@ const DEFAULT_INDICATORS = { ...useChartStore.getState().indicators }
 const { INDICATOR_KEYS } = await import('@/lib/chart/preferences-schema')
 const lwc = await import('lightweight-charts')
 
-afterEach(() => { compare.status = 'idle'; compare.series = {}; compare.ccl = undefined; bars.status = 'ready'; bars.error = undefined; getVisibleRange.mockReset(); getVisibleRange.mockReturnValue(null); useChartStore.setState({ compareSymbols: [], compareDefaulted: true, compareRange: '1A', indicators: { ...DEFAULT_INDICATORS } }); vi.clearAllMocks(); vi.unstubAllGlobals(); setupOrder.length = 0; alertsApi.alerts = []; bars.candles = [candle]; drawingState.tool = null; drawingState.selection = []; series.priceToCoordinate.mockReturnValue(null); document.body.innerHTML = '' })
+afterEach(() => { compare.status = 'idle'; compare.series = {}; compare.ccl = undefined; bars.status = 'ready'; bars.error = undefined; bars.key = undefined; getVisibleRange.mockReset(); getVisibleRange.mockReturnValue(null); useChartStore.setState({ compareSymbols: [], compareDefaulted: true, compareRange: '1A', indicators: { ...DEFAULT_INDICATORS } }); vi.clearAllMocks(); vi.unstubAllGlobals(); setupOrder.length = 0; alertsApi.alerts = []; bars.candles = [candle]; drawingState.tool = null; drawingState.selection = []; series.priceToCoordinate.mockReturnValue(null); document.body.innerHTML = '' })
 
 const onPhone = (phone: boolean) => vi.stubGlobal('matchMedia', (q: string) => ({ matches: phone && q.includes('max-width'), media: q, addEventListener() {}, removeEventListener() {} }))
 const panes = (n: number) => Array.from({ length: n }, () => ({ setStretchFactor: vi.fn() }))
@@ -1142,6 +1144,52 @@ describe('TradingChart — comparing', () => {
     await act(async () => { await new Promise((r) => setTimeout(r, 20)) })
 
     expect(el.querySelector('[data-chart-legend]')!.textContent).toContain('AAPL+100,00 %SPY+10,00 %')
+    unmount()
+  })
+
+  it('a comparison shows its range whole once; adding or taking out a line keeps the user\'s zoom', async () => {
+    compare.status = 'ready'
+    compare.series = { SPY: SPY_TWO, QQQ: SPY_TWO }
+    bars.candles = TWO_DAYS
+    const { unmount } = await renderTf('AAPL', '1d', ['SPY'])
+    const rangeZooms = () => setVisibleLogicalRange.mock.calls.filter((c) => c[0].to === TWO_DAYS.length + 3)
+
+    expect(rangeZooms()).toEqual([[{ from: 0, to: 5 }]])
+    await act(async () => { useChartStore.getState().setCompareSymbols(['SPY', 'QQQ']) })
+    await act(async () => { useChartStore.getState().setCompareSymbols(['SPY']) })
+    expect(rangeZooms()).toHaveLength(1)
+    unmount()
+  })
+
+  it('the bars of the last chart, still on screen right after a switch, never set the new one\'s zoom', async () => {
+    compare.status = 'ready'
+    compare.series = { SPY: SPY_TWO }
+    bars.candles = TWO_DAYS
+    bars.key = 'BTCUSDT:1d'
+    const { show, unmount } = await renderTf('AAPL', '1d', ['SPY'])
+    const rangeZooms = () => setVisibleLogicalRange.mock.calls.filter((c) => c[0].to === TWO_DAYS.length + 3)
+    expect(rangeZooms()).toEqual([])
+
+    bars.key = undefined
+    await show('1d')
+    expect(rangeZooms()).toEqual([[{ from: 0, to: 5 }]])
+    unmount()
+  })
+
+  it('the indicators over the price read in % on the scale too, like every line', async () => {
+    compare.status = 'ready'
+    compare.series = { SPY: SPY_TWO }
+    bars.candles = TWO_DAYS
+    const ema = { applyOptions: vi.fn(), setData: vi.fn(), priceScale: () => priceScale, createPriceLine: vi.fn(() => ({ applyOptions: vi.fn() })), attachPrimitive: vi.fn() }
+    chart.addSeries.mockImplementation(((_t: unknown, _o: unknown, pane?: number) => (pane === 0 ? ema : series)) as never)
+    useChartStore.setState({ compareRange: 'Todo' })
+    const { unmount } = await renderTf('AAPL', '1d', ['SPY'])
+    useChartStore.setState({ indicators: { ...NO_INDICATORS, ema20: true } as never })
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+
+    const formats = (ema.applyOptions.mock.calls as { priceFormat?: { formatter: (p: number) => string } }[][]).map((c) => c[0].priceFormat).filter(Boolean)
+    expect(formats.at(-1)!.formatter(3)).toBe('+100,00 %')
+    chart.addSeries.mockImplementation(() => series)
     unmount()
   })
 
