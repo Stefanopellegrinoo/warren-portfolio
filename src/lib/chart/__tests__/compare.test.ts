@@ -135,9 +135,14 @@ describe('compareBase', () => {
 })
 
 describe('scaleToBase', () => {
-  it('draws a series in the chart\'s own units, starting at the chart\'s close on the base day', () => {
+  it('draws a series in the chart\'s own units from the base day on, starting at the chart\'s close that day', () => {
     const points = [{ time: 1, value: 400 }, { time: 2, value: 440 }, { time: 3, value: 380 }]
-    expect(scaleToBase(points, 2, 100)).toEqual([{ time: 1, value: 400 / 440 * 100 }, { time: 2, value: 100 }, { time: 3, value: 380 / 440 * 100 }])
+    expect(scaleToBase(points, 2, 100)).toEqual([{ time: 2, value: 100 }, { time: 3, value: 380 / 440 * 100 }])
+  })
+
+  it('a base day the series skips starts the line at its next value', () => {
+    const points = [{ time: 1, value: 400 }, { time: 3, value: 500 }, { time: 4, value: 600 }]
+    expect(scaleToBase(points, 2, 100)).toEqual([{ time: 3, value: 100 }, { time: 4, value: 120 }])
   })
 
   it('with no value on or after the base day there is nothing to draw', () => {

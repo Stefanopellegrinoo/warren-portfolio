@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
 	CandlestickSeries,
@@ -439,15 +439,19 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		}
 	}, [aligned, base, comparing, manager, scaleFormat]);
 
-	// A new range (or a comparison that starts) shows the range whole, from its first day on.
+	// Shows the range whole, from its first day on: once for a new range (or a comparison that
+	// starts), and again whenever its button is pressed, however the chart was moved since.
+	const fitRange = useCallback(() => {
+		if (!base || !fresh) return false;
+		chartRef.current?.timeScale().setVisibleLogicalRange({ from: Math.max(0, base.index - 1), to: drawn.length + 3 });
+		return true;
+	}, [base, fresh, drawn.length]);
 	useEffect(() => {
-		const chart = chartRef.current;
-		if (!chart || !base || !fresh) return;
+		if (!chartRef.current) return;
 		const key = `${symbol}:${timeframe}:${compareRange}`;
-		if (zoomedRef.current === key) return;
+		if (zoomedRef.current === key || !fitRange()) return;
 		zoomedRef.current = key;
-		chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, base.index - 1), to: drawn.length + 3 });
-	}, [base, fresh, symbol, timeframe, compareRange, drawn.length, manager]);
+	}, [fitRange, symbol, timeframe, compareRange, manager]);
 	useEffect(() => {
 		if (!base) zoomedRef.current = "";
 	}, [base]);
@@ -675,12 +679,14 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	const at = hover?.time ?? null;
 	const comparingNow = comparing.length > 0;
 	const from = base?.time ?? null;
+	// Before the first day only the chart's own line is drawn, so only it reads a %.
+	const beforeBase = at !== null && from !== null && at < from;
 	const compareRows = comparingNow
 		? [
 				{ symbol, color: line ? theme?.accent : theme?.ink, pct: base ? pctFrom(drawn.map((c) => ({ time: c.time, value: c.close })), from, at) : null, main: true, missing: false },
 				...comparing.map((s, i) => {
 					const points = aligned.get(s);
-					return { symbol: s, color: COMPARE_COLORS[i % COMPARE_COLORS.length], pct: points && base ? pctFrom(points, from, at) : null, main: false, missing: compared.status === "ready" && !points };
+					return { symbol: s, color: COMPARE_COLORS[i % COMPARE_COLORS.length], pct: points && base && !beforeBase ? pctFrom(points, from, at) : null, main: false, missing: compared.status === "ready" && !points };
 				}),
 			]
 		: [];
@@ -750,7 +756,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 									key={r}
 									type="button"
 									aria-pressed={r === compareRange}
-									onClick={() => setCompareRange(r)}
+									onClick={() => (r === compareRange ? fitRange() : setCompareRange(r))}
 									className={cn("rounded px-1.5 py-0.5 text-ink-3 hover:bg-hover hover:text-ink max-[819px]:min-h-7", r === compareRange && "bg-accent-soft font-medium text-accent-ink")}
 								>
 									{r}
