@@ -8,10 +8,12 @@ import { loadStocksTwr } from '@/lib/stocks-twr'
 import {
   PORTFOLIO_SERIES,
   isArsSymbol,
+  isTicker,
   parseCompareSymbols,
   toUsdDaily,
   yahooSymbol,
   type CompareSeriesResponse,
+  type SeriesPoint,
   type SeriesResult,
 } from '@/lib/compare-series'
 
@@ -37,7 +39,8 @@ export async function GET(req: NextRequest) {
     const cached = await getCachedRoute<CompareSeriesResponse>(cacheKey)
     if (cached) return NextResponse.json(cached)
 
-    const tickers = symbols.filter((s) => s !== PORTFOLIO_SERIES)
+    // Something that is not a ticker never reaches Yahoo: it is answered as an asset without data.
+    const tickers = symbols.filter((s) => s !== PORTFOLIO_SERIES && isTicker(s))
     const from = new Date()
     from.setFullYear(from.getFullYear() - YEARS_BACK)
     const needsCcl = wantsCcl || tickers.some(isArsSymbol)
@@ -50,8 +53,9 @@ export async function GET(req: NextRequest) {
 
     const series: Record<string, SeriesResult> = {}
     for (const symbol of symbols) {
-      let points
+      let points: SeriesPoint[]
       if (symbol === PORTFOLIO_SERIES) points = (twr ?? []).map((p) => ({ time: p.date, value: p.twrIndex * 100 }))
+      else if (!isTicker(symbol)) points = []
       else {
         const daily = bars?.get(yahooSymbol(symbol))?.bars ?? []
         // A peso ticker with no CCL at all stays without data rather than drawn in pesos.

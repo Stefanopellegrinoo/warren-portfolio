@@ -300,6 +300,7 @@ export function DrawingTools({
 	symbol = "",
 	alerts = [],
 	onNewAlert = () => {},
+	alertsOff = false,
 	onOpenAlert = () => {},
 }: {
 	manager: DrawingManager | null;
@@ -311,6 +312,8 @@ export function DrawingTools({
 	symbol?: string;
 	alerts?: readonly ChartAlert[];
 	onNewAlert?: () => void;
+	/** No alerts to offer: the chart is drawn in another currency than its alerts. */
+	alertsOff?: boolean;
 	onOpenAlert?: (id: string) => void;
 }) {
 	const [tool, setTool] = useState<DrawingKind | null>(null);
@@ -347,7 +350,7 @@ export function DrawingTools({
 	};
 
 	// Alerts watch a ticker's price; Mi cartera has none.
-	const alertMenu: AlertMenuProps | null = symbol === PORTFOLIO_SERIES ? null : {
+	const alertMenu: AlertMenuProps | null = symbol === PORTFOLIO_SERIES || alertsOff ? null : {
 		symbol,
 		alerts,
 		armed: alertMode,

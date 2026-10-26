@@ -50,7 +50,7 @@ beforeEach(() => {
 
 describe('GET /api/compare-series', () => {
   it('asks for between one and five assets', async () => {
-    for (const query of ['', '?symbols=', '?symbols=A,B,C,D,E,F', '?symbols=SPY;DROP']) {
+    for (const query of ['', '?symbols=', '?symbols=A,B,C,D,E,F']) {
       const res = await get(query)
       expect(res.status).toBe(400)
       expect(await res.json()).toEqual({ error: 'Elegí entre 1 y 5 activos para comparar' })
@@ -63,6 +63,21 @@ describe('GET /api/compare-series', () => {
     const body = await res.json()
     expect(body.series.SPY).toEqual({ points: [{ time: '2026-01-02', value: 2000 }] })
     expect(body.series.ZZZZ).toEqual({ error: 'no_data' })
+  })
+
+  it('something that is not a ticker is one asset without data, never a failed request', async () => {
+    const res = await get('?symbols=SPY,SP;Y')
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.series['SP;Y']).toEqual({ error: 'no_data' })
+    expect(body.series.SPY.points).toHaveLength(1)
+    expect(mockGetBars.mock.calls[0][0]).toEqual(['SPY'])
+  })
+
+  it('a held peso share is its Buenos Aires listing, in dollars', async () => {
+    const body = await (await get('?symbols=BCBA:GGAL')).json()
+    expect(mockGetBars.mock.calls[0][0]).toEqual(['GGAL.BA'])
+    expect(body.series['BCBA:GGAL']).toEqual({ points: [{ time: '2026-01-02', value: 2 }] })
   })
 
   it('a peso-quoted ticker is divided by the CCL; a dollar one never asks for it', async () => {

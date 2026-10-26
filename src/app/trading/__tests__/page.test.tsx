@@ -218,6 +218,14 @@ describe('TradingPage — Mi cartera', () => {
     expect(urls.some((u) => u.startsWith('/api/quote') && u.includes('portfolio'))).toBe(false)
   })
 
+  it('never shows its internal name anywhere on the page', async () => {
+    useChartStore.setState({ symbol: '__portfolio__' })
+    await act(async () => { root.render(<TradingPage />) })
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+
+    expect(host.textContent).not.toContain('__portfolio__')
+  })
+
   it('with Cartera chosen there is no star either: the list builds itself', async () => {
     useChartStore.setState({ symbol: 'AAPL', activeWatchlistId: '__cartera__' })
     await act(async () => { root.render(<TradingPage />) })

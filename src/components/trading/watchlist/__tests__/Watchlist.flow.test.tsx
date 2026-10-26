@@ -206,12 +206,36 @@ describe('Watchlist — Cartera, the stocks held', () => {
     unmount()
   })
 
+  it('the stock rows keep the remove column, so prices sit under their headers', async () => {
+    stubPortfolio()
+    const { el, unmount } = await render('__cartera__')
+
+    const rows = [...el.querySelectorAll('ul[aria-label="Símbolos de la lista"] li')].slice(1)
+    expect(rows.every((li) => li.querySelector('[data-remove-slot]'))).toBe(true)
+    unmount()
+  })
+
   it('with nothing held it says so', async () => {
     stubPortfolio([])
     const { el, unmount } = await render('__cartera__')
 
     expect(el.textContent).toContain('No tenés acciones en cartera')
     expect(el.textContent).not.toContain('Mi cartera')
+    unmount()
+  })
+})
+
+describe('Watchlist — the + button', () => {
+  it('adds the pick to the list and opens it on the chart, as before', async () => {
+    stubFetch(listOf())
+    const { unmount } = await render(null, [])
+    useChartStore.setState({ symbol: 'SPY' })
+
+    act(() => document.querySelector<HTMLButtonElement>('button[aria-label="Agregar símbolo"]')!.click())
+    await act(async () => { await useChartStore.getState().symbolDialogOnSelect!('MSFT') })
+
+    expect(useChartStore.getState().watchlist).toContain('MSFT')
+    expect(useChartStore.getState().symbol).toBe('MSFT')
     unmount()
   })
 })

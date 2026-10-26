@@ -1,5 +1,5 @@
 import type { Candle, Timeframe } from '@/lib/binance/types'
-import { closeOnOrBefore } from '@/lib/historical-prices'
+import { closeOnOrBefore } from '@/lib/daily-bars'
 import type { SeriesPoint } from '@/lib/compare-series'
 import { toChartTime } from './timeframes'
 

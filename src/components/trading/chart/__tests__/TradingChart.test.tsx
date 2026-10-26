@@ -15,6 +15,8 @@ vi.hoisted(() => {
 })
 
 // lightweight-charts draws on canvas, which jsdom lacks: a recording stand-in.
+// The visible time range, which the library applies lazily after a range is set.
+const getVisibleRange = vi.fn((): { from: number; to: number } | null => null)
 const priceScale = { applyOptions: vi.fn() }
 const series = {
   priceScale: () => priceScale,
@@ -33,7 +35,7 @@ const chart = {
   subscribeCrosshairMove: vi.fn(),
   unsubscribeCrosshairMove: vi.fn(),
   // A bar's x is its time, for the trade card's finger slop.
-  timeScale: () => ({ setVisibleLogicalRange: vi.fn(), timeToCoordinate: (t: number) => t, subscribeVisibleTimeRangeChange: vi.fn(), unsubscribeVisibleTimeRangeChange: vi.fn(), getVisibleRange: () => null }),
+  timeScale: () => ({ setVisibleLogicalRange: vi.fn(), timeToCoordinate: (t: number) => t, subscribeVisibleTimeRangeChange: vi.fn(), unsubscribeVisibleTimeRangeChange: vi.fn(), getVisibleRange }),
   subscribeClick: vi.fn(),
   unsubscribeClick: vi.fn(),
   panes: vi.fn(() => []),
@@ -54,6 +56,7 @@ vi.mock('lightweight-charts', () => ({
 const drawingEvents: Record<string, (...a: unknown[]) => void> = {}
 const drawingSelect = vi.fn()
 const drawingSetTool = vi.fn()
+const drawingsVisible = vi.fn()
 // What the drawing layer holds: the armed tool and the selected drawings.
 const drawingState = { tool: null as string | null, selection: [] as string[] }
 // What the chart set up, in order.
@@ -67,6 +70,7 @@ vi.mock('lightweight-charts-drawing', () => ({
     setTool(kind: string | null) { drawingSetTool(kind) }
     select(ids: string[]) { drawingSelect(ids) }
     setInterval() {}
+    setDrawingsVisible(v: boolean) { drawingsVisible(v) }
     destroy() {}
   },
   setDefaultStyleOverride: vi.fn(),
@@ -77,9 +81,9 @@ vi.mock('@/lib/chart/select-before-move', async (importOriginal) => {
 })
 
 const candle = { time: 1, open: 1, high: 2, low: 0.5, close: 1.5 }
-const bars = { candles: [candle] as typeof candle[] }
+const bars = { candles: [candle] as typeof candle[], status: 'ready', error: undefined as string | undefined }
 vi.mock('../useCandles', () => ({
-  useCandles: () => ({ status: 'ready', candles: bars.candles, change: { kind: 'set' }, retry: () => {} }),
+  useCandles: () => ({ status: bars.status, candles: bars.candles, error: bars.error, change: { kind: 'set' }, retry: () => {} }),
 }))
 vi.mock('../useDrawings', () => ({ useDrawings: () => 'ready' }))
 // The compared series the chart is given: a test sets what the endpoint answered.
@@ -96,9 +100,13 @@ vi.mock('../useChartTheme', () => ({
 // The toolbar has its own tests; here it only switches the alert mode on, and shows where the
 // chart lets it float the favorites bar.
 let favoritesArea: HTMLElement | null | undefined
+// What the chart handed the toolbar: its drawing layer (null while drawing is paused) and the alerts switch.
+const toolbar = { manager: undefined as unknown, alertsOff: undefined as boolean | undefined }
 vi.mock('../DrawingTools', () => ({
-  DrawingTools: ({ onAlertMode, chartArea, alerts, onNewAlert, onOpenAlert }: { onAlertMode: (on: boolean) => void; chartArea?: HTMLElement | null; alerts?: { id: string }[]; onNewAlert?: () => void; onOpenAlert?: (id: string) => void }) => {
+  DrawingTools: ({ manager, alertsOff, onAlertMode, chartArea, alerts, onNewAlert, onOpenAlert }: { manager: unknown; alertsOff?: boolean; onAlertMode: (on: boolean) => void; chartArea?: HTMLElement | null; alerts?: { id: string }[]; onNewAlert?: () => void; onOpenAlert?: (id: string) => void }) => {
     favoritesArea = chartArea
+    toolbar.manager = manager
+    toolbar.alertsOff = alertsOff
     return (
       <>
         <button type="button" onClick={() => onAlertMode(true)}>Alerta</button>
@@ -113,10 +121,11 @@ const { TradingChart } = await import('../TradingChart')
 const { setDefaultStyleOverride } = await import('lightweight-charts-drawing')
 const { setToolStyle, setIndicatorSettings } = await import('@/lib/chart/preferences')
 const { useChartStore, DEFAULT_CONFIG } = await import('@/lib/store/chart-store')
+const DEFAULT_INDICATORS = { ...useChartStore.getState().indicators }
 const { INDICATOR_KEYS } = await import('@/lib/chart/preferences-schema')
 const lwc = await import('lightweight-charts')
 
-afterEach(() => { compare.status = 'idle'; compare.series = {}; compare.ccl = undefined; useChartStore.setState({ compareSymbols: [] }); vi.clearAllMocks(); vi.unstubAllGlobals(); setupOrder.length = 0; alertsApi.alerts = []; bars.candles = [candle]; drawingState.tool = null; drawingState.selection = []; series.priceToCoordinate.mockReturnValue(null); document.body.innerHTML = '' })
+afterEach(() => { compare.status = 'idle'; compare.series = {}; compare.ccl = undefined; bars.status = 'ready'; bars.error = undefined; getVisibleRange.mockReset(); getVisibleRange.mockReturnValue(null); useChartStore.setState({ compareSymbols: [], compareDefaulted: true, indicators: { ...DEFAULT_INDICATORS } }); vi.clearAllMocks(); vi.unstubAllGlobals(); setupOrder.length = 0; alertsApi.alerts = []; bars.candles = [candle]; drawingState.tool = null; drawingState.selection = []; series.priceToCoordinate.mockReturnValue(null); document.body.innerHTML = '' })
 
 const onPhone = (phone: boolean) => vi.stubGlobal('matchMedia', (q: string) => ({ matches: phone && q.includes('max-width'), media: q, addEventListener() {}, removeEventListener() {} }))
 const panes = (n: number) => Array.from({ length: n }, () => ({ setStretchFactor: vi.fn() }))
@@ -558,6 +567,7 @@ describe('TradingChart indicator styles', () => {
       made.push(m)
       return {
         applyOptions: (o: Rec) => Object.assign(m.options, o),
+        priceScale: () => ({ applyOptions: () => {} }),
         setData: (d: Rec[]) => { m.data = d },
         createPriceLine: (o: Rec) => {
           const line = { options: { ...o }, applyOptions: (p: Rec) => Object.assign(line.options, p) }
@@ -1181,10 +1191,55 @@ describe('TradingChart — comparing', () => {
     unmount()
   })
 
-  it('opening Mi cartera with nothing compared puts SPY next to it', async () => {
-    const { unmount } = await renderTf('__portfolio__', '1d', [])
-
+  it('opening Mi cartera the first time puts SPY next to it; taken out, it stays out', async () => {
+    useChartStore.setState({ compareDefaulted: false })
+    const first = await renderTf('__portfolio__', '1d', [])
     expect(useChartStore.getState().compareSymbols).toEqual(['SPY'])
+    first.unmount()
+
+    useChartStore.setState({ compareDefaulted: true })
+    const again = await renderTf('__portfolio__', '1d', [])
+    expect(useChartStore.getState().compareSymbols).toEqual([])
+    again.unmount()
+  })
+
+  it('while comparing, the indicators drawn over the price wait and the ones in their own pane stay in prices', async () => {
+    compare.status = 'ready'
+    compare.series = { SPY }
+    useChartStore.setState({ compareSymbols: ['SPY'], indicators: { ...NO_INDICATORS, ema20: true, rsi: true } as never })
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<TradingChart symbol="AAPL" timeframe="1d" />) })
+
+    expect((chart.addSeries.mock.calls as unknown[][]).filter((c) => c[2] === 0)).toEqual([])
+    expect((chart.addSeries.mock.calls as unknown[][]).some((c) => c[2] === 1)).toBe(true)
+    expect(modes().lastIndexOf(0)).toBeGreaterThan(modes().indexOf(2))
+    expect(el.textContent).toContain('Las medias y Bollinger se ocultan mientras comparás')
+    act(() => root.unmount())
+  })
+
+  it('Mi cartera has no volume to draw', async () => {
+    useChartStore.setState({ indicators: { ...NO_INDICATORS, volume: true } as never })
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<TradingChart symbol="__portfolio__" timeframe="1d" />) })
+
+    expect(seriesKinds()).not.toContain(lwc.HistogramSeries)
+    act(() => root.unmount())
+  })
+
+  it('a peso chart drawn in dollars pauses its drawings and alerts, which are in pesos', async () => {
+    compare.status = 'ready'
+    compare.series = { SPY }
+    compare.ccl = [{ time: '1970-01-01', value: 2 }]
+    const { el, unmount } = await renderTf('GGAL.BA', '1d', ['SPY'])
+
+    expect(toolbar.manager).toBeNull()
+    expect(toolbar.alertsOff).toBe(true)
+    expect(drawingsVisible).toHaveBeenLastCalledWith(false)
+    expect(el.textContent).toContain('Dibujos y alertas en pausa mientras comparás en dólares')
     unmount()
   })
 
@@ -1198,5 +1253,17 @@ describe('TradingChart — comparing', () => {
     const full = await renderTf('AAPL', '1d', ['SPY', 'QQQ', 'DIA', 'EEM', 'VT'])
     expect(button('+ Comparar')).toBeUndefined()
     full.unmount()
+  })
+})
+
+describe('TradingChart — Mi cartera without history', () => {
+  it('says so with its name, never its internal one', async () => {
+    bars.status = 'error'
+    bars.error = 'Todavía no hay historia de tu cartera'
+    const { unmount } = await render('__portfolio__')
+
+    expect(document.body.textContent).toContain('Todavía no hay historia de tu cartera')
+    expect(document.body.textContent).not.toContain('__portfolio__')
+    unmount()
   })
 })

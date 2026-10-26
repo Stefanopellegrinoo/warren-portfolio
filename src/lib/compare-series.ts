@@ -3,7 +3,7 @@
  * daily series in USD, so a peso ticker never reads as beating a dollar one through inflation.
  * Pure and client-safe; the server side lives in the route and stocks-twr.ts.
  */
-import { closeOnOrBefore, type DailyBar } from './historical-prices'
+import { closeOnOrBefore, type DailyBar } from './daily-bars'
 
 /** The stock portfolio as a series: its TWR index, never its raw value. */
 export const PORTFOLIO_SERIES = '__portfolio__'
@@ -17,23 +17,32 @@ export interface CompareSeriesResponse {
   ccl?: SeriesPoint[]
 }
 
-const TICKER = /^\^?[A-Z0-9][A-Z0-9.=-]{0,14}$/
+// A held peso share is named `BCBA:GGAL` across the app.
+const LOCAL_PREFIX = 'BCBA:'
+const TICKER = /^(BCBA:)?\^?[A-Z0-9][A-Z0-9.=-]{0,14}$/
+const MAX_SYMBOL_LENGTH = 20
 
-/** The requested symbols, or null when there are none, more than MAX_COMPARE, or one is not a ticker. */
+/** The requested symbols, or null when there are none, more than MAX_COMPARE, or one too long to be any. */
 export function parseCompareSymbols(raw: string | null): string[] | null {
   if (!raw) return null
   const symbols = [...new Set(raw.split(',').map((s) => (s.trim() === PORTFOLIO_SERIES ? PORTFOLIO_SERIES : s.trim().toUpperCase())))]
   if (symbols.length === 0 || symbols.length > MAX_COMPARE) return null
-  return symbols.every((s) => s === PORTFOLIO_SERIES || TICKER.test(s)) ? symbols : null
+  return symbols.every((s) => s.length > 0 && s.length <= MAX_SYMBOL_LENGTH) ? symbols : null
 }
 
-/** Quoted in pesos: Buenos Aires tickers and the MERVAL. */
+/** A symbol Yahoo can be asked for; anything else is answered as an asset without data. */
+export function isTicker(symbol: string): boolean {
+  return TICKER.test(symbol)
+}
+
+/** Quoted in pesos: Buenos Aires tickers, held peso shares and the MERVAL. */
 export function isArsSymbol(symbol: string): boolean {
-  return symbol.endsWith('.BA') || symbol === '^MERV'
+  return symbol.endsWith('.BA') || symbol.startsWith(LOCAL_PREFIX) || symbol === '^MERV'
 }
 
-/** The Yahoo name of a symbol: a Binance USDT pair is Yahoo's USD pair. */
+/** The Yahoo name of a symbol: a Binance USDT pair is Yahoo's USD pair, a held peso share its Buenos Aires listing. */
 export function yahooSymbol(symbol: string): string {
+  if (symbol.startsWith(LOCAL_PREFIX)) return `${symbol.slice(LOCAL_PREFIX.length)}.BA`
   return symbol.endsWith('USDT') ? `${symbol.slice(0, -4)}-USD` : symbol
 }
 

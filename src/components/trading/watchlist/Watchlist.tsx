@@ -170,6 +170,7 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
   }, [currentList]);
 
   const handleRemove = async (s: string) => {
+    if (activeId === CARTERA_LIST_ID) return; // the stocks held: nothing to remove
     const removed = () => toast.success("Quitado de la lista", { description: s });
     if (!activeId) {
       removeFromLocal(s);
@@ -205,7 +206,8 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
             type="button"
             aria-label="Agregar símbolo"
             title="Agregar símbolo"
-            onClick={() => openSymbolDialog(true, addSymbolToCurrentWatchlist)}
+            // The pick goes to the list and opens on the chart.
+            onClick={() => openSymbolDialog(true, (s) => { setSymbol(s); void addSymbolToCurrentWatchlist(s); })}
             className={iconButton}
           >
             <Plus className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
@@ -264,6 +266,8 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
                       {row ? <Chip tone={toneOf(row.pct)}>{formatPct(row.pct / 100)}</Chip> : <span className="text-ink-3">—</span>}
                     </span>
                   </button>
+                  {/* Cartera has nothing to remove, but keeps the column so prices sit under their headers. */}
+                  {cartera && <span data-remove-slot aria-hidden="true" className="mx-1 h-8 w-8 flex-none max-[819px]:h-11 max-[819px]:w-11" />}
                   {!cartera && <button
                     type="button"
                     aria-label={`Quitar ${s} de la lista`}

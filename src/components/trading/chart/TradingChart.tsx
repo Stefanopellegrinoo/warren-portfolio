@@ -73,6 +73,7 @@ const asTime = (t: number) => t as UTCTimestamp;
 // One color per compared asset, in the order they were chosen; apart from the candles' green and red.
 const COMPARE_COLORS = ["#f59e0b", "#8b5cf6", "#06b6d4", "#ec4899", "#84cc16"];
 const NONE: string[] = [];
+const NO_ALERTS: ChartAlert[] = [];
 const pointOf = (line: boolean, c: Candle) => (line ? { time: asTime(c.time), value: c.close } : { ...c, time: asTime(c.time) });
 const PRICE_FORMAT = { type: "custom" as const, formatter: priceText, minMove: 0.0001 };
 const ALERT_TITLES = { active: "Alerta", triggered: "Disparada", unavailable: "No se puede revisar" };
@@ -159,6 +160,9 @@ function syncIndicators(
 							paneIndex,
 						),
 			);
+			// A pane of its own reads in its own units: a new pane takes the chart's last scale mode,
+			// which is % while comparing.
+			if (paneIndex > 0) series[0]?.priceScale().applyOptions({ mode: PriceScaleMode.Normal });
 			const levels = (spec.levels ?? []).map((price) =>
 				series[0].createPriceLine({ price, color: theme.ink3, lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: false }),
 			);
@@ -262,6 +266,13 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		}
 		return out;
 	}, [comparing, compared.series, drawn]);
+	// While comparing, the price pane is in %: indicators drawn over the price would each start at 0 %
+	// from their own first bar, so they wait. Mi cartera has no volume.
+	const priceOverlays = enabled.filter((k) => INDICATOR_SPECS[k].pane === "price");
+	const drawnIndicators = useMemo(
+		() => enabled.filter((k) => !(line && k === "volume") && !(comparing.length > 0 && INDICATOR_SPECS[k].pane === "price")),
+		[enabled, line, comparing.length],
+	);
 	const compareLinesRef = useRef(new Map<string, ISeriesApi<"Line">>());
 	const percentRef = useRef(false);
 	const drawnUsdRef = useRef(false);
@@ -425,10 +436,23 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		return () => scale.unsubscribeVisibleTimeRangeChange(onRange);
 	}, [manager, percentMode]);
 
-	// Mi cartera opens against the market when nothing is compared yet.
+	// The first time Mi cartera opens on this device, it opens against the market; after that, the
+	// comparisons are whatever the user left.
 	useEffect(() => {
-		if (symbol === PORTFOLIO_SERIES && useChartStore.getState().compareSymbols.length === 0) setCompareSymbols(["SPY"]);
+		const state = useChartStore.getState();
+		if (symbol !== PORTFOLIO_SERIES || state.compareDefaulted) return;
+		useChartStore.setState({ compareDefaulted: true });
+		if (state.compareSymbols.length === 0) setCompareSymbols(["SPY"]);
 	}, [symbol, setCompareSymbols]);
+
+	// A peso chart drawn in dollars: its drawings and alerts are in pesos, so they wait until the
+	// comparison ends instead of landing in the wrong place or being saved in dollars.
+	useEffect(() => {
+		if (!manager || !usd) return;
+		manager.setDrawingsVisible(false);
+		return () => manager.setDrawingsVisible(true);
+	}, [manager, usd]);
+	const shownAlerts = usd ? NO_ALERTS : alerts;
 
 	// The user's buys and sells, after the candles they sit on.
 	useEffect(() => {
@@ -487,8 +511,8 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	useEffect(() => {
 		const chart = chartRef.current;
 		if (!chart || !theme || data.status !== "ready") return;
-		syncIndicators(chart, indicatorsRef.current, data.candles, enabled, hidden, config, saved, theme, window.matchMedia(PHONE).matches);
-	}, [data.status, data.candles, enabled, hidden, config, saved, theme, manager]);
+		syncIndicators(chart, indicatorsRef.current, data.candles, drawnIndicators, hidden, config, saved, theme, window.matchMedia(PHONE).matches);
+	}, [data.status, data.candles, drawnIndicators, hidden, config, saved, theme, manager]);
 
 	// Alert lines: only an alert against a value has one, in its color (the accent when it has none), the selected
 	// one thicker. The price's on the candles; an indicator's in that indicator's pane while it is on (S6). Removed on
@@ -499,7 +523,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		if (!candles || !theme) return;
 		const draggable = alertLinesRef.current;
 		const made: [ISeriesApi<SeriesType>, IPriceLine][] = [];
-		for (const a of alerts) {
+		for (const a of shownAlerts) {
 			if (a.target !== "value" || a.value === null) continue;
 			const host: ISeriesApi<SeriesType> | undefined =
 				a.source === "price" ? candles : indicatorsRef.current.list.find((i) => i.key === indicatorOf(a.source))?.series[0];
@@ -521,7 +545,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			// After the chart is gone (unmount) there is nothing to remove them from.
 			if (chartRef.current) made.forEach(([series, line]) => series.removePriceLine(line));
 		};
-	}, [alerts, theme, manager, selectedId, enabled, config, data.status]);
+	}, [shownAlerts, theme, manager, selectedId, enabled, config, data.status]);
 
 	// Alert placement and dragging. Capture phase: an alert under the pointer
 	// wins over the drawing layer and the chart's own panning.
@@ -536,9 +560,10 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		const box = boxRef.current;
 		const chart = chartRef.current;
 		const series = seriesRef.current;
-		if (!box || !chart || !series) return;
+		// A peso chart in dollars: its alerts, in pesos, cannot be placed or moved on it.
+		if (!box || !chart || !series || usd) return;
 		// Only the price against a value has a line on the price pane to grab.
-		const lines = alerts.filter((a): a is ChartAlert & { value: number } => isPriceValue(a) && a.value !== null);
+		const lines = shownAlerts.filter((a): a is ChartAlert & { value: number } => isPriceValue(a) && a.value !== null);
 
 		const onDown = (e: PointerEvent) => {
 			const y = e.clientY - box.getBoundingClientRect().top;
@@ -612,7 +637,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			box.removeEventListener("pointerdown", onDown, true);
 			window.removeEventListener("keydown", onKey);
 		};
-	}, [alertMode, alerts, create, move, manager, selectedId]);
+	}, [alertMode, shownAlerts, create, move, manager, selectedId, usd]);
 
 	useEffect(() => {
 		setSelectedAlert(null);
@@ -646,7 +671,8 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	return (
 		<div className="flex min-h-0 flex-1">
 			<DrawingTools
-				manager={manager}
+				manager={usd ? null : manager}
+				alertsOff={usd}
 				alertMode={alertMode}
 				onAlertMode={armAlert}
 				phoneBar={phoneBar}
@@ -695,6 +721,8 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 						</div>
 					))}
 					{percentMode && compared.status === "error" && <p className="text-ink-3">No se pudieron cargar las comparaciones.</p>}
+					{percentMode && priceOverlays.length > 0 && <p className="text-ink-3">Las medias y Bollinger se ocultan mientras comparás</p>}
+					{usd && <p className="text-ink-3">Dibujos y alertas en pausa mientras comparás en dólares</p>}
 					{!daily && others.length > 0 && <p className="text-ink-3">Las comparaciones se ven en diario, semanal o mensual</p>}
 					{daily && others.length < MAX_COMPARE && (
 						<button type="button" onClick={() => setCompareOpen(true)} className="pointer-events-auto inline-flex w-fit items-center rounded px-1 text-ink-3 hover:bg-hover hover:text-ink max-[819px]:min-h-8">
@@ -836,7 +864,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 							<p role="status" className="text-ink-3">Cargando {seriesLabel(symbol)}…</p>
 						) : (
 							<div role="alert" className="flex flex-col items-center gap-3 text-center">
-								<p className="text-ink">No se pudo cargar {symbol}</p>
+								<p className="text-ink">No se pudo cargar {seriesLabel(symbol)}</p>
 								<p className="max-w-sm text-[13px] text-ink-3">{data.error}</p>
 								<button type="button" onClick={data.retry} className="rounded bg-primary px-3 py-1.5 text-primary-on hover:bg-primary-hover">
 									Reintentar

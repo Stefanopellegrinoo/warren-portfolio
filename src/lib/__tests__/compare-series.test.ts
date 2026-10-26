@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseCompareSymbols, isArsSymbol, yahooSymbol, toUsdDaily, seriesLabel, PORTFOLIO_SERIES } from '../compare-series'
+import { parseCompareSymbols, isTicker, isArsSymbol, yahooSymbol, toUsdDaily, seriesLabel, PORTFOLIO_SERIES } from '../compare-series'
 
 describe('parseCompareSymbols', () => {
   it('trims, uppercases and drops repeats, keeping the order', () => {
@@ -10,17 +10,29 @@ describe('parseCompareSymbols', () => {
     expect(parseCompareSymbols(`^MERV,GGAL.BA,${PORTFOLIO_SERIES}`)).toEqual(['^MERV', 'GGAL.BA', '__portfolio__'])
   })
 
-  it('refuses nothing, more than five, and anything that is not a ticker', () => {
+  it('refuses nothing, more than five, and anything too long to be a ticker', () => {
     expect(parseCompareSymbols('')).toBeNull()
     expect(parseCompareSymbols(null)).toBeNull()
     expect(parseCompareSymbols('A,B,C,D,E,F')).toBeNull()
-    expect(parseCompareSymbols('SPY;DROP')).toBeNull()
+    expect(parseCompareSymbols('X'.repeat(21))).toBeNull()
+  })
+
+  it('keeps a held peso share as the app names it', () => {
+    expect(parseCompareSymbols('bcba:ggal')).toEqual(['BCBA:GGAL'])
+  })
+})
+
+describe('isTicker', () => {
+  it('is a ticker, an index or a held peso share; anything else is not', () => {
+    expect(['SPY', '^MERV', 'GGAL.BA', 'BCBA:GGAL', 'BRK-B'].every(isTicker)).toBe(true)
+    expect(isTicker('SPY;DROP')).toBe(false)
   })
 })
 
 describe('isArsSymbol', () => {
   it('is true for Buenos Aires tickers and the MERVAL, false for the rest', () => {
     expect(isArsSymbol('GGAL.BA')).toBe(true)
+    expect(isArsSymbol('BCBA:GGAL')).toBe(true)
     expect(isArsSymbol('^MERV')).toBe(true)
     expect(isArsSymbol('SPY')).toBe(false)
   })
@@ -29,6 +41,7 @@ describe('isArsSymbol', () => {
 describe('yahooSymbol', () => {
   it('turns a Binance USDT pair into its Yahoo USD pair and leaves the rest alone', () => {
     expect(yahooSymbol('BTCUSDT')).toBe('BTC-USD')
+    expect(yahooSymbol('BCBA:GGAL')).toBe('GGAL.BA')
     expect(yahooSymbol('SPY')).toBe('SPY')
   })
 })

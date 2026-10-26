@@ -90,6 +90,8 @@ interface ChartState {
   showTrades: boolean;
   /** The assets drawn over every chart to compare with it, on this device. */
   compareSymbols: string[];
+  /** Mi cartera already opened once against SPY on this device: the default is not applied again. */
+  compareDefaulted: boolean;
 
   symbolDialogOpen: boolean;
   symbolDialogOnSelect: ((s: string) => void) | null;
@@ -148,6 +150,7 @@ export const useChartStore = create<ChartState>()(
       showPortfolioOverlay: true,
       showTrades: true,
       compareSymbols: [],
+      compareDefaulted: false,
       symbolDialogOpen: false,
       symbolDialogOnSelect: null,
       settingsTarget: null,
@@ -206,6 +209,7 @@ export const useChartStore = create<ChartState>()(
         // A state saved before it has none: the merge keeps the default (on), no migration needed.
         showTrades: s.showTrades,
         compareSymbols: s.compareSymbols,
+        compareDefaulted: s.compareDefaulted,
       }),
     },
   ),
