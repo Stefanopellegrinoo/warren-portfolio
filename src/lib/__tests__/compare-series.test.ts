@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseCompareSymbols, isArsSymbol, yahooSymbol, toUsdDaily, PORTFOLIO_SERIES } from '../compare-series'
+import { parseCompareSymbols, isArsSymbol, yahooSymbol, toUsdDaily, seriesLabel, PORTFOLIO_SERIES } from '../compare-series'
 
 describe('parseCompareSymbols', () => {
   it('trims, uppercases and drops repeats, keeping the order', () => {
@@ -48,5 +48,13 @@ describe('toUsdDaily', () => {
 
   it('without a CCL the closes are already USD', () => {
     expect(toUsdDaily([{ date: '2026-01-02', close: 400 }])).toEqual([{ time: '2026-01-02', value: 400 }])
+  })
+})
+
+describe('seriesLabel', () => {
+  it('names the portfolio and the MERVAL in words, and any other ticker as itself', () => {
+    expect(seriesLabel('__portfolio__')).toBe('Mi cartera')
+    expect(seriesLabel('^MERV')).toBe('MERVAL (USD CCL)')
+    expect(seriesLabel('SPY')).toBe('SPY')
   })
 })

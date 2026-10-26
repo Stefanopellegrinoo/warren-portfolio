@@ -3,6 +3,14 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Timeframe } from "@/lib/binance/types";
+// Relative: the price worker reaches this module and its image has no `@/` paths.
+import { MAX_COMPARE, PORTFOLIO_SERIES } from "../compare-series";
+
+export { MAX_COMPARE };
+/** Mi cartera as a chart symbol: the stock portfolio's return. */
+export const PORTFOLIO_SYMBOL = PORTFOLIO_SERIES;
+/** The automatic Cartera list: the stocks held, never stored or edited. */
+export const CARTERA_LIST_ID = "__cartera__";
 
 export type IndicatorKey =
   | "ema20"
@@ -80,6 +88,8 @@ interface ChartState {
   showPortfolioOverlay: boolean;
   /** The user's buys and sells as arrows on the candles ("Mostrar operaciones"). */
   showTrades: boolean;
+  /** The assets drawn over every chart to compare with it, on this device. */
+  compareSymbols: string[];
 
   symbolDialogOpen: boolean;
   symbolDialogOnSelect: ((s: string) => void) | null;
@@ -97,6 +107,7 @@ interface ChartState {
   setSettingsTarget: (k: IndicatorKey | null) => void;
   togglePortfolioOverlay: () => void;
   toggleShowTrades: () => void;
+  setCompareSymbols: (symbols: string[]) => void;
   setActiveWatchlistId: (id: string | null) => void;
   watchlistRefreshTick: number;
   bumpWatchlistRefresh: () => void;
@@ -136,6 +147,7 @@ export const useChartStore = create<ChartState>()(
       activeWatchlistId: null,
       showPortfolioOverlay: true,
       showTrades: true,
+      compareSymbols: [],
       symbolDialogOpen: false,
       symbolDialogOnSelect: null,
       settingsTarget: null,
@@ -175,6 +187,7 @@ export const useChartStore = create<ChartState>()(
       togglePortfolioOverlay: () =>
         set((s) => ({ showPortfolioOverlay: !s.showPortfolioOverlay })),
       toggleShowTrades: () => set((s) => ({ showTrades: !s.showTrades })),
+      setCompareSymbols: (symbols) => set({ compareSymbols: [...new Set(symbols)].slice(0, MAX_COMPARE) }),
       setActiveWatchlistId: (activeWatchlistId) => set({ activeWatchlistId }),
       bumpWatchlistRefresh: () =>
         set((s) => ({ watchlistRefreshTick: s.watchlistRefreshTick + 1 })),
@@ -192,6 +205,7 @@ export const useChartStore = create<ChartState>()(
         showPortfolioOverlay: s.showPortfolioOverlay,
         // A state saved before it has none: the merge keeps the default (on), no migration needed.
         showTrades: s.showTrades,
+        compareSymbols: s.compareSymbols,
       }),
     },
   ),

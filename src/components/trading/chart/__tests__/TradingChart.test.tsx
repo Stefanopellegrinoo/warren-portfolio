@@ -1058,3 +1058,26 @@ describe('TradingChart one selection at a time', () => {
     unmount()
   })
 })
+
+describe('TradingChart — Mi cartera', () => {
+  it('is a line of its value, not candles', async () => {
+    const { unmount } = await render('__portfolio__')
+
+    expect((chart.addSeries.mock.calls as unknown[][])[0][0]).toBe(lwc.LineSeries)
+    expect(series.setData).toHaveBeenCalledWith([{ time: 1, value: 1.5 }])
+    unmount()
+  })
+
+  it('going back to a stock brings its candles back', async () => {
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<TradingChart symbol="__portfolio__" timeframe="1d" />) })
+    await act(async () => { root.render(<TradingChart symbol="AAPL" timeframe="1d" />) })
+
+    expect((chart.addSeries.mock.calls as unknown[][]).map((c) => c[0])).toContain(lwc.CandlestickSeries)
+    expect(vi.mocked(createChart)).toHaveBeenCalledTimes(2)
+    expect(series.setData).toHaveBeenCalledWith([{ ...candle, time: 1 }])
+    act(() => root.unmount())
+  })
+})

@@ -8,9 +8,11 @@ import { klinesInterval, toChartTime } from "@/lib/chart/timeframes";
 import { barsToUpdate, mergeRecent } from "@/lib/chart/live-bars";
 import { requestErrorMessage } from "@/lib/request-errors";
 import type { Candle, Timeframe } from "@/lib/binance/types";
+import { PORTFOLIO_SERIES, type CompareSeriesResponse } from "@/lib/compare-series";
 
 const POLL_MS = 30_000;
 const CANDLES_FAILED = "No se pudieron cargar las velas. Probá de nuevo.";
+const NO_PORTFOLIO_HISTORY = "Todavía no hay historia de tu cartera";
 // Days of recent bars a stock's poll asks for: wide enough to hold the last drawn bar over a
 // weekend or a holiday, small next to the history.
 const RECENT_DAYS: Record<ReturnType<typeof klinesInterval>, number> = { "15m": 7, "1h": 10, "1d": 14, "1w": 60, "1mo": 400 };
@@ -51,6 +53,16 @@ async function fetchYahoo(symbol: string, tf: Timeframe, signal: AbortSignal, da
 	return (body as { time: string | number; open: number; high: number; low: number; close: number; volume?: number }[]).map(
 		(k) => ({ time: toChartTime(k.time), open: k.open, high: k.high, low: k.low, close: k.close, volume: k.volume ?? 0 }),
 	);
+}
+
+/** Mi cartera: one value a day, as bars whose every price is that value, so indicators read it like a close. */
+async function fetchPortfolio(signal: AbortSignal): Promise<Candle[]> {
+	const res = await fetch(`/api/compare-series?symbols=${PORTFOLIO_SERIES}`, { signal });
+	const body = await res.json().catch(() => null);
+	if (!res.ok) throw new Error(body?.error ?? "");
+	const result = (body as CompareSeriesResponse).series[PORTFOLIO_SERIES];
+	if (!result || "error" in result) throw new Error(NO_PORTFOLIO_HISTORY);
+	return result.points.map((p) => ({ time: toChartTime(p.time), open: p.value, high: p.value, low: p.value, close: p.value, volume: 0 }));
 }
 
 function withBar(candles: Candle[], c: Candle): Candle[] {
@@ -94,7 +106,14 @@ export function useCandles(symbol: string, timeframe: Timeframe) {
 
 		(async () => {
 			try {
-				if (getProviderForSymbol(symbol) === "binance") {
+				const source = getProviderForSymbol(symbol);
+				if (source === "portfolio") {
+					// Daily values that change once a day: loaded once, never polled.
+					const candles = await fetchPortfolio(ctrl.signal);
+					if (!ctrl.signal.aborted) show(candles);
+					return;
+				}
+				if (source === "binance") {
 					// Binance's own errors ("klines 451") say nothing to the user; a dropped connection does.
 					const candles = await fetchKlines(symbol, timeframe).catch((e) => {
 						throw e instanceof TypeError ? e : new Error("");

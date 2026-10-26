@@ -130,3 +130,22 @@ describe('SymbolSelector — a failed search is not "no results"', () => {
     unmount()
   })
 })
+
+describe('SymbolSelector — picking for someone else', () => {
+  it('hands the ticker to the caller and leaves the chart where it is', async () => {
+    stubFetch({})
+    const onSelect = vi.fn()
+    useChartStore.setState({ symbolDialogOpen: true, symbolDialogOnSelect: onSelect, symbol: 'AAPL' })
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<SymbolSelector />) })
+    await flush()
+
+    act(() => button('GGAL')!.click())
+
+    expect(onSelect).toHaveBeenCalledWith('GGAL')
+    expect(useChartStore.getState().symbol).toBe('AAPL')
+    act(() => root.unmount())
+  })
+})

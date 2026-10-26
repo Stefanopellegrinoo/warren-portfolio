@@ -143,12 +143,12 @@ export function SymbolSelector({ onSymbolSelect, children }: SymbolSelectorProps
   }, [query, portfolioTickers]);
 
   function selectTicker(ticker: string) {
-    setSymbol(ticker);
+    // Opened to pick for someone else (a comparison): the pick is theirs, the chart stays.
     const onSelect = useChartStore.getState().symbolDialogOnSelect;
     if (onSelect) {
       onSelect(ticker);
       useChartStore.setState({ symbolDialogOnSelect: null });
-    }
+    } else setSymbol(ticker);
     setOpen(false);
     setQuery("");
     onSymbolSelect?.();

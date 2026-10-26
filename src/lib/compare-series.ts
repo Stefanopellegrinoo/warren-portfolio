@@ -47,3 +47,10 @@ export function toUsdDaily(bars: DailyBar[], ccl?: DailyBar[]): SeriesPoint[] {
   }
   return out
 }
+
+/** How a series is named on screen. */
+export function seriesLabel(symbol: string): string {
+  if (symbol === PORTFOLIO_SERIES) return 'Mi cartera'
+  if (symbol === '^MERV') return 'MERVAL (USD CCL)'
+  return symbol
+}

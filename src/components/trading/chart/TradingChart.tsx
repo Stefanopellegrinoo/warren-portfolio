@@ -32,6 +32,7 @@ import { touchDrawing } from "@/lib/chart/touch-drawing";
 import { onTap, selectBeforeMove } from "@/lib/chart/select-before-move";
 import { applyRememberedStyles } from "@/lib/chart/remembered-style";
 import { tradeMarkers } from "@/lib/chart/trade-markers";
+import { PORTFOLIO_SERIES, seriesLabel } from "@/lib/compare-series";
 import type { Candle, Timeframe } from "@/lib/binance/types";
 import { cn, formatNumber } from "@/lib/utils";
 import { useCandles } from "./useCandles";
@@ -64,6 +65,8 @@ const priceText = (p: number) => formatNumber(p, { decimals: priceDecimals(p) })
 const roundPrice = (p: number) => Number(p.toFixed(priceDecimals(p)));
 const PHONE = "(max-width: 819px)";
 const asTime = (t: number) => t as UTCTimestamp;
+/** What the main series draws of a bar: the candle, or for a line (Mi cartera) its close. */
+const pointOf = (line: boolean, c: Candle) => (line ? { time: asTime(c.time), value: c.close } : { ...c, time: asTime(c.time) });
 const PRICE_FORMAT = { type: "custom" as const, formatter: priceText, minMove: 0.0001 };
 const ALERT_TITLES = { active: "Alerta", triggered: "Disparada", unavailable: "No se puede revisar" };
 
@@ -189,7 +192,8 @@ function syncIndicators(
 export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: string; timeframe: Timeframe; phoneBar?: HTMLElement | null }) {
 	const boxRef = useRef<HTMLDivElement>(null);
 	const chartRef = useRef<IChartApi | null>(null);
-	const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+	// Candles, or a line for Mi cartera, which has one value a day and no open, high or low.
+	const seriesRef = useRef<ISeriesApi<"Candlestick"> | ISeriesApi<"Line"> | null>(null);
 	const indicatorsRef = useRef<{ signature: string; list: IndicatorSeries[] }>({ signature: "", list: [] });
 	const alertLinesRef = useRef(new Map<string, IPriceLine>());
 	const fittedRef = useRef("");
@@ -212,6 +216,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 
 	const theme = useChartTheme();
 	const intraday = INTRADAY.includes(timeframe);
+	const line = symbol === PORTFOLIO_SERIES;
 	const indicators = useChartStore((s) => s.indicators);
 	const hidden = useChartStore((s) => s.hidden);
 	const device = useChartStore((s) => s.config);
@@ -234,13 +239,16 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	const trades = useTradeMarkers(symbol, data.candles, showTrades);
 	const { alerts, create, save, move, rearm, remove } = useChartAlerts(symbol, last?.close ?? null);
 
-	// The chart, its candle series and the drawing layer: created once.
+	// The chart, its price series and the drawing layer: created once, and again when the series
+	// changes between candles and a line.
 	const ready = theme !== null;
 	useEffect(() => {
 		const box = boxRef.current;
 		if (!ready || !box) return;
 		const chart = createChart(box, { autoSize: true });
-		const series = chart.addSeries(CandlestickSeries, { priceLineVisible: true, priceFormat: PRICE_FORMAT });
+		const series = line
+			? chart.addSeries(LineSeries, { priceLineVisible: true, lineWidth: 2, priceFormat: PRICE_FORMAT })
+			: chart.addSeries(CandlestickSeries, { priceLineVisible: true, priceFormat: PRICE_FORMAT });
 		markersRef.current = createSeriesMarkers(series, []);
 		// Before the drawing layer, so a finger's press reaches it first (its events come later,
 		// once `drawings` exists).
@@ -270,7 +278,11 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			else open();
 		});
 		const offTouch = touchDrawing(drawings, chart.chartElement());
-		const onMove = (p: MouseEventParams) => setHover((p.seriesData.get(series) as Candle | undefined) ?? null);
+		const onMove = (p: MouseEventParams) => {
+			const d = p.seriesData.get(series) as (Candle & { value?: number }) | undefined;
+			// A line's point is one value: its legend reads it as a bar opening and closing there.
+			setHover(d && d.value !== undefined ? { time: d.time as number, open: d.value, high: d.value, low: d.value, close: d.value, volume: 0 } : (d ?? null));
+		};
 		chart.subscribeCrosshairMove(onMove);
 		chartRef.current = chart;
 		seriesRef.current = series;
@@ -290,34 +302,40 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			markersRef.current = null;
 			indicatorsRef.current = { signature: "", list: [] };
 			alertLinesRef.current.clear();
+			// The next chart gets every bar drawn and fitted again.
+			fittedRef.current = "";
 			setManager(null);
 		};
-	}, [ready]);
+	}, [ready, line]);
 
 	// Theme and timeframe options.
 	useEffect(() => {
 		if (!theme || !chartRef.current || !seriesRef.current) return;
 		chartRef.current.applyOptions(chartOptions(theme, intraday));
-		seriesRef.current.applyOptions({
-			upColor: theme.up,
-			downColor: theme.down,
-			borderUpColor: theme.up,
-			borderDownColor: theme.down,
-			wickUpColor: theme.up,
-			wickDownColor: theme.down,
-		});
-	}, [theme, intraday, manager]);
+		if (line) (seriesRef.current as ISeriesApi<"Line">).applyOptions({ color: theme.accent });
+		else
+			(seriesRef.current as ISeriesApi<"Candlestick">).applyOptions({
+				upColor: theme.up,
+				downColor: theme.down,
+				borderUpColor: theme.up,
+				borderDownColor: theme.down,
+				wickUpColor: theme.up,
+				wickDownColor: theme.down,
+			});
+	}, [theme, intraday, manager, line]);
 
 	// Candles: a full redraw on load, series.update() for live bars.
 	useEffect(() => {
 		const series = seriesRef.current;
 		const chart = chartRef.current;
 		if (!series || !chart || data.status !== "ready") return;
-		if (data.change.kind === "update") {
-			data.change.bars.forEach((b) => series.update({ ...b, time: asTime(b.time) }));
+		const key = `${symbol}:${timeframe}`;
+		// Live bars on top of the bars already drawn; a new chart draws them all.
+		const set = series as ISeriesApi<SeriesType>;
+		if (data.change.kind === "update" && fittedRef.current === key) {
+			data.change.bars.forEach((b) => set.update(pointOf(line, b)));
 		} else {
-			series.setData(data.candles.map((c) => ({ ...c, time: asTime(c.time) })));
-			const key = `${symbol}:${timeframe}`;
+			set.setData(data.candles.map((c) => pointOf(line, c)));
 			if (fittedRef.current !== key) {
 				fittedRef.current = key;
 				const n = data.candles.length;
@@ -328,7 +346,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			}
 		}
 		manager?.setInterval(timeframe);
-	}, [data.status, data.candles, data.change, symbol, timeframe, manager]);
+	}, [data.status, data.candles, data.change, symbol, timeframe, manager, line]);
 
 	// The user's buys and sells, after the candles they sit on.
 	useEffect(() => {
@@ -696,7 +714,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 				{data.status !== "ready" && (
 					<div className="absolute inset-0 z-30 grid place-items-center bg-canvas text-[14px]">
 						{data.status === "loading" ? (
-							<p role="status" className="text-ink-3">Cargando {symbol}…</p>
+							<p role="status" className="text-ink-3">Cargando {seriesLabel(symbol)}…</p>
 						) : (
 							<div role="alert" className="flex flex-col items-center gap-3 text-center">
 								<p className="text-ink">No se pudo cargar {symbol}</p>

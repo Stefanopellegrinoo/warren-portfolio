@@ -22,6 +22,13 @@ describe('coerceTimeframe', () => {
   })
 })
 
+describe('Mi cartera', () => {
+  it('is daily only: one value per day', () => {
+    expect(timeframesFor('portfolio')).toEqual(['1d'])
+    expect(coerceTimeframe('1h', 'portfolio')).toBe('1d')
+  })
+})
+
 describe('klinesInterval', () => {
   it('maps chart timeframes to /api/klines intervals', () => {
     expect(['15m', '1h', '1d', '1w', '1M'].map((t) => klinesInterval(t as never))).toEqual(['15m', '1h', '1d', '1w', '1mo'])

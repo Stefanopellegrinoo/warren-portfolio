@@ -179,3 +179,17 @@ describe('DrawingTools — the strip on a computer fits a 1280×800 window (S8)'
     unmount()
   })
 })
+
+describe('DrawingTools — Mi cartera', () => {
+  it('offers no alerts: they watch a ticker\'s price', async () => {
+    const manager = { on: vi.fn(() => () => {}), drawings: vi.fn(() => []), setTool: vi.fn(), setMagnet: vi.fn(), setDrawingsVisible: vi.fn() }
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<DrawingTools manager={manager as unknown as DrawingManager} alertMode={false} onAlertMode={() => {}} symbol="__portfolio__" alerts={[]} />) })
+
+    expect(document.querySelector('[role="toolbar"] button[aria-label="Alertas"]')).toBeNull()
+    expect(document.querySelector('[role="toolbar"] button[aria-label="Imán"]')).not.toBeNull()
+    act(() => root.unmount())
+  })
+})
