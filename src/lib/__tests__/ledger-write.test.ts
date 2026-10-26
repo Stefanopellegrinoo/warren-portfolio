@@ -2,8 +2,11 @@
 // inserts ledger rows only. The fake throws on any access to the stored derived tables.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-const h = vi.hoisted(() => ({ invalidated: [] as string[], splits: new Map<string, { date: string; numerator: number; denominator: number }[]>() }))
+const h = vi.hoisted(() => ({ invalidated: [] as string[], splits: new Map<string, { date: string; numerator: number; denominator: number }[]>(), bars: new Map<string, unknown>() }))
 vi.mock('../stock-splits', () => ({ loadSplits: async () => h.splits }))
+// The split-adjusted guard's market reads (S4): Yahoo bars and the ticker catalog.
+vi.mock('../bars-cache', () => ({ getBars: async () => h.bars }))
+vi.mock('../ticker-catalog', async orig => ({ ...(await orig<object>()), listCatalogued: async () => [{ ticker: 'AAPL', yahoo_symbol: 'AAPL' }] }))
 vi.mock('../redis', () => ({
   isRedisReady: () => false, getRedis: () => null, SUMMARY_VERSION_TTL: 60,
   invalidateUserCache: async (id: string) => { h.invalidated.push(id) },
@@ -32,6 +35,7 @@ import { processTransaction, processTransactionBatch } from '../portfolio-engine
 import { processONTransaction } from '../on-engine'
 import { processCashMovement, adjustCashBalance, deleteCashMovement } from '../cash-engine'
 import { OversellError, newOversell } from '../ledger-write'
+import { SplitAdjustedError } from '../split-adjusted-check'
 import { writeSupabase } from './fixtures/ledger-write-supabase'
 
 const U = 'u1'
@@ -41,7 +45,7 @@ const buy = (over: Record<string, unknown> = {}) => ({
 })
 const stock = { date: '2026-02-01', ticker: 'aapl', operation: 'VENTA' as const, quantity: 4, price: 120, commission: 0, assetType: 'ACCION' as const }
 
-beforeEach(() => { h.invalidated.length = 0; h.splits = new Map() })
+beforeEach(() => { h.invalidated.length = 0; h.splits = new Map(); h.bars = new Map() })
 
 describe('processTransaction', () => {
   it('rejects a sale of more than held with a 400 Spanish error and inserts nothing', async () => {
@@ -103,6 +107,49 @@ describe('stock splits (odd/tasks/split-aware-ledger.md S2)', () => {
     const result = await processTransaction(sb as never, U, { ...stock, quantity: 20, price: 245.4, date: '2025-09-25' })
     expect(result.closedTrade).toMatchObject({ ticker: 'AAPL', quantity: 20, close_price: 245.4 })
     expect(sb.tables.transactions).toHaveLength(2)
+  })
+})
+
+describe('split-adjusted entries (odd/tasks/split-aware-ledger.md S4)', () => {
+  const split = [{ date: '2022-07-18', numerator: 20, denominator: 1 }]
+  const adjustedBuy = { date: '2022-03-21', ticker: 'aapl', operation: 'COMPRA' as const, quantity: 17.93, price: 136.98, commission: 0, assetType: 'ACCION' as const }
+  const asTraded = { ...adjustedBuy, quantity: 0.8965, price: 2739.6 }
+  const MESSAGE = 'El precio de AAPL el 2022-03-21 (136.98) parece ajustado por el split 20:1 del 2022-07-18: ese día cotizaba cerca de 2802.46. Cargala como figura en tu comprobante: 0.8965 a 2739.6.'
+
+  beforeEach(() => {
+    h.splits = new Map([['AAPL', split]])
+    h.bars = new Map([['AAPL', { bars: [{ date: '2022-03-18', close: 140.123 }], splits: split, splitsKnown: true, degraded: false, missing: false }]])
+  })
+
+  it('create refuses a pre-split trade entered split-adjusted, with 400, and inserts nothing', async () => {
+    const sb = writeSupabase()
+    const err = await processTransaction(sb as never, U, adjustedBuy).catch(e => e)
+    expect(err).toBeInstanceOf(SplitAdjustedError)
+    expect(err.status).toBe(400)
+    expect(err.message).toBe(MESSAGE)
+    expect(sb.rpcCalls).toEqual([])
+    expect(sb.tables.transactions ?? []).toHaveLength(0)
+    expect(sb.tables.cash_movements ?? []).toHaveLength(0)
+  })
+
+  it('with the guard active, an as-traded buy and an oversell keep their previous responses', async () => {
+    const sb = writeSupabase()
+    const result = await processTransaction(sb as never, U, asTraded)
+    expect(result.transaction).toMatchObject({ ticker: 'AAPL', operation: 'COMPRA', quantity: 0.8965, price: 2739.6 })
+    expect(result.position).toMatchObject({ ticker: 'AAPL' })
+    expect(result.closedTrade).toBeNull()
+    const err = await processTransaction(sb as never, U, { ...asTraded, operation: 'VENTA', quantity: 1, date: '2022-03-22' }).catch(e => e)
+    expect(err).toBeInstanceOf(OversellError)
+    expect(err.message).toBe('No podés vender 1 AAPL el 2022-03-22: a esa fecha tenías 0.8965.')
+    expect(sb.tables.transactions).toHaveLength(1)
+  })
+
+  it('import refuses it in the error list and inserts nothing', async () => {
+    const sb = writeSupabase()
+    const result = await processTransactionBatch(sb as never, U, [{ ...asTraded, date: '2022-03-25' }, adjustedBuy])
+    expect(result).toEqual({ success: false, imported: 0, failed: 2, errors: [{ line: 0, ticker: 'AAPL', error: MESSAGE }] })
+    expect(sb.rpcCalls).toEqual([])
+    expect(sb.tables.transactions ?? []).toHaveLength(0)
   })
 })
 
