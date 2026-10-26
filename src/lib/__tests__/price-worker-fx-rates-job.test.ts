@@ -7,7 +7,7 @@ const h = vi.hoisted(() => ({
 }))
 
 vi.mock('bullmq', () => ({ Worker: class { constructor(_n: string, p: never) { h.processor = p } on() {} } }))
-vi.mock('../queue', () => ({
+vi.mock('../queue', () => ({ ON_PRICES_PERSIST_JOB_NAME: 'on-prices-persist',
   PRICE_QUEUE_NAME: 'q', PRICE_REPEAT_JOB_NAME: 'r', NIGHTLY_JOB_NAME: 's', TICKER_AUDIT_JOB_NAME: 't', ON_TERMS_JOB_NAME: 'on-terms-ingest', FX_RATES_JOB_NAME: 'fx-rates-ingest',
 }))
 vi.mock('../yahoo-finance', () => ({ fetchQuotesFromYahoo: vi.fn(), cachePrice: vi.fn(), fetchQuotes: vi.fn(async () => new Map()) }))
@@ -30,7 +30,7 @@ await import('../price-worker')
 
 beforeEach(() => {
   h.ingest.mockReset().mockResolvedValue({ asOf: '2026-10-20', ons: 228, skipped: 0, sov: 15, checks: 200, flagged: 8, warnings: 0 })
-  h.fx.mockReset().mockResolvedValue({ mep: 2916, ccl: 5042 })
+  h.fx.mockReset().mockResolvedValue({ mep: 2916, ccl: 5042, written: 2 })
   vi.spyOn(console, 'log').mockImplementation(() => {})
 })
 

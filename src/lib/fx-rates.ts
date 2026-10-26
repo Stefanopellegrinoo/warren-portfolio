@@ -31,19 +31,47 @@ async function fetchSeries(kind: FxKind, fetchFn: typeof fetch) {
     .map((r) => ({ date: r.fecha, kind, buy: r.compra as number, sell: r.venta as number, source: 'argentinadatos' }))
 }
 
-/** Upserts the whole MEP and CCL history (idempotent; a few thousand rows). */
+/**
+ * The stored rates by kind and date, read in pages until one comes back empty. A page may hold
+ * fewer rows than asked (PostgREST caps it at the project's max rows), so a short page is not the end.
+ */
+async function storedRates(supabase: SupabaseClient): Promise<Map<string, { buy: number; sell: number }>> {
+  const stored = new Map<string, { buy: number; sell: number }>()
+  for (let from = 0; ; ) {
+    const { data, error } = await supabase
+      .from('fx_rates')
+      .select('date, kind, buy, sell')
+      .order('date')
+      .order('kind')
+      .range(from, from + CHUNK - 1)
+    if (error) throw new Error(`fx_rates read: ${error.message}`)
+    if (!data || data.length === 0) return stored
+    for (const r of data) stored.set(`${r.kind} ${r.date}`, { buy: Number(r.buy), sell: Number(r.sell) })
+    from += data.length
+  }
+}
+
+/**
+ * Brings fx_rates up to the MEP and CCL history: writes only the days that are new or whose
+ * rate changed. The whole history is a few thousand rows, and rewriting it every night (and on
+ * every deploy) was most of the database's disk writes on a machine short of memory.
+ */
 export async function ingestFxRates(
   supabase: SupabaseClient,
   fetchFn: typeof fetch = fetch
-): Promise<Record<FxKind, number>> {
+): Promise<Record<FxKind, number> & { written: number }> {
   // Both series first: a failed fetch writes nothing.
   const [mep, ccl] = await Promise.all([fetchSeries('mep', fetchFn), fetchSeries('ccl', fetchFn)])
-  const rows = [...mep, ...ccl]
+  const stored = await storedRates(supabase)
+  const rows = [...mep, ...ccl].filter((r) => {
+    const s = stored.get(`${r.kind} ${r.date}`)
+    return !s || s.buy !== r.buy || s.sell !== r.sell
+  })
   for (let i = 0; i < rows.length; i += CHUNK) {
     const { error } = await supabase.from('fx_rates').upsert(rows.slice(i, i + CHUNK), { onConflict: 'date,kind' })
     if (error) throw new Error(`fx_rates upsert: ${error.message}`)
   }
-  return { mep: mep.length, ccl: ccl.length }
+  return { mep: mep.length, ccl: ccl.length, written: rows.length }
 }
 
 /**

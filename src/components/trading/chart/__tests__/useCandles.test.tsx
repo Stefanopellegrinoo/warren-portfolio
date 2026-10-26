@@ -148,3 +148,14 @@ describe('useCandles — Mi cartera', () => {
     unmount()
   })
 })
+
+describe('useCandles — which chart the bars are for', () => {
+  it('names the symbol and timeframe of the bars it holds, so a stale render can be told apart', async () => {
+    const { unmount } = await render('__portfolio__', () =>
+      Response.json({ series: { __portfolio__: { points: [{ time: '2026-01-02', value: 100 }] } } }),
+    )
+
+    expect(state.key).toBe('__portfolio__:1d')
+    unmount()
+  })
+})

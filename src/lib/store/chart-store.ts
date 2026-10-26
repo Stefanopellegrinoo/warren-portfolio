@@ -5,6 +5,7 @@ import { persist } from "zustand/middleware";
 import type { Timeframe } from "@/lib/binance/types";
 // Relative: the price worker reaches this module and its image has no `@/` paths.
 import { MAX_COMPARE, PORTFOLIO_SERIES } from "../compare-series";
+import type { CompareRange } from "../chart/compare";
 
 export { MAX_COMPARE };
 /** Mi cartera as a chart symbol: the stock portfolio's return. */
@@ -92,6 +93,8 @@ interface ChartState {
   compareSymbols: string[];
   /** Mi cartera already opened once against SPY on this device: the default is not applied again. */
   compareDefaulted: boolean;
+  /** How far back comparisons start: every line is at 0 % on its first day. */
+  compareRange: CompareRange;
 
   symbolDialogOpen: boolean;
   symbolDialogOnSelect: ((s: string) => void) | null;
@@ -110,6 +113,7 @@ interface ChartState {
   togglePortfolioOverlay: () => void;
   toggleShowTrades: () => void;
   setCompareSymbols: (symbols: string[]) => void;
+  setCompareRange: (range: CompareRange) => void;
   setActiveWatchlistId: (id: string | null) => void;
   watchlistRefreshTick: number;
   bumpWatchlistRefresh: () => void;
@@ -151,6 +155,7 @@ export const useChartStore = create<ChartState>()(
       showTrades: true,
       compareSymbols: [],
       compareDefaulted: false,
+      compareRange: "1A" as CompareRange,
       symbolDialogOpen: false,
       symbolDialogOnSelect: null,
       settingsTarget: null,
@@ -191,6 +196,7 @@ export const useChartStore = create<ChartState>()(
         set((s) => ({ showPortfolioOverlay: !s.showPortfolioOverlay })),
       toggleShowTrades: () => set((s) => ({ showTrades: !s.showTrades })),
       setCompareSymbols: (symbols) => set({ compareSymbols: [...new Set(symbols)].slice(0, MAX_COMPARE) }),
+      setCompareRange: (compareRange) => set({ compareRange }),
       setActiveWatchlistId: (activeWatchlistId) => set({ activeWatchlistId }),
       bumpWatchlistRefresh: () =>
         set((s) => ({ watchlistRefreshTick: s.watchlistRefreshTick + 1 })),
@@ -210,6 +216,7 @@ export const useChartStore = create<ChartState>()(
         showTrades: s.showTrades,
         compareSymbols: s.compareSymbols,
         compareDefaulted: s.compareDefaulted,
+        compareRange: s.compareRange,
       }),
     },
   ),

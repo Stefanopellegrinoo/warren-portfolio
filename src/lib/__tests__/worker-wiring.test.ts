@@ -19,7 +19,7 @@ vi.mock('bullmq', () => ({
   },
 }))
 vi.mock('../job-health', () => ({ beat: h.beat, alertJobFailure: h.alertJobFailure, recordRefresh: vi.fn() }))
-vi.mock('../queue', () => ({
+vi.mock('../queue', () => ({ ON_PRICES_PERSIST_JOB_NAME: 'on-prices-persist',
   PRICE_QUEUE_NAME: 'price-q', PRICE_REPEAT_JOB_NAME: 'r', NIGHTLY_JOB_NAME: 's', TICKER_AUDIT_JOB_NAME: 't',
   IMPORT_QUEUE_NAME: 'import-q',
 }))

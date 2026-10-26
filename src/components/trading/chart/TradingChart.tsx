@@ -8,7 +8,6 @@ import {
 	HistogramSeries,
 	LineSeries,
 	LineStyle,
-	PriceScaleMode,
 	TickMarkType,
 	createChart,
 	createSeriesMarkers,
@@ -17,6 +16,7 @@ import {
 	type ISeriesMarkersPluginApi,
 	type ISeriesApi,
 	type MouseEventParams,
+	type SeriesPartialOptionsMap,
 	type SeriesType,
 	type Time,
 	type UTCTimestamp,
@@ -34,7 +34,7 @@ import { onTap, selectBeforeMove } from "@/lib/chart/select-before-move";
 import { applyRememberedStyles } from "@/lib/chart/remembered-style";
 import { tradeMarkers } from "@/lib/chart/trade-markers";
 import { PORTFOLIO_SERIES, isArsSymbol, seriesLabel } from "@/lib/compare-series";
-import { COMPARE_TIMEFRAMES, alignToBars, pctFrom, toUsdCandles } from "@/lib/chart/compare";
+import { COMPARE_RANGES, COMPARE_TIMEFRAMES, alignToBars, compareBase, pctFrom, scaleToBase, toUsdCandles } from "@/lib/chart/compare";
 import type { Candle, Timeframe } from "@/lib/binance/types";
 import { cn, formatNumber } from "@/lib/utils";
 import { useCandles } from "./useCandles";
@@ -78,6 +78,13 @@ const NO_ALERTS: ChartAlert[] = [];
 const legendNote = "w-fit rounded bg-canvas px-1 text-ink-3";
 const pointOf = (line: boolean, c: Candle) => (line ? { time: asTime(c.time), value: c.close } : { ...c, time: asTime(c.time) });
 const PRICE_FORMAT = { type: "custom" as const, formatter: priceText, minMove: 0.0001 };
+/** While comparing, the price scale reads in % from the base day's close: every line starts there. */
+const percentFormat = (base: number) => ({
+	type: "custom" as const,
+	formatter: (p: number) => `${formatNumber((p / base - 1) * 100, { sign: true })} %`,
+	minMove: 0.0001,
+});
+const dayText = (time: number) => new Date(time * 1000).toLocaleDateString("es-AR", { timeZone: "UTC", day: "2-digit", month: "2-digit", year: "2-digit" });
 const ALERT_TITLES = { active: "Alerta", triggered: "Disparada", unavailable: "No se puede revisar" };
 
 const fmt = (opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("es-AR", { timeZone: TZ, ...opts });
@@ -141,6 +148,7 @@ function syncIndicators(
 	saved: ChartPreferences["indicatorSettings"],
 	theme: ChartTheme,
 	phone: boolean,
+	priceFormat: SeriesPartialOptionsMap["Line"]["priceFormat"],
 ) {
 	const signature = JSON.stringify([enabled, config, theme.ink3]);
 	if (built.signature !== signature) {
@@ -162,9 +170,6 @@ function syncIndicators(
 							paneIndex,
 						),
 			);
-			// A pane of its own reads in its own units: a new pane takes the chart's last scale mode,
-			// which is % while comparing.
-			if (paneIndex > 0) series[0]?.priceScale().applyOptions({ mode: PriceScaleMode.Normal });
 			const levels = (spec.levels ?? []).map((price) =>
 				series[0].createPriceLine({ price, color: theme.ink3, lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: false }),
 			);
@@ -190,6 +195,8 @@ function syncIndicators(
 			s.setData(seriesPoints(lines[i], look).map((p) => ({ ...p, time: asTime(p.time) })));
 			const visible = !hidden[key] && look.visible;
 			s.applyOptions(lines[i].type === "histogram" ? { visible, color: look.upColor } : { visible, color: look.color, lineWidth: look.width });
+			// Over the price, its label reads like the price scale: in % while comparing.
+			if (INDICATOR_SPECS[key].pane === "price") s.applyOptions({ priceFormat });
 		});
 		const looks = levelLooks(key, style, theme.ink3);
 		levels.forEach((l, i) => l.applyOptions({ price: looks[i].value, color: looks[i].color, lineVisible: looks[i].visible }));
@@ -268,19 +275,25 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		}
 		return out;
 	}, [comparing, compared.series, drawn]);
-	// While comparing, the price pane is in %: indicators drawn over the price would each start at 0 %
-	// from their own first bar, so they wait. Mi cartera has no volume.
-	const priceOverlays = enabled.filter((k) => INDICATOR_SPECS[k].pane === "price");
-	const drawnIndicators = useMemo(
-		() => enabled.filter((k) => !(line && k === "volume") && !(comparing.length > 0 && INDICATOR_SPECS[k].pane === "price")),
-		[enabled, line, comparing.length],
+	// The day every line starts from, fixed by the range (never by the view): panning or zooming
+	// never changes a number.
+	const compareRange = useChartStore((s) => s.compareRange);
+	const setCompareRange = useChartStore((s) => s.setCompareRange);
+	const base = useMemo(
+		() => (comparing.length > 0 && aligned.size > 0 ? compareBase(drawn, [...aligned.values()], compareRange) : null),
+		[comparing.length, aligned, drawn, compareRange],
 	);
+	// The price scale's labels: in % from the base close while comparing, prices otherwise.
+	const baseClose = base?.close;
+	const scaleFormat = useMemo(() => (baseClose === undefined ? PRICE_FORMAT : percentFormat(baseClose)), [baseClose]);
+	// The bars on screen are this chart's (right after a switch they are still the last one's).
+	const fresh = data.key === `${symbol}:${timeframe}`;
+	// Mi cartera has no volume.
+	const drawnIndicators = useMemo(() => enabled.filter((k) => !(line && k === "volume")), [enabled, line]);
 	const compareLinesRef = useRef(new Map<string, ISeriesApi<"Line">>());
-	const percentRef = useRef(false);
+	const zoomedRef = useRef("");
 	const drawnUsdRef = useRef(false);
 	const [compareOpen, setCompareOpen] = useState(false);
-	// The first day in sight: where every % starts.
-	const [visibleFrom, setVisibleFrom] = useState<number | null>(null);
 	const drawingsStatus = useDrawings(manager, symbol);
 	const trades = useTradeMarkers(symbol, data.candles, showTrades);
 	const { alerts, create, save, move, rearm, remove } = useChartAlerts(symbol, last?.close ?? null);
@@ -352,7 +365,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			// The next chart gets every bar drawn and fitted again, with its own compared lines.
 			fittedRef.current = "";
 			compareLines.clear();
-			percentRef.current = false;
+			zoomedRef.current = "";
 			setManager(null);
 		};
 	}, [ready, line]);
@@ -399,44 +412,45 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		manager?.setInterval(timeframe);
 	}, [data.status, data.candles, data.change, symbol, timeframe, manager, line, usd, drawn]);
 
-	// The compared lines on the chart's own bars, and the scale in % while there are any.
+	// The compared lines, drawn on the price scale from the chart's own close on the base day, so
+	// every line starts at the same point and the indicators, drawings and alerts keep their prices.
+	// The scale's labels read in % from that day while there is a base.
 	useEffect(() => {
 		const chart = chartRef.current;
 		const main = seriesRef.current;
 		if (!chart || !main) return;
 		const lines = compareLinesRef.current;
 		for (const [s, l] of lines) {
-			if (aligned.has(s)) continue;
+			if (base && aligned.has(s)) continue;
 			chart.removeSeries(l);
 			lines.delete(s);
 		}
+		const format = scaleFormat;
+		main.applyOptions({ priceFormat: format });
+		if (!base) return;
 		for (const [s, points] of aligned) {
 			let l = lines.get(s);
 			if (!l) {
-				l = chart.addSeries(LineSeries, { lineWidth: 2, priceLineVisible: false, lastValueVisible: true, priceFormat: PRICE_FORMAT });
+				l = chart.addSeries(LineSeries, { lineWidth: 2, priceLineVisible: false, lastValueVisible: true });
 				lines.set(s, l);
 			}
-			l.applyOptions({ color: COMPARE_COLORS[comparing.indexOf(s) % COMPARE_COLORS.length] });
-			l.setData(points.map((p) => ({ time: asTime(p.time), value: p.value })));
+			l.applyOptions({ color: COMPARE_COLORS[comparing.indexOf(s) % COMPARE_COLORS.length], priceFormat: format });
+			l.setData(scaleToBase(points, base.time, base.close).map((p) => ({ time: asTime(p.time), value: p.value })));
 		}
-		const percent = comparing.length > 0;
-		if (percent !== percentRef.current) {
-			percentRef.current = percent;
-			main.priceScale().applyOptions({ mode: percent ? PriceScaleMode.Percentage : PriceScaleMode.Normal });
-		}
-	}, [aligned, comparing, manager]);
+	}, [aligned, base, comparing, manager, scaleFormat]);
 
-	// While comparing, the legend reads every % from the first day in sight.
-	const percentMode = comparing.length > 0;
+	// A new range (or a comparison that starts) shows the range whole, from its first day on.
 	useEffect(() => {
 		const chart = chartRef.current;
-		if (!chart || !percentMode) return;
-		const scale = chart.timeScale();
-		const onRange = (r: { from: Time } | null) => setVisibleFrom(r ? (r.from as number) : null);
-		onRange(scale.getVisibleRange());
-		scale.subscribeVisibleTimeRangeChange(onRange);
-		return () => scale.unsubscribeVisibleTimeRangeChange(onRange);
-	}, [manager, percentMode]);
+		if (!chart || !base || !fresh) return;
+		const key = `${symbol}:${timeframe}:${compareRange}`;
+		if (zoomedRef.current === key) return;
+		zoomedRef.current = key;
+		chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, base.index - 1), to: drawn.length + 3 });
+	}, [base, fresh, symbol, timeframe, compareRange, drawn.length, manager]);
+	useEffect(() => {
+		if (!base) zoomedRef.current = "";
+	}, [base]);
 
 	// The first time Mi cartera opens on this device, it opens against the market; after that, the
 	// comparisons are whatever the user left.
@@ -513,8 +527,8 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	useEffect(() => {
 		const chart = chartRef.current;
 		if (!chart || !theme || data.status !== "ready") return;
-		syncIndicators(chart, indicatorsRef.current, data.candles, drawnIndicators, hidden, config, saved, theme, window.matchMedia(PHONE).matches);
-	}, [data.status, data.candles, drawnIndicators, hidden, config, saved, theme, manager]);
+		syncIndicators(chart, indicatorsRef.current, data.candles, drawnIndicators, hidden, config, saved, theme, window.matchMedia(PHONE).matches, scaleFormat);
+	}, [data.status, data.candles, drawnIndicators, hidden, config, saved, theme, manager, scaleFormat]);
 
 	// Alert lines: only an alert against a value has one, in its color (the accent when it has none), the selected
 	// one thicker. The price's on the candles; an indicator's in that indicator's pane while it is on (S6). Removed on
@@ -659,12 +673,14 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	const prevClose = drawn.at(-2)?.close;
 	const change = shown && prevClose && shown === drawnLast ? (shown.close - prevClose) / prevClose : shown ? (shown.close - shown.open) / shown.open : null;
 	const at = hover?.time ?? null;
-	const compareRows = percentMode
+	const comparingNow = comparing.length > 0;
+	const from = base?.time ?? null;
+	const compareRows = comparingNow
 		? [
-				{ symbol, color: line ? theme?.accent : theme?.ink, pct: pctFrom(drawn.map((c) => ({ time: c.time, value: c.close })), visibleFrom, at), main: true, missing: false },
+				{ symbol, color: line ? theme?.accent : theme?.ink, pct: base ? pctFrom(drawn.map((c) => ({ time: c.time, value: c.close })), from, at) : null, main: true, missing: false },
 				...comparing.map((s, i) => {
 					const points = aligned.get(s);
-					return { symbol: s, color: COMPARE_COLORS[i % COMPARE_COLORS.length], pct: points ? pctFrom(points, visibleFrom, at) : null, main: false, missing: compared.status === "ready" && !points };
+					return { symbol: s, color: COMPARE_COLORS[i % COMPARE_COLORS.length], pct: points && base ? pctFrom(points, from, at) : null, main: false, missing: compared.status === "ready" && !points };
 				}),
 			]
 		: [];
@@ -706,24 +722,44 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 							</>
 						)}
 					</div>
-					{compareRows.map((r) => (
-						<div key={r.symbol} className="pointer-events-auto flex w-fit items-center gap-1.5 rounded bg-canvas px-1 tabular-nums text-ink-2">
-							<span aria-hidden className="h-0.5 w-3 rounded" style={{ background: r.color }} />
-							<span className="text-ink">{seriesLabel(r.symbol)}</span>
-							{r.missing ? (
-								<span className="text-ink-3">Sin datos</span>
-							) : (
-								r.pct !== null && <span className={r.pct >= 0 ? "text-ok" : "text-danger"}>{formatNumber(r.pct, { sign: true })} %</span>
-							)}
-							{!r.main && (
-								<button type="button" aria-label={`Quitar ${seriesLabel(r.symbol)} de la comparación`} title="Quitar" onClick={() => setCompareSymbols(compareSymbols.filter((s) => s !== r.symbol))} className="grid h-6 w-6 place-items-center rounded text-ink-3 hover:bg-hover hover:text-ink max-[819px]:h-8 max-[819px]:w-8">
-									<X className="h-3.5 w-3.5" aria-hidden />
-								</button>
-							)}
+					{/* Chips that wrap, so on a phone three comparisons take two lines, not three. */}
+					{compareRows.length > 0 && (
+						<div className="flex flex-wrap gap-1">
+							{compareRows.map((r) => (
+								<div key={r.symbol} className="pointer-events-auto flex w-fit items-center gap-1.5 rounded bg-canvas px-1 tabular-nums text-ink-2">
+									<span aria-hidden className="h-0.5 w-3 rounded" style={{ background: r.color }} />
+									<span className="text-ink">{seriesLabel(r.symbol)}</span>
+									{r.missing ? (
+										<span className="text-ink-3">Sin datos</span>
+									) : (
+										r.pct !== null && <span className={r.pct >= 0 ? "text-ok" : "text-danger"}>{formatNumber(r.pct, { sign: true })} %</span>
+									)}
+									{!r.main && (
+										<button type="button" aria-label={`Quitar ${seriesLabel(r.symbol)} de la comparación`} title="Quitar" onClick={() => setCompareSymbols(compareSymbols.filter((s) => s !== r.symbol))} className="grid h-6 w-6 place-items-center rounded text-ink-3 hover:bg-hover hover:text-ink max-[819px]:h-7 max-[819px]:w-7">
+											<X className="h-3.5 w-3.5" aria-hidden />
+										</button>
+									)}
+								</div>
+							))}
 						</div>
-					))}
-					{percentMode && compared.status === "error" && <p className={legendNote}>No se pudieron cargar las comparaciones.</p>}
-					{percentMode && priceOverlays.length > 0 && <p className={legendNote}>Medias y Bollinger: ocultas al comparar</p>}
+					)}
+					{comparingNow && (
+						<div role="group" aria-label="Comparar desde" className="pointer-events-auto flex w-fit flex-wrap items-center gap-0.5 rounded bg-canvas p-0.5 text-[12px] tabular-nums">
+							{COMPARE_RANGES.map((r) => (
+								<button
+									key={r}
+									type="button"
+									aria-pressed={r === compareRange}
+									onClick={() => setCompareRange(r)}
+									className={cn("rounded px-1.5 py-0.5 text-ink-3 hover:bg-hover hover:text-ink max-[819px]:min-h-7", r === compareRange && "bg-accent-soft font-medium text-accent-ink")}
+								>
+									{r}
+								</button>
+							))}
+							{base && <span className="px-1 text-ink-3">desde {dayText(base.time)}</span>}
+						</div>
+					)}
+					{comparingNow && compared.status === "error" && <p className={legendNote}>No se pudieron cargar las comparaciones.</p>}
 					{usd && <p className={legendNote}>Dibujos y alertas: en pausa al comparar en dólares</p>}
 					{!daily && others.length > 0 && <p className={legendNote}>Las comparaciones se ven en diario, semanal o mensual</p>}
 					{daily && others.length < MAX_COMPARE && (

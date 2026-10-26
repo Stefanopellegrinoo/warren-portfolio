@@ -76,7 +76,7 @@ export async function processONTransaction(
       .from('ons')
       .upsert({ ticker, currency: 'USD', created_at: new Date().toISOString() }, { onConflict: 'ticker' })
   } catch (err) {
-    // Non-critical — the background worker also handles this via updateONPricesInDatabase
+    // Non-critical — the ticker joins the catalog with the next trade
     console.warn(`[ON Engine] Failed to register ticker ${ticker} in ons catalog:`, err)
   }
 

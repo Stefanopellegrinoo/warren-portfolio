@@ -106,6 +106,41 @@ describe('GET /api/health', () => {
     expect(body).toEqual({ status: 'degraded', redis: false, supabase: true, worker: FRESH })
   })
 
+  it('a healthy result is served for five minutes, so the database is asked at most that often', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-26T12:00:00Z'))
+    mockEnsureRedisConnected.mockResolvedValue(true)
+    const { mockFrom } = setupSupabaseQuery({ data: [{ ticker: 'YMCID' }], error: null })
+    const { GET } = await import('../route')
+
+    expect((await GET()).status).toBe(200)
+    vi.setSystemTime(new Date('2026-10-26T12:04:59Z'))
+    expect((await GET()).status).toBe(200)
+    const probesWithinFive = mockFrom.mock.calls.filter((c) => c[0] === 'ons').length
+
+    vi.setSystemTime(new Date('2026-10-26T12:05:01Z'))
+    await GET()
+
+    expect(probesWithinFive).toBe(1)
+    expect(mockFrom.mock.calls.filter((c) => c[0] === 'ons').length).toBe(2)
+    vi.useRealTimers()
+  })
+
+  it('a degraded result is probed again after ten seconds, so a recovery shows quickly', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-26T12:00:00Z'))
+    mockEnsureRedisConnected.mockResolvedValue(false)
+    setupSupabaseQuery({ data: [{ ticker: 'YMCID' }], error: null })
+    const { GET } = await import('../route')
+
+    expect((await GET()).status).toBe(503)
+    mockEnsureRedisConnected.mockResolvedValue(true)
+    vi.setSystemTime(new Date('2026-10-26T12:00:11Z'))
+
+    expect((await GET()).status).toBe(200)
+    vi.useRealTimers()
+  })
+
   it('serves the cached result within the TTL instead of re-probing', async () => {
     // Arrange — first call: everything healthy
     mockEnsureRedisConnected.mockResolvedValue(true)

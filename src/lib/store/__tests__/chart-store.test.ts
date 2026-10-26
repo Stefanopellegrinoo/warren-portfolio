@@ -60,3 +60,15 @@ describe('chart store: comparisons', () => {
     expect(useChartStore.getState().compareSymbols).toEqual(['SPY', '__portfolio__'])
   })
 })
+
+describe('chart store: the range comparisons start from', () => {
+  it('starts at one year and is kept on this device', async () => {
+    expect(useChartStore.getState().compareRange).toBe('1A')
+
+    useChartStore.getState().setCompareRange('6M')
+    expect(JSON.parse(data.get(KEY)!).state.compareRange).toBe('6M')
+
+    await useChartStore.persist.rehydrate()
+    expect(useChartStore.getState().compareRange).toBe('6M')
+  })
+})

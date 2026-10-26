@@ -26,9 +26,11 @@ export interface CandleState {
 	candles: Candle[];
 	change: CandleChange;
 	error?: string;
+	/** The `symbol:timeframe` these bars are for: the first render after a switch still holds the last ones. */
+	key: string;
 }
 
-const LOADING: CandleState = { status: "loading", candles: [], change: { kind: "reset" } };
+const LOADING: CandleState = { status: "loading", candles: [], change: { kind: "reset" }, key: "" };
 
 // The candles of the assets and timeframes seen in this tab, newest last: one seen before
 // opens at once and refreshes behind (odd/tasks/rendimiento.md S4).
@@ -87,7 +89,7 @@ export function useCandles(symbol: string, timeframe: Timeframe) {
 		const key = `${symbol}:${timeframe}`;
 		const seen = memory.get(key);
 		let stop: (() => void) | null = null;
-		setState(seen ? { status: "ready", candles: seen, change: { kind: "reset" } } : LOADING);
+		setState(seen ? { status: "ready", candles: seen, change: { kind: "reset" }, key } : { ...LOADING, key });
 
 		// A fresh load: drawn over the remembered bars when it continues them, redrawn otherwise.
 		const show = (candles: Candle[]) => {
@@ -95,13 +97,13 @@ export function useCandles(symbol: string, timeframe: Timeframe) {
 			setState((s) => {
 				const bars = s.status === "ready" ? barsToUpdate(s.candles, candles) : null;
 				if (bars?.length === 0) return s.candles.length === candles.length ? s : { ...s, candles };
-				return { status: "ready", candles, change: bars && s.candles.length <= candles.length ? { kind: "update", bars } : { kind: "reset" } };
+				return { status: "ready", candles, change: bars && s.candles.length <= candles.length ? { kind: "update", bars } : { kind: "reset" }, key };
 			});
 		};
 		const fail = (e: unknown) => {
 			// A failed refresh keeps the remembered bars on screen; only a first load shows the error.
 			if (ctrl.signal.aborted || seen) return;
-			setState({ ...LOADING, status: "error", error: requestErrorMessage(e, CANDLES_FAILED) });
+			setState({ ...LOADING, status: "error", error: requestErrorMessage(e, CANDLES_FAILED), key });
 		};
 
 		(async () => {

@@ -6,7 +6,7 @@ const h = vi.hoisted(() => ({
 }))
 
 vi.mock('bullmq', () => ({ Worker: class { constructor(_n: string, p: never) { h.processor = p } on() {} } }))
-vi.mock('../queue', () => ({
+vi.mock('../queue', () => ({ ON_PRICES_PERSIST_JOB_NAME: 'on-prices-persist',
   PRICE_QUEUE_NAME: 'q', PRICE_REPEAT_JOB_NAME: 'r', NIGHTLY_JOB_NAME: 's', TICKER_AUDIT_JOB_NAME: 't', ON_TERMS_JOB_NAME: 'on-terms-ingest',
 }))
 vi.mock('../yahoo-finance', () => ({ fetchQuotesFromYahoo: vi.fn(), cachePrice: vi.fn(), fetchQuotes: vi.fn(async () => new Map()) }))

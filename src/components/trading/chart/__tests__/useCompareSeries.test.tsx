@@ -54,4 +54,25 @@ describe('useCompareSeries', () => {
     expect(state.status).toBe('error')
     unmount()
   })
+
+  it('while a new set loads, the last answer stays: lines and the scale never blink', async () => {
+    let release: (r: Response) => void = () => {}
+    const first = { series: { SPY: { points: [{ time: '2026-01-02', value: 400 }] } } }
+    vi.stubGlobal('fetch', vi.fn((url: string) => url.includes('QQQ') ? new Promise<Response>((r) => { release = r }) : Promise.resolve(Response.json(first))))
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<Probe symbols={['SPY']} ccl={false} />) })
+    await flush()
+
+    await act(async () => { root.render(<Probe symbols={['SPY', 'QQQ']} ccl={false} />) })
+    expect(state.status).toBe('loading')
+    expect(state.series).toEqual(first.series)
+
+    await act(async () => { release(Response.json({ series: { ...first.series, QQQ: { points: [] } } })) })
+    await flush()
+    expect(state.status).toBe('ready')
+    expect(Object.keys(state.series)).toEqual(['SPY', 'QQQ'])
+    act(() => root.unmount())
+  })
 })

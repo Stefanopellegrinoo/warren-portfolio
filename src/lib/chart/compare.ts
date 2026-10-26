@@ -49,12 +49,61 @@ export function portfolioDayChangePct(positions: { market_value?: number; day_ch
 }
 
 /**
- * The % a series moved from the first bar in sight (`from`, or its first bar) to the bar pointed at
- * (`at`, or its last bar): what the % scale reads for it. Null when there is nothing to read.
+ * The % a series moved from the base day (`from`, or its first bar) to the bar pointed at (`at`, or
+ * its last bar); a bar before the base day reads its change against that day too. Null when there
+ * is nothing to read.
  */
 export function pctFrom(points: { time: number; value: number }[], from: number | null, at: number | null): number | null {
   const base = points.find((p) => from === null || p.time >= from)
   const target = at === null ? points.at(-1) : points.findLast((p) => p.time <= at)
-  if (!base || !target || target.time < base.time || !(base.value > 0)) return null
+  if (!base || !target || !(base.value > 0)) return null
   return (target.value / base.value - 1) * 100
+}
+
+/** How far back the comparison starts: every line is at 0 % on that day. */
+export type CompareRange = '1M' | '3M' | '6M' | 'YTD' | '1A' | 'Todo'
+export const COMPARE_RANGES: CompareRange[] = ['1M', '3M', '6M', 'YTD', '1A', 'Todo']
+const MONTHS_BACK: Partial<Record<CompareRange, number>> = { '1M': 1, '3M': 3, '6M': 6, '1A': 12 }
+
+/** The first day of `range`, in chart seconds, counted back from the last bar; null for Todo (no limit). */
+export function rangeStart(range: CompareRange, last: number): number | null {
+  if (range === 'Todo') return null
+  const d = new Date(last * 1000)
+  if (range === 'YTD') return Date.UTC(d.getUTCFullYear(), 0, 1) / 1000
+  // Months back, on the same day, or the last day of a shorter month (Mar 31 − 1M = Feb 28).
+  const month = d.getUTCMonth() - MONTHS_BACK[range]!
+  const lastDay = new Date(Date.UTC(d.getUTCFullYear(), month + 1, 0)).getUTCDate()
+  return Date.UTC(d.getUTCFullYear(), month, Math.min(d.getUTCDate(), lastDay)) / 1000
+}
+
+/**
+ * The bar every line starts from, fixed: the one that closes right before the range starts (its
+ * close is where the range begins: Dec 31 for YTD, December's bar on a monthly chart), and never
+ * before the first bar on which the chart and every compared series have a value. It moves only
+ * with the range, never with the view, so panning or zooming the chart never changes a number.
+ */
+export function compareBase(
+  bars: { time: number; close: number }[],
+  lines: { time: number; value: number }[][],
+  range: CompareRange,
+): { index: number; time: number; close: number } | null {
+  if (bars.length === 0) return null
+  const firsts = lines.filter((l) => l.length > 0).map((l) => l[0].time)
+  const common = bars.findIndex((b) => b.time >= Math.max(bars[0].time, ...firsts))
+  if (common < 0) return null
+  const start = rangeStart(range, bars[bars.length - 1].time)
+  const inRange = start === null ? 0 : bars.findIndex((b) => b.time >= start)
+  const index = Math.max(common, inRange < 0 ? bars.length - 1 : inRange - 1)
+  return { index, time: bars[index].time, close: bars[index].close }
+}
+
+/**
+ * A compared series in the chart's own units: it reads `close` on the base day and moves by its own %
+ * from there. Drawn on the price scale like that, every line starts at the same point, and the
+ * chart's indicators, drawings and alerts keep their prices.
+ */
+export function scaleToBase(points: { time: number; value: number }[], time: number, close: number): { time: number; value: number }[] {
+  const base = points.find((p) => p.time >= time)
+  if (!base || !(base.value > 0)) return []
+  return points.map((p) => ({ time: p.time, value: (p.value / base.value) * close }))
 }

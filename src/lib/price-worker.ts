@@ -12,7 +12,7 @@
  */
 
 import { Worker } from 'bullmq'
-import { PRICE_QUEUE_NAME, PRICE_REPEAT_JOB_NAME, NIGHTLY_JOB_NAME, TICKER_AUDIT_JOB_NAME, ON_TERMS_JOB_NAME, FX_RATES_JOB_NAME } from './queue'
+import { PRICE_QUEUE_NAME, PRICE_REPEAT_JOB_NAME, NIGHTLY_JOB_NAME, TICKER_AUDIT_JOB_NAME, ON_TERMS_JOB_NAME, FX_RATES_JOB_NAME, ON_PRICES_PERSIST_JOB_NAME } from './queue'
 import { fetchQuotesFromYahoo, cachePrice, fetchQuotes } from './yahoo-finance'
 import { fetchData912Prices, refreshLocalPrices } from './data912-client'
 import { createServiceClient } from './supabase-server'
@@ -110,34 +110,35 @@ async function getAllONTickers(): Promise<string[]> {
 }
 
 /**
- * Update last_price in ons table after fetching from Data912
+ * The daily job: writes the ON prices Redis holds to `ons.last_price`, in one write.
+ * All day the prices live in Redis; the database copy is only their last-resort
+ * fallback (data912-client, tier 3), so it is written once a day after the close
+ * instead of on every minute's cycle. An ON without a positive price keeps the
+ * one the database has. A failed write fails the job, so the worker reports it.
  */
-async function updateONPricesInDatabase(prices: Map<string, any>): Promise<void> {
+async function persistONPrices(): Promise<number> {
   const supabase = getSupabase()
-  if (!supabase) return
+  if (!supabase) throw new Error('Supabase not configured')
 
-  const updates = Array.from(prices.entries()).map(([ticker, quote]) => ({
-    ticker,
-    last_price: quote.price,
-    last_updated: new Date().toISOString()
-  }))
+  // Its own read, not getAllONTickers (which answers [] on an error): a database it cannot
+  // read must fail the job, never report "0 written".
+  const { data, error: readError } = await supabase.from('ons').select('ticker')
+  if (readError) throw new Error(`ons catalog read: ${readError.message ?? readError}`)
+  const onTickers = [...new Set((data ?? []).map((r: { ticker: string }) => r.ticker))] as string[]
+  if (onTickers.length === 0) return 0
+  const quotes = await fetchQuotes(onTickers)
+  // fetchQuotes answers an empty map when Redis fails: no price at all is a failure to report.
+  if (quotes.size === 0) throw new Error(`Redis has no price for any of the ${onTickers.length} ONs`)
 
-  if (updates.length === 0) return
+  const updates = Array.from(quotes.entries())
+    .filter(([, quote]) => Number(quote.price) > 0)
+    // When the price is from, not when this ran: Redis keeps a last price for days.
+    .map(([ticker, quote]) => ({ ticker, last_price: quote.price, last_updated: quote.updatedAt ?? new Date().toISOString() }))
+  if (updates.length === 0) return 0
 
-  try {
-    // Use upsert to update existing records
-    const { error } = await supabase
-      .from('ons')
-      .upsert(updates, { onConflict: 'ticker' })
-
-    if (error) {
-      console.error('[Worker] Failed to update ON prices in database:', error)
-    } else {
-      console.log(`[Worker] Updated ${updates.length} ON prices in database`)
-    }
-  } catch (err) {
-    console.error('[Worker] Error updating ON prices:', err)
-  }
+  const { error } = await supabase.from('ons').upsert(updates, { onConflict: 'ticker' })
+  if (error) throw new Error(`ons.last_price write: ${error.message ?? error}`)
+  return updates.length
 }
 
 
@@ -315,10 +316,16 @@ const worker = new Worker(
       return
     }
 
+    if (job.name === ON_PRICES_PERSIST_JOB_NAME) {
+      const n = await persistONPrices()
+      console.log(`[Worker] ON prices: ${n} written to the database`)
+      return
+    }
+
     if (job.name === FX_RATES_JOB_NAME) {
       // Failures propagate to the 'failed' handler; the table keeps last-good rows.
       const n = await ingestFxRates(createServiceClient())
-      console.log(`[Worker] FX rates: ${n.mep} MEP days, ${n.ccl} CCL days`)
+      console.log(`[Worker] FX rates: ${n.mep} MEP days, ${n.ccl} CCL days, ${n.written} written`)
       return
     }
 
@@ -412,14 +419,11 @@ const worker = new Worker(
         freshONPrices = await fetchData912Prices(onTickers)
         console.log(`[Worker] Data912 returned ${freshONPrices.size}/${onTickers.length} prices`)
         
-        // Cache fresh ON prices to Redis AND Database
+        // Cache fresh ON prices to Redis; the database gets them once a day (persistONPrices).
         freshONPrices.forEach((quote, ticker) => {
           cachePrice(ticker, quote).catch(e => console.error(`[Worker] Cache error for ${ticker}:`, e))
           allPrices.set(ticker, quote) // Overwrite LKP with fresh data
         })
-        
-        // Background DB update
-        updateONPricesInDatabase(freshONPrices).catch(e => console.error('[Worker] DB update failed:', e))
         
       } catch (err) {
         console.error('[Worker] Data912 fetch failed:', err)
@@ -523,7 +527,6 @@ async function main() {
           cachePrice(ticker, quote).catch(e => console.error(`[Worker] Cache error for ${ticker}:`, e))
           allPrices.set(ticker, quote)
         })
-        await updateONPricesInDatabase(onPrices)
       } catch (err) {
         console.error('[Worker] Data912 fetch failed on startup:', err)
       }
