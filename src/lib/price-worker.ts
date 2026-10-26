@@ -12,7 +12,7 @@
  */
 
 import { Worker } from 'bullmq'
-import { PRICE_QUEUE_NAME, PRICE_REPEAT_JOB_NAME, NIGHTLY_JOB_NAME, TICKER_AUDIT_JOB_NAME, ON_TERMS_JOB_NAME, FX_RATES_JOB_NAME, ON_PRICES_PERSIST_JOB_NAME } from './queue'
+import { PRICE_QUEUE_NAME, PRICE_REPEAT_JOB_NAME, NIGHTLY_JOB_NAME, TICKER_AUDIT_JOB_NAME, ON_TERMS_JOB_NAME, FX_RATES_JOB_NAME, ON_PRICES_PERSIST_JOB_NAME, SPLITS_INGEST_JOB_NAME } from './queue'
 import { fetchQuotesFromYahoo, cachePrice, fetchQuotes } from './yahoo-finance'
 import { fetchData912Prices, refreshLocalPrices } from './data912-client'
 import { createServiceClient } from './supabase-server'
@@ -30,6 +30,7 @@ import { ensureRedisAndScheduleJobs, resolveStartupOutcome } from './worker-star
 import { auditTickerIdentities } from './ticker-audit'
 import { ingestOnTerms } from './on-terms-ingest'
 import { ingestFxRates } from './fx-rates'
+import { ingestSplits } from './splits-ingest'
 import { loadHeldStockTickers, loadPortfolioNow } from './ledger-now'
 import { fetchCryptoQuotes } from './binance/rest'
 import { getProviderForSymbol } from './market-data/resolver'
@@ -326,6 +327,13 @@ const worker = new Worker(
       // Failures propagate to the 'failed' handler; the table keeps last-good rows.
       const n = await ingestFxRates(createServiceClient())
       console.log(`[Worker] FX rates: ${n.mep} MEP days, ${n.ccl} CCL days, ${n.written} written`)
+      return
+    }
+
+    if (job.name === SPLITS_INGEST_JOB_NAME) {
+      // Failures propagate to the 'failed' handler; the table keeps last-good rows.
+      const n = await ingestSplits(createServiceClient())
+      console.log(`[Worker] Stock splits: ${n.tickers} tickers, ${n.written} written${n.unknown.length > 0 ? `, unknown: ${n.unknown.join(', ')}` : ''}`)
       return
     }
 
