@@ -81,6 +81,14 @@ describe('ensureRedisAndScheduleJobs', () => {
     expect(mockScheduleSplitsIngestJob).toHaveBeenCalledTimes(1)
   })
 
+  it('a failing splits schedule leaves every existing job scheduled', async () => {
+    mockScheduleSplitsIngestJob.mockRejectedValue(new Error('redis blip'))
+    const result = await ensureRedisAndScheduleJobs()
+    expect(result).toMatchObject({ ok: false, reason: 'schedule-failed' })
+    expect(mockScheduleOnPricesPersistJob).toHaveBeenCalledTimes(1)
+    expect(mockScheduleSignalsEvaluationJobs).toHaveBeenCalledTimes(1)
+  })
+
   it('does not schedule the nightly job when Redis is unreachable', async () => {
     // Arrange
     mockEnsureRedisConnected.mockResolvedValue(false)

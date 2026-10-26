@@ -6,14 +6,15 @@
  *
  * A symbol whose splits Yahoo did not report (historical() fallback, failure) keeps its stored
  * rows. ponytail: a split Yahoo later withdraws is never deleted here; delete the row by hand.
+ * ponytail: each run reads every transaction to find the traded tickers; a DISTINCT query or RPC
+ * when the ledger grows large.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getBars } from './bars-cache'
 import { invalidateUserCache, getRedis } from './redis'
-import { SPLITS_KEY } from './stock-splits'
+import { readAll, SPLITS_KEY } from './stock-splits'
 import { listCatalogued, yahooSymbols } from './ticker-catalog'
 
-const PAGE = 1000
 // Every run asks Yahoo again: the bars cache is otherwise fresh all day.
 const FRESH_SEC = 3600
 
@@ -22,20 +23,6 @@ export interface IngestSplitsDeps {
   listCatalogued?: typeof listCatalogued
   invalidateUserCache?: typeof invalidateUserCache
   dropCachedSplits?: () => Promise<void>
-}
-
-async function readAll(supabase: SupabaseClient, table: string, columns: string, orderBy: string[]): Promise<any[]> {
-  const rows: any[] = []
-  // A page may hold fewer rows than asked (PostgREST's row cap), so only an empty page ends.
-  for (let from = 0; ; ) {
-    let q: any = supabase.from(table).select(columns)
-    for (const col of orderBy) q = q.order(col)
-    const { data, error } = await q.range(from, from + PAGE - 1)
-    if (error) throw new Error(`${table} read: ${error.message}`)
-    if (!data || data.length === 0) return rows
-    rows.push(...data)
-    from += data.length
-  }
 }
 
 const dropCachedSplits = async () => { await getRedis()?.del(SPLITS_KEY) }

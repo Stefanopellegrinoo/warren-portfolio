@@ -46,9 +46,10 @@ export async function ensureRedisAndScheduleJobs(): Promise<StartupResult> {
     await scheduleTickerAuditJob()
     await scheduleOnTermsIngestJob()
     await scheduleFxRatesIngestJob()
-    await scheduleSplitsIngestJob()
     await scheduleOnPricesPersistJob()
     await scheduleSignalsEvaluationJobs()
+    // Last: a failure here leaves every job above scheduled.
+    await scheduleSplitsIngestJob()
     return { ok: true }
   } catch (error) {
     return { ok: false, reason: 'schedule-failed', error }
