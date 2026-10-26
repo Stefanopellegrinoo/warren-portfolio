@@ -14,6 +14,9 @@
  * earlier-dated sale oversell is caught only by this dated check. Move the dated check into
  * SQL if that ever matters.
  *
+ * Rows are stored as traded (odd/tasks/split-aware-ledger.md S2): the check runs with the stock
+ * splits, so a sale of shares bought before a split counts the split.
+ *
  * WORKER-SAFE: relative value imports only (the import worker validates through here).
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -22,12 +25,14 @@ import { normalizeError } from './errors'
 import { ledgerAt, type LedgerIssue, type LedgerTrade } from './ledger-core'
 import { loadPortfolioNow, NO_DATE_CUTOFF, type PortfolioNow } from './ledger-now'
 import { argentinaDate } from './utils'
+import { loadSplits, type SplitsByTicker } from './stock-splits'
 
 export type LedgerRow = LedgerTrade & { id?: string }
 
 const PAGE = 1000
 const COLUMNS = 'id, ticker, operation, quantity, price, commission, date, asset_type, created_at'
-const num = (n: number) => String(Number(n.toFixed(6)))
+/** A quantity in a user-facing message: up to 6 decimals, no trailing zeros. */
+export const num = (n: number) => String(Number(n.toFixed(6)))
 
 export class OversellError extends Error {
   /** Read by every route's `status === 400` branch. */
@@ -51,10 +56,10 @@ export async function loadTradeRows(sb: SupabaseClient, userId: string): Promise
 }
 
 /** Pure: the first oversell `after` has that `before` did not (same ticker, day and quantity). */
-export function newOversell(before: LedgerTrade[], after: LedgerTrade[]): LedgerIssue | null {
+export function newOversell(before: LedgerTrade[], after: LedgerTrade[], splits: SplitsByTicker = new Map()): LedgerIssue | null {
   const key = (i: LedgerIssue) => `${i.ticker}|${i.date}|${i.requested}`
-  const known = new Set(ledgerAt(before, [], NO_DATE_CUTOFF).issues.map(key))
-  return ledgerAt(after, [], NO_DATE_CUTOFF).issues.find(i => !known.has(key(i))) ?? null
+  const known = new Set(ledgerAt(before, [], NO_DATE_CUTOFF, { splits }).issues.map(key))
+  return ledgerAt(after, [], NO_DATE_CUTOFF, { splits }).issues.find(i => !known.has(key(i))) ?? null
 }
 
 /**
@@ -67,8 +72,8 @@ export async function assertNoNewOversell(
   change: (rows: LedgerRow[]) => LedgerRow[],
   baseline?: (rows: LedgerRow[]) => LedgerRow[],
 ): Promise<void> {
-  const rows = await loadTradeRows(sb, userId)
-  const issue = newOversell(baseline ? baseline(rows) : rows, change(rows))
+  const [rows, splits] = await Promise.all([loadTradeRows(sb, userId), loadSplits()])
+  const issue = newOversell(baseline ? baseline(rows) : rows, change(rows), splits)
   if (issue) throw new OversellError(issue)
 }
 

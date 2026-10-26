@@ -8,7 +8,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const h = vi.hoisted(() => ({ service: null as any }))
 vi.mock('@/lib/supabase-server', () => ({ createServiceClient: vi.fn(() => h.service) }))
-vi.mock('@/lib/redis', () => ({ ensureRedisConnected: vi.fn(async () => false), getRedis: vi.fn(() => null) }))
+vi.mock('@/lib/redis', () => ({
+  ensureRedisConnected: vi.fn(async () => false), getRedis: vi.fn(() => null),
+  getCachedRoute: vi.fn(async () => null), cacheRoute: vi.fn(async () => {}),
+}))
 vi.mock('@/lib/currency', async (orig) => ({
   ...(await orig<typeof import('@/lib/currency')>()),
   getDollarInfo: vi.fn(async (kind: string) => ({ rate: kind === 'mep' ? 1400 : 1500, asOf: '2026-10-23T15:00:00Z' })),
@@ -28,7 +31,7 @@ import { getCataloguedTicker, listCatalogued } from '@/lib/ticker-catalog'
 
 const MARKET = [
   'on_terms', 'on_terms_overrides', 'on_flow_history', 'on_price_history', 'on_cashflows', 'on_corporate_events',
-  'on_sov_curve', 'on_yield_checks', 'ons', 'activos', 'cedears', 'ticker_identity', 'fx_rates',
+  'on_sov_curve', 'on_yield_checks', 'ons', 'activos', 'cedears', 'ticker_identity', 'fx_rates', 'stock_splits',
 ]
 const TODAY = '2026-10-23'
 const ISIN = 'AR0000000001'

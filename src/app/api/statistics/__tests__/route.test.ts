@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
 
 const mockRequireUser = vi.fn()
+// Ledger reads load the stock splits (odd/tasks/split-aware-ledger.md T3): none in these tests.
+vi.mock('@/lib/stock-splits', () => ({ loadSplits: async () => new Map() }))
 vi.mock('@/lib/api-auth', () => ({
   requireUser: () => mockRequireUser(),
   isAuthFailure: (r: any) => 'error' in r,

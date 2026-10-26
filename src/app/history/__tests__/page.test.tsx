@@ -255,3 +255,49 @@ describe('HistoryPage — trades to review', () => {
     unmount()
   })
 })
+
+// odd/tasks/split-aware-ledger.md S5: a row with stored splits after its date says, under it, what it is in today's shares.
+describe('HistoryPage — after the splits', () => {
+  const LINE = 'Tras el split 20:1 del 18/07/2022: 18,62 acciones a US$ 129,58'
+  const tx = (over: Partial<Transaction>): Transaction => ({
+    id: 'x1', user_id: 'u', date: '2022-03-21', ticker: 'GOOGL', operation: 'COMPRA', quantity: 0.931, price: 2591.6, commission: 0, total: 2412.78,
+    avg_cost_after: null, notes: null, asset_type: 'CEDEAR', moneda: 'USD', created_at: '2022-03-21T14:00:00+00:00', ...over,
+  })
+  const split = { splits: [{ date: '2022-07-18', numerator: 20, denominator: 1 }], factor: 20, quantity: 18.62, price: 129.58 }
+
+  async function mountAll(rows: Transaction[]) {
+    const urls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      urls.push(url)
+      return new Response(JSON.stringify({ data: url.startsWith('/api/transactions?') ? rows : [] }))
+    }))
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<HistoryPage />) })
+    await act(async () => { (el.querySelector('input[value="all"]') as HTMLInputElement).click() })
+    await act(async () => {})
+    return { el, urls, unmount: () => act(() => root.unmount()) }
+  }
+
+  it('shows the line under the row in the table and in the list, from the rows already loaded', async () => {
+    const { el, urls, unmount } = await mountAll([tx({ id: 'pre', after_splits: split }), tx({ id: 'ko', ticker: 'KO', date: '2022-03-20' })])
+
+    const [pre, ko] = [...el.querySelectorAll('tbody tr')]
+    expect(pre.textContent).toContain(LINE)
+    expect(ko.textContent).not.toContain('Tras ')
+    const [preItem, koItem] = [...el.querySelectorAll('ul li')]
+    expect(preItem.textContent).toContain(LINE)
+    expect(koItem.textContent).not.toContain('Tras ')
+    expect(urls).toEqual(['/api/transactions/closed', '/api/transactions?limit=1000'])
+    unmount()
+  })
+
+  it('shows nothing when no row has after_splits', async () => {
+    const { el, unmount } = await mountAll([tx({ id: 'ko', ticker: 'KO' })])
+
+    expect(el.querySelector('tbody tr')).not.toBeNull()
+    expect(el.textContent).not.toContain('Tras ')
+    unmount()
+  })
+})

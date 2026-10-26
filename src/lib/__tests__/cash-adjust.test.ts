@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { adjustCashBalance } from '../cash-engine'
 import { writeSupabase } from './fixtures/ledger-write-supabase'
 
+// Ledger reads load the stock splits (odd/tasks/split-aware-ledger.md T3): none in these tests.
+vi.mock('@/lib/stock-splits', () => ({ loadSplits: async () => new Map() }))
 vi.mock('../queue', () => ({
   addRefreshSummaryJob: vi.fn().mockResolvedValue(undefined),
   addPriceUpdateJob: vi.fn().mockResolvedValue(undefined),

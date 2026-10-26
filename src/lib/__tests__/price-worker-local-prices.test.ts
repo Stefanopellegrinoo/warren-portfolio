@@ -9,8 +9,10 @@ const mockRefreshLocal = vi.fn()
 const mockCacheSummaries = vi.fn()
 const mockRecordRefresh = vi.fn()
 
+// Ledger reads load the stock splits (odd/tasks/split-aware-ledger.md T3): none in these tests.
+vi.mock('@/lib/stock-splits', () => ({ loadSplits: async () => new Map() }))
 vi.mock('bullmq', () => ({ Worker: class { constructor(_q: string, fn: typeof processor) { processor = fn } on() {} } }))
-vi.mock('../queue', () => ({ ON_PRICES_PERSIST_JOB_NAME: 'on-prices-persist', PRICE_QUEUE_NAME: 'q', PRICE_REPEAT_JOB_NAME: 'r', NIGHTLY_JOB_NAME: 's', TICKER_AUDIT_JOB_NAME: 't', ON_TERMS_JOB_NAME: 'o', FX_RATES_JOB_NAME: 'fx' }))
+vi.mock('../queue', () => ({ ON_PRICES_PERSIST_JOB_NAME: 'on-prices-persist', PRICE_QUEUE_NAME: 'q', PRICE_REPEAT_JOB_NAME: 'r', NIGHTLY_JOB_NAME: 's', TICKER_AUDIT_JOB_NAME: 't', ON_TERMS_JOB_NAME: 'o', FX_RATES_JOB_NAME: 'fx', SPLITS_INGEST_JOB_NAME: 'splits' }))
 vi.mock('../yahoo-finance', () => ({
   fetchQuotesFromYahoo: vi.fn(async () => new Map([['AAPL', { ticker: 'AAPL', price: 200, change: 0, changePercent: 0, previousClose: 200 }]])),
   cachePrice: vi.fn(async () => {}),

@@ -1,9 +1,12 @@
 "use client";
 
+import { Fragment } from "react";
 import { X } from "lucide-react";
+import { afterSplitsText } from "@/lib/after-splits";
 import { priceDecimals } from "@/lib/chart/alerts";
 import { qtyText, type Trade } from "@/lib/chart/trade-markers";
 import { formatNumber } from "@/lib/utils";
+import type { Transaction } from "@/types";
 import { ChartSheet } from "./ChartSheet";
 
 // Numeric, like the Historial's dates: the card fits a 320px phone.
@@ -13,14 +16,16 @@ const OPERATION = { COMPRA: "Compra", VENTA: "Venta", DIVIDENDO: "Dividendo" };
 const CARD_PX = 240;
 const priceText = (price: number) => formatNumber(price, { decimals: priceDecimals(price) });
 const opClass = (t: Trade) => (t.operation === "VENTA" ? "text-danger" : "text-ok");
+/** The rows are the API's (useTradeMarkers): one dated before stored splits carries `after_splits` (split-aware-ledger S5). */
+type CardTrade = Trade & Pick<Transaction, "after_splits">;
 
 /** On a phone: a sheet from the bottom, one row per operation, readable at 320px. */
-export function TradeSheet({ trades, onClose }: { trades: readonly Trade[]; onClose: () => void }) {
+export function TradeSheet({ trades, onClose }: { trades: readonly CardTrade[]; onClose: () => void }) {
 	return (
 		<ChartSheet open onOpenChange={(open) => !open && onClose()} title="Operaciones">
 			<ul className="divide-y divide-line tabular-nums">
 				{trades.map((t) => (
-					<li key={t.id} className="flex items-center justify-between gap-4 py-3">
+					<li key={t.id} className="flex flex-wrap items-center justify-between gap-x-4 py-3">
 						<div className="flex flex-col">
 							<span className={`font-medium ${opClass(t)}`}>{OPERATION[t.operation]}</span>
 							<span className="text-[13px] text-ink-3">{dateText(t.date)}</span>
@@ -31,6 +36,7 @@ export function TradeSheet({ trades, onClose }: { trades: readonly Trade[]; onCl
 							<span className="text-[13px] text-ink-3">Precio</span>
 							<span className="text-ink">{priceText(t.price)}</span>
 						</div>
+						{t.after_splits && <p className="mt-1 basis-full text-[13px] text-ink-3">{afterSplitsText(t.after_splits)}</p>}
 					</li>
 				))}
 			</ul>
@@ -42,7 +48,7 @@ export function TradeSheet({ trades, onClose }: { trades: readonly Trade[]; onCl
  * From 820px, the operations of the bar whose arrow was clicked, next to where it was clicked: over it in the
  * lower half of the chart, under it in the upper half, always inside the chart.
  */
-export function TradeCard({ trades, x, y, above, onClose }: { trades: readonly Trade[]; x: number; y: number; above: boolean; onClose: () => void }) {
+export function TradeCard({ trades, x, y, above, onClose }: { trades: readonly CardTrade[]; x: number; y: number; above: boolean; onClose: () => void }) {
 	return (
 		<div
 			role="dialog"
@@ -76,12 +82,19 @@ export function TradeCard({ trades, x, y, above, onClose }: { trades: readonly T
 				</thead>
 				<tbody>
 					{trades.map((t) => (
-						<tr key={t.id}>
-							<td className="whitespace-nowrap px-1 py-0.5 text-ink-2">{dateText(t.date)}</td>
-							<td className={`px-1 py-0.5 ${opClass(t)}`}>{OPERATION[t.operation]}</td>
-							<td className="px-1 py-0.5 text-right text-ink">{qtyText(t.quantity)}</td>
-							<td className="px-1 py-0.5 text-right text-ink">{priceText(t.price)}</td>
-						</tr>
+						<Fragment key={t.id}>
+							<tr>
+								<td className="whitespace-nowrap px-1 py-0.5 text-ink-2">{dateText(t.date)}</td>
+								<td className={`px-1 py-0.5 ${opClass(t)}`}>{OPERATION[t.operation]}</td>
+								<td className="px-1 py-0.5 text-right text-ink">{qtyText(t.quantity)}</td>
+								<td className="px-1 py-0.5 text-right text-ink">{priceText(t.price)}</td>
+							</tr>
+							{t.after_splits && (
+								<tr>
+									<td colSpan={4} className="whitespace-normal px-1 pb-1 text-[12px] text-ink-3">{afterSplitsText(t.after_splits)}</td>
+								</tr>
+							)}
+						</Fragment>
 					))}
 				</tbody>
 			</table>

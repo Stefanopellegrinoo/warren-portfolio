@@ -9,6 +9,7 @@ import { recordCedearTrade, TradeRecordError } from '@/lib/trade-record'
 import { createServiceClient } from '@/lib/supabase-server'
 import { CedearTradeSchema } from '@/lib/schemas/transaction'
 import { assertNoNewOversell } from '@/lib/ledger-write'
+import { assertNotSplitAdjusted } from '@/lib/split-adjusted-check'
 import { serverError } from '@/lib/api/errors'
 
 export const dynamic = 'force-dynamic'
@@ -86,10 +87,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       return NextResponse.json({ error: 'Identificador de operación inválido' }, { status: 400 })
     }
 
-    // 1. Get the original transaction to know ticker and asset_type
+    // 1. Get the original transaction: ticker and asset_type, and the trade the edit may change
     const { data: originalTx, error: getErr } = await supabase
       .from('transactions')
-      .select('ticker, asset_type')
+      .select('ticker, asset_type, date, quantity, price')
       .eq('id', params.id)
       .eq('user_id', user.id)
       .single()
@@ -137,10 +138,21 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       }
     }
 
-    // 3. The core's sale rule on the ledger with this row edited
+    // 3. A pre-split trade edited into split-adjusted numbers is refused (odd/tasks/split-aware-ledger.md S4).
+    //    Only when the edit changes the trade (the ticker never changes here): an old row stays editable.
+    const changed = fields.date !== originalTx.date || Number(fields.price) !== Number(originalTx.price)
+      || Math.abs(Number(fields.quantity)) !== Math.abs(Number(originalTx.quantity))
+    if (changed) {
+      await assertNotSplitAdjusted([{
+        ticker: originalTx.ticker, date: String(fields.date), quantity: Number(fields.quantity), price: Number(fields.price),
+        operation: String(fields.operation), assetType: originalTx.asset_type,
+      }])
+    }
+
+    // 4. The core's sale rule on the ledger with this row edited
     await assertNoNewOversell(supabase, user.id, rows => rows.map(r => (r.id === params.id ? { ...r, ...fields } as typeof r : r)))
 
-    // 4. Update the transaction — VENTA keeps the RPC's -ABS(qty) convention
+    // 5. Update the transaction — VENTA keeps the RPC's -ABS(qty) convention
     const { data: updated, error: updateErr } = await supabase
       .from('transactions')
       .update(fields)
@@ -150,14 +162,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
     if (updateErr) throw normalizeError(updateErr)
 
-    // 5. Delete old cash_movement (if exists) before recreating it
+    // 6. Delete old cash_movement (if exists) before recreating it
     // This handles cases where transaction was edited (different amount/operation)
     await supabase
       .from('cash_movements')
       .delete()
       .eq('transaction_id', params.id)
 
-    // 6. Recreate the cash movement with the SAME contract the RPC uses:
+    // 7. Recreate the cash movement with the SAME contract the RPC uses:
     //    type = the operation itself and transaction_id kept linked. Routing
     //    this through processCashMovement as RETIRO/DEPOSITO wrote a movement
     //    with transaction_id = NULL — a forged external flow that distorted
@@ -177,7 +189,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       if (movementErr) throw normalizeError(movementErr)
     }
 
-    // 7. Invalidate User Cache. The ledger IS the state (T5.1): nothing to rebuild.
+    // 8. Invalidate User Cache. The ledger IS the state (T5.1): nothing to rebuild.
     await invalidateUserCache(user.id)
 
     return NextResponse.json({ success: true, data: updated }, { status: 200 })

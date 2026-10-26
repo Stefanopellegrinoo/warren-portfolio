@@ -8,6 +8,7 @@ import { InlineConfirm } from '@/components/ui/InlineConfirm'
 import { Trash2 } from 'lucide-react'
 import { formatDate, formatNumber, formatPct, formatUSD } from '@/lib/utils'
 import type { ClosedTrade, Transaction } from '@/types'
+import { afterSplitsText } from '@/lib/after-splits'
 import { ReviewFix } from './review-fix'
 
 type ClosedSortKey = 'ticker' | 'open_date' | 'close_date' | 'days_held' | 'avg_cost' | 'close_price' | 'quantity' | 'invested' | 'proceeds' | 'pnl' | 'pnl_pct'
@@ -111,6 +112,12 @@ function ReviewNote({ note, onFix }: { note: string | null | undefined; onFix?: 
       </span>
     </>
   )
+}
+
+/** A row dated before stored splits: what it is in today's shares (split-aware-ledger S5). */
+function AfterSplitsNote({ t }: { t: Transaction }) {
+  if (!t.after_splits) return null
+  return <span className="mt-0.5 block max-w-[52ch] whitespace-normal text-[13px] font-normal text-ink-3">{afterSplitsText(t.after_splits)}</span>
 }
 
 const field = 'min-h-9 w-64 rounded-md border border-line-strong bg-surface px-3 text-ink placeholder:text-ink-3 hover:border-ink-3 focus-visible:border-accent focus-visible:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_28%,transparent)] focus-visible:outline-none max-[819px]:min-h-11 max-[819px]:w-full'
@@ -351,6 +358,7 @@ export default function HistoryPage() {
                         <th scope="row" className="py-2 pr-3 text-left font-semibold">
                           {symbolOf(t.ticker)}
                           {t.needs_review && <ReviewNote note={t.review_note} onFix={fixOf(t)} />}
+                          <AfterSplitsNote t={t} />
                         </th>
                         <td className="py-2 pr-3">{OPERATION_LABELS[t.operation] ?? t.operation}</td>
                         <td className="py-2 pr-3 text-right">{qty(t.quantity, true)}</td>
@@ -394,6 +402,7 @@ export default function HistoryPage() {
                     <span className="min-w-0">
                       <span className="block font-semibold">{symbolOf(t.ticker)}{t.needs_review && <ReviewNote note={t.review_note} onFix={fixOf(t)} />}</span>
                       <span className="block truncate text-[13px] text-ink-3 tabular-nums">{OPERATION_LABELS[t.operation] ?? t.operation} a {formatNumber(t.price)}</span>
+                      <AfterSplitsNote t={t} />
                     </span>
                     <span className="font-medium tabular-nums">{qty(t.quantity, true)}</span>
                     <InlineConfirm

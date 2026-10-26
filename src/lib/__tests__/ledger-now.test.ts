@@ -9,6 +9,9 @@ vi.mock('../on-schedules', () => ({
     ]]] : [])),
 }))
 
+const splits = vi.hoisted(() => ({ map: new Map<string, { date: string; numerator: number; denominator: number }[]>() }))
+vi.mock('../stock-splits', () => ({ loadSplits: vi.fn(async () => splits.map) }))
+
 const { markPrice, loadPortfolioNow, closedTradesOf } = await import('../ledger-now')
 
 const TODAY = '2026-03-01'
@@ -103,11 +106,44 @@ describe('closedTradesOf', () => {
       { ticker: 'AAPL', assetType: 'STOCK' as const, date: '2026-02-03', quantity: 4, invested: 360, proceeds: 380, pnl: 20 },
     ]
 
-    const closed = closedTradesOf('u1', trades, realized)
+    const closed = closedTradesOf('u1', trades, realized, new Map())
 
     expect(closed.map(c => [c.open_date, c.close_date, c.close_price])).toEqual([
       ['2026-01-05', '2026-01-10', 120],
       ['2026-02-01', '2026-02-03', 95],
     ])
+  })
+})
+
+describe('stock splits (odd/tasks/split-aware-ledger.md S2)', () => {
+  const GOOGL = [{ date: '2022-07-18', numerator: 20, denominator: 1 }]
+
+  it('positions now apply the splits after each as-traded buy', async () => {
+    splits.map = new Map([['GOOGL', GOOGL]])
+    const sb = ledgerSupabase({ transactions: [
+      trade({ ticker: 'GOOGL', quantity: 1, price: 2591.6, date: '2022-03-21' }),
+      trade({ ticker: 'GOOGL', operation: 'VENTA', quantity: -10, price: 120, date: '2023-01-03' }),
+    ], cash_movements: [] })
+
+    const now = await loadPortfolioNow(sb, 'u1', TODAY)
+
+    expect(now.stockPositions).toMatchObject([{ ticker: 'GOOGL', quantity: 10 }])
+    expect(now.stockPositions[0].total_invested).toBeCloseTo(1295.8, 8)
+    expect(now.stockClosedTrades).toMatchObject([{ ticker: 'GOOGL', quantity: 10, open_date: '2022-03-21' }])
+    expect(now.stockClosedTrades[0].invested).toBeCloseTo(1295.8, 8)
+    splits.map = new Map()
+  })
+
+  it('a second sale after a split keeps the open date of the pre-split buy', () => {
+    const trades = [
+      { ticker: 'GOOGL', operation: 'COMPRA', quantity: 1, price: 2591.6, commission: 0, date: '2022-03-21', asset_type: 'ACCION', created_at: null },
+      { ticker: 'GOOGL', operation: 'VENTA', quantity: -10, price: 120, commission: 0, date: '2023-01-03', asset_type: 'ACCION', created_at: null },
+      { ticker: 'GOOGL', operation: 'VENTA', quantity: -10, price: 150, commission: 0, date: '2024-01-03', asset_type: 'ACCION', created_at: null },
+    ]
+    const realized = [
+      { ticker: 'GOOGL', assetType: 'STOCK' as const, date: '2023-01-03', quantity: 10, invested: 1295.8, proceeds: 1200, pnl: -95.8 },
+      { ticker: 'GOOGL', assetType: 'STOCK' as const, date: '2024-01-03', quantity: 10, invested: 1295.8, proceeds: 1500, pnl: 204.2 },
+    ]
+    expect(closedTradesOf('u1', trades, realized, new Map([['GOOGL', GOOGL]])).map(c => c.open_date)).toEqual(['2022-03-21', '2022-03-21'])
   })
 })

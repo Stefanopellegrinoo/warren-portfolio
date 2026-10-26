@@ -13,6 +13,7 @@ const mockScheduleNightlyJob = vi.fn()
 const mockScheduleTickerAuditJob = vi.fn()
 const mockScheduleOnTermsIngestJob = vi.fn()
 const mockScheduleOnPricesPersistJob = vi.fn()
+const mockScheduleSplitsIngestJob = vi.fn()
 vi.mock('../queue', () => ({
   scheduleRepeatingPriceJob: (...args: unknown[]) => mockScheduleRepeatingPriceJob(...args),
   scheduleNightlyJob: (...args: unknown[]) => mockScheduleNightlyJob(...args),
@@ -20,6 +21,7 @@ vi.mock('../queue', () => ({
   scheduleOnTermsIngestJob: (...args: unknown[]) => mockScheduleOnTermsIngestJob(...args),
   scheduleFxRatesIngestJob: (...args: unknown[]) => mockScheduleFxRatesIngestJob(...args),
   scheduleOnPricesPersistJob: (...args: unknown[]) => mockScheduleOnPricesPersistJob(...args),
+  scheduleSplitsIngestJob: (...args: unknown[]) => mockScheduleSplitsIngestJob(...args),
 }))
 
 const mockScheduleSignalsEvaluationJobs = vi.fn()
@@ -43,6 +45,7 @@ describe('ensureRedisAndScheduleJobs', () => {
     mockScheduleTickerAuditJob.mockResolvedValue(undefined)
     mockScheduleOnTermsIngestJob.mockResolvedValue(undefined)
     mockScheduleOnPricesPersistJob.mockResolvedValue(undefined)
+    mockScheduleSplitsIngestJob.mockResolvedValue(undefined)
     mockScheduleSignalsEvaluationJobs.mockResolvedValue(undefined)
   })
 
@@ -70,6 +73,20 @@ describe('ensureRedisAndScheduleJobs', () => {
   it('schedules the daily ON price write alongside the other jobs', async () => {
     await ensureRedisAndScheduleJobs()
     expect(mockScheduleOnPricesPersistJob).toHaveBeenCalledTimes(1)
+  })
+
+  it('schedules the stock splits ingest alongside the other jobs', async () => {
+    await ensureRedisAndScheduleJobs()
+    // Without it a split never reaches stock_splits and pre-split holdings stay on the old basis.
+    expect(mockScheduleSplitsIngestJob).toHaveBeenCalledTimes(1)
+  })
+
+  it('a failing splits schedule leaves every existing job scheduled', async () => {
+    mockScheduleSplitsIngestJob.mockRejectedValue(new Error('redis blip'))
+    const result = await ensureRedisAndScheduleJobs()
+    expect(result).toMatchObject({ ok: false, reason: 'schedule-failed' })
+    expect(mockScheduleOnPricesPersistJob).toHaveBeenCalledTimes(1)
+    expect(mockScheduleSignalsEvaluationJobs).toHaveBeenCalledTimes(1)
   })
 
   it('does not schedule the nightly job when Redis is unreachable', async () => {

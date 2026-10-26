@@ -7,6 +7,7 @@ import { tradeRecordRpcParams, type TradeRecord } from './trade-record'
 import { loadPortfolioNow } from './ledger-now'
 import { argentinaDate } from './utils'
 import { assertNoNewOversell, OversellError, pendingTrade, stateAfterWrite } from './ledger-write'
+import { assertNotSplitAdjusted, SplitAdjustedError } from './split-adjusted-check'
 import { GENERIC_ERROR } from './api/errors'
 
 /**
@@ -34,6 +35,7 @@ export interface FullPortfolio {
 
 /**
  * Process a new transaction (odd/tasks/nucleo-ledger.md T5.1, S5):
+ * 0. A pre-split trade entered with split-adjusted numbers is refused (odd/tasks/split-aware-ledger.md S4)
  * 1. A sale is validated by the ledger core on the ledger after the write
  * 2. The RPC inserts the transaction and its linked cash movement — nothing else
  * 3. The position and the sale come back from the core, as the old RPC's tables did
@@ -56,6 +58,7 @@ export async function processTransaction(
 
   const ticker = input.ticker.toUpperCase().trim()
   const assetType = (input as any).assetType ?? 'ACCION'
+  await assertNotSplitAdjusted([{ ...input, ticker, assetType }])
   if (input.operation === 'VENTA') {
     const pending = pendingTrade({ ...input, assetType })
     await assertNoNewOversell(supabase, userId, rows => [...rows, pending])
@@ -288,6 +291,7 @@ export async function processTransactionBatch(
     // The RPC stamps one created_at on the whole batch, so the pending rows share one too.
     const at = new Date().toISOString()
     const pending = sortedInputs.map(i => ({ ...pendingTrade({ ...i, assetType: (i as any).assetType }), created_at: at }))
+    await assertNotSplitAdjusted(sortedInputs.map(i => ({ ...i, assetType: (i as any).assetType })))
     await assertNoNewOversell(supabase, userId, rows => (replace ? pending : [...rows, ...pending]), rows => (replace ? [] : rows))
 
     // Convert to JSONB for RPC
@@ -333,45 +337,11 @@ export async function processTransactionBatch(
 
     return { success: true, imported: result.imported, failed: 0, errors: [] }
   } catch (err: any) {
-    // Only the oversell rule speaks to the user; anything else is internal (logged, never shown).
-    if (!(err instanceof OversellError)) console.error('[importTransactions]', err)
-    const ticker = err instanceof OversellError ? err.issue.ticker : 'BATCH'
-    const error = err instanceof OversellError ? err.message : GENERIC_ERROR
+    // Only the oversell and split-adjusted rules speak to the user; anything else is internal (logged, never shown).
+    const ruled = err instanceof OversellError || err instanceof SplitAdjustedError
+    if (!ruled) console.error('[importTransactions]', err)
+    const ticker = err instanceof OversellError ? err.issue.ticker : err instanceof SplitAdjustedError ? err.ticker : 'BATCH'
+    const error = ruled ? err.message : GENERIC_ERROR
     return { success: false, imported: 0, failed: inputs.length, errors: [{ line: 0, ticker, error }] }
   }
-}
-
-/**
- * FIFO Lots Logic
- */
-export function calculatePositionLotsDefinition(transactions: Transaction[]): any[] {
-  const sorted = [...transactions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime() || new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-  const buys = sorted.filter(t => t.operation === 'COMPRA').map(t => {
-    const qty = Math.abs(t.quantity)
-    return { id: t.id, date: t.date, remaining_quantity: qty, buy_price: ((qty * t.price) + (t.commission || 0)) / qty }
-  })
-  const sells = sorted.filter(t => t.operation === 'VENTA')
-  for (const sell of sells) {
-    let sellQty = Math.abs(sell.quantity)
-    for (const buy of buys) {
-      if (buy.remaining_quantity <= 0) continue
-      const consume = Math.min(sellQty, buy.remaining_quantity)
-      buy.remaining_quantity -= consume
-      sellQty -= consume
-      if (sellQty <= 0) break
-    }
-  }
-  return buys.filter(b => b.remaining_quantity > 0.0001)
-}
-
-export function enrichLots(lots: any[], currentPrice: number): any[] {
-  return lots.map(lot => {
-    const market_value = lot.remaining_quantity * currentPrice
-    const invested = lot.remaining_quantity * lot.buy_price
-    return { ...lot, quantity: lot.remaining_quantity, current_price: currentPrice, market_value, invested, pnl: market_value - invested, pnl_pct: invested > 0 ? (market_value - invested) / invested : 0 }
-  })
-}
-
-export function calculatePositionLots(transactions: Transaction[], currentPrice: number): any[] {
-  return enrichLots(calculatePositionLotsDefinition(transactions), currentPrice)
 }

@@ -144,3 +144,84 @@ describe('ledgerAt: automatic ON payments', () => {
     expect(s.holdings[0].costBasis).toBeCloseTo(18000)
   })
 })
+
+describe('ledgerAt: stock splits (odd/tasks/split-aware-ledger.md S2)', () => {
+  const googl = new Map([['GOOGL', [{ date: '2022-07-18', numerator: 20, denominator: 1 }]]])
+
+  it('a split multiplies the quantity from its date on; the cost stays and the average divides', () => {
+    const buy = [tx('GOOGL', 'COMPRA', 1, 2591.6, '2022-03-21', { asset_type: 'ACCION' })]
+    expect(ledgerAt(buy, [], '2022-07-17', { splits: googl }).holdings[0]).toMatchObject({ quantity: 1, avgCost: 2591.6, costBasis: 2591.6 })
+    const after = ledgerAt(buy, [], '2022-07-18', { splits: googl }).holdings[0]
+    expect(after.quantity).toBe(20)
+    expect(after.costBasis).toBe(2591.6)
+    expect(after.avgCost).toBeCloseTo(129.58, 10)
+    expect(after.firstBought).toBe('2022-03-21')
+  })
+
+  it('a sale after the split of shares bought before it is accepted and realizes on the whole cost', () => {
+    const s = ledgerAt([
+      tx('GOOGL', 'COMPRA', 1, 2591.6, '2022-03-21', { asset_type: 'ACCION' }),
+      tx('GOOGL', 'VENTA', -20, 245.4, '2025-09-25', { asset_type: 'ACCION' }),
+    ], [], '2025-12-31', { splits: googl })
+    expect(s.issues).toEqual([])
+    expect(s.holdings).toEqual([])
+    expect(s.realized).toHaveLength(1)
+    expect(s.realized[0].quantity).toBe(20)
+    expect(s.realized[0].invested).toBeCloseTo(2591.6, 8)
+    expect(s.realized[0].proceeds).toBeCloseTo(4908, 8)
+  })
+
+  it('a trade on the split date is already on the new basis', () => {
+    const s = ledgerAt([
+      tx('GOOGL', 'COMPRA', 1, 2600, '2022-07-15'),
+      tx('GOOGL', 'COMPRA', 20, 130, '2022-07-18'),
+    ], [], '2022-07-31', { splits: googl })
+    expect(s.holdings[0].quantity).toBe(40)
+    expect(s.holdings[0].costBasis).toBe(5200)
+  })
+
+  it('splits compound, a reverse split divides, and splits before the first buy or after the date do nothing', () => {
+    const splits = new Map([['ABC', [
+      { date: '2020-01-02', numerator: 4, denominator: 1 },
+      { date: '2021-01-04', numerator: 3, denominator: 1 },
+      { date: '2022-01-03', numerator: 1, denominator: 2 },
+      { date: '2023-01-03', numerator: 10, denominator: 1 },
+    ]]])
+    const s = ledgerAt([tx('ABC', 'COMPRA', 10, 60, '2020-06-01')], [], '2022-12-31', { splits })
+    expect(s.holdings[0].quantity).toBe(15)
+    expect(s.holdings[0].avgCost).toBeCloseTo(40, 10)
+  })
+
+  it('the closing residue scales with the split, so a rounding leftover still closes the holding', () => {
+    const s = ledgerAt([
+      tx('NVDA', 'COMPRA', 100, 189, '2022-05-05'),
+      tx('NVDA', 'VENTA', -999.95, 120, '2024-09-20'),
+    ], [], '2024-12-31', { splits: new Map([['NVDA', [{ date: '2024-06-10', numerator: 10, denominator: 1 }]]]) })
+    expect(s.holdings).toEqual([])
+  })
+
+  it('a split dated with a time still applies at the start of its day', () => {
+    const timed = new Map([['GOOGL', [{ date: '2022-07-18T13:30:00.000Z', numerator: 20, denominator: 1 }]]])
+    const s = ledgerAt([tx('GOOGL', 'COMPRA', 1, 2600, '2022-07-15'), tx('GOOGL', 'COMPRA', 20, 130, '2022-07-18')], [], '2022-07-18', { splits: timed })
+    expect(s.holdings[0].quantity).toBe(40)
+  })
+
+  it('a split of a ticker sold before it, or with an invalid ratio, changes nothing', () => {
+    const closed = ledgerAt([
+      tx('GOOGL', 'COMPRA', 1, 2600, '2022-03-21'),
+      tx('GOOGL', 'VENTA', -1, 2700, '2022-04-01'),
+      tx('GOOGL', 'COMPRA', 5, 130, '2022-08-01'),
+    ], [], '2022-12-31', { splits: googl })
+    expect(closed.holdings[0]).toMatchObject({ quantity: 5, costBasis: 650, firstBought: '2022-08-01' })
+    const invalid = new Map([['ABC', [{ date: '2023-01-03', numerator: 2, denominator: 0 }, { date: '2023-02-01', numerator: 0, denominator: 1 }]]])
+    expect(ledgerAt([tx('ABC', 'COMPRA', 10, 60, '2022-06-01')], [], '2023-12-31', { splits: invalid }).holdings[0].quantity).toBe(10)
+  })
+
+  it('without splits nothing changes: the as-traded quantities are summed as before', () => {
+    const s = ledgerAt([
+      tx('GOOGL', 'COMPRA', 1, 2591.6, '2022-03-21'),
+      tx('GOOGL', 'VENTA', -20, 245.4, '2025-09-25'),
+    ], [], '2025-12-31')
+    expect(s.issues).toEqual([{ kind: 'oversell', ticker: 'GOOGL', date: '2025-09-25', requested: 20, held: 1 }])
+  })
+})

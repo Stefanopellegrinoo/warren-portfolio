@@ -84,7 +84,7 @@ describe('multi-currency views on the ledger core', () => {
       { date: '2026-06-02', kind: 'mep', buy: 1100, sell: 1100 },
       { date: '2026-06-02', kind: 'ccl', buy: 1200, sell: 1200 },
     ])
-    const v = views([buy], { fxAt, payments: { schedules, overrides: [], today: '2026-10-22' } })
+    const v = views([buy], { fxAt, payments: { schedules, overrides: [], today: '2026-10-22', splits: new Map() } })
     // Coupon 100 × 1 = 100 MEP; the 2.500 MEP amortization is capital returned.
     expectAmounts(v.totals.realized, { ARS: 110_000, MEP: 100, CCL: 110_000 / 1200 })
   })
@@ -96,13 +96,13 @@ describe('multi-currency views on the ledger core', () => {
       trade_currency: 'MEP', trade_quantity: 100, trade_price: 100, trade_commission: 0, fx_mep: 1000, fx_ccl: 1250,
     }
     const schedules = new Map([['YM34D', [{ date: '2026-06-02', ren: 1, amo: 25 }]]])
-    const state = ledgerNowFrom({ trades: [{ ...buy, created_at: buy.created_at! }], movements: [], overrides: [] }, schedules, '2026-10-22')
+    const state = ledgerNowFrom({ trades: [{ ...buy, created_at: buy.created_at! }], movements: [], overrides: [], splits: new Map() }, schedules, '2026-10-22')
     expect(state.cash).toBe(2600) // coupon 100 + amortization 2500, USD-MEP
 
     const v = views([buy], {
       onPositions: [{ ticker: 'YM34D', quantity: 100, market_value: 7600 }],
       cashBalance: state.cash,
-      payments: { schedules, overrides: [], today: '2026-10-22' },
+      payments: { schedules, overrides: [], today: '2026-10-22', splits: new Map() },
     })
     // 25 % of the capital returned: cost 10.000 MEP → 7.500 MEP at the purchase FX.
     expectAmounts(v.positions.YM34D.cost, { ARS: 7_500_000, MEP: 7500, CCL: 6000 })

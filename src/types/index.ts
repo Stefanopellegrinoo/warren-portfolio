@@ -1,3 +1,5 @@
+import type { AfterSplits } from '@/lib/after-splits'
+
 // ═══════════════════════════════════════════════════════════════════════════
 // AUTHENTICATION & USER TYPES
 // ═══════════════════════════════════════════════════════════════════════════
@@ -64,6 +66,8 @@ export interface Transaction {
   fx_source?: 'reference' | 'user' | 'reconstructed' | null
   needs_review?: boolean
   review_note?: string | null
+  // GET /api/transactions: a stock or CEDEAR row with stored splits after its date (split-aware-ledger S5).
+  after_splits?: AfterSplits
 }
 
 export interface Position {

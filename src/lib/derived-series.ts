@@ -24,12 +24,12 @@ import { normalizeError } from './errors'
 import { ensureRedisConnected, getRedis } from './redis'
 import { SUMMARY_SETEX_LUA } from './summary-cache'
 import { getBars } from './bars-cache'
-import { listCatalogued } from './ticker-catalog'
-import { normalizeTickerForYahoo, fetchQuotes } from './yahoo-finance'
+import { listCatalogued, yahooSymbols } from './ticker-catalog'
+import { fetchQuotes } from './yahoo-finance'
 import { getHistoricalCCL } from './currency'
 import { argentinaDate } from './utils'
 import { addDays } from './ar-calendar'
-import { unadjustSplits, toUsd, type DailyBar } from './historical-prices'
+import { unadjustSplits, toUsd, type DailyBar, type SplitEvent } from './historical-prices'
 import { deriveHistory, type DerivedRow, type DeriveFlags } from './derive-history'
 import { loadSchedules } from './on-schedules'
 import { backfillOnPriceHistory } from './rava-history'
@@ -38,6 +38,7 @@ import type { FlowRow } from './on-flow-history'
 import type { Income, LedgerMovement, LedgerTrade } from './ledger-core'
 import { loadOverrides } from './ledger-now'
 import { createServiceClient } from './supabase-server'
+import { loadSplits } from './stock-splits'
 
 export interface SeriesRange {
   /** Inclusive YYYY-MM-DD lower bound. */
@@ -71,6 +72,7 @@ export interface DerivedDeps {
   loadSchedules?: typeof loadSchedules
   backfillOnPriceHistory?: typeof backfillOnPriceHistory
   backfillPastFlows?: typeof backfillPastFlows
+  loadSplits?: typeof loadSplits
 }
 
 /** Walks every page of a query. The order is re-applied per page on purpose. */
@@ -283,16 +285,13 @@ async function buildSeries(
   const stockTickers = Array.from(new Set(transactions.filter(t => !isOn(t)).map(t => norm(t.ticker))))
   const onTickers = Array.from(new Set(transactions.filter(isOn).map(t => norm(t.ticker))))
 
-  // Which Yahoo symbol to ask for: the confirmed one, else the exchange-normalized string.
-  const catalog = new Map<string, string>()
-  for (const row of catalogRows) catalog.set(norm(row.ticker), String(row.yahoo_symbol).trim())
-  const symbolOf = new Map(stockTickers.map(t => [t, catalog.get(t) ?? normalizeTickerForYahoo(t)]))
+  const symbolOf = yahooSymbols(stockTickers, catalogRows)
   const needsCcl = Array.from(symbolOf.values()).some(s => s.endsWith('.BA'))
 
   // Bars, CCL, ON closes (from the first trade on: other days of the feed must not widen the
   // calendar), the schedules that pay ON coupons and amortizations, and today's quotes: all
   // independent, read together.
-  const [charts, ccl, onCloses, schedules, todayQuotes] = await Promise.all([
+  const [charts, ccl, onCloses, schedules, todayQuotes, storedSplits] = await Promise.all([
     (deps.getBars ?? getBars)(Array.from(new Set(symbolOf.values())), new Date(firstDate)),
     // A failure leaves an empty map: every ARS bar is dropped and flagged below.
     needsCcl
@@ -306,14 +305,26 @@ async function buildSeries(
         })
       : new Map<string, FlowRow[]>(),
     (deps.fetchQuotes ?? fetchQuotes)([...stockTickers, ...onTickers]),
+    // The stored splits stand in for a chart whose splits Yahoo did not report.
+    stockTickers.length > 0
+      ? (deps.loadSplits ?? loadSplits)().catch(err => {
+          console.warn('[Derived] stock splits unreadable:', err instanceof Error ? err.message : err)
+          return null
+        })
+      : new Map(),
   ])
   if (onCloses.degraded || schedules === null) degraded = true
 
+  // Raw closes and holdings on the same basis each day: the bars are un-adjusted with the splits
+  // the core applies (odd/tasks/split-aware-ledger.md S1): the chart's own, else the stored ones.
   const barsByTicker = new Map<string, DailyBar[]>()
+  const splitsByTicker = new Map<string, SplitEvent[]>()
   for (const [ticker, symbol] of symbolOf) {
     const chart = charts.get(symbol)
     if (!chart || chart.degraded || !chart.splitsKnown) degraded = true
-    let bars = unadjustSplits(chart?.bars ?? [], chart?.splits ?? [])
+    const splits = chart?.splitsKnown ? chart.splits : storedSplits?.get(ticker) ?? []
+    splitsByTicker.set(ticker, splits)
+    let bars = unadjustSplits(chart?.bars ?? [], splits)
     if (symbol.endsWith('.BA')) {
       const usd = toUsd(bars, ccl)
       bars = usd.bars
@@ -323,7 +334,7 @@ async function buildSeries(
   }
 
   const { rows, flags, income } = (deps.derive ?? deriveHistory)({
-    userId, transactions, movements, schedules: schedules ?? new Map(), overrides, barsByTicker,
+    userId, transactions, movements, schedules: schedules ?? new Map(), overrides, splits: splitsByTicker, barsByTicker,
     onPricesByTicker: onCloses.closes, today, todayQuotes,
   })
   if (flags.failure != null) degraded = true

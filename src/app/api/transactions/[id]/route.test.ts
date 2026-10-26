@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
 
+// Ledger reads load the stock splits (odd/tasks/split-aware-ledger.md T3): none unless a test sets them.
+const h = vi.hoisted(() => ({ splits: new Map<string, unknown[]>(), bars: new Map<string, unknown>(), barReads: 0 }))
+vi.mock('@/lib/stock-splits', () => ({ loadSplits: async () => h.splits }))
+// The split-adjusted guard's market reads (S4).
+vi.mock('@/lib/bars-cache', () => ({ getBars: async () => { h.barReads++; return h.bars } }))
+vi.mock('@/lib/ticker-catalog', async orig => ({ ...(await orig<object>()), listCatalogued: async () => [{ ticker: 'GOOGL', yahoo_symbol: 'GOOGL' }] }))
 vi.mock('@/lib/redis', () => ({ invalidateUserCache: vi.fn(async () => undefined) }))
 
 const ID = '11111111-1111-4111-8111-111111111111'
@@ -56,6 +62,9 @@ beforeEach(() => {
   deletes = []
   ledger = []
   original = { ticker: 'AAPL', asset_type: 'CEDEAR', needs_review: true }
+  h.splits = new Map()
+  h.bars = new Map()
+  h.barReads = 0
 })
 
 describe('PATCH /api/transactions/[id]', () => {
@@ -122,5 +131,34 @@ describe('the core validates edits and deletes (T5.1)', () => {
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ success: true, invalidated: expect.any(Number), message: 'Transaction deleted. Portfolio and cash balance recalculated.' })
     expect(deletes).toEqual(['transactions'])
+  })
+})
+
+describe('split-adjusted edits (odd/tasks/split-aware-ledger.md S4)', () => {
+  const split = [{ date: '2022-07-18', numerator: 20, denominator: 1 }]
+  const adjusted = { date: '2022-03-21', ticker: 'GOOGL', operation: 'COMPRA', quantity: 17.93, price: 136.98, assetType: 'ACCION' }
+
+  beforeEach(() => {
+    h.splits = new Map([['GOOGL', split]])
+    h.bars = new Map([['GOOGL', { bars: [{ date: '2022-03-18', close: 140.123 }], splits: split, splitsKnown: true, degraded: false, missing: false }]])
+  })
+
+  it('refuses an edit that makes a pre-split row split-adjusted, with 400, and writes nothing', async () => {
+    original = { ticker: 'GOOGL', asset_type: 'ACCION', date: '2022-03-21', quantity: 0.8965, price: 2739.6 }
+    const { PATCH } = await import('./route')
+    const res = await PATCH(patch(adjusted), { params: { id: ID } })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('El precio de GOOGL el 2022-03-21 (136.98) parece ajustado por el split 20:1 del 2022-07-18: ese día cotizaba cerca de 2802.46. Cargala como figura en tu comprobante: 0.8965 a 2739.6.')
+    expect(updates).toEqual([])
+    expect(deletes).toEqual([])
+  })
+
+  it('an edit of the notes only on an old row is not checked', async () => {
+    original = { ticker: 'GOOGL', asset_type: 'ACCION', date: '2022-03-21', quantity: 17.93, price: 136.98 }
+    const { PATCH } = await import('./route')
+    const res = await PATCH(patch({ ...adjusted, notes: 'from the broker' }), { params: { id: ID } })
+    expect(res.status).toBe(200)
+    expect(updates).toEqual([{ date: '2022-03-21', operation: 'COMPRA', quantity: 17.93, price: 136.98, commission: 0, notes: 'from the broker' }])
+    expect(h.barReads).toBe(0)
   })
 })

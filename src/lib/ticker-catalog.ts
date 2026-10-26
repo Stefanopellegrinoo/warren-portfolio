@@ -10,6 +10,7 @@
  */
 import type { ResolveResult } from './ticker-identity'
 import { createServiceClient } from './supabase-server'
+import { normalizeTickerForYahoo } from './yahoo-finance'
 
 export interface CatalogRow {
   ticker: string
@@ -80,4 +81,10 @@ export async function stampChecked(supabase: any, ticker: string, at: string): P
     .eq('ticker', ticker.toUpperCase().trim())
 
   if (error) throw new Error(error.message)
+}
+
+/** Which Yahoo symbol to ask for each ledger ticker: the confirmed one, else the exchange-normalized string. */
+export function yahooSymbols(tickers: string[], catalog: CatalogRow[]): Map<string, string> {
+  const confirmed = new Map(catalog.map(row => [row.ticker.trim().toUpperCase(), String(row.yahoo_symbol).trim()]))
+  return new Map(tickers.map(t => [t, confirmed.get(t) ?? normalizeTickerForYahoo(t)]))
 }

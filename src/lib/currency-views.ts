@@ -20,6 +20,7 @@ import { loadOverrides, loadPortfolioAndLedger, onTickersOf, type PortfolioNow }
 import type { FlowOverride } from './ledger-core'
 import type { FlowRow } from './on-flow-history'
 import { loadSchedules } from './on-schedules'
+import { loadSplits, type SplitsByTicker } from './stock-splits'
 import { argentinaDate } from './utils'
 import { createServiceClient } from './supabase-server'
 
@@ -92,6 +93,7 @@ export interface ViewsLedger {
   trades: LedgerTrade[]
   overrides: FlowOverride[]
   schedules: Map<string, FlowRow[]>
+  splits: SplitsByTicker
 }
 
 /**
@@ -107,7 +109,7 @@ export async function loadPortfolioForViews(
     throw new Error('[Security] userId inválido o ausente. Operación cancelada para prevenir corrupción de datos.')
   }
   const { now, ledger, schedules } = await loadPortfolioAndLedger(supabase, userId, today, LEDGER_COLUMNS)
-  return { portfolio: now, ledger: { trades: ledger.trades as unknown as LedgerTrade[], overrides: ledger.overrides, schedules } }
+  return { portfolio: now, ledger: { trades: ledger.trades as unknown as LedgerTrade[], overrides: ledger.overrides, schedules, splits: ledger.splits } }
 }
 
 /** The views' own read order (date, then created_at, NULLs last), for trades read in another order. */
@@ -144,12 +146,13 @@ export async function currencyViewsFor(
   const symbols = Array.from(new Set(valued.positions.map(p => localSymbol(p.ticker))))
   // The automatic ON payments the core applies to cost and cash (odd/tasks/nucleo-ledger.md T3.1).
   const today = argentinaDate()
-  // Independent reads, together: trade-date FX, peso-line prices, ON payment overrides and schedules.
-  const [fxRows, lkp, overrides, schedules] = await Promise.all([
+  // Independent reads, together: trade-date FX, peso-line prices, ON payment overrides and schedules, stock splits.
+  const [fxRows, lkp, overrides, schedules, splits] = await Promise.all([
     tradeDateFx(trades),
     fetchQuotes(symbols.map(localPriceKey)),
     loaded?.overrides ?? loadOverrides(supabase, userId),
     loaded?.schedules ?? loadSchedules(supabase, onTickersOf(trades.map(t => ({ ...t, created_at: t.created_at ?? null }))), today),
+    loaded?.splits ?? loadSplits(),
   ])
   const local = new Map(symbols.flatMap(s => {
     const q = lkp.get(localPriceKey(s))
@@ -165,6 +168,6 @@ export async function currencyViewsFor(
     local,
     fx: ctx.fx,
     fxAt: fxLookupFrom(fxRows),
-    payments: { schedules, overrides, today },
+    payments: { schedules, overrides, today, splits },
   })
 }

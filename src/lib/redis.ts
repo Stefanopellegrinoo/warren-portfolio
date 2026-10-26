@@ -152,7 +152,7 @@ export function stripKeyPrefix(key: string): string {
 
 /**
  * Invalidates all user-specific route caches when data mutates.
- * Clears history:v3:{userId}:*, statistics:v4:{userId}:* and lots:def:{userId}:*
+ * Clears history:v3:{userId}:* and statistics:v4:{userId}:*
  * (SCAN+DEL), plus the exact-match keys statistics:combined:{userId},
  * statistics:ons:v3:{userId}, summary:{userId} and derived:v1:{userId}. Also bumps
  * summary:version:{userId} so the summary writers (worker, /api/positions) and the derived series detect stale writes.
@@ -181,14 +181,6 @@ export async function invalidateUserCache(userId: string): Promise<void> {
       statsCursor = nextCursor
       keysToDelete.push(...keys.map(stripKeyPrefix))
     } while (statsCursor !== '0')
-
-    // Find keys matching lots:def:{userId}:*
-    let lotsCursor = '0'
-    do {
-      const [nextCursor, keys] = await redis.scan(lotsCursor, 'MATCH', `${KEY_PREFIX}lots:def:${userId}:*`, 'COUNT', 100)
-      lotsCursor = nextCursor
-      keysToDelete.push(...keys.map(stripKeyPrefix))
-    } while (lotsCursor !== '0')
 
     // Add exactly matching keys (no prefix stripping needed — DEL adds it)
     keysToDelete.push(`statistics:combined:${userId}`)
