@@ -120,13 +120,20 @@ async function persistONPrices(): Promise<number> {
   const supabase = getSupabase()
   if (!supabase) throw new Error('Supabase not configured')
 
-  const onTickers = await getAllONTickers()
+  // Its own read, not getAllONTickers (which answers [] on an error): a database it cannot
+  // read must fail the job, never report "0 written".
+  const { data, error: readError } = await supabase.from('ons').select('ticker')
+  if (readError) throw new Error(`ons catalog read: ${readError.message ?? readError}`)
+  const onTickers = [...new Set((data ?? []).map((r: { ticker: string }) => r.ticker))] as string[]
   if (onTickers.length === 0) return 0
   const quotes = await fetchQuotes(onTickers)
+  // fetchQuotes answers an empty map when Redis fails: no price at all is a failure to report.
+  if (quotes.size === 0) throw new Error(`Redis has no price for any of the ${onTickers.length} ONs`)
 
   const updates = Array.from(quotes.entries())
     .filter(([, quote]) => Number(quote.price) > 0)
-    .map(([ticker, quote]) => ({ ticker, last_price: quote.price, last_updated: new Date().toISOString() }))
+    // When the price is from, not when this ran: Redis keeps a last price for days.
+    .map(([ticker, quote]) => ({ ticker, last_price: quote.price, last_updated: quote.updatedAt ?? new Date().toISOString() }))
   if (updates.length === 0) return 0
 
   const { error } = await supabase.from('ons').upsert(updates, { onConflict: 'ticker' })

@@ -9,6 +9,7 @@ const mockCachePrice = vi.fn(async () => {})
 const mockFetchQuotes = vi.fn(async (): Promise<Map<string, unknown>> => new Map())
 const mockData912 = vi.fn(async (): Promise<Map<string, unknown>> => new Map())
 const onsUpsert = vi.fn(async (): Promise<{ error: unknown }> => ({ error: null }))
+const onsSelect = vi.fn(async (): Promise<{ data: unknown; error: unknown }> => ({ data: [{ ticker: 'YMCXO' }], error: null }))
 
 vi.mock('bullmq', () => ({ Worker: class { constructor(_q: string, fn: typeof processor) { processor = fn } on() {} } }))
 vi.mock('../queue', () => ({
@@ -31,7 +32,7 @@ vi.mock('../supabase-server', async () => {
   return {
     createServiceClient: () => ({
       from: (name: string) => name === 'ons'
-        ? { select: async () => ({ data: [{ ticker: 'YMCXO' }], error: null }), upsert: (...a: unknown[]) => onsUpsert(...(a as [])) }
+        ? { select: () => onsSelect(), upsert: (...a: unknown[]) => onsUpsert(...(a as [])) }
         : ledger.from(name),
     }),
   }
@@ -62,6 +63,7 @@ const cachedAtStartup = mockCachePrice.mock.calls.map((c) => (c as unknown[])[0]
 beforeEach(() => {
   vi.clearAllMocks()
   onsUpsert.mockResolvedValue({ error: null })
+  onsSelect.mockResolvedValue({ data: [{ ticker: 'YMCXO' }], error: null })
   vi.spyOn(console, 'log').mockImplementation(() => {})
 })
 
@@ -91,11 +93,43 @@ describe('ON prices: Redis all day, the database once a day', () => {
     expect(onsUpsert).toHaveBeenCalledWith([{ ticker: 'YMCXO', last_price: 1.07, last_updated: expect.any(String) }], { onConflict: 'ticker' })
   })
 
-  it('an ON without a price in Redis keeps the one the database has', async () => {
-    mockFetchQuotes.mockResolvedValue(new Map([['YMCXO', quote(0)]]))
+  it('the date written is when the price is from, not when the job ran', async () => {
+    mockFetchQuotes.mockResolvedValue(new Map([['YMCXO', { ...quote(1.07), updatedAt: '2026-10-21T20:00:00.000Z' }]]))
 
     await processor({ name: 'on-prices-persist', data: {} })
 
+    expect(onsUpsert).toHaveBeenCalledWith([{ ticker: 'YMCXO', last_price: 1.07, last_updated: '2026-10-21T20:00:00.000Z' }], { onConflict: 'ticker' })
+  })
+
+  it('an ON with a zero price keeps the one the database has', async () => {
+    onsSelect.mockResolvedValue({ data: [{ ticker: 'YMCXO' }, { ticker: 'TLCMO' }], error: null })
+    mockFetchQuotes.mockResolvedValue(new Map([['YMCXO', quote(0)], ['TLCMO', { ...quote(98.5), ticker: 'TLCMO' }]]))
+
+    await processor({ name: 'on-prices-persist', data: {} })
+
+    expect(onsUpsert).toHaveBeenCalledWith([{ ticker: 'TLCMO', last_price: 98.5, last_updated: expect.any(String) }], { onConflict: 'ticker' })
+  })
+
+  it('an ON missing from Redis keeps the one the database has; the others are written', async () => {
+    onsSelect.mockResolvedValue({ data: [{ ticker: 'YMCXO' }, { ticker: 'TLCMO' }], error: null })
+    mockFetchQuotes.mockResolvedValue(new Map([['TLCMO', { ...quote(98.5), ticker: 'TLCMO' }]]))
+
+    await processor({ name: 'on-prices-persist', data: {} })
+
+    expect(onsUpsert).toHaveBeenCalledWith([{ ticker: 'TLCMO', last_price: 98.5, last_updated: expect.any(String) }], { onConflict: 'ticker' })
+  })
+
+  it('a catalog that cannot be read fails the job instead of reporting 0 written', async () => {
+    onsSelect.mockResolvedValue({ data: null, error: { message: 'connection timeout' } })
+
+    await expect(processor({ name: 'on-prices-persist', data: {} })).rejects.toThrow(/connection timeout/)
+    expect(onsUpsert).not.toHaveBeenCalled()
+  })
+
+  it('a Redis with none of the catalog\'s prices fails the job: the copy would go stale unseen', async () => {
+    mockFetchQuotes.mockResolvedValue(new Map())
+
+    await expect(processor({ name: 'on-prices-persist', data: {} })).rejects.toThrow(/Redis/)
     expect(onsUpsert).not.toHaveBeenCalled()
   })
 

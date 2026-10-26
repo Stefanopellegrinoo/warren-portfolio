@@ -15,7 +15,8 @@ export const dynamic = 'force-dynamic'
  *  endpoint (Supabase free tier 429s under load). A healthy answer is kept five
  *  minutes: the Docker healthcheck asks every 30 s, and the database is small and
  *  short of memory, so it should not be asked that often. A degraded one only ten
- *  seconds, so a recovery shows at once. */
+ *  seconds, so a recovery shows at once. The cost: an outage shows here up to five
+ *  minutes late (nothing restarts the app on this status; a new container probes fresh). */
 const HEALTHY_TTL_MS = 5 * 60_000
 const DEGRADED_TTL_MS = 10_000
 

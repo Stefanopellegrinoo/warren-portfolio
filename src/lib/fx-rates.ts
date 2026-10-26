@@ -31,10 +31,13 @@ async function fetchSeries(kind: FxKind, fetchFn: typeof fetch) {
     .map((r) => ({ date: r.fecha, kind, buy: r.compra as number, sell: r.venta as number, source: 'argentinadatos' }))
 }
 
-/** The stored rates by kind and date, read in pages (PostgREST answers at most 1000 rows). */
+/**
+ * The stored rates by kind and date, read in pages until one comes back empty. A page may hold
+ * fewer rows than asked (PostgREST caps it at the project's max rows), so a short page is not the end.
+ */
 async function storedRates(supabase: SupabaseClient): Promise<Map<string, { buy: number; sell: number }>> {
   const stored = new Map<string, { buy: number; sell: number }>()
-  for (let from = 0; ; from += CHUNK) {
+  for (let from = 0; ; ) {
     const { data, error } = await supabase
       .from('fx_rates')
       .select('date, kind, buy, sell')
@@ -42,8 +45,9 @@ async function storedRates(supabase: SupabaseClient): Promise<Map<string, { buy:
       .order('kind')
       .range(from, from + CHUNK - 1)
     if (error) throw new Error(`fx_rates read: ${error.message}`)
-    for (const r of data ?? []) stored.set(`${r.kind} ${r.date}`, { buy: Number(r.buy), sell: Number(r.sell) })
-    if (!data || data.length < CHUNK) return stored
+    if (!data || data.length === 0) return stored
+    for (const r of data) stored.set(`${r.kind} ${r.date}`, { buy: Number(r.buy), sell: Number(r.sell) })
+    from += data.length
   }
 }
 

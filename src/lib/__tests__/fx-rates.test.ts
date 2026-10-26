@@ -20,7 +20,7 @@ function fakeFetch(overrides: Partial<Record<keyof typeof series, unknown>> = {}
 type Stored = { date: string; kind: string; buy: number | string; sell: number | string }
 
 /** fx_rates as stored (served in pages by `range`), and the upserts it receives. */
-function fakeDb({ upsertError = null, stored = [] as Stored[], readError = null }: { upsertError?: unknown; stored?: Stored[]; readError?: unknown } = {}) {
+function fakeDb({ upsertError = null, stored = [] as Stored[], readError = null, maxRows = 1000 }: { upsertError?: unknown; stored?: Stored[]; readError?: unknown; maxRows?: number } = {}) {
   const upsert = vi.fn().mockResolvedValue({ error: upsertError })
   const ranges: [number, number][] = []
   const select = vi.fn(() => {
@@ -29,7 +29,8 @@ function fakeDb({ upsertError = null, stored = [] as Stored[], readError = null 
     const b: any = {
       order: () => b,
       range: (f: number, t: number) => { from = f; to = t; ranges.push([f, t]); return b },
-      then: (res: any, rej: any) => Promise.resolve(readError ? { data: null, error: readError } : { data: stored.slice(from, to + 1), error: null }).then(res, rej),
+      // Like PostgREST, a page holds at most the server's row cap, whatever range was asked.
+      then: (res: any, rej: any) => Promise.resolve(readError ? { data: null, error: readError } : { data: stored.slice(from, Math.min(to + 1, from + maxRows)), error: null }).then(res, rej),
     }
     return b
   })
@@ -100,7 +101,16 @@ describe('ingestFxRates', () => {
 
     await ingestFxRates(db.client as never, fakeFetch({ bolsa: days.map((fecha) => ({ casa: 'bolsa', compra: 1, venta: 2, fecha })), contadoconliqui: [] }))
 
-    expect(db.ranges).toEqual([[0, 999], [1000, 1999]])
+    expect(db.ranges.slice(0, 2)).toEqual([[0, 999], [1000, 1999]])
+    expect(db.upsert).not.toHaveBeenCalled()
+  })
+
+  it('a server that answers fewer rows per page than asked still has its whole history read', async () => {
+    const days = Array.from({ length: 1200 }, (_, i) => new Date(Date.UTC(2020, 0, 1) + i * 86_400_000).toISOString().slice(0, 10))
+    const db = fakeDb({ stored: days.map((date) => ({ date, kind: 'mep', buy: 1, sell: 2 })), maxRows: 500 })
+
+    await ingestFxRates(db.client as never, fakeFetch({ bolsa: days.map((fecha) => ({ casa: 'bolsa', compra: 1, venta: 2, fecha })), contadoconliqui: [] }))
+
     expect(db.upsert).not.toHaveBeenCalled()
   })
 
