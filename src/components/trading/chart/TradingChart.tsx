@@ -43,7 +43,7 @@ import { DrawingActions } from "./DrawingActions";
 import { useChartPreferences } from "./useChartPreferences";
 import { AlertSheet } from "./AlertSheet";
 import { useTradeMarkers } from "./useTradeMarkers";
-import { TradeCard } from "./TradeMarkers";
+import { TradeCard, TradeSheet } from "./TradeMarkers";
 
 const TZ = "America/Argentina/Buenos_Aires";
 const INTRADAY: Timeframe[] = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h"];
@@ -204,7 +204,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	// The alert sheet (S6): a new alert (id null) or an existing one.
 	const [sheet, setSheet] = useState<{ id: string | null } | null>(null);
 	// The operations card of a bar with arrows: its bar and where it was tapped.
-	const [tradeCard, setTradeCard] = useState<{ chart: string; time: number; x: number; y: number; above: boolean } | null>(null);
+	const [tradeCard, setTradeCard] = useState<{ chart: string; time: number; x: number; y: number; above: boolean; phone: boolean } | null>(null);
 	const [textEdit, setTextEdit] = useState<{ drawing: Drawing; x: number; y: number } | null>(null);
 	const [legendOpen, setLegendOpen] = useState(true);
 	// Where the favorites bar floats: over the chart, in its container (S3).
@@ -357,7 +357,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 				if (d <= slop && (!best || d < best.d)) best = { time, d };
 			}
 			if (p.time !== undefined && trades.has(p.time as number)) best = { time: p.time as number, d: 0 };
-			setTradeCard(best && { chart: `${symbol}:${timeframe}`, time: best.time, x: p.point.x, y: p.point.y, above: p.point.y > box.clientHeight / 2 });
+			setTradeCard(best && { chart: `${symbol}:${timeframe}`, time: best.time, x: p.point.x, y: p.point.y, above: p.point.y > box.clientHeight / 2, phone: window.matchMedia(PHONE).matches });
 		};
 		chart.subscribeClick(onClick);
 		return () => chart.unsubscribeClick(onClick);
@@ -642,7 +642,11 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 
 				{/* A card is for the bars it was opened on: another symbol or timeframe drops it. */}
 				{tradeCard?.chart === `${symbol}:${timeframe}` && trades.get(tradeCard.time) && (
-					<TradeCard trades={trades.get(tradeCard.time)!} x={tradeCard.x} y={tradeCard.y} above={tradeCard.above} onClose={() => setTradeCard(null)} />
+					tradeCard.phone ? (
+						<TradeSheet trades={trades.get(tradeCard.time)!} onClose={() => setTradeCard(null)} />
+					) : (
+						<TradeCard trades={trades.get(tradeCard.time)!} x={tradeCard.x} y={tradeCard.y} above={tradeCard.above} onClose={() => setTradeCard(null)} />
+					)
 				)}
 
 				<DrawingActions manager={manager} onEditText={(drawing) => setTextEdit({ drawing, x: 12, y: 56 })} />

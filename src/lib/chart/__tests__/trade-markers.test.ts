@@ -12,31 +12,31 @@ const markersOf = (trades: Trade[], times: number[]) => tradeMarkers(tradesByBar
 const DAILY = ['2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22', '2026-10-23'].map(day)
 
 describe('trade markers', () => {
-  it('a buy is a green arrow under its day\'s bar that says "C" and the quantity', () => {
+  it('a buy is a green arrow under its day\'s bar ', () => {
     expect(markersOf([trade('2026-10-20', 'COMPRA', 10)], DAILY)).toEqual([
-      { time: day('2026-10-20'), position: 'belowBar', shape: 'arrowUp', color: '#0f0', text: 'C 10' },
+      { time: day('2026-10-20'), position: 'belowBar', shape: 'arrowUp', color: '#0f0' },
     ])
   })
 
-  it('a sell is a red arrow over its day\'s bar that says "V" and the quantity', () => {
+  it('a sell is a red arrow over its day\'s bar ', () => {
     expect(markersOf([trade('2026-10-22', 'VENTA', 5)], DAILY)).toEqual([
-      { time: day('2026-10-22'), position: 'aboveBar', shape: 'arrowDown', color: '#f00', text: 'V 5' },
+      { time: day('2026-10-22'), position: 'aboveBar', shape: 'arrowDown', color: '#f00' },
     ])
   })
 
-  it('several trades on one bar make one arrow per side, their quantities added', () => {
+  it('several trades on one bar make one arrow per side', () => {
     const trades = [trade('2026-10-21', 'COMPRA', 10), trade('2026-10-21', 'COMPRA', 2.5), trade('2026-10-21', 'VENTA', 4)]
 
     expect(markersOf(trades, DAILY)).toEqual([
-      { time: day('2026-10-21'), position: 'belowBar', shape: 'arrowUp', color: '#0f0', text: 'C 12,5' },
-      { time: day('2026-10-21'), position: 'aboveBar', shape: 'arrowDown', color: '#f00', text: 'V 4' },
+      { time: day('2026-10-21'), position: 'belowBar', shape: 'arrowUp', color: '#0f0' },
+      { time: day('2026-10-21'), position: 'aboveBar', shape: 'arrowDown', color: '#f00' },
     ])
   })
 
-  it('quantities keep their own decimals, up to six, with the app\'s number format', () => {
-    const trades = [trade('2026-10-19', 'COMPRA', 0.1), trade('2026-10-19', 'COMPRA', 0.2), trade('2026-10-20', 'VENTA', 1500)]
+  it('an arrow is only an arrow: no letter, no quantity', () => {
+    const trades = [trade('2026-10-19', 'COMPRA', 0.1), trade('2026-10-20', 'VENTA', 1500)]
 
-    expect(markersOf(trades, DAILY).map((m) => m.text)).toEqual(['C 0,3', 'V 1.500'])
+    expect(markersOf(trades, DAILY).map((m) => m.text)).toEqual([undefined, undefined])
   })
 
   it('on a weekly chart a trade goes in the week that holds it', () => {
@@ -44,8 +44,8 @@ describe('trade markers', () => {
     const trades = [trade('2026-10-22', 'COMPRA', 3), trade('2026-10-20', 'COMPRA', 1), trade('2026-10-13', 'VENTA', 2)]
 
     expect(markersOf(trades, weeks)).toEqual([
-      { time: day('2026-10-12'), position: 'aboveBar', shape: 'arrowDown', color: '#f00', text: 'V 2' },
-      { time: day('2026-10-19'), position: 'belowBar', shape: 'arrowUp', color: '#0f0', text: 'C 4' },
+      { time: day('2026-10-12'), position: 'aboveBar', shape: 'arrowDown', color: '#f00' },
+      { time: day('2026-10-19'), position: 'belowBar', shape: 'arrowUp', color: '#0f0' },
     ])
   })
 
@@ -75,7 +75,7 @@ describe('trade markers', () => {
   it('dividends get no arrow and are not in the bar\'s trades', () => {
     const trades = [trade('2026-10-20', 'DIVIDENDO', 7), trade('2026-10-20', 'COMPRA', 1)]
 
-    expect(markersOf(trades, DAILY).map((m) => m.text)).toEqual(['C 1'])
+    expect(markersOf(trades, DAILY).map((m) => m.shape)).toEqual(['arrowUp'])
     expect(tradesByBar(trades, DAILY).get(day('2026-10-20'))!.map((t) => t.operation)).toEqual(['COMPRA'])
   })
 

@@ -874,8 +874,8 @@ describe('TradingChart trade markers', () => {
 
     expect(tradeRequests()).toEqual(['/api/transactions?ticker=BCBA%3AGGAL&limit=500'])
     expect(lastMarkers()).toEqual([
-      { time: day('2026-10-20'), position: 'belowBar', shape: 'arrowUp', color: '#0f0', text: 'C 10' },
-      { time: day('2026-10-22'), position: 'aboveBar', shape: 'arrowDown', color: '#f00', text: 'V 5' },
+      { time: day('2026-10-20'), position: 'belowBar', shape: 'arrowUp', color: '#0f0' },
+      { time: day('2026-10-22'), position: 'aboveBar', shape: 'arrowDown', color: '#f00' },
     ])
     unmount()
   })
@@ -888,7 +888,7 @@ describe('TradingChart trade markers', () => {
     await settle()
 
     expect(tradeRequests()).toHaveLength(1)
-    expect(lastMarkers().map((m: { time: number; text: string }) => [m.time, m.text])).toEqual([[day('2026-10-19'), 'C 10'], [day('2026-10-19'), 'V 5']])
+    expect(lastMarkers().map((m: { time: number; shape: string }) => [m.time, m.shape])).toEqual([[day('2026-10-19'), 'arrowUp'], [day('2026-10-19'), 'arrowDown']])
     unmount()
   })
 
@@ -921,6 +921,24 @@ describe('TradingChart trade markers', () => {
 
     const rows = [...card()!.querySelectorAll('tbody tr')].map((r) => [...r.querySelectorAll('td')].map((c) => c.textContent))
     expect(rows).toEqual([['20/10/2026', 'Compra', '4', '1.240,50'], ['20/10/2026', 'Compra', '6', '1.234,50']])
+    unmount()
+  })
+
+  it('on a phone it opens as a sheet from the bottom: one row per operation, and Listo closes it', async () => {
+    onPhone(true)
+    const { box, unmount } = await mount()
+    press(box, 'touch')
+
+    click(day('2026-10-20'))
+    await act(async () => {})
+
+    const sheet = [...document.querySelectorAll('[role="dialog"]')].find((d) => d.textContent?.startsWith('Operaciones'))!
+    const rows = [...sheet.querySelectorAll('li')].map((r) => [...r.querySelectorAll('span')].map((c) => c.textContent))
+    expect(rows).toEqual([['Compra', '20/10/2026', 'Cantidad', '4', 'Precio', '1.240,50'], ['Compra', '20/10/2026', 'Cantidad', '6', 'Precio', '1.234,50']])
+    expect(card()).toBeNull()
+
+    await act(async () => button('Listo').click())
+    expect([...document.querySelectorAll('[role="dialog"]')].some((d) => d.textContent?.startsWith('Operaciones'))).toBe(false)
     unmount()
   })
 
