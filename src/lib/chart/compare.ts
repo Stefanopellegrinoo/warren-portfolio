@@ -98,12 +98,14 @@ export function compareBase(
 }
 
 /**
- * A compared series in the chart's own units: it reads `close` on the base day and moves by its own %
- * from there. Drawn on the price scale like that, every line starts at the same point, and the
- * chart's indicators, drawings and alerts keep their prices.
+ * A compared series in the chart's own units, from the base day on: it reads `close` that day and
+ * moves by its own % from there. Drawn on the price scale like that, every line starts at the same
+ * point, and the chart's indicators, drawings and alerts keep their prices. Before the base day the
+ * comparison has not started, so nothing is drawn there: zoomed out, only the chart's own series shows.
  */
 export function scaleToBase(points: { time: number; value: number }[], time: number, close: number): { time: number; value: number }[] {
-  const base = points.find((p) => p.time >= time)
+  const start = points.findIndex((p) => p.time >= time)
+  const base = points[start]
   if (!base || !(base.value > 0)) return []
-  return points.map((p) => ({ time: p.time, value: (p.value / base.value) * close }))
+  return points.slice(start).map((p) => ({ time: p.time, value: (p.value / base.value) * close }))
 }

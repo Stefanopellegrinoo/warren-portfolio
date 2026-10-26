@@ -1227,6 +1227,44 @@ describe('TradingChart — comparing', () => {
     unmount()
   })
 
+  // YTD starts from Dec 31, so Dec 29 and 30 come before the comparison.
+  const day = (d: string) => Date.parse(`${d}T00:00:00Z`) / 1000
+  const YEAR_END = [['2025-12-29', 5], ['2025-12-30', 10], ['2025-12-31', 20], ['2026-01-02', 30]].map(([d, c]) => ({ time: day(d as string), open: c as number, high: c as number, low: c as number, close: c as number }))
+  const SPY_YEAR_END = { points: [['2025-12-29', 300], ['2025-12-30', 400], ['2025-12-31', 500], ['2026-01-02', 600]].map(([time, value]) => ({ time: time as string, value: value as number })) }
+
+  it('a compared line starts on the first day; pointing before it reads only the chart\'s own %', async () => {
+    compare.status = 'ready'
+    compare.series = { SPY: SPY_YEAR_END }
+    bars.candles = YEAR_END
+    useChartStore.setState({ compareRange: 'YTD' })
+    const { el, unmount } = await renderTf('AAPL', '1d', ['SPY'])
+
+    const lines = (series.setData.mock.calls as { time: number; value: number }[][][]).map((c) => c[0]).filter((d) => d.length > 0 && !('close' in d[0]))
+    expect(lines.at(-1)).toEqual([{ time: day('2025-12-31'), value: 20 }, { time: day('2026-01-02'), value: 24 }])
+    const onMove = chart.subscribeCrosshairMove.mock.calls.at(-1)![0] as (p: unknown) => void
+    act(() => onMove({ seriesData: new Map([[series, YEAR_END[1]]]) }))
+    const legend = el.querySelector('[data-chart-legend]')!.textContent!
+    expect(legend).toMatch(/AAPL[−-]50,00 %SPY/)
+    expect(legend).not.toMatch(/SPY[+−-]\d/)
+    unmount()
+  })
+
+  it('the range already chosen shows it whole again; another one shows its own', async () => {
+    compare.status = 'ready'
+    compare.series = { SPY: SPY_YEAR_END }
+    bars.candles = YEAR_END
+    useChartStore.setState({ compareRange: 'Todo' })
+    const { unmount } = await renderTf('AAPL', '1d', ['SPY'])
+    const rangeZooms = () => setVisibleLogicalRange.mock.calls.filter((c) => c[0].to === YEAR_END.length + 3)
+
+    expect(rangeZooms()).toEqual([[{ from: 0, to: 7 }]])
+    await act(async () => { button('Todo').click() })
+    expect(rangeZooms()).toEqual([[{ from: 0, to: 7 }], [{ from: 0, to: 7 }]])
+    await act(async () => { button('YTD').click() })
+    expect(rangeZooms().at(-1)).toEqual([{ from: 1, to: 7 }])
+    unmount()
+  })
+
   it('the range buttons pick the first day, remembered; the chosen one is marked', async () => {
     compare.status = 'ready'
     compare.series = { SPY: SPY_TWO }
