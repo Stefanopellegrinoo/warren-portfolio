@@ -2,7 +2,8 @@
 // inserts ledger rows only. The fake throws on any access to the stored derived tables.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-const h = vi.hoisted(() => ({ invalidated: [] as string[] }))
+const h = vi.hoisted(() => ({ invalidated: [] as string[], splits: new Map<string, { date: string; numerator: number; denominator: number }[]>() }))
+vi.mock('../stock-splits', () => ({ loadSplits: async () => h.splits }))
 vi.mock('../redis', () => ({
   isRedisReady: () => false, getRedis: () => null, SUMMARY_VERSION_TTL: 60,
   invalidateUserCache: async (id: string) => { h.invalidated.push(id) },
@@ -40,7 +41,7 @@ const buy = (over: Record<string, unknown> = {}) => ({
 })
 const stock = { date: '2026-02-01', ticker: 'aapl', operation: 'VENTA' as const, quantity: 4, price: 120, commission: 0, assetType: 'ACCION' as const }
 
-beforeEach(() => { h.invalidated.length = 0 })
+beforeEach(() => { h.invalidated.length = 0; h.splits = new Map() })
 
 describe('processTransaction', () => {
   it('rejects a sale of more than held with a 400 Spanish error and inserts nothing', async () => {
@@ -83,6 +84,25 @@ describe('newOversell', () => {
   it('deleting a buy that a later sale depends on is a new oversell', () => {
     const sale = buy({ id: 's1', operation: 'VENTA', quantity: -8, date: '2026-02-01' })
     expect(newOversell([buy(), sale], [sale])).toMatchObject({ ticker: 'AAPL', date: '2026-02-01', held: 0 })
+  })
+})
+
+describe('stock splits (odd/tasks/split-aware-ledger.md S2)', () => {
+  const split = new Map([['AAPL', [{ date: '2022-07-18', numerator: 20, denominator: 1 }]]])
+  const preSplit = buy({ quantity: 1, price: 2591.6, date: '2022-03-21', created_at: '2022-03-21T10:00:00.000Z' })
+
+  it('newOversell counts the splits after each buy', () => {
+    const sale = buy({ id: 's1', operation: 'VENTA', quantity: -20, price: 245.4, date: '2025-09-25' })
+    expect(newOversell([preSplit], [preSplit, sale], split)).toBeNull()
+    expect(newOversell([preSplit], [preSplit, sale])).toMatchObject({ requested: 20, held: 1 })
+  })
+
+  it('a sale after a split of shares bought before it is accepted', async () => {
+    h.splits = split
+    const sb = writeSupabase({ transactions: [preSplit] })
+    const result = await processTransaction(sb as never, U, { ...stock, quantity: 20, price: 245.4, date: '2025-09-25' })
+    expect(result.closedTrade).toMatchObject({ ticker: 'AAPL', quantity: 20, close_price: 245.4 })
+    expect(sb.tables.transactions).toHaveLength(2)
   })
 })
 

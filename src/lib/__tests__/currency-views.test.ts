@@ -74,7 +74,7 @@ describe('currencyViewsFor', () => {
     h.market = sb
     // The ledger core reads by id: the KO row was entered last.
     const idOrder = [byDate[0], byDate[2], byDate[3], byDate[1]]
-    const preloaded = await currencyViewsFor(sb, 'u1', ctx, valued, { trades: idOrder as never, overrides: [], schedules: new Map() })
+    const preloaded = await currencyViewsFor(sb, 'u1', ctx, valued, { trades: idOrder as never, overrides: [], schedules: new Map(), splits: new Map() })
 
     expect(preloaded).toEqual(read)
     expect(read.positions.KO.cost).toEqual({ ARS: 75_000, MEP: 75, CCL: 60 })

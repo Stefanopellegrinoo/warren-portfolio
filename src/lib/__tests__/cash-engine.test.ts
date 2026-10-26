@@ -5,6 +5,8 @@ import { writeSupabase } from './fixtures/ledger-write-supabase'
 const mockAddRefreshSummaryJob = vi.fn().mockResolvedValue(undefined)
 const mockInvalidateUserCache = vi.fn().mockResolvedValue(undefined)
 
+// Ledger reads load the stock splits (odd/tasks/split-aware-ledger.md T3): none in these tests.
+vi.mock('@/lib/stock-splits', () => ({ loadSplits: async () => new Map() }))
 vi.mock('../queue', () => ({
   addRefreshSummaryJob: vi.fn().mockResolvedValue(undefined),
   addPriceUpdateJob: vi.fn().mockResolvedValue(undefined),

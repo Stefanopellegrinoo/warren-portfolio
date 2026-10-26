@@ -4,6 +4,8 @@ const mockRequireUser = vi.fn()
 // Market tables are read with the service role (odd/tasks/security-hardening.md S12): the service
 // client serves the same fixture the session does.
 const h = vi.hoisted(() => ({ market: null as any }))
+// Ledger reads load the stock splits (odd/tasks/split-aware-ledger.md T3): none in these tests.
+vi.mock('@/lib/stock-splits', () => ({ loadSplits: async () => new Map() }))
 vi.mock('@/lib/supabase-server', () => ({ createServiceClient: () => h.market }))
 vi.mock('@/lib/api-auth', () => ({
   requireUser: async () => { const r = await mockRequireUser(); h.market = r?.supabase; return r },

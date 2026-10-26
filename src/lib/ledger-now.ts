@@ -17,6 +17,7 @@ import { addDays, toMs } from './ar-calendar'
 import { loadSchedules } from './on-schedules'
 import { createServiceClient } from './supabase-server'
 import type { FlowRow } from './on-flow-history'
+import { loadSplits, type SplitsByTicker } from './stock-splits'
 import {
   ledgerAt, type AssetKind, type FlowOverride, type Holding, type LedgerMovement, type LedgerState,
   type LedgerTrade, type PaymentKind, type Realized,
@@ -48,6 +49,8 @@ export interface UserLedger {
   trades: LedgerTrade[]
   movements: LedgerMovement[]
   overrides: FlowOverride[]
+  /** Stock splits by ledger ticker: market data, the same for every user (odd/tasks/split-aware-ledger.md S2). */
+  splits: SplitsByTicker
 }
 
 /** The user's corrections to automatic ON payments (amount, or null = not received). */
@@ -58,24 +61,26 @@ export async function loadOverrides(sb: SupabaseClient, userId: string): Promise
 
 /** `columns`: the trade columns to read, TRADE_COLUMNS or a superset of them. */
 export async function loadLedger(sb: SupabaseClient, userId: string, columns: string = TRADE_COLUMNS): Promise<UserLedger> {
-  const [trades, movements, overrides] = await Promise.all([
+  const [trades, movements, overrides, splits] = await Promise.all([
     readAll<LedgerTrade>(() => sb.from('transactions').select(columns).eq('user_id', userId)),
     readAll<LedgerMovement>(() => sb.from('cash_movements').select('type, amount, date').eq('user_id', userId)),
     loadOverrides(sb, userId),
+    loadSplits(),
   ])
-  return { trades, movements, overrides }
+  return { trades, movements, overrides, splits }
 }
 
 /** Every user's ledger (service client, worker only), keyed by user id. */
 export async function loadAllLedgers(sb: SupabaseClient): Promise<Map<string, UserLedger>> {
-  const [trades, movements, overrides] = await Promise.all([
+  const [trades, movements, overrides, splits] = await Promise.all([
     readAll<LedgerTrade & { user_id: string }>(() => sb.from('transactions').select(`user_id, ${TRADE_COLUMNS}`)),
     readAll<LedgerMovement & { user_id: string }>(() => sb.from('cash_movements').select('user_id, type, amount, date')),
     readAll<OverrideRow & { user_id: string }>(() => sb.from('on_payment_overrides').select('user_id, ticker, pay_date, kind, amount')),
+    loadSplits(sb),
   ])
   const out = new Map<string, UserLedger>()
   const of = (userId: string) => {
-    if (!out.has(userId)) out.set(userId, { trades: [], movements: [], overrides: [] })
+    if (!out.has(userId)) out.set(userId, { trades: [], movements: [], overrides: [], splits })
     return out.get(userId)!
   }
   for (const t of trades) of(t.user_id).trades.push(t)
@@ -91,7 +96,7 @@ export const onTickersOf = (trades: LedgerTrade[]) =>
 export function ledgerNowFrom(ledger: UserLedger, schedules: Map<string, FlowRow[]>, today: string): LedgerState {
   const paid = new Map([...schedules].map(([t, flows]) => [t, flows.filter(f => f.date <= today)]))
   const overrides = ledger.overrides.filter(o => o.date <= today)
-  return ledgerAt(ledger.trades, ledger.movements, NO_DATE_CUTOFF, { schedules: paid, overrides })
+  return ledgerAt(ledger.trades, ledger.movements, NO_DATE_CUTOFF, { schedules: paid, overrides, splits: ledger.splits })
 }
 
 /** S3, one rule everywhere: the live quote if positive, else the last close, else the holding's own cost. */
@@ -121,10 +126,10 @@ export function toPositions(userId: string, holdings: Holding[], kind: AssetKind
  * dates that sale from the first open. Adding openDate and price to Realized (ledger-core)
  * removes this glue.
  */
-export function closedTradesOf(userId: string, trades: LedgerTrade[], realized: Realized[]): ClosedTrade[] {
+export function closedTradesOf(userId: string, trades: LedgerTrade[], realized: Realized[], splits: SplitsByTicker = new Map()): ClosedTrade[] {
   return realized.map((r, i) => {
     const own = trades.filter(t => norm(t.ticker) === r.ticker)
-    const open = ledgerAt(own, [], addDays(r.date, -1)).holdings[0]?.firstBought ?? r.date
+    const open = ledgerAt(own, [], addDays(r.date, -1), { splits }).holdings[0]?.firstBought ?? r.date
     const sales = own.filter(t => t.operation === 'VENTA' && day(t.date) === r.date)
     const sale = sales.find(t => Math.abs(Math.abs(t.quantity) - r.quantity) < 1e-6) ?? (sales.length === 1 ? sales[0] : undefined)
     return {
@@ -155,7 +160,7 @@ export interface PortfolioNow {
 }
 
 export function portfolioNowFrom(userId: string, ledger: UserLedger, state: LedgerState): PortfolioNow {
-  const closed = closedTradesOf(userId, ledger.trades, state.realized)
+  const closed = closedTradesOf(userId, ledger.trades, state.realized, ledger.splits)
   const isOn = new Set(state.realized.map((r, i) => (r.assetType === 'ON' ? i : -1)))
   return {
     stockPositions: toPositions(userId, state.holdings, 'STOCK'),
@@ -219,7 +224,7 @@ export async function loadLastCloses(
 export async function loadHeldStockTickers(sb: SupabaseClient): Promise<string[]> {
   const held = new Set<string>()
   ;(await loadAllLedgers(sb)).forEach(l => {
-    for (const h of ledgerAt(l.trades, [], NO_DATE_CUTOFF).holdings) if (h.assetType === 'STOCK') held.add(h.ticker)
+    for (const h of ledgerAt(l.trades, [], NO_DATE_CUTOFF, { splits: l.splits }).holdings) if (h.assetType === 'STOCK') held.add(h.ticker)
   })
   return [...held]
 }

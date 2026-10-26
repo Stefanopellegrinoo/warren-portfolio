@@ -255,3 +255,18 @@ describe('deriveHistory — automatic ON payments from the schedule (S4)', () =>
     }
   })
 })
+
+describe('deriveHistory — stock splits (odd/tasks/split-aware-ledger.md S1, S2)', () => {
+  it('the holding multiplies on the split date, so the value is continuous on raw closes', () => {
+    // Raw closes: 600 before a 3:1 split on Wed 03-04, 200 after it.
+    const raw = bars([['2026-03-02', 600], ['2026-03-03', 600], ['2026-03-04', 200], ['2026-03-05', 200], ['2026-03-06', 200], ['2026-03-09', 200]])
+    const rows = byDate(deriveHistory(input({
+      transactions: [tx({ quantity: 1, price: 600 })],
+      movements: [mv('DEPOSITO', 600, '2026-03-01'), mv('COMPRA', 600, '2026-03-02')],
+      barsByTicker: new Map([['AAA', raw]]),
+      splits: new Map([['AAA', [{ date: '2026-03-04', numerator: 3, denominator: 1 }]]]),
+      todayQuotes: new Map([['AAA', { ticker: 'AAA', price: 200, change: 0, changePercent: 0, previousClose: 200 }]]),
+    })).rows)
+    for (const d of ['2026-03-03', '2026-03-04', '2026-03-09', TODAY]) expect(rows.get(d).total_value).toBeCloseTo(600, 6)
+  })
+})

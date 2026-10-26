@@ -340,38 +340,3 @@ export async function processTransactionBatch(
     return { success: false, imported: 0, failed: inputs.length, errors: [{ line: 0, ticker, error }] }
   }
 }
-
-/**
- * FIFO Lots Logic
- */
-export function calculatePositionLotsDefinition(transactions: Transaction[]): any[] {
-  const sorted = [...transactions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime() || new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-  const buys = sorted.filter(t => t.operation === 'COMPRA').map(t => {
-    const qty = Math.abs(t.quantity)
-    return { id: t.id, date: t.date, remaining_quantity: qty, buy_price: ((qty * t.price) + (t.commission || 0)) / qty }
-  })
-  const sells = sorted.filter(t => t.operation === 'VENTA')
-  for (const sell of sells) {
-    let sellQty = Math.abs(sell.quantity)
-    for (const buy of buys) {
-      if (buy.remaining_quantity <= 0) continue
-      const consume = Math.min(sellQty, buy.remaining_quantity)
-      buy.remaining_quantity -= consume
-      sellQty -= consume
-      if (sellQty <= 0) break
-    }
-  }
-  return buys.filter(b => b.remaining_quantity > 0.0001)
-}
-
-export function enrichLots(lots: any[], currentPrice: number): any[] {
-  return lots.map(lot => {
-    const market_value = lot.remaining_quantity * currentPrice
-    const invested = lot.remaining_quantity * lot.buy_price
-    return { ...lot, quantity: lot.remaining_quantity, current_price: currentPrice, market_value, invested, pnl: market_value - invested, pnl_pct: invested > 0 ? (market_value - invested) / invested : 0 }
-  })
-}
-
-export function calculatePositionLots(transactions: Transaction[], currentPrice: number): any[] {
-  return enrichLots(calculatePositionLotsDefinition(transactions), currentPrice)
-}

@@ -96,7 +96,7 @@ describe('multi-currency views on the ledger core', () => {
       trade_currency: 'MEP', trade_quantity: 100, trade_price: 100, trade_commission: 0, fx_mep: 1000, fx_ccl: 1250,
     }
     const schedules = new Map([['YM34D', [{ date: '2026-06-02', ren: 1, amo: 25 }]]])
-    const state = ledgerNowFrom({ trades: [{ ...buy, created_at: buy.created_at! }], movements: [], overrides: [] }, schedules, '2026-10-22')
+    const state = ledgerNowFrom({ trades: [{ ...buy, created_at: buy.created_at! }], movements: [], overrides: [], splits: new Map() }, schedules, '2026-10-22')
     expect(state.cash).toBe(2600) // coupon 100 + amortization 2500, USD-MEP
 
     const v = views([buy], {
