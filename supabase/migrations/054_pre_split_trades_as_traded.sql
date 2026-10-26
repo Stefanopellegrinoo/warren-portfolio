@@ -18,8 +18,9 @@
 --
 -- SAFETY: the nine rows are copied to backup.transactions_20261026 first, in the same
 -- transaction. Each row is updated only while it still holds its split-adjusted price,
--- and anything but nine updated rows aborts the whole migration, so a second run
--- changes nothing.
+-- and a partial conversion (1 to 8 rows) aborts the whole migration; a second run fails
+-- on the existing backup and changes nothing. A database without this account (a local
+-- reset, CI) converts none: a NOTICE, not an error.
 -- Rollback: UPDATE public.transactions t SET quantity = b.quantity, price = b.price,
 --   trade_quantity = b.trade_quantity, trade_price = b.trade_price
 --   FROM backup.transactions_20261026 b WHERE t.id = b.id;
@@ -64,7 +65,9 @@ BEGIN
     AND t.price = f.adjusted_price;
 
   GET DIAGNOSTICS v_updated = ROW_COUNT;
-  IF v_updated <> 9 THEN
+  IF v_updated = 0 THEN
+    RAISE NOTICE '054: none of the nine rows to convert here, nothing changed';
+  ELSIF v_updated <> 9 THEN
     RAISE EXCEPTION '054: expected to convert 9 rows, converted %: nothing was changed', v_updated;
   END IF;
 END $$;

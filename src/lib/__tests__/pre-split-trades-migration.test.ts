@@ -25,8 +25,8 @@ describe('054_pre_split_trades_as_traded.sql', () => {
     expect(update).toMatch(/AND t\.price = f\.adjusted_price/)
   })
 
-  it('aborts unless exactly nine rows were converted, in one transaction', () => {
-    expect(update).toMatch(/IF v_updated <> 9 THEN RAISE EXCEPTION/)
+  it('aborts on a partial conversion, in one transaction; converting none is a notice', () => {
+    expect(update).toMatch(/IF v_updated = 0 THEN RAISE NOTICE '[^']+'; ELSIF v_updated <> 9 THEN RAISE EXCEPTION/)
     expect(sql.trim().startsWith('BEGIN;')).toBe(true)
     expect(sql.trim().endsWith('COMMIT;')).toBe(true)
   })
