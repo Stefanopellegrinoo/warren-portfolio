@@ -47,3 +47,14 @@ export function portfolioDayChangePct(positions: { market_value?: number; day_ch
   }
   return value > 0 ? weighted / value : null
 }
+
+/**
+ * The % a series moved from the first bar in sight (`from`, or its first bar) to the bar pointed at
+ * (`at`, or its last bar): what the % scale reads for it. Null when there is nothing to read.
+ */
+export function pctFrom(points: { time: number; value: number }[], from: number | null, at: number | null): number | null {
+  const base = points.find((p) => from === null || p.time >= from)
+  const target = at === null ? points.at(-1) : points.findLast((p) => p.time <= at)
+  if (!base || !target || target.time < base.time || !(base.value > 0)) return null
+  return (target.value / base.value - 1) * 100
+}

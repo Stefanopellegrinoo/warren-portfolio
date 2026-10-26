@@ -8,6 +8,7 @@ import {
 	HistogramSeries,
 	LineSeries,
 	LineStyle,
+	PriceScaleMode,
 	TickMarkType,
 	createChart,
 	createSeriesMarkers,
@@ -22,7 +23,7 @@ import {
 } from "lightweight-charts";
 import { DrawingManager, type Drawing } from "lightweight-charts-drawing";
 import { ChevronDown, Eye, EyeOff, Settings2, X } from "lucide-react";
-import { useChartStore, type IndicatorKey } from "@/lib/store/chart-store";
+import { MAX_COMPARE, useChartStore, type IndicatorKey } from "@/lib/store/chart-store";
 import { INDICATOR_ORDER, INDICATOR_SPECS, type IndicatorLine } from "@/lib/chart/indicator-specs";
 import { BandFill, effectiveConfig, fillLook, levelLooks, lineLook, seriesPoints } from "@/lib/chart/indicator-style";
 import { INDICATOR_STYLE_PARTS, type ChartPreferences } from "@/lib/chart/preferences-schema";
@@ -32,7 +33,8 @@ import { touchDrawing } from "@/lib/chart/touch-drawing";
 import { onTap, selectBeforeMove } from "@/lib/chart/select-before-move";
 import { applyRememberedStyles } from "@/lib/chart/remembered-style";
 import { tradeMarkers } from "@/lib/chart/trade-markers";
-import { PORTFOLIO_SERIES, seriesLabel } from "@/lib/compare-series";
+import { PORTFOLIO_SERIES, isArsSymbol, seriesLabel } from "@/lib/compare-series";
+import { COMPARE_TIMEFRAMES, alignToBars, pctFrom, toUsdCandles } from "@/lib/chart/compare";
 import type { Candle, Timeframe } from "@/lib/binance/types";
 import { cn, formatNumber } from "@/lib/utils";
 import { useCandles } from "./useCandles";
@@ -45,6 +47,8 @@ import { useChartPreferences } from "./useChartPreferences";
 import { AlertSheet } from "./AlertSheet";
 import { useTradeMarkers } from "./useTradeMarkers";
 import { TradeCard, TradeSheet } from "./TradeMarkers";
+import { useCompareSeries } from "./useCompareSeries";
+import { CompareSheet } from "./CompareSheet";
 
 const TZ = "America/Argentina/Buenos_Aires";
 const INTRADAY: Timeframe[] = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h"];
@@ -66,6 +70,9 @@ const roundPrice = (p: number) => Number(p.toFixed(priceDecimals(p)));
 const PHONE = "(max-width: 819px)";
 const asTime = (t: number) => t as UTCTimestamp;
 /** What the main series draws of a bar: the candle, or for a line (Mi cartera) its close. */
+// One color per compared asset, in the order they were chosen; apart from the candles' green and red.
+const COMPARE_COLORS = ["#f59e0b", "#8b5cf6", "#06b6d4", "#ec4899", "#84cc16"];
+const NONE: string[] = [];
 const pointOf = (line: boolean, c: Candle) => (line ? { time: asTime(c.time), value: c.close } : { ...c, time: asTime(c.time) });
 const PRICE_FORMAT = { type: "custom" as const, formatter: priceText, minMove: 0.0001 };
 const ALERT_TITLES = { active: "Alerta", triggered: "Disparada", unavailable: "No se puede revisar" };
@@ -235,6 +242,32 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 
 	const data = useCandles(symbol, timeframe);
 	const last = data.candles.at(-1) ?? null;
+
+	// Comparing (S3): the assets chosen, minus the chart itself, drawn on daily charts and up only.
+	const compareSymbols = useChartStore((s) => s.compareSymbols);
+	const setCompareSymbols = useChartStore((s) => s.setCompareSymbols);
+	const others = useMemo(() => compareSymbols.filter((s) => s !== symbol), [compareSymbols, symbol]);
+	const daily = COMPARE_TIMEFRAMES.includes(timeframe);
+	const comparing = daily ? others : NONE;
+	// Everything compared is in dollars: a peso chart too, while it is compared.
+	const usd = comparing.length > 0 && isArsSymbol(symbol);
+	const compared = useCompareSeries(comparing, usd);
+	const drawn = useMemo(() => (usd && compared.ccl ? toUsdCandles(data.candles, compared.ccl) : data.candles), [usd, compared.ccl, data.candles]);
+	const aligned = useMemo(() => {
+		const times = drawn.map((c) => c.time);
+		const out = new Map<string, { time: number; value: number }[]>();
+		for (const s of comparing) {
+			const r = compared.series[s];
+			if (r && "points" in r) out.set(s, alignToBars(times, r.points));
+		}
+		return out;
+	}, [comparing, compared.series, drawn]);
+	const compareLinesRef = useRef(new Map<string, ISeriesApi<"Line">>());
+	const percentRef = useRef(false);
+	const drawnUsdRef = useRef(false);
+	const [compareOpen, setCompareOpen] = useState(false);
+	// The first day in sight: where every % starts.
+	const [visibleFrom, setVisibleFrom] = useState<number | null>(null);
 	const drawingsStatus = useDrawings(manager, symbol);
 	const trades = useTradeMarkers(symbol, data.candles, showTrades);
 	const { alerts, create, save, move, rearm, remove } = useChartAlerts(symbol, last?.close ?? null);
@@ -302,8 +335,10 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			markersRef.current = null;
 			indicatorsRef.current = { signature: "", list: [] };
 			alertLinesRef.current.clear();
-			// The next chart gets every bar drawn and fitted again.
+			// The next chart gets every bar drawn and fitted again, with its own compared lines.
 			fittedRef.current = "";
+			compareLinesRef.current.clear();
+			percentRef.current = false;
 			setManager(null);
 		};
 	}, [ready, line]);
@@ -332,10 +367,12 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		const key = `${symbol}:${timeframe}`;
 		// Live bars on top of the bars already drawn; a new chart draws them all.
 		const set = series as ISeriesApi<SeriesType>;
-		if (data.change.kind === "update" && fittedRef.current === key) {
+		if (data.change.kind === "update" && fittedRef.current === key && !usd && !drawnUsdRef.current) {
 			data.change.bars.forEach((b) => set.update(pointOf(line, b)));
 		} else {
-			set.setData(data.candles.map((c) => pointOf(line, c)));
+			// A peso chart in dollars is redrawn whole: its live bars arrive in pesos.
+			drawnUsdRef.current = usd;
+			set.setData(drawn.map((c) => pointOf(line, c)));
 			if (fittedRef.current !== key) {
 				fittedRef.current = key;
 				const n = data.candles.length;
@@ -346,7 +383,51 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			}
 		}
 		manager?.setInterval(timeframe);
-	}, [data.status, data.candles, data.change, symbol, timeframe, manager, line]);
+	}, [data.status, data.candles, data.change, symbol, timeframe, manager, line, usd, drawn]);
+
+	// The compared lines on the chart's own bars, and the scale in % while there are any.
+	useEffect(() => {
+		const chart = chartRef.current;
+		const main = seriesRef.current;
+		if (!chart || !main) return;
+		const lines = compareLinesRef.current;
+		for (const [s, l] of lines) {
+			if (aligned.has(s)) continue;
+			chart.removeSeries(l);
+			lines.delete(s);
+		}
+		for (const [s, points] of aligned) {
+			let l = lines.get(s);
+			if (!l) {
+				l = chart.addSeries(LineSeries, { lineWidth: 2, priceLineVisible: false, lastValueVisible: true, priceFormat: PRICE_FORMAT });
+				lines.set(s, l);
+			}
+			l.applyOptions({ color: COMPARE_COLORS[comparing.indexOf(s) % COMPARE_COLORS.length] });
+			l.setData(points.map((p) => ({ time: asTime(p.time), value: p.value })));
+		}
+		const percent = comparing.length > 0;
+		if (percent !== percentRef.current) {
+			percentRef.current = percent;
+			main.priceScale().applyOptions({ mode: percent ? PriceScaleMode.Percentage : PriceScaleMode.Normal });
+		}
+	}, [aligned, comparing, manager]);
+
+	// While comparing, the legend reads every % from the first day in sight.
+	const percentMode = comparing.length > 0;
+	useEffect(() => {
+		const chart = chartRef.current;
+		if (!chart || !percentMode) return;
+		const scale = chart.timeScale();
+		const onRange = (r: { from: Time } | null) => setVisibleFrom(r ? (r.from as number) : null);
+		onRange(scale.getVisibleRange());
+		scale.subscribeVisibleTimeRangeChange(onRange);
+		return () => scale.unsubscribeVisibleTimeRangeChange(onRange);
+	}, [manager, percentMode]);
+
+	// Mi cartera opens against the market when nothing is compared yet.
+	useEffect(() => {
+		if (symbol === PORTFOLIO_SERIES && useChartStore.getState().compareSymbols.length === 0) setCompareSymbols(["SPY"]);
+	}, [symbol, setCompareSymbols]);
 
 	// The user's buys and sells, after the candles they sit on.
 	useEffect(() => {
@@ -545,9 +626,20 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	};
 	const sheetAlert = sheet?.id ? alerts.find((a) => a.id === sheet.id) : undefined;
 
-	const shown = hover ?? last;
-	const prevClose = data.candles.at(-2)?.close;
-	const change = shown && prevClose && shown === last ? (shown.close - prevClose) / prevClose : shown ? (shown.close - shown.open) / shown.open : null;
+	const drawnLast = drawn.at(-1) ?? null;
+	const shown = hover ?? drawnLast;
+	const prevClose = drawn.at(-2)?.close;
+	const change = shown && prevClose && shown === drawnLast ? (shown.close - prevClose) / prevClose : shown ? (shown.close - shown.open) / shown.open : null;
+	const at = hover?.time ?? null;
+	const compareRows = percentMode
+		? [
+				{ symbol, color: line ? theme?.accent : theme?.ink, pct: pctFrom(drawn.map((c) => ({ time: c.time, value: c.close })), visibleFrom, at), main: true, missing: false },
+				...comparing.map((s, i) => {
+					const points = aligned.get(s);
+					return { symbol: s, color: COMPARE_COLORS[i % COMPARE_COLORS.length], pct: points ? pctFrom(points, visibleFrom, at) : null, main: false, missing: compared.status === "ready" && !points };
+				}),
+			]
+		: [];
 	const selected: ChartAlert | undefined = selectedAlert ? alerts.find((a) => a.id === selectedAlert.id) : undefined;
 
 	return (
@@ -572,7 +664,8 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 
 				<div data-chart-legend className="pointer-events-none absolute left-3 top-2 z-10 flex max-w-[calc(100%-5rem)] flex-col gap-1 text-[13px]">
 					<div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 tabular-nums">
-						{shown && (
+						{shown && line && <span className="text-ink-3">Valor <span className="text-ink">{priceText(shown.close)}</span></span>}
+						{shown && !line && (
 							<>
 								<span className="text-ink-3">Ap <span className="text-ink">{priceText(shown.open)}</span></span>
 								<span className="text-ink-3">Máx <span className="text-ink">{priceText(shown.high)}</span></span>
@@ -584,6 +677,29 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 							</>
 						)}
 					</div>
+					{compareRows.map((r) => (
+						<div key={r.symbol} className="pointer-events-auto flex items-center gap-1.5 tabular-nums text-ink-2">
+							<span aria-hidden className="h-0.5 w-3 rounded" style={{ background: r.color }} />
+							<span className="text-ink">{seriesLabel(r.symbol)}</span>
+							{r.missing ? (
+								<span className="text-ink-3">Sin datos</span>
+							) : (
+								r.pct !== null && <span className={r.pct >= 0 ? "text-ok" : "text-danger"}>{formatNumber(r.pct, { sign: true })} %</span>
+							)}
+							{!r.main && (
+								<button type="button" aria-label={`Quitar ${seriesLabel(r.symbol)} de la comparación`} title="Quitar" onClick={() => setCompareSymbols(compareSymbols.filter((s) => s !== r.symbol))} className="grid h-6 w-6 place-items-center rounded text-ink-3 hover:bg-hover hover:text-ink max-[819px]:h-8 max-[819px]:w-8">
+									<X className="h-3.5 w-3.5" aria-hidden />
+								</button>
+							)}
+						</div>
+					))}
+					{percentMode && compared.status === "error" && <p className="text-ink-3">No se pudieron cargar las comparaciones.</p>}
+					{!daily && others.length > 0 && <p className="text-ink-3">Las comparaciones se ven en diario, semanal o mensual</p>}
+					{daily && others.length < MAX_COMPARE && (
+						<button type="button" onClick={() => setCompareOpen(true)} className="pointer-events-auto inline-flex w-fit items-center rounded px-1 text-ink-3 hover:bg-hover hover:text-ink max-[819px]:min-h-8">
+							+ Comparar
+						</button>
+					)}
 					{enabled.length > 0 && (
 						<button
 							type="button"
@@ -690,6 +806,8 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 						onRearm={() => sheet.id && rearm(sheet.id)}
 					/>
 				)}
+
+				{compareOpen && <CompareSheet open onOpenChange={setCompareOpen} main={symbol} />}
 
 				{textEdit && (
 					<input

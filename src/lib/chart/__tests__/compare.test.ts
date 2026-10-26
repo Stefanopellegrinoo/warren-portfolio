@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { COMPARE_TIMEFRAMES, alignToBars, toUsdCandles, portfolioDayChangePct } from '../compare'
+import { COMPARE_TIMEFRAMES, alignToBars, toUsdCandles, portfolioDayChangePct, pctFrom } from '../compare'
 import { toChartTime } from '../timeframes'
 
 const t = (day: string) => toChartTime(day)
@@ -57,5 +57,22 @@ describe('portfolioDayChangePct', () => {
 
   it('is null with nothing held', () => {
     expect(portfolioDayChangePct([])).toBeNull()
+  })
+})
+
+describe('pctFrom', () => {
+  const points = [{ time: 10, value: 100 }, { time: 20, value: 110 }, { time: 30, value: 121 }]
+
+  it('is the change from the first bar in sight to the bar pointed at', () => {
+    expect(pctFrom(points, 20, 30)).toBeCloseTo(10)
+  })
+
+  it('without a pointer it reads the last bar; without a range, from the first', () => {
+    expect(pctFrom(points, null, null)).toBeCloseTo(21)
+  })
+
+  it('a pointer before the first bar in sight, or no points, gives nothing', () => {
+    expect(pctFrom(points, 20, 10)).toBeNull()
+    expect(pctFrom([], null, null)).toBeNull()
   })
 })
