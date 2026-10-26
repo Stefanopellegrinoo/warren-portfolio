@@ -713,22 +713,27 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 							</>
 						)}
 					</div>
-					{compareRows.map((r) => (
-						<div key={r.symbol} className="pointer-events-auto flex w-fit items-center gap-1.5 rounded bg-canvas px-1 tabular-nums text-ink-2">
-							<span aria-hidden className="h-0.5 w-3 rounded" style={{ background: r.color }} />
-							<span className="text-ink">{seriesLabel(r.symbol)}</span>
-							{r.missing ? (
-								<span className="text-ink-3">Sin datos</span>
-							) : (
-								r.pct !== null && <span className={r.pct >= 0 ? "text-ok" : "text-danger"}>{formatNumber(r.pct, { sign: true })} %</span>
-							)}
-							{!r.main && (
-								<button type="button" aria-label={`Quitar ${seriesLabel(r.symbol)} de la comparación`} title="Quitar" onClick={() => setCompareSymbols(compareSymbols.filter((s) => s !== r.symbol))} className="grid h-6 w-6 place-items-center rounded text-ink-3 hover:bg-hover hover:text-ink max-[819px]:h-8 max-[819px]:w-8">
-									<X className="h-3.5 w-3.5" aria-hidden />
-								</button>
-							)}
+					{/* Chips that wrap, so on a phone three comparisons take two lines, not three. */}
+					{compareRows.length > 0 && (
+						<div className="flex flex-wrap gap-1">
+							{compareRows.map((r) => (
+								<div key={r.symbol} className="pointer-events-auto flex w-fit items-center gap-1.5 rounded bg-canvas px-1 tabular-nums text-ink-2">
+									<span aria-hidden className="h-0.5 w-3 rounded" style={{ background: r.color }} />
+									<span className="text-ink">{seriesLabel(r.symbol)}</span>
+									{r.missing ? (
+										<span className="text-ink-3">Sin datos</span>
+									) : (
+										r.pct !== null && <span className={r.pct >= 0 ? "text-ok" : "text-danger"}>{formatNumber(r.pct, { sign: true })} %</span>
+									)}
+									{!r.main && (
+										<button type="button" aria-label={`Quitar ${seriesLabel(r.symbol)} de la comparación`} title="Quitar" onClick={() => setCompareSymbols(compareSymbols.filter((s) => s !== r.symbol))} className="grid h-6 w-6 place-items-center rounded text-ink-3 hover:bg-hover hover:text-ink max-[819px]:h-7 max-[819px]:w-7">
+											<X className="h-3.5 w-3.5" aria-hidden />
+										</button>
+									)}
+								</div>
+							))}
 						</div>
-					))}
+					)}
 					{comparingNow && (
 						<div role="group" aria-label="Comparar desde" className="pointer-events-auto flex w-fit flex-wrap items-center gap-0.5 rounded bg-canvas p-0.5 text-[12px] tabular-nums">
 							{COMPARE_RANGES.map((r) => (
@@ -737,7 +742,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 									type="button"
 									aria-pressed={r === compareRange}
 									onClick={() => setCompareRange(r)}
-									className={cn("rounded px-1.5 py-0.5 text-ink-3 hover:bg-hover hover:text-ink max-[819px]:min-h-8 max-[819px]:px-2", r === compareRange && "bg-accent-soft font-medium text-accent-ink")}
+									className={cn("rounded px-1.5 py-0.5 text-ink-3 hover:bg-hover hover:text-ink max-[819px]:min-h-7", r === compareRange && "bg-accent-soft font-medium text-accent-ink")}
 								>
 									{r}
 								</button>
