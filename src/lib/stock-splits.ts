@@ -21,7 +21,7 @@ export type SplitsByTicker = Map<string, SplitEvent[]>
 interface SplitRow { ticker: string; date: string; numerator: number | string; denominator: number | string }
 
 /** Every row of `table`, ordered on every page. A page may hold fewer rows than asked (PostgREST's row cap), so only an empty page ends. */
-export async function readAll(supabase: SupabaseClient, table: string, columns: string, orderBy: string[]): Promise<any[]> {
+export async function readTable(supabase: SupabaseClient, table: string, columns: string, orderBy: string[]): Promise<any[]> {
   const rows: any[] = []
   for (let from = 0; ; ) {
     let q: any = supabase.from(table).select(columns)
@@ -38,7 +38,7 @@ export async function readAll(supabase: SupabaseClient, table: string, columns: 
 export async function loadSplits(supabase: SupabaseClient = createServiceClient()): Promise<SplitsByTicker> {
   let rows = await getCachedRoute<SplitRow[]>(SPLITS_KEY)
   if (!rows) {
-    rows = (await readAll(supabase, 'stock_splits', 'ticker, date, numerator, denominator', ['ticker', 'date'])) as SplitRow[]
+    rows = (await readTable(supabase, 'stock_splits', 'ticker, date, numerator, denominator', ['ticker', 'date'])) as SplitRow[]
     await cacheRoute(SPLITS_KEY, rows, SPLITS_TTL)
   }
   const out: SplitsByTicker = new Map()

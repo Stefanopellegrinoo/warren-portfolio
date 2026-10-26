@@ -126,7 +126,7 @@ export function toPositions(userId: string, holdings: Holding[], kind: AssetKind
  * dates that sale from the first open. Adding openDate and price to Realized (ledger-core)
  * removes this glue.
  */
-export function closedTradesOf(userId: string, trades: LedgerTrade[], realized: Realized[], splits: SplitsByTicker = new Map()): ClosedTrade[] {
+export function closedTradesOf(userId: string, trades: LedgerTrade[], realized: Realized[], splits: SplitsByTicker): ClosedTrade[] {
   return realized.map((r, i) => {
     const own = trades.filter(t => norm(t.ticker) === r.ticker)
     const open = ledgerAt(own, [], addDays(r.date, -1), { splits }).holdings[0]?.firstBought ?? r.date

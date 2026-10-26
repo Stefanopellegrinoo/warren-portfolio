@@ -106,7 +106,7 @@ describe('closedTradesOf', () => {
       { ticker: 'AAPL', assetType: 'STOCK' as const, date: '2026-02-03', quantity: 4, invested: 360, proceeds: 380, pnl: 20 },
     ]
 
-    const closed = closedTradesOf('u1', trades, realized)
+    const closed = closedTradesOf('u1', trades, realized, new Map())
 
     expect(closed.map(c => [c.open_date, c.close_date, c.close_price])).toEqual([
       ['2026-01-05', '2026-01-10', 120],
