@@ -14,7 +14,7 @@ const onsSelect = vi.fn(async (): Promise<{ data: unknown; error: unknown }> => 
 vi.mock('bullmq', () => ({ Worker: class { constructor(_q: string, fn: typeof processor) { processor = fn } on() {} } }))
 vi.mock('../queue', () => ({
   PRICE_QUEUE_NAME: 'q', PRICE_REPEAT_JOB_NAME: 'r', NIGHTLY_JOB_NAME: 's', TICKER_AUDIT_JOB_NAME: 't', ON_TERMS_JOB_NAME: 'o', FX_RATES_JOB_NAME: 'fx',
-  ON_PRICES_PERSIST_JOB_NAME: 'on-prices-persist',
+  ON_PRICES_PERSIST_JOB_NAME: 'on-prices-persist', SPLITS_INGEST_JOB_NAME: 'splits',
 }))
 vi.mock('../yahoo-finance', () => ({
   fetchQuotesFromYahoo: vi.fn(async () => new Map()),

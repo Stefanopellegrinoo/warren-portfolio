@@ -28,6 +28,7 @@ export const NIGHTLY_JOB_NAME = 'daily-snapshot'
 export const TICKER_AUDIT_JOB_NAME = 'ticker-audit'
 export const ON_TERMS_JOB_NAME = 'on-terms-ingest'
 export const FX_RATES_JOB_NAME = 'fx-rates-ingest'
+export const SPLITS_INGEST_JOB_NAME = 'splits-ingest'
 export const ON_PRICES_PERSIST_JOB_NAME = 'on-prices-persist'
 
 /**
@@ -268,4 +269,29 @@ export async function scheduleFxRatesIngestJob(pattern = '45 23 * * 1-5') {
   await queue.add(FX_RATES_JOB_NAME, {}, { removeOnComplete: true, removeOnFail: { age: 24 * 3600 } })
 
   console.log(`[Queue] FX rates ingest scheduled (${pattern} UTC) and queued once now`)
+}
+
+/**
+ * Schedule the stock splits ingest (odd/tasks/split-aware-ledger.md T2) at 12:30 and 20:30 UTC
+ * Mon–Fri: before the US open, so a split dated today is stored before its first post-split
+ * quote, and after the close. Queued once now as well, so a deploy fills an empty table.
+ */
+export async function scheduleSplitsIngestJob(pattern = '30 12,20 * * 1-5') {
+  const queue = getPriceQueue()
+
+  const repeatable = await queue.getRepeatableJobs()
+  for (const job of repeatable) {
+    if (job.name === SPLITS_INGEST_JOB_NAME) {
+      await queue.removeRepeatableByKey(job.key)
+    }
+  }
+
+  await queue.add(SPLITS_INGEST_JOB_NAME, {}, {
+    repeat: { pattern },
+    removeOnComplete: true,
+    removeOnFail: { age: 24 * 3600 },
+  })
+  await queue.add(SPLITS_INGEST_JOB_NAME, {}, { removeOnComplete: true, removeOnFail: { age: 24 * 3600 } })
+
+  console.log(`[Queue] Stock splits ingest scheduled (${pattern} UTC) and queued once now`)
 }
