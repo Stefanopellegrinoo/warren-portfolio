@@ -31,7 +31,8 @@ export type LedgerRow = LedgerTrade & { id?: string }
 
 const PAGE = 1000
 const COLUMNS = 'id, ticker, operation, quantity, price, commission, date, asset_type, created_at'
-const num = (n: number) => String(Number(n.toFixed(6)))
+/** A quantity in a user-facing message: up to 6 decimals, no trailing zeros. */
+export const num = (n: number) => String(Number(n.toFixed(6)))
 
 export class OversellError extends Error {
   /** Read by every route's `status === 400` branch. */
