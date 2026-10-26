@@ -14,6 +14,9 @@
  *   conversion rounding: 114.67 bought, 2 × 57.333333 sold), is closed; the next buy starts
  *   a new cost and first-bought date.
  * - Routes by asset_type ('ON' vs everything else), never by ticker suffix.
+ * - Trades are stored as traded (odd/tasks/split-aware-ledger.md S2). A stock split
+ *   applies at the start of its date, before that day's trades: the quantity is
+ *   multiplied by numerator/denominator and the cost stays, so the average divides.
  * - ON payments (odd/tasks/nucleo-ledger.md T3.1) come from the bond schedule, per 100
  *   original VN: the holder at the close of the business day before the payment date is
  *   paid quantity × (ren + amo) (quantity is VN/100). An amortization is a return of
@@ -26,6 +29,7 @@
 import { cashDelta } from './cash-signs'
 import { addBusinessDays } from './ar-calendar'
 import type { FlowRow } from './on-flow-history'
+import type { SplitEvent } from './historical-prices'
 
 const DUST = 0.0001
 const RESIDUE = 1e-4
@@ -95,6 +99,8 @@ export interface LedgerOptions {
   /** ON ticker (D line, upper case) → its payment schedule. */
   schedules?: Map<string, FlowRow[]>
   overrides?: FlowOverride[]
+  /** Ledger ticker (upper case) → its stock splits. */
+  splits?: Map<string, SplitEvent[]>
 }
 
 export interface LedgerState {
@@ -113,6 +119,7 @@ type PayAmount = { per100: number } | { fixed: number }
 type Event =
   | { kind: 'trade'; day: string; created: string; rank: number; t: LedgerTrade }
   | { kind: 'pay'; day: string; created: string; rank: number; ticker: string; date: string; coupon: PayAmount; amortization: PayAmount; residualBefore: number }
+  | { kind: 'split'; day: string; created: string; rank: number; ticker: string; factor: number }
 
 const LAST = '\uffff' // a payment is settled after every trade of its record day
 
@@ -162,6 +169,10 @@ export function ledgerAt(trades: LedgerTrade[], movements: LedgerMovement[], dat
       .filter(t => dayOf(t.date) <= cutoff)
       .map((t): Event => ({ kind: 'trade', day: dayOf(t.date), created: String(t.created_at ?? ''), rank: t.operation === 'COMPRA' ? 0 : 1, t })),
     ...paymentEvents(options.schedules ?? new Map(), options.overrides ?? [], cutoff),
+    // Empty insertion time and rank -1: a split goes before every trade of its day.
+    ...Array.from(options.splits ?? new Map<string, SplitEvent[]>()).flatMap(([ticker, splits]) => splits
+      .filter(sp => sp.date <= cutoff)
+      .map((sp): Event => ({ kind: 'split', day: sp.date, created: '', rank: -1, ticker: ticker.trim().toUpperCase(), factor: sp.numerator / sp.denominator }))),
   ].sort((a, b) => a.day.localeCompare(b.day) || a.created.localeCompare(b.created) || a.rank - b.rank)
 
   const pay = (ticker: string, payDate: string, kind: PaymentKind, computed: number, fromUser: boolean): number => {
@@ -175,6 +186,14 @@ export function ledgerAt(trades: LedgerTrade[], movements: LedgerMovement[], dat
   const amountOf = (a: PayAmount, quantity: number) => ('fixed' in a ? a.fixed : quantity * a.per100)
 
   for (const e of events) {
+    if (e.kind === 'split') {
+      const h = open.get(e.ticker)
+      if (!h || !(e.factor > 0) || !Number.isFinite(e.factor)) continue
+      h.quantity *= e.factor
+      h.avgCost = h.costBasis / h.quantity
+      peaks.set(h, (peaks.get(h) ?? 0) * e.factor)
+      continue
+    }
     if (e.kind === 'pay') {
       const h = open.get(e.ticker)
       if (!h) continue
