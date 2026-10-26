@@ -10,8 +10,10 @@ import {
 	LineStyle,
 	TickMarkType,
 	createChart,
+	createSeriesMarkers,
 	type IChartApi,
 	type IPriceLine,
+	type ISeriesMarkersPluginApi,
 	type ISeriesApi,
 	type MouseEventParams,
 	type SeriesType,
@@ -29,6 +31,7 @@ import { indicatorOf, isPriceValue, lineIdOf } from "@/lib/chart/alert-condition
 import { touchDrawing } from "@/lib/chart/touch-drawing";
 import { onTap, selectBeforeMove } from "@/lib/chart/select-before-move";
 import { applyRememberedStyles } from "@/lib/chart/remembered-style";
+import { tradeMarkers } from "@/lib/chart/trade-markers";
 import type { Candle, Timeframe } from "@/lib/binance/types";
 import { cn, formatNumber } from "@/lib/utils";
 import { useCandles } from "./useCandles";
@@ -39,6 +42,8 @@ import { DrawingTools } from "./DrawingTools";
 import { DrawingActions } from "./DrawingActions";
 import { useChartPreferences } from "./useChartPreferences";
 import { AlertSheet } from "./AlertSheet";
+import { useTradeMarkers } from "./useTradeMarkers";
+import { TradeCard } from "./TradeMarkers";
 
 const TZ = "America/Argentina/Buenos_Aires";
 const INTRADAY: Timeframe[] = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h"];
@@ -47,6 +52,8 @@ const DRAG_THRESHOLD_PX = 3;
 // A finger covers more than a mouse pointer: the same sizes as the drawings (scripts/patch-drawing-lib.mjs).
 const TOUCH_HIT_PX = 14;
 const TOUCH_DRAG_PX = 8;
+// How far from an arrow's bar a tap still opens its card: a 44px finger target, a mouse's few px.
+const TRADE_SLOP_PX = { touch: 22, mouse: 6 };
 const LEGEND_OPEN_MAX = 3;
 const TEXT_EDITOR_PX = 224;
 // The text editor stays inside the chart however narrow the screen or close to the edge the text is.
@@ -186,12 +193,18 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	const indicatorsRef = useRef<{ signature: string; list: IndicatorSeries[] }>({ signature: "", list: [] });
 	const alertLinesRef = useRef(new Map<string, IPriceLine>());
 	const fittedRef = useRef("");
+	const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+	// The last press on the chart: whether something took it (an armed tool, the alert placement,
+	// an alert line), for the click the chart reports after it.
+	const pressRef = useRef({ taken: false, touch: false });
 	const [manager, setManager] = useState<DrawingManager | null>(null);
 	const [hover, setHover] = useState<Candle | null>(null);
 	const [alertMode, setAlertMode] = useState(false);
 	const [selectedAlert, setSelectedAlert] = useState<{ id: string; y: number } | null>(null);
 	// The alert sheet (S6): a new alert (id null) or an existing one.
 	const [sheet, setSheet] = useState<{ id: string | null } | null>(null);
+	// The operations card of a bar with arrows: its bar and where it was tapped.
+	const [tradeCard, setTradeCard] = useState<{ chart: string; time: number; x: number; y: number; above: boolean } | null>(null);
 	const [textEdit, setTextEdit] = useState<{ drawing: Drawing; x: number; y: number } | null>(null);
 	const [legendOpen, setLegendOpen] = useState(true);
 	// Where the favorites bar floats: over the chart, in its container (S3).
@@ -208,6 +221,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	const toggleHidden = useChartStore((s) => s.toggleHidden);
 	const removeIndicator = useChartStore((s) => s.removeIndicator);
 	const setSettingsTarget = useChartStore((s) => s.setSettingsTarget);
+	const showTrades = useChartStore((s) => s.showTrades);
 	const enabled = useMemo(() => INDICATOR_ORDER.filter((k) => indicators[k]), [indicators]);
 
 	// The indicator list starts folded on phones, or when it is long enough to cover the candles.
@@ -217,6 +231,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	const data = useCandles(symbol, timeframe);
 	const last = data.candles.at(-1) ?? null;
 	const drawingsStatus = useDrawings(manager, symbol);
+	const trades = useTradeMarkers(symbol, data.candles, showTrades);
 	const { alerts, create, save, move, rearm, remove } = useChartAlerts(symbol, last?.close ?? null);
 
 	// The chart, its candle series and the drawing layer: created once.
@@ -226,6 +241,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		if (!ready || !box) return;
 		const chart = createChart(box, { autoSize: true });
 		const series = chart.addSeries(CandlestickSeries, { priceLineVisible: true, priceFormat: PRICE_FORMAT });
+		markersRef.current = createSeriesMarkers(series, []);
 		// Before the drawing layer, so a finger's press reaches it first (its events come later,
 		// once `drawings` exists).
 		const offSelect = selectBeforeMove(chart.chartElement(), () => drawings);
@@ -271,6 +287,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			chart.remove();
 			chartRef.current = null;
 			seriesRef.current = null;
+			markersRef.current = null;
 			indicatorsRef.current = { signature: "", list: [] };
 			alertLinesRef.current.clear();
 			setManager(null);
@@ -312,6 +329,59 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		}
 		manager?.setInterval(timeframe);
 	}, [data.status, data.candles, data.change, symbol, timeframe, manager]);
+
+	// The user's buys and sells, after the candles they sit on.
+	useEffect(() => {
+		markersRef.current?.setMarkers(theme ? tradeMarkers(trades, theme) : []);
+	}, [trades, theme, manager]);
+
+	// A click on (or, with a finger, near) a bar with arrows opens its operations, unless the press
+	// was taken: an armed tool or alert placement, an alert line, a drawing it selected. Any other
+	// click closes them.
+	useEffect(() => {
+		const chart = chartRef.current;
+		const box = boxRef.current;
+		if (!chart || !box || !manager) return;
+		const onClick = (p: MouseEventParams) => {
+			const press = pressRef.current;
+			pressRef.current = { taken: false, touch: false };
+			if (press.taken || manager.tool() !== null || manager.selection().length > 0 || !p.point || p.paneIndex !== 0) {
+				setTradeCard(null);
+				return;
+			}
+			const slop = press.touch ? TRADE_SLOP_PX.touch : TRADE_SLOP_PX.mouse;
+			let best: { time: number; d: number } | null = null;
+			for (const time of trades.keys()) {
+				const x = chart.timeScale().timeToCoordinate(asTime(time));
+				const d = x === null ? Infinity : Math.abs(x - p.point.x);
+				if (d <= slop && (!best || d < best.d)) best = { time, d };
+			}
+			if (p.time !== undefined && trades.has(p.time as number)) best = { time: p.time as number, d: 0 };
+			setTradeCard(best && { chart: `${symbol}:${timeframe}`, time: best.time, x: p.point.x, y: p.point.y, above: p.point.y > box.clientHeight / 2 });
+		};
+		chart.subscribeClick(onClick);
+		return () => chart.unsubscribeClick(onClick);
+	}, [manager, trades, symbol, timeframe]);
+
+	// One thing selected or armed at a time (odd/tasks/chart-customization.md L16): arming a drawing
+	// tool, from the strip, the list or the favorites bar (all through the layer), lets go of the
+	// selected alert and the operations card; so does arming the alert placement, and the drawings too.
+	useEffect(
+		() =>
+			manager?.on("tool", (kind) => {
+				if (!kind) return;
+				setSelectedAlert(null);
+				setTradeCard(null);
+			}),
+		[manager],
+	);
+	const armAlert = (on: boolean) => {
+		setAlertMode(on);
+		if (!on) return;
+		setSelectedAlert(null);
+		setTradeCard(null);
+		manager?.select([]);
+	};
 
 	// Indicators follow the candles and the store.
 	useEffect(() => {
@@ -358,7 +428,9 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	useEffect(() => {
 		// One thing selected at a time: an alert takes the selection from the drawings.
 		const select = (id: string, y: number) => {
+			manager?.setTool(null);
 			manager?.select([]);
+			setTradeCard(null);
 			setSelectedAlert({ id, y });
 		};
 		const box = boxRef.current;
@@ -370,6 +442,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 
 		const onDown = (e: PointerEvent) => {
 			const y = e.clientY - box.getBoundingClientRect().top;
+			pressRef.current = { taken: true, touch: e.pointerType === "touch" };
 			if (alertMode) {
 				const price = series.coordinateToPrice(y);
 				e.stopPropagation();
@@ -380,6 +453,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			if (manager?.tool()) return;
 			const touch = e.pointerType === "touch";
 			const id = hitTestAlert(lines, y, (p) => series.priceToCoordinate(p), touch ? TOUCH_HIT_PX : undefined);
+			pressRef.current.taken = !!id;
 			// A finger only drags the selected alert (odd/tasks/chart-customization.md S1): across
 			// any other line, or off them, it pans the chart, and a tap selects or deselects.
 			if (touch && id !== selectedId) {
@@ -429,6 +503,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			if (e.key === "Escape") {
 				setAlertMode(false);
 				setSelectedAlert(null);
+				setTradeCard(null);
 			}
 		};
 		box.addEventListener("pointerdown", onDown, true);
@@ -462,7 +537,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			<DrawingTools
 				manager={manager}
 				alertMode={alertMode}
-				onAlertMode={setAlertMode}
+				onAlertMode={armAlert}
 				phoneBar={phoneBar}
 				chartArea={area}
 				symbol={symbol}
@@ -563,6 +638,11 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 							Listo
 						</button>
 					</div>
+				)}
+
+				{/* A card is for the bars it was opened on: another symbol or timeframe drops it. */}
+				{tradeCard?.chart === `${symbol}:${timeframe}` && trades.get(tradeCard.time) && (
+					<TradeCard trades={trades.get(tradeCard.time)!} x={tradeCard.x} y={tradeCard.y} above={tradeCard.above} onClose={() => setTradeCard(null)} />
 				)}
 
 				<DrawingActions manager={manager} onEditText={(drawing) => setTextEdit({ drawing, x: 12, y: 56 })} />

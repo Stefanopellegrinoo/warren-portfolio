@@ -78,6 +78,8 @@ interface ChartState {
   watchlist: string[];
   activeWatchlistId: string | null;
   showPortfolioOverlay: boolean;
+  /** The user's buys and sells as arrows on the candles ("Mostrar operaciones"). */
+  showTrades: boolean;
 
   symbolDialogOpen: boolean;
   symbolDialogOnSelect: ((s: string) => void) | null;
@@ -94,6 +96,7 @@ interface ChartState {
   setSymbolDialogOpen: (v: boolean, onSelect?: (s: string) => void) => void;
   setSettingsTarget: (k: IndicatorKey | null) => void;
   togglePortfolioOverlay: () => void;
+  toggleShowTrades: () => void;
   setActiveWatchlistId: (id: string | null) => void;
   watchlistRefreshTick: number;
   bumpWatchlistRefresh: () => void;
@@ -132,6 +135,7 @@ export const useChartStore = create<ChartState>()(
       watchlist: DEFAULT_WATCHLIST,
       activeWatchlistId: null,
       showPortfolioOverlay: true,
+      showTrades: true,
       symbolDialogOpen: false,
       symbolDialogOnSelect: null,
       settingsTarget: null,
@@ -170,6 +174,7 @@ export const useChartStore = create<ChartState>()(
       setSettingsTarget: (settingsTarget) => set({ settingsTarget }),
       togglePortfolioOverlay: () =>
         set((s) => ({ showPortfolioOverlay: !s.showPortfolioOverlay })),
+      toggleShowTrades: () => set((s) => ({ showTrades: !s.showTrades })),
       setActiveWatchlistId: (activeWatchlistId) => set({ activeWatchlistId }),
       bumpWatchlistRefresh: () =>
         set((s) => ({ watchlistRefreshTick: s.watchlistRefreshTick + 1 })),
@@ -185,6 +190,8 @@ export const useChartStore = create<ChartState>()(
         watchlist: s.watchlist,
         activeWatchlistId: s.activeWatchlistId,
         showPortfolioOverlay: s.showPortfolioOverlay,
+        // A state saved before it has none: the merge keeps the default (on), no migration needed.
+        showTrades: s.showTrades,
       }),
     },
   ),
