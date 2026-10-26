@@ -25,7 +25,7 @@ vi.mock('../push', async () => ({
 // Capture the BullMQ processor so the price job can be driven directly
 let processor: (job: unknown) => Promise<void> = async () => {}
 vi.mock('bullmq', () => ({ Worker: class { constructor(_q: string, fn: typeof processor) { processor = fn } on() {} } }))
-vi.mock('../queue', () => ({ PRICE_QUEUE_NAME: 'q', PRICE_REPEAT_JOB_NAME: 'repeat', NIGHTLY_JOB_NAME: 's', TICKER_AUDIT_JOB_NAME: 't', ON_TERMS_JOB_NAME: 'o', FX_RATES_JOB_NAME: 'fx' }))
+vi.mock('../queue', () => ({ ON_PRICES_PERSIST_JOB_NAME: 'on-prices-persist', PRICE_QUEUE_NAME: 'q', PRICE_REPEAT_JOB_NAME: 'repeat', NIGHTLY_JOB_NAME: 's', TICKER_AUDIT_JOB_NAME: 't', ON_TERMS_JOB_NAME: 'o', FX_RATES_JOB_NAME: 'fx' }))
 const mockFetchLkp = vi.fn(async () => new Map())
 const mockFetchYahoo = vi.fn(async () => new Map())
 vi.mock('../yahoo-finance', () => ({

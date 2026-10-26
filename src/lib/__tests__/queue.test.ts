@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { addRefreshSummaryJob, addPriceUpdateJob, addImportJob, QueueUnavailableError, scheduleOnTermsIngestJob, ON_TERMS_JOB_NAME } from '../queue'
+import { addRefreshSummaryJob, addPriceUpdateJob, addImportJob, QueueUnavailableError, scheduleOnTermsIngestJob, ON_TERMS_JOB_NAME, scheduleOnPricesPersistJob, ON_PRICES_PERSIST_JOB_NAME } from '../queue'
 
 process.env.REDIS_URL = 'redis://localhost:6379'
 
@@ -108,5 +108,28 @@ describe('scheduleOnTermsIngestJob', () => {
       {},
       expect.objectContaining({ repeat: { pattern: '30 23 * * 1-5' }, removeOnComplete: true })
     )
+  })
+})
+
+describe('scheduleOnPricesPersistJob', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockEnsureRedisConnected.mockResolvedValue(true)
+  })
+
+  it('adds a weekday 21:15 UTC repeatable (18:15 in Argentina, after the close) and drops only its own previous schedule', async () => {
+    mockGetRepeatableJobs.mockResolvedValueOnce([
+      { name: ON_PRICES_PERSIST_JOB_NAME, key: 'mine' },
+      { name: ON_TERMS_JOB_NAME, key: 'other' },
+    ])
+    await scheduleOnPricesPersistJob()
+    expect(mockRemoveRepeatableByKey).toHaveBeenCalledTimes(1)
+    expect(mockRemoveRepeatableByKey).toHaveBeenCalledWith('mine')
+    expect(mockAdd).toHaveBeenCalledWith(
+      ON_PRICES_PERSIST_JOB_NAME,
+      {},
+      expect.objectContaining({ repeat: { pattern: '15 21 * * 1-5' }, removeOnComplete: true })
+    )
+    expect(mockAdd).toHaveBeenCalledTimes(1)
   })
 })

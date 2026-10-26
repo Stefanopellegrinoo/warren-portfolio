@@ -12,12 +12,14 @@ const mockScheduleFxRatesIngestJob = vi.fn()
 const mockScheduleNightlyJob = vi.fn()
 const mockScheduleTickerAuditJob = vi.fn()
 const mockScheduleOnTermsIngestJob = vi.fn()
+const mockScheduleOnPricesPersistJob = vi.fn()
 vi.mock('../queue', () => ({
   scheduleRepeatingPriceJob: (...args: unknown[]) => mockScheduleRepeatingPriceJob(...args),
   scheduleNightlyJob: (...args: unknown[]) => mockScheduleNightlyJob(...args),
   scheduleTickerAuditJob: (...args: unknown[]) => mockScheduleTickerAuditJob(...args),
   scheduleOnTermsIngestJob: (...args: unknown[]) => mockScheduleOnTermsIngestJob(...args),
   scheduleFxRatesIngestJob: (...args: unknown[]) => mockScheduleFxRatesIngestJob(...args),
+  scheduleOnPricesPersistJob: (...args: unknown[]) => mockScheduleOnPricesPersistJob(...args),
 }))
 
 const mockScheduleSignalsEvaluationJobs = vi.fn()
@@ -40,6 +42,7 @@ describe('ensureRedisAndScheduleJobs', () => {
     mockScheduleNightlyJob.mockResolvedValue(undefined)
     mockScheduleTickerAuditJob.mockResolvedValue(undefined)
     mockScheduleOnTermsIngestJob.mockResolvedValue(undefined)
+    mockScheduleOnPricesPersistJob.mockResolvedValue(undefined)
     mockScheduleSignalsEvaluationJobs.mockResolvedValue(undefined)
   })
 
@@ -62,6 +65,11 @@ describe('ensureRedisAndScheduleJobs', () => {
   it('schedules the nightly ON terms ingest alongside the other jobs', async () => {
     await ensureRedisAndScheduleJobs()
     expect(mockScheduleOnTermsIngestJob).toHaveBeenCalledTimes(1)
+  })
+
+  it('schedules the daily ON price write alongside the other jobs', async () => {
+    await ensureRedisAndScheduleJobs()
+    expect(mockScheduleOnPricesPersistJob).toHaveBeenCalledTimes(1)
   })
 
   it('does not schedule the nightly job when Redis is unreachable', async () => {

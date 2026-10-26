@@ -28,6 +28,7 @@ export const NIGHTLY_JOB_NAME = 'daily-snapshot'
 export const TICKER_AUDIT_JOB_NAME = 'ticker-audit'
 export const ON_TERMS_JOB_NAME = 'on-terms-ingest'
 export const FX_RATES_JOB_NAME = 'fx-rates-ingest'
+export const ON_PRICES_PERSIST_JOB_NAME = 'on-prices-persist'
 
 /**
  * Parse Redis connection URL from REDIS_URL env var
@@ -215,6 +216,30 @@ export async function scheduleOnTermsIngestJob(pattern = '30 23 * * 1-5') {
   })
 
   console.log(`[Queue] ON terms ingest scheduled (${pattern} UTC)`)
+}
+
+/**
+ * Schedule the daily write of the ON prices to the database at 21:15 UTC Mon–Fri
+ * (18:15 in Argentina, after BYMA closes). All day they live in Redis; the database
+ * copy is only their last-resort fallback, so once a day is enough.
+ */
+export async function scheduleOnPricesPersistJob(pattern = '15 21 * * 1-5') {
+  const queue = getPriceQueue()
+
+  const repeatable = await queue.getRepeatableJobs()
+  for (const job of repeatable) {
+    if (job.name === ON_PRICES_PERSIST_JOB_NAME) {
+      await queue.removeRepeatableByKey(job.key)
+    }
+  }
+
+  await queue.add(ON_PRICES_PERSIST_JOB_NAME, {}, {
+    repeat: { pattern },
+    removeOnComplete: true,
+    removeOnFail: { age: 24 * 3600 },
+  })
+
+  console.log(`[Queue] Daily ON price write scheduled (${pattern} UTC)`)
 }
 
 /**
