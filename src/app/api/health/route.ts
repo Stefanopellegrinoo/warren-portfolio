@@ -12,8 +12,12 @@ export const dynamic = 'force-dynamic'
 
 /** How long a probe result is served from memory before re-probing.
  *  Shields Redis/Supabase from rapid repeated hits on this unauthenticated
- *  endpoint (Supabase free tier 429s under load). */
-const HEALTH_CACHE_TTL_MS = 10_000
+ *  endpoint (Supabase free tier 429s under load). A healthy answer is kept five
+ *  minutes: the Docker healthcheck asks every 30 s, and the database is small and
+ *  short of memory, so it should not be asked that often. A degraded one only ten
+ *  seconds, so a recovery shows at once. */
+const HEALTHY_TTL_MS = 5 * 60_000
+const DEGRADED_TTL_MS = 10_000
 
 interface HealthBody {
   status: 'ok' | 'degraded'
@@ -30,10 +34,10 @@ let cached: { at: number; body: HealthBody; status: number } | null = null
 /**
  * GET /api/health — unauthenticated health check for container orchestration.
  * Reports Redis and Supabase connectivity. Used by the Docker healthcheck.
- * The probe result is cached in-module for HEALTH_CACHE_TTL_MS.
+ * The probe result is cached in-module: HEALTHY_TTL_MS when healthy, DEGRADED_TTL_MS when not.
  */
 export async function GET() {
-  if (cached && Date.now() - cached.at < HEALTH_CACHE_TTL_MS) {
+  if (cached && Date.now() - cached.at < (cached.status === 200 ? HEALTHY_TTL_MS : DEGRADED_TTL_MS)) {
     return NextResponse.json(cached.body, { status: cached.status })
   }
 
