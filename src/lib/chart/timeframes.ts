@@ -8,6 +8,8 @@ type KlinesInterval = '15m' | '1h' | '1d' | '1w' | '1mo'
 const OFFERED: Record<DataSource, Timeframe[]> = {
   yahoo: ['15m', '1h', '1d', '1w', '1M'],
   binance: ['1m', '5m', '15m', '1h', '4h', '1d', '1w'],
+  // Mi cartera has one value per day.
+  portfolio: ['1d'],
 }
 
 export function timeframesFor(source: DataSource): Timeframe[] {

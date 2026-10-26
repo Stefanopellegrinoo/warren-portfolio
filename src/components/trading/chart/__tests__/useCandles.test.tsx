@@ -124,3 +124,27 @@ describe('useCandles — quick to show, light to keep live (S4)', () => {
     unmount()
   })
 })
+
+describe('useCandles — Mi cartera', () => {
+  it('loads the portfolio series once, as bars whose every price is its value', async () => {
+    const { calls, unmount } = await render('__portfolio__', () =>
+      Response.json({ series: { __portfolio__: { points: [{ time: '2026-01-02', value: 100 }, { time: '2026-01-05', value: 104.5 }] } } }),
+    )
+
+    expect(calls).toEqual(['/api/compare-series?symbols=__portfolio__'])
+    expect(state.status).toBe('ready')
+    expect(state.candles).toEqual([
+      { time: 1767312000, open: 100, high: 100, low: 100, close: 100, volume: 0 },
+      { time: 1767571200, open: 104.5, high: 104.5, low: 104.5, close: 104.5, volume: 0 },
+    ])
+    unmount()
+  })
+
+  it('a portfolio without history says so', async () => {
+    const { unmount } = await render('__portfolio__', () => Response.json({ series: { __portfolio__: { error: 'no_data' } } }))
+
+    expect(state.status).toBe('error')
+    expect(state.error).toBe('Todavía no hay historia de tu cartera')
+    unmount()
+  })
+})

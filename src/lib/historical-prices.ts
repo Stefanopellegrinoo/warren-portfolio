@@ -14,11 +14,9 @@
  */
 import type { Quote } from '@/types'
 
-export interface DailyBar {
-  /** YYYY-MM-DD */
-  date: string
-  close: number
-}
+// They live in daily-bars.ts, so the chart page can use them without this module's Yahoo fetch.
+import { closeOnOrBefore, type DailyBar } from './daily-bars'
+export { closeOnOrBefore, type DailyBar }
 
 export class HistoricalFetchError extends Error {
   readonly symbol: string
@@ -168,20 +166,6 @@ export function toUsd(bars: DailyBar[], ccl: Map<string, number>): { bars: Daily
   return { bars: out, degraded }
 }
 
-/**
- * The close on `date`, else the most recent close before it.
- *
- * Carries the last price forward across weekends and holidays. Returns null —
- * never 0 — when the series starts after `date`, because a 0 would report a
- * -100% crash for every day before an ETF existed.
- */
-export function closeOnOrBefore(bars: DailyBar[], date: string): number | null {
-  let best: DailyBar | null = null
-  for (const bar of bars) {
-    if (bar.date <= date && (!best || bar.date > best.date)) best = bar
-  }
-  return best ? best.close : null
-}
 
 /** Wraps day-D prices in the Quote shape the valuation expects. */
 export function buildQuoteMap(pricesByTicker: Map<string, number>): Map<string, Quote> {

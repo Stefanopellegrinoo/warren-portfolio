@@ -5,6 +5,7 @@ import { act } from 'react-dom/test-utils'
 import { toast } from 'sonner'
 import { WatchlistSelector } from '../WatchlistSelector'
 import { NO_CONNECTION } from '@/lib/request-errors'
+import { useChartStore } from '@/lib/store/chart-store'
 
 // Node 25 ships a stub localStorage without methods; the persisted store needs a real one.
 vi.hoisted(() => {
@@ -29,5 +30,38 @@ describe('WatchlistSelector', () => {
     await act(async () => { await new Promise(r => setTimeout(r, 0)) })
     expect(toast.error).toHaveBeenCalledWith('No se pudieron cargar las listas', { description: NO_CONNECTION })
     act(() => root.unmount())
+  })
+})
+
+describe('WatchlistSelector — Cartera', () => {
+  async function open() {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ lists: [{ id: 'w1', name: 'Mi lista', item_count: 1 }] })))
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<WatchlistSelector />) })
+    await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+    const trigger = el.querySelector('button')!
+    await act(async () => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    return { el, unmount: () => act(() => root.unmount()) }
+  }
+  const items = () => [...document.querySelectorAll('[role="menuitem"]')]
+
+  it('is the first list, before Lista local, and cannot be renamed or deleted', async () => {
+    const { unmount } = await open()
+
+    expect(items().map((i) => i.textContent?.trim().split(/\s/)[0])).toEqual(['Cartera', 'Lista', 'Mi'])
+    expect(items()[0].querySelector('button')).toBeNull()
+    unmount()
+  })
+
+  it('choosing it makes it the current list, named on the button', async () => {
+    const { el, unmount } = await open()
+
+    await act(async () => { (items()[0] as HTMLElement).click() })
+
+    expect(useChartStore.getState().activeWatchlistId).toBe('__cartera__')
+    expect(el.querySelector('button')!.textContent).toContain('Cartera')
+    unmount()
   })
 })

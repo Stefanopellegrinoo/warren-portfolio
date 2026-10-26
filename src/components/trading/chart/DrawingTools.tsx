@@ -42,6 +42,7 @@ import type { ChartAlert } from "@/lib/chart/alerts";
 import { useChartPreferences } from "./useChartPreferences";
 import { FavoritesBar } from "./FavoritesBar";
 import { AlertMenu } from "./AlertMenu";
+import { PORTFOLIO_SERIES } from "@/lib/compare-series";
 
 interface Tool {
 	kind: ToolKind;
@@ -202,7 +203,7 @@ function PhoneTools({
 	onAlertMode: (on: boolean) => void;
 	onMagnet: () => void;
 	favorites: Favorites;
-	alertMenu: AlertMenuProps;
+	alertMenu: AlertMenuProps | null;
 }) {
 	const [open, setOpen] = useState(false);
 	const armed = tool ? TOOLS.find((t) => t.kind === tool) : undefined;
@@ -264,10 +265,12 @@ function PhoneTools({
 							</div>
 						</PopoverContent>
 					</Popover>
-					<AlertMenu {...alertMenu} side="top" triggerClassName={barButton}>
-						<Bell className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
-						Alerta
-					</AlertMenu>
+					{alertMenu && (
+						<AlertMenu {...alertMenu} side="top" triggerClassName={barButton}>
+							<Bell className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
+							Alerta
+						</AlertMenu>
+					)}
 				</>
 			)}
 		</div>
@@ -297,6 +300,7 @@ export function DrawingTools({
 	symbol = "",
 	alerts = [],
 	onNewAlert = () => {},
+	alertsOff = false,
 	onOpenAlert = () => {},
 }: {
 	manager: DrawingManager | null;
@@ -308,6 +312,8 @@ export function DrawingTools({
 	symbol?: string;
 	alerts?: readonly ChartAlert[];
 	onNewAlert?: () => void;
+	/** No alerts to offer: the chart is drawn in another currency than its alerts. */
+	alertsOff?: boolean;
 	onOpenAlert?: (id: string) => void;
 }) {
 	const [tool, setTool] = useState<DrawingKind | null>(null);
@@ -343,7 +349,8 @@ export function DrawingTools({
 		manager?.setTool(kind);
 	};
 
-	const alertMenu: AlertMenuProps = {
+	// Alerts watch a ticker's price; Mi cartera has none.
+	const alertMenu: AlertMenuProps | null = symbol === PORTFOLIO_SERIES || alertsOff ? null : {
 		symbol,
 		alerts,
 		armed: alertMode,
@@ -394,15 +401,19 @@ export function DrawingTools({
 				</div>
 			))}
 			<Divider />
-			<AlertMenu
-				{...alertMenu}
-				side="right"
-				triggerLabel="Alertas"
-				triggerClassName={cn(toolClass, alertMode && "bg-accent-soft text-accent-ink hover:bg-accent-soft hover:text-accent-ink")}
-			>
-				<Bell className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
-			</AlertMenu>
-			<Divider />
+			{alertMenu && (
+				<>
+					<AlertMenu
+						{...alertMenu}
+						side="right"
+						triggerLabel="Alertas"
+						triggerClassName={cn(toolClass, alertMode && "bg-accent-soft text-accent-ink hover:bg-accent-soft hover:text-accent-ink")}
+					>
+						<Bell className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
+					</AlertMenu>
+					<Divider />
+				</>
+			)}
 			<ToolButton
 				label={magnet ? "Imán activado" : "Imán"}
 				icon={Magnet}

@@ -15,6 +15,8 @@ vi.hoisted(() => {
 })
 
 // lightweight-charts draws on canvas, which jsdom lacks: a recording stand-in.
+// The visible time range, which the library applies lazily after a range is set.
+const getVisibleRange = vi.fn((): { from: number; to: number } | null => null)
 const priceScale = { applyOptions: vi.fn() }
 const series = {
   priceScale: () => priceScale,
@@ -33,7 +35,7 @@ const chart = {
   subscribeCrosshairMove: vi.fn(),
   unsubscribeCrosshairMove: vi.fn(),
   // A bar's x is its time, for the trade card's finger slop.
-  timeScale: () => ({ setVisibleLogicalRange: vi.fn(), timeToCoordinate: (t: number) => t }),
+  timeScale: () => ({ setVisibleLogicalRange: vi.fn(), timeToCoordinate: (t: number) => t, subscribeVisibleTimeRangeChange: vi.fn(), unsubscribeVisibleTimeRangeChange: vi.fn(), getVisibleRange }),
   subscribeClick: vi.fn(),
   unsubscribeClick: vi.fn(),
   panes: vi.fn(() => []),
@@ -47,13 +49,14 @@ vi.mock('lightweight-charts', () => ({
   createChart: vi.fn(() => chart),
   createSeriesMarkers: vi.fn(() => markers),
   CandlestickSeries: {}, HistogramSeries: {}, LineSeries: {},
-  CrosshairMode: { Normal: 0 }, LineStyle: { Solid: 0, Dashed: 2 },
+  CrosshairMode: { Normal: 0 }, LineStyle: { Solid: 0, Dashed: 2 }, PriceScaleMode: { Normal: 0, Logarithmic: 1, Percentage: 2, IndexedTo100: 3 },
   TickMarkType: { Year: 0, Month: 1, DayOfMonth: 2, Time: 3, TimeWithSeconds: 4 },
 }))
 // The drawing layer's events, so a test can raise them.
 const drawingEvents: Record<string, (...a: unknown[]) => void> = {}
 const drawingSelect = vi.fn()
 const drawingSetTool = vi.fn()
+const drawingsVisible = vi.fn()
 // What the drawing layer holds: the armed tool and the selected drawings.
 const drawingState = { tool: null as string | null, selection: [] as string[] }
 // What the chart set up, in order.
@@ -67,6 +70,7 @@ vi.mock('lightweight-charts-drawing', () => ({
     setTool(kind: string | null) { drawingSetTool(kind) }
     select(ids: string[]) { drawingSelect(ids) }
     setInterval() {}
+    setDrawingsVisible(v: boolean) { drawingsVisible(v) }
     destroy() {}
   },
   setDefaultStyleOverride: vi.fn(),
@@ -77,11 +81,15 @@ vi.mock('@/lib/chart/select-before-move', async (importOriginal) => {
 })
 
 const candle = { time: 1, open: 1, high: 2, low: 0.5, close: 1.5 }
-const bars = { candles: [candle] as typeof candle[] }
+const bars = { candles: [candle] as typeof candle[], status: 'ready', error: undefined as string | undefined }
 vi.mock('../useCandles', () => ({
-  useCandles: () => ({ status: 'ready', candles: bars.candles, change: { kind: 'set' }, retry: () => {} }),
+  useCandles: () => ({ status: bars.status, candles: bars.candles, error: bars.error, change: { kind: 'set' }, retry: () => {} }),
 }))
 vi.mock('../useDrawings', () => ({ useDrawings: () => 'ready' }))
+// The compared series the chart is given: a test sets what the endpoint answered.
+const compare = { status: 'idle' as string, series: {} as Record<string, unknown>, ccl: undefined as unknown }
+const useCompareSeries = vi.fn((_symbols: string[], _ccl: boolean) => compare)
+vi.mock('../useCompareSeries', () => ({ useCompareSeries: (s: string[], c: boolean) => useCompareSeries(s, c) }))
 // What useChartAlerts gives an alert from before the conditions: the price against its value, no color.
 const PRICE_VALUE = { source: 'price', target: 'value', timeframe: null, periods: null, color: null }
 const alertsApi = { alerts: [] as unknown[], create: vi.fn(), save: vi.fn(async () => true), move: vi.fn(), rearm: vi.fn(), remove: vi.fn() }
@@ -92,9 +100,13 @@ vi.mock('../useChartTheme', () => ({
 // The toolbar has its own tests; here it only switches the alert mode on, and shows where the
 // chart lets it float the favorites bar.
 let favoritesArea: HTMLElement | null | undefined
+// What the chart handed the toolbar: its drawing layer (null while drawing is paused) and the alerts switch.
+const toolbar = { manager: undefined as unknown, alertsOff: undefined as boolean | undefined }
 vi.mock('../DrawingTools', () => ({
-  DrawingTools: ({ onAlertMode, chartArea, alerts, onNewAlert, onOpenAlert }: { onAlertMode: (on: boolean) => void; chartArea?: HTMLElement | null; alerts?: { id: string }[]; onNewAlert?: () => void; onOpenAlert?: (id: string) => void }) => {
+  DrawingTools: ({ manager, alertsOff, onAlertMode, chartArea, alerts, onNewAlert, onOpenAlert }: { manager: unknown; alertsOff?: boolean; onAlertMode: (on: boolean) => void; chartArea?: HTMLElement | null; alerts?: { id: string }[]; onNewAlert?: () => void; onOpenAlert?: (id: string) => void }) => {
     favoritesArea = chartArea
+    toolbar.manager = manager
+    toolbar.alertsOff = alertsOff
     return (
       <>
         <button type="button" onClick={() => onAlertMode(true)}>Alerta</button>
@@ -109,10 +121,11 @@ const { TradingChart } = await import('../TradingChart')
 const { setDefaultStyleOverride } = await import('lightweight-charts-drawing')
 const { setToolStyle, setIndicatorSettings } = await import('@/lib/chart/preferences')
 const { useChartStore, DEFAULT_CONFIG } = await import('@/lib/store/chart-store')
+const DEFAULT_INDICATORS = { ...useChartStore.getState().indicators }
 const { INDICATOR_KEYS } = await import('@/lib/chart/preferences-schema')
 const lwc = await import('lightweight-charts')
 
-afterEach(() => { vi.clearAllMocks(); vi.unstubAllGlobals(); setupOrder.length = 0; alertsApi.alerts = []; bars.candles = [candle]; drawingState.tool = null; drawingState.selection = []; series.priceToCoordinate.mockReturnValue(null); document.body.innerHTML = '' })
+afterEach(() => { compare.status = 'idle'; compare.series = {}; compare.ccl = undefined; bars.status = 'ready'; bars.error = undefined; getVisibleRange.mockReset(); getVisibleRange.mockReturnValue(null); useChartStore.setState({ compareSymbols: [], compareDefaulted: true, indicators: { ...DEFAULT_INDICATORS } }); vi.clearAllMocks(); vi.unstubAllGlobals(); setupOrder.length = 0; alertsApi.alerts = []; bars.candles = [candle]; drawingState.tool = null; drawingState.selection = []; series.priceToCoordinate.mockReturnValue(null); document.body.innerHTML = '' })
 
 const onPhone = (phone: boolean) => vi.stubGlobal('matchMedia', (q: string) => ({ matches: phone && q.includes('max-width'), media: q, addEventListener() {}, removeEventListener() {} }))
 const panes = (n: number) => Array.from({ length: n }, () => ({ setStretchFactor: vi.fn() }))
@@ -554,6 +567,7 @@ describe('TradingChart indicator styles', () => {
       made.push(m)
       return {
         applyOptions: (o: Rec) => Object.assign(m.options, o),
+        priceScale: () => ({ applyOptions: () => {} }),
         setData: (d: Rec[]) => { m.data = d },
         createPriceLine: (o: Rec) => {
           const line = { options: { ...o }, applyOptions: (p: Rec) => Object.assign(line.options, p) }
@@ -874,8 +888,8 @@ describe('TradingChart trade markers', () => {
 
     expect(tradeRequests()).toEqual(['/api/transactions?ticker=BCBA%3AGGAL&limit=500'])
     expect(lastMarkers()).toEqual([
-      { time: day('2026-10-20'), position: 'belowBar', shape: 'arrowUp', color: '#0f0', text: 'C 10' },
-      { time: day('2026-10-22'), position: 'aboveBar', shape: 'arrowDown', color: '#f00', text: 'V 5' },
+      { time: day('2026-10-20'), position: 'belowBar', shape: 'arrowUp', color: '#0f0' },
+      { time: day('2026-10-22'), position: 'aboveBar', shape: 'arrowDown', color: '#f00' },
     ])
     unmount()
   })
@@ -888,7 +902,7 @@ describe('TradingChart trade markers', () => {
     await settle()
 
     expect(tradeRequests()).toHaveLength(1)
-    expect(lastMarkers().map((m: { time: number; text: string }) => [m.time, m.text])).toEqual([[day('2026-10-19'), 'C 10'], [day('2026-10-19'), 'V 5']])
+    expect(lastMarkers().map((m: { time: number; shape: string }) => [m.time, m.shape])).toEqual([[day('2026-10-19'), 'arrowUp'], [day('2026-10-19'), 'arrowDown']])
     unmount()
   })
 
@@ -921,6 +935,24 @@ describe('TradingChart trade markers', () => {
 
     const rows = [...card()!.querySelectorAll('tbody tr')].map((r) => [...r.querySelectorAll('td')].map((c) => c.textContent))
     expect(rows).toEqual([['20/10/2026', 'Compra', '4', '1.240,50'], ['20/10/2026', 'Compra', '6', '1.234,50']])
+    unmount()
+  })
+
+  it('on a phone it opens as a sheet from the bottom: one row per operation, and Listo closes it', async () => {
+    onPhone(true)
+    const { box, unmount } = await mount()
+    press(box, 'touch')
+
+    click(day('2026-10-20'))
+    await act(async () => {})
+
+    const sheet = [...document.querySelectorAll('[role="dialog"]')].find((d) => d.textContent?.startsWith('Operaciones'))!
+    const rows = [...sheet.querySelectorAll('li')].map((r) => [...r.querySelectorAll('span')].map((c) => c.textContent))
+    expect(rows).toEqual([['Compra', '20/10/2026', 'Cantidad', '4', 'Precio', '1.240,50'], ['Compra', '20/10/2026', 'Cantidad', '6', 'Precio', '1.234,50']])
+    expect(card()).toBeNull()
+
+    await act(async () => button('Listo').click())
+    expect([...document.querySelectorAll('[role="dialog"]')].some((d) => d.textContent?.startsWith('Operaciones'))).toBe(false)
     unmount()
   })
 
@@ -1037,6 +1069,201 @@ describe('TradingChart one selection at a time', () => {
 
     expect(bar()).toBeNull()
     expect(drawingSelect).toHaveBeenCalledWith([])
+    unmount()
+  })
+})
+
+describe('TradingChart — Mi cartera', () => {
+  it('is a line of its value, not candles', async () => {
+    const { unmount } = await render('__portfolio__')
+
+    expect((chart.addSeries.mock.calls as unknown[][])[0][0]).toBe(lwc.LineSeries)
+    expect(series.setData).toHaveBeenCalledWith([{ time: 1, value: 1.5 }])
+    unmount()
+  })
+
+  it('going back to a stock brings its candles back', async () => {
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<TradingChart symbol="__portfolio__" timeframe="1d" />) })
+    await act(async () => { root.render(<TradingChart symbol="AAPL" timeframe="1d" />) })
+
+    expect((chart.addSeries.mock.calls as unknown[][]).map((c) => c[0])).toContain(lwc.CandlestickSeries)
+    expect(vi.mocked(createChart)).toHaveBeenCalledTimes(2)
+    expect(series.setData).toHaveBeenCalledWith([{ ...candle, time: 1 }])
+    act(() => root.unmount())
+  })
+})
+
+describe('TradingChart — comparing', () => {
+  const NO_INDICATORS = Object.fromEntries(INDICATOR_KEYS.map((k: string) => [k, false]))
+  const SPY = { points: [{ time: '1970-01-01', value: 400 }] }
+  async function renderTf(symbol: string, timeframe: '1d' | '1h', compared: string[]) {
+    useChartStore.setState({ compareSymbols: compared, indicators: NO_INDICATORS as never })
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    const show = (tf: '1d' | '1h') => act(async () => { root.render(<TradingChart symbol={symbol} timeframe={tf} />) })
+    await show(timeframe)
+    return { el, show, unmount: () => act(() => root.unmount()) }
+  }
+  const seriesKinds = () => (chart.addSeries.mock.calls as unknown[][]).map((c) => c[0])
+  const modes = () => (priceScale.applyOptions.mock.calls as { mode?: number }[][]).map((c) => c[0].mode).filter((m) => m !== undefined)
+
+  it('draws each compared asset as a line on the bars and turns the scale to %', async () => {
+    compare.status = 'ready'
+    compare.series = { SPY }
+    const { el, unmount } = await renderTf('AAPL', '1d', ['SPY'])
+
+    expect(useCompareSeries).toHaveBeenLastCalledWith(['SPY'], false)
+    expect(seriesKinds()).toEqual([lwc.CandlestickSeries, lwc.LineSeries])
+    expect(series.setData).toHaveBeenCalledWith([{ time: 1, value: 400 }])
+    expect(modes().at(-1)).toBe(2)
+    expect(el.textContent).toContain('SPY')
+    unmount()
+  })
+
+  it('with nothing compared it asks for nothing and the scale stays in prices', async () => {
+    const { el, unmount } = await renderTf('AAPL', '1d', [])
+
+    expect(useCompareSeries).toHaveBeenLastCalledWith([], false)
+    expect(seriesKinds()).toEqual([lwc.CandlestickSeries])
+    expect(modes()).not.toContain(2)
+    expect(button('+ Comparar')).toBeTruthy()
+    expect(el.textContent).not.toContain('Sin datos')
+    unmount()
+  })
+
+  it('an asset without data says so and draws nothing', async () => {
+    compare.status = 'ready'
+    compare.series = { ZZZZ: { error: 'no_data' } }
+    const { el, unmount } = await renderTf('AAPL', '1d', ['ZZZZ'])
+
+    expect(el.textContent).toContain('ZZZZ')
+    expect(el.textContent).toContain('Sin datos')
+    expect(seriesKinds()).toEqual([lwc.CandlestickSeries])
+    unmount()
+  })
+
+  it('on an intraday chart the lines wait, and come back on the daily one', async () => {
+    compare.status = 'ready'
+    compare.series = { SPY }
+    const { el, show, unmount } = await renderTf('AAPL', '1h', ['SPY'])
+
+    expect(useCompareSeries).toHaveBeenLastCalledWith([], false)
+    expect(el.textContent).toContain('Las comparaciones se ven en diario, semanal o mensual')
+    expect(seriesKinds()).toEqual([lwc.CandlestickSeries])
+
+    await show('1d')
+    expect(seriesKinds()).toEqual([lwc.CandlestickSeries, lwc.LineSeries])
+    unmount()
+  })
+
+  it('× takes an asset out: its line goes and the scale is in prices again', async () => {
+    compare.status = 'ready'
+    compare.series = { SPY }
+    const { unmount } = await renderTf('AAPL', '1d', ['SPY'])
+
+    await act(async () => { document.querySelector<HTMLButtonElement>('button[aria-label="Quitar SPY de la comparación"]')!.click() })
+
+    expect(useChartStore.getState().compareSymbols).toEqual([])
+    expect(chart.removeSeries).toHaveBeenCalled()
+    expect(modes().at(-1)).toBe(0)
+    unmount()
+  })
+
+  it('a peso chart is drawn in dollars while comparing', async () => {
+    compare.status = 'ready'
+    compare.series = { SPY }
+    compare.ccl = [{ time: '1970-01-01', value: 2 }]
+    const { unmount } = await renderTf('GGAL.BA', '1d', ['SPY'])
+
+    expect(useCompareSeries).toHaveBeenLastCalledWith(['SPY'], true)
+    expect(series.setData).toHaveBeenCalledWith([{ time: 1, open: 0.5, high: 1, low: 0.25, close: 0.75 }])
+    unmount()
+  })
+
+  it('the chart itself is never compared with itself', async () => {
+    const { unmount } = await renderTf('SPY', '1d', ['SPY', 'QQQ'])
+
+    expect(useCompareSeries).toHaveBeenLastCalledWith(['QQQ'], false)
+    unmount()
+  })
+
+  it('opening Mi cartera the first time puts SPY next to it; taken out, it stays out', async () => {
+    useChartStore.setState({ compareDefaulted: false })
+    const first = await renderTf('__portfolio__', '1d', [])
+    expect(useChartStore.getState().compareSymbols).toEqual(['SPY'])
+    first.unmount()
+
+    useChartStore.setState({ compareDefaulted: true })
+    const again = await renderTf('__portfolio__', '1d', [])
+    expect(useChartStore.getState().compareSymbols).toEqual([])
+    again.unmount()
+  })
+
+  it('while comparing, the indicators drawn over the price wait and the ones in their own pane stay in prices', async () => {
+    compare.status = 'ready'
+    compare.series = { SPY }
+    useChartStore.setState({ compareSymbols: ['SPY'], indicators: { ...NO_INDICATORS, ema20: true, rsi: true } as never })
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<TradingChart symbol="AAPL" timeframe="1d" />) })
+
+    expect((chart.addSeries.mock.calls as unknown[][]).filter((c) => c[2] === 0)).toEqual([])
+    expect((chart.addSeries.mock.calls as unknown[][]).some((c) => c[2] === 1)).toBe(true)
+    expect(modes().lastIndexOf(0)).toBeGreaterThan(modes().indexOf(2))
+    expect(el.textContent).toContain('Medias y Bollinger: ocultas al comparar')
+    act(() => root.unmount())
+  })
+
+  it('Mi cartera has no volume to draw', async () => {
+    useChartStore.setState({ indicators: { ...NO_INDICATORS, volume: true } as never })
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<TradingChart symbol="__portfolio__" timeframe="1d" />) })
+
+    expect(seriesKinds()).not.toContain(lwc.HistogramSeries)
+    act(() => root.unmount())
+  })
+
+  it('a peso chart drawn in dollars pauses its drawings and alerts, which are in pesos', async () => {
+    compare.status = 'ready'
+    compare.series = { SPY }
+    compare.ccl = [{ time: '1970-01-01', value: 2 }]
+    const { el, unmount } = await renderTf('GGAL.BA', '1d', ['SPY'])
+
+    expect(toolbar.manager).toBeNull()
+    expect(toolbar.alertsOff).toBe(true)
+    expect(drawingsVisible).toHaveBeenLastCalledWith(false)
+    expect(el.textContent).toContain('Dibujos y alertas: en pausa al comparar en dólares')
+    unmount()
+  })
+
+  it('+ Comparar opens the sheet, and is gone with five compared', async () => {
+    const first = await renderTf('AAPL', '1d', ['SPY'])
+    await act(async () => { button('+ Comparar').click() })
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)) })
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Comparar con')
+    first.unmount()
+
+    const full = await renderTf('AAPL', '1d', ['SPY', 'QQQ', 'DIA', 'EEM', 'VT'])
+    expect(button('+ Comparar')).toBeUndefined()
+    full.unmount()
+  })
+})
+
+describe('TradingChart — Mi cartera without history', () => {
+  it('says so with its name, never its internal one', async () => {
+    bars.status = 'error'
+    bars.error = 'Todavía no hay historia de tu cartera'
+    const { unmount } = await render('__portfolio__')
+
+    expect(document.body.textContent).toContain('Todavía no hay historia de tu cartera')
+    expect(document.body.textContent).not.toContain('__portfolio__')
     unmount()
   })
 })

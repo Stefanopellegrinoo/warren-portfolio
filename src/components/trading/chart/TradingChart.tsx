@@ -8,6 +8,7 @@ import {
 	HistogramSeries,
 	LineSeries,
 	LineStyle,
+	PriceScaleMode,
 	TickMarkType,
 	createChart,
 	createSeriesMarkers,
@@ -22,7 +23,7 @@ import {
 } from "lightweight-charts";
 import { DrawingManager, type Drawing } from "lightweight-charts-drawing";
 import { ChevronDown, Eye, EyeOff, Settings2, X } from "lucide-react";
-import { useChartStore, type IndicatorKey } from "@/lib/store/chart-store";
+import { MAX_COMPARE, useChartStore, type IndicatorKey } from "@/lib/store/chart-store";
 import { INDICATOR_ORDER, INDICATOR_SPECS, type IndicatorLine } from "@/lib/chart/indicator-specs";
 import { BandFill, effectiveConfig, fillLook, levelLooks, lineLook, seriesPoints } from "@/lib/chart/indicator-style";
 import { INDICATOR_STYLE_PARTS, type ChartPreferences } from "@/lib/chart/preferences-schema";
@@ -32,6 +33,8 @@ import { touchDrawing } from "@/lib/chart/touch-drawing";
 import { onTap, selectBeforeMove } from "@/lib/chart/select-before-move";
 import { applyRememberedStyles } from "@/lib/chart/remembered-style";
 import { tradeMarkers } from "@/lib/chart/trade-markers";
+import { PORTFOLIO_SERIES, isArsSymbol, seriesLabel } from "@/lib/compare-series";
+import { COMPARE_TIMEFRAMES, alignToBars, pctFrom, toUsdCandles } from "@/lib/chart/compare";
 import type { Candle, Timeframe } from "@/lib/binance/types";
 import { cn, formatNumber } from "@/lib/utils";
 import { useCandles } from "./useCandles";
@@ -43,7 +46,9 @@ import { DrawingActions } from "./DrawingActions";
 import { useChartPreferences } from "./useChartPreferences";
 import { AlertSheet } from "./AlertSheet";
 import { useTradeMarkers } from "./useTradeMarkers";
-import { TradeCard } from "./TradeMarkers";
+import { TradeCard, TradeSheet } from "./TradeMarkers";
+import { useCompareSeries } from "./useCompareSeries";
+import { CompareSheet } from "./CompareSheet";
 
 const TZ = "America/Argentina/Buenos_Aires";
 const INTRADAY: Timeframe[] = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h"];
@@ -64,6 +69,14 @@ const priceText = (p: number) => formatNumber(p, { decimals: priceDecimals(p) })
 const roundPrice = (p: number) => Number(p.toFixed(priceDecimals(p)));
 const PHONE = "(max-width: 819px)";
 const asTime = (t: number) => t as UTCTimestamp;
+/** What the main series draws of a bar: the candle, or for a line (Mi cartera) its close. */
+// One color per compared asset, in the order they were chosen; apart from the candles' green and red.
+const COMPARE_COLORS = ["#f59e0b", "#8b5cf6", "#06b6d4", "#ec4899", "#84cc16"];
+const NONE: string[] = [];
+const NO_ALERTS: ChartAlert[] = [];
+// A note over the chart: on its own background, so the lines under it never cross the words.
+const legendNote = "w-fit rounded bg-canvas px-1 text-ink-3";
+const pointOf = (line: boolean, c: Candle) => (line ? { time: asTime(c.time), value: c.close } : { ...c, time: asTime(c.time) });
 const PRICE_FORMAT = { type: "custom" as const, formatter: priceText, minMove: 0.0001 };
 const ALERT_TITLES = { active: "Alerta", triggered: "Disparada", unavailable: "No se puede revisar" };
 
@@ -149,6 +162,9 @@ function syncIndicators(
 							paneIndex,
 						),
 			);
+			// A pane of its own reads in its own units: a new pane takes the chart's last scale mode,
+			// which is % while comparing.
+			if (paneIndex > 0) series[0]?.priceScale().applyOptions({ mode: PriceScaleMode.Normal });
 			const levels = (spec.levels ?? []).map((price) =>
 				series[0].createPriceLine({ price, color: theme.ink3, lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: false }),
 			);
@@ -189,7 +205,8 @@ function syncIndicators(
 export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: string; timeframe: Timeframe; phoneBar?: HTMLElement | null }) {
 	const boxRef = useRef<HTMLDivElement>(null);
 	const chartRef = useRef<IChartApi | null>(null);
-	const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+	// Candles, or a line for Mi cartera, which has one value a day and no open, high or low.
+	const seriesRef = useRef<ISeriesApi<"Candlestick"> | ISeriesApi<"Line"> | null>(null);
 	const indicatorsRef = useRef<{ signature: string; list: IndicatorSeries[] }>({ signature: "", list: [] });
 	const alertLinesRef = useRef(new Map<string, IPriceLine>());
 	const fittedRef = useRef("");
@@ -204,7 +221,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	// The alert sheet (S6): a new alert (id null) or an existing one.
 	const [sheet, setSheet] = useState<{ id: string | null } | null>(null);
 	// The operations card of a bar with arrows: its bar and where it was tapped.
-	const [tradeCard, setTradeCard] = useState<{ chart: string; time: number; x: number; y: number; above: boolean } | null>(null);
+	const [tradeCard, setTradeCard] = useState<{ chart: string; time: number; x: number; y: number; above: boolean; phone: boolean } | null>(null);
 	const [textEdit, setTextEdit] = useState<{ drawing: Drawing; x: number; y: number } | null>(null);
 	const [legendOpen, setLegendOpen] = useState(true);
 	// Where the favorites bar floats: over the chart, in its container (S3).
@@ -212,6 +229,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 
 	const theme = useChartTheme();
 	const intraday = INTRADAY.includes(timeframe);
+	const line = symbol === PORTFOLIO_SERIES;
 	const indicators = useChartStore((s) => s.indicators);
 	const hidden = useChartStore((s) => s.hidden);
 	const device = useChartStore((s) => s.config);
@@ -230,17 +248,53 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 
 	const data = useCandles(symbol, timeframe);
 	const last = data.candles.at(-1) ?? null;
+
+	// Comparing (S3): the assets chosen, minus the chart itself, drawn on daily charts and up only.
+	const compareSymbols = useChartStore((s) => s.compareSymbols);
+	const setCompareSymbols = useChartStore((s) => s.setCompareSymbols);
+	const others = useMemo(() => compareSymbols.filter((s) => s !== symbol), [compareSymbols, symbol]);
+	const daily = COMPARE_TIMEFRAMES.includes(timeframe);
+	const comparing = daily ? others : NONE;
+	// Everything compared is in dollars: a peso chart too, while it is compared.
+	const usd = comparing.length > 0 && isArsSymbol(symbol);
+	const compared = useCompareSeries(comparing, usd);
+	const drawn = useMemo(() => (usd && compared.ccl ? toUsdCandles(data.candles, compared.ccl) : data.candles), [usd, compared.ccl, data.candles]);
+	const aligned = useMemo(() => {
+		const times = drawn.map((c) => c.time);
+		const out = new Map<string, { time: number; value: number }[]>();
+		for (const s of comparing) {
+			const r = compared.series[s];
+			if (r && "points" in r) out.set(s, alignToBars(times, r.points));
+		}
+		return out;
+	}, [comparing, compared.series, drawn]);
+	// While comparing, the price pane is in %: indicators drawn over the price would each start at 0 %
+	// from their own first bar, so they wait. Mi cartera has no volume.
+	const priceOverlays = enabled.filter((k) => INDICATOR_SPECS[k].pane === "price");
+	const drawnIndicators = useMemo(
+		() => enabled.filter((k) => !(line && k === "volume") && !(comparing.length > 0 && INDICATOR_SPECS[k].pane === "price")),
+		[enabled, line, comparing.length],
+	);
+	const compareLinesRef = useRef(new Map<string, ISeriesApi<"Line">>());
+	const percentRef = useRef(false);
+	const drawnUsdRef = useRef(false);
+	const [compareOpen, setCompareOpen] = useState(false);
+	// The first day in sight: where every % starts.
+	const [visibleFrom, setVisibleFrom] = useState<number | null>(null);
 	const drawingsStatus = useDrawings(manager, symbol);
 	const trades = useTradeMarkers(symbol, data.candles, showTrades);
 	const { alerts, create, save, move, rearm, remove } = useChartAlerts(symbol, last?.close ?? null);
 
-	// The chart, its candle series and the drawing layer: created once.
+	// The chart, its price series and the drawing layer: created once, and again when the series
+	// changes between candles and a line.
 	const ready = theme !== null;
 	useEffect(() => {
 		const box = boxRef.current;
 		if (!ready || !box) return;
 		const chart = createChart(box, { autoSize: true });
-		const series = chart.addSeries(CandlestickSeries, { priceLineVisible: true, priceFormat: PRICE_FORMAT });
+		const series = line
+			? chart.addSeries(LineSeries, { priceLineVisible: true, lineWidth: 2, priceFormat: PRICE_FORMAT })
+			: chart.addSeries(CandlestickSeries, { priceLineVisible: true, priceFormat: PRICE_FORMAT });
 		markersRef.current = createSeriesMarkers(series, []);
 		// Before the drawing layer, so a finger's press reaches it first (its events come later,
 		// once `drawings` exists).
@@ -270,7 +324,12 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			else open();
 		});
 		const offTouch = touchDrawing(drawings, chart.chartElement());
-		const onMove = (p: MouseEventParams) => setHover((p.seriesData.get(series) as Candle | undefined) ?? null);
+		const compareLines = compareLinesRef.current;
+		const onMove = (p: MouseEventParams) => {
+			const d = p.seriesData.get(series) as (Candle & { value?: number }) | undefined;
+			// A line's point is one value: its legend reads it as a bar opening and closing there.
+			setHover(d && d.value !== undefined ? { time: d.time as number, open: d.value, high: d.value, low: d.value, close: d.value, volume: 0 } : (d ?? null));
+		};
 		chart.subscribeCrosshairMove(onMove);
 		chartRef.current = chart;
 		seriesRef.current = series;
@@ -290,34 +349,44 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			markersRef.current = null;
 			indicatorsRef.current = { signature: "", list: [] };
 			alertLinesRef.current.clear();
+			// The next chart gets every bar drawn and fitted again, with its own compared lines.
+			fittedRef.current = "";
+			compareLines.clear();
+			percentRef.current = false;
 			setManager(null);
 		};
-	}, [ready]);
+	}, [ready, line]);
 
 	// Theme and timeframe options.
 	useEffect(() => {
 		if (!theme || !chartRef.current || !seriesRef.current) return;
 		chartRef.current.applyOptions(chartOptions(theme, intraday));
-		seriesRef.current.applyOptions({
-			upColor: theme.up,
-			downColor: theme.down,
-			borderUpColor: theme.up,
-			borderDownColor: theme.down,
-			wickUpColor: theme.up,
-			wickDownColor: theme.down,
-		});
-	}, [theme, intraday, manager]);
+		if (line) (seriesRef.current as ISeriesApi<"Line">).applyOptions({ color: theme.accent });
+		else
+			(seriesRef.current as ISeriesApi<"Candlestick">).applyOptions({
+				upColor: theme.up,
+				downColor: theme.down,
+				borderUpColor: theme.up,
+				borderDownColor: theme.down,
+				wickUpColor: theme.up,
+				wickDownColor: theme.down,
+			});
+	}, [theme, intraday, manager, line]);
 
 	// Candles: a full redraw on load, series.update() for live bars.
 	useEffect(() => {
 		const series = seriesRef.current;
 		const chart = chartRef.current;
 		if (!series || !chart || data.status !== "ready") return;
-		if (data.change.kind === "update") {
-			data.change.bars.forEach((b) => series.update({ ...b, time: asTime(b.time) }));
+		const key = `${symbol}:${timeframe}`;
+		// Live bars on top of the bars already drawn; a new chart draws them all.
+		const set = series as ISeriesApi<SeriesType>;
+		if (data.change.kind === "update" && fittedRef.current === key && !usd && !drawnUsdRef.current) {
+			data.change.bars.forEach((b) => set.update(pointOf(line, b)));
 		} else {
-			series.setData(data.candles.map((c) => ({ ...c, time: asTime(c.time) })));
-			const key = `${symbol}:${timeframe}`;
+			// A peso chart in dollars is redrawn whole: its live bars arrive in pesos.
+			drawnUsdRef.current = usd;
+			set.setData(drawn.map((c) => pointOf(line, c)));
 			if (fittedRef.current !== key) {
 				fittedRef.current = key;
 				const n = data.candles.length;
@@ -328,7 +397,64 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			}
 		}
 		manager?.setInterval(timeframe);
-	}, [data.status, data.candles, data.change, symbol, timeframe, manager]);
+	}, [data.status, data.candles, data.change, symbol, timeframe, manager, line, usd, drawn]);
+
+	// The compared lines on the chart's own bars, and the scale in % while there are any.
+	useEffect(() => {
+		const chart = chartRef.current;
+		const main = seriesRef.current;
+		if (!chart || !main) return;
+		const lines = compareLinesRef.current;
+		for (const [s, l] of lines) {
+			if (aligned.has(s)) continue;
+			chart.removeSeries(l);
+			lines.delete(s);
+		}
+		for (const [s, points] of aligned) {
+			let l = lines.get(s);
+			if (!l) {
+				l = chart.addSeries(LineSeries, { lineWidth: 2, priceLineVisible: false, lastValueVisible: true, priceFormat: PRICE_FORMAT });
+				lines.set(s, l);
+			}
+			l.applyOptions({ color: COMPARE_COLORS[comparing.indexOf(s) % COMPARE_COLORS.length] });
+			l.setData(points.map((p) => ({ time: asTime(p.time), value: p.value })));
+		}
+		const percent = comparing.length > 0;
+		if (percent !== percentRef.current) {
+			percentRef.current = percent;
+			main.priceScale().applyOptions({ mode: percent ? PriceScaleMode.Percentage : PriceScaleMode.Normal });
+		}
+	}, [aligned, comparing, manager]);
+
+	// While comparing, the legend reads every % from the first day in sight.
+	const percentMode = comparing.length > 0;
+	useEffect(() => {
+		const chart = chartRef.current;
+		if (!chart || !percentMode) return;
+		const scale = chart.timeScale();
+		const onRange = (r: { from: Time } | null) => setVisibleFrom(r ? (r.from as number) : null);
+		onRange(scale.getVisibleRange());
+		scale.subscribeVisibleTimeRangeChange(onRange);
+		return () => scale.unsubscribeVisibleTimeRangeChange(onRange);
+	}, [manager, percentMode]);
+
+	// The first time Mi cartera opens on this device, it opens against the market; after that, the
+	// comparisons are whatever the user left.
+	useEffect(() => {
+		const state = useChartStore.getState();
+		if (symbol !== PORTFOLIO_SERIES || state.compareDefaulted) return;
+		useChartStore.setState({ compareDefaulted: true });
+		if (state.compareSymbols.length === 0) setCompareSymbols(["SPY"]);
+	}, [symbol, setCompareSymbols]);
+
+	// A peso chart drawn in dollars: its drawings and alerts are in pesos, so they wait until the
+	// comparison ends instead of landing in the wrong place or being saved in dollars.
+	useEffect(() => {
+		if (!manager || !usd) return;
+		manager.setDrawingsVisible(false);
+		return () => manager.setDrawingsVisible(true);
+	}, [manager, usd]);
+	const shownAlerts = usd ? NO_ALERTS : alerts;
 
 	// The user's buys and sells, after the candles they sit on.
 	useEffect(() => {
@@ -357,7 +483,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 				if (d <= slop && (!best || d < best.d)) best = { time, d };
 			}
 			if (p.time !== undefined && trades.has(p.time as number)) best = { time: p.time as number, d: 0 };
-			setTradeCard(best && { chart: `${symbol}:${timeframe}`, time: best.time, x: p.point.x, y: p.point.y, above: p.point.y > box.clientHeight / 2 });
+			setTradeCard(best && { chart: `${symbol}:${timeframe}`, time: best.time, x: p.point.x, y: p.point.y, above: p.point.y > box.clientHeight / 2, phone: window.matchMedia(PHONE).matches });
 		};
 		chart.subscribeClick(onClick);
 		return () => chart.unsubscribeClick(onClick);
@@ -387,8 +513,8 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	useEffect(() => {
 		const chart = chartRef.current;
 		if (!chart || !theme || data.status !== "ready") return;
-		syncIndicators(chart, indicatorsRef.current, data.candles, enabled, hidden, config, saved, theme, window.matchMedia(PHONE).matches);
-	}, [data.status, data.candles, enabled, hidden, config, saved, theme, manager]);
+		syncIndicators(chart, indicatorsRef.current, data.candles, drawnIndicators, hidden, config, saved, theme, window.matchMedia(PHONE).matches);
+	}, [data.status, data.candles, drawnIndicators, hidden, config, saved, theme, manager]);
 
 	// Alert lines: only an alert against a value has one, in its color (the accent when it has none), the selected
 	// one thicker. The price's on the candles; an indicator's in that indicator's pane while it is on (S6). Removed on
@@ -399,7 +525,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		if (!candles || !theme) return;
 		const draggable = alertLinesRef.current;
 		const made: [ISeriesApi<SeriesType>, IPriceLine][] = [];
-		for (const a of alerts) {
+		for (const a of shownAlerts) {
 			if (a.target !== "value" || a.value === null) continue;
 			const host: ISeriesApi<SeriesType> | undefined =
 				a.source === "price" ? candles : indicatorsRef.current.list.find((i) => i.key === indicatorOf(a.source))?.series[0];
@@ -421,7 +547,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			// After the chart is gone (unmount) there is nothing to remove them from.
 			if (chartRef.current) made.forEach(([series, line]) => series.removePriceLine(line));
 		};
-	}, [alerts, theme, manager, selectedId, enabled, config, data.status]);
+	}, [shownAlerts, theme, manager, selectedId, enabled, config, data.status]);
 
 	// Alert placement and dragging. Capture phase: an alert under the pointer
 	// wins over the drawing layer and the chart's own panning.
@@ -436,9 +562,10 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		const box = boxRef.current;
 		const chart = chartRef.current;
 		const series = seriesRef.current;
-		if (!box || !chart || !series) return;
+		// A peso chart in dollars: its alerts, in pesos, cannot be placed or moved on it.
+		if (!box || !chart || !series || usd) return;
 		// Only the price against a value has a line on the price pane to grab.
-		const lines = alerts.filter((a): a is ChartAlert & { value: number } => isPriceValue(a) && a.value !== null);
+		const lines = shownAlerts.filter((a): a is ChartAlert & { value: number } => isPriceValue(a) && a.value !== null);
 
 		const onDown = (e: PointerEvent) => {
 			const y = e.clientY - box.getBoundingClientRect().top;
@@ -512,7 +639,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 			box.removeEventListener("pointerdown", onDown, true);
 			window.removeEventListener("keydown", onKey);
 		};
-	}, [alertMode, alerts, create, move, manager, selectedId]);
+	}, [alertMode, shownAlerts, create, move, manager, selectedId, usd]);
 
 	useEffect(() => {
 		setSelectedAlert(null);
@@ -527,15 +654,27 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	};
 	const sheetAlert = sheet?.id ? alerts.find((a) => a.id === sheet.id) : undefined;
 
-	const shown = hover ?? last;
-	const prevClose = data.candles.at(-2)?.close;
-	const change = shown && prevClose && shown === last ? (shown.close - prevClose) / prevClose : shown ? (shown.close - shown.open) / shown.open : null;
+	const drawnLast = drawn.at(-1) ?? null;
+	const shown = hover ?? drawnLast;
+	const prevClose = drawn.at(-2)?.close;
+	const change = shown && prevClose && shown === drawnLast ? (shown.close - prevClose) / prevClose : shown ? (shown.close - shown.open) / shown.open : null;
+	const at = hover?.time ?? null;
+	const compareRows = percentMode
+		? [
+				{ symbol, color: line ? theme?.accent : theme?.ink, pct: pctFrom(drawn.map((c) => ({ time: c.time, value: c.close })), visibleFrom, at), main: true, missing: false },
+				...comparing.map((s, i) => {
+					const points = aligned.get(s);
+					return { symbol: s, color: COMPARE_COLORS[i % COMPARE_COLORS.length], pct: points ? pctFrom(points, visibleFrom, at) : null, main: false, missing: compared.status === "ready" && !points };
+				}),
+			]
+		: [];
 	const selected: ChartAlert | undefined = selectedAlert ? alerts.find((a) => a.id === selectedAlert.id) : undefined;
 
 	return (
 		<div className="flex min-h-0 flex-1">
 			<DrawingTools
-				manager={manager}
+				manager={usd ? null : manager}
+				alertsOff={usd}
 				alertMode={alertMode}
 				onAlertMode={armAlert}
 				phoneBar={phoneBar}
@@ -554,7 +693,8 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 
 				<div data-chart-legend className="pointer-events-none absolute left-3 top-2 z-10 flex max-w-[calc(100%-5rem)] flex-col gap-1 text-[13px]">
 					<div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 tabular-nums">
-						{shown && (
+						{shown && line && <span className="text-ink-3">Valor <span className="text-ink">{priceText(shown.close)}</span></span>}
+						{shown && !line && (
 							<>
 								<span className="text-ink-3">Ap <span className="text-ink">{priceText(shown.open)}</span></span>
 								<span className="text-ink-3">Máx <span className="text-ink">{priceText(shown.high)}</span></span>
@@ -566,6 +706,31 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 							</>
 						)}
 					</div>
+					{compareRows.map((r) => (
+						<div key={r.symbol} className="pointer-events-auto flex w-fit items-center gap-1.5 rounded bg-canvas px-1 tabular-nums text-ink-2">
+							<span aria-hidden className="h-0.5 w-3 rounded" style={{ background: r.color }} />
+							<span className="text-ink">{seriesLabel(r.symbol)}</span>
+							{r.missing ? (
+								<span className="text-ink-3">Sin datos</span>
+							) : (
+								r.pct !== null && <span className={r.pct >= 0 ? "text-ok" : "text-danger"}>{formatNumber(r.pct, { sign: true })} %</span>
+							)}
+							{!r.main && (
+								<button type="button" aria-label={`Quitar ${seriesLabel(r.symbol)} de la comparación`} title="Quitar" onClick={() => setCompareSymbols(compareSymbols.filter((s) => s !== r.symbol))} className="grid h-6 w-6 place-items-center rounded text-ink-3 hover:bg-hover hover:text-ink max-[819px]:h-8 max-[819px]:w-8">
+									<X className="h-3.5 w-3.5" aria-hidden />
+								</button>
+							)}
+						</div>
+					))}
+					{percentMode && compared.status === "error" && <p className={legendNote}>No se pudieron cargar las comparaciones.</p>}
+					{percentMode && priceOverlays.length > 0 && <p className={legendNote}>Medias y Bollinger: ocultas al comparar</p>}
+					{usd && <p className={legendNote}>Dibujos y alertas: en pausa al comparar en dólares</p>}
+					{!daily && others.length > 0 && <p className={legendNote}>Las comparaciones se ven en diario, semanal o mensual</p>}
+					{daily && others.length < MAX_COMPARE && (
+						<button type="button" onClick={() => setCompareOpen(true)} className="pointer-events-auto inline-flex w-fit items-center rounded bg-canvas px-1 text-ink-2 hover:bg-hover hover:text-ink max-[819px]:min-h-8">
+							+ Comparar
+						</button>
+					)}
 					{enabled.length > 0 && (
 						<button
 							type="button"
@@ -642,7 +807,11 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 
 				{/* A card is for the bars it was opened on: another symbol or timeframe drops it. */}
 				{tradeCard?.chart === `${symbol}:${timeframe}` && trades.get(tradeCard.time) && (
-					<TradeCard trades={trades.get(tradeCard.time)!} x={tradeCard.x} y={tradeCard.y} above={tradeCard.above} onClose={() => setTradeCard(null)} />
+					tradeCard.phone ? (
+						<TradeSheet trades={trades.get(tradeCard.time)!} onClose={() => setTradeCard(null)} />
+					) : (
+						<TradeCard trades={trades.get(tradeCard.time)!} x={tradeCard.x} y={tradeCard.y} above={tradeCard.above} onClose={() => setTradeCard(null)} />
+					)
 				)}
 
 				<DrawingActions manager={manager} onEditText={(drawing) => setTextEdit({ drawing, x: 12, y: 56 })} />
@@ -669,6 +838,8 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 					/>
 				)}
 
+				{compareOpen && <CompareSheet open onOpenChange={setCompareOpen} main={symbol} />}
+
 				{textEdit && (
 					<input
 						autoFocus
@@ -692,10 +863,10 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 				{data.status !== "ready" && (
 					<div className="absolute inset-0 z-30 grid place-items-center bg-canvas text-[14px]">
 						{data.status === "loading" ? (
-							<p role="status" className="text-ink-3">Cargando {symbol}…</p>
+							<p role="status" className="text-ink-3">Cargando {seriesLabel(symbol)}…</p>
 						) : (
 							<div role="alert" className="flex flex-col items-center gap-3 text-center">
-								<p className="text-ink">No se pudo cargar {symbol}</p>
+								<p className="text-ink">No se pudo cargar {seriesLabel(symbol)}</p>
 								<p className="max-w-sm text-[13px] text-ink-3">{data.error}</p>
 								<button type="button" onClick={data.retry} className="rounded bg-primary px-3 py-1.5 text-primary-on hover:bg-primary-hover">
 									Reintentar

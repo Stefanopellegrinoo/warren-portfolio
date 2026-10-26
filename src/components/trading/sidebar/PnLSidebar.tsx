@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { Position } from "@/types";
 import { getPortfolio, getCedearRatios } from "@/lib/warren/positions";
-import { useChartStore } from "@/lib/store/chart-store";
+import { PORTFOLIO_SYMBOL, useChartStore } from "@/lib/store/chart-store";
 import { Chip, SectionHead, toneOf, linkButton } from "@/components/resumen/ui";
 import { formatNumber, formatPct, formatUSD } from "@/lib/utils";
 
@@ -71,6 +71,8 @@ export function PnLSidebar({ price }: { price: number | null }) {
   }, [reloadKey]);
 
   const pos = positions.find((p) => p.ticker === symbol);
+  // Mi cartera is every position at once, not one to show here.
+  if (symbol === PORTFOLIO_SYMBOL) return null;
 
   return (
     <section aria-labelledby="h-posicion" className="border-t border-line px-4 pb-4 pt-3">

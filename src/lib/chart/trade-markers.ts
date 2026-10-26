@@ -44,16 +44,14 @@ export function tradesByBar(trades: readonly Trade[], times: readonly number[]):
 	return byBar;
 }
 
-/** One arrow per side and bar, in time order: buys green under it, sells red over it, with their total. */
+/** One arrow per side and bar, in time order: buys green under it, sells red over it. Only the arrow: tapping it shows the operations. */
 export function tradeMarkers(byBar: Map<number, Trade[]>, colors: { up: string; down: string }): SeriesMarker<UTCTimestamp>[] {
 	const markers: SeriesMarker<UTCTimestamp>[] = [];
 	for (const time of [...byBar.keys()].sort((a, b) => a - b)) {
-		const sum = (op: Trade["operation"]) => byBar.get(time)!.filter((t) => t.operation === op).reduce((s, t) => s + t.quantity, 0);
-		const buys = sum("COMPRA");
-		const sells = sum("VENTA");
+		const has = (op: Trade["operation"]) => byBar.get(time)!.some((t) => t.operation === op);
 		const at = time as UTCTimestamp;
-		if (buys) markers.push({ time: at, position: "belowBar", shape: "arrowUp", color: colors.up, text: `C ${qtyText(buys)}` });
-		if (sells) markers.push({ time: at, position: "aboveBar", shape: "arrowDown", color: colors.down, text: `V ${qtyText(sells)}` });
+		if (has("COMPRA")) markers.push({ time: at, position: "belowBar", shape: "arrowUp", color: colors.up });
+		if (has("VENTA")) markers.push({ time: at, position: "aboveBar", shape: "arrowDown", color: colors.down });
 	}
 	return markers;
 }

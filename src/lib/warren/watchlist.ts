@@ -1,4 +1,4 @@
-import { useChartStore } from "@/lib/store/chart-store";
+import { CARTERA_LIST_ID, useChartStore } from "@/lib/store/chart-store";
 import { toast } from "sonner";
 
 /**
@@ -8,6 +8,13 @@ import { toast } from "sonner";
 export async function addSymbolToCurrentWatchlist(symbol: string) {
   const store = useChartStore.getState();
   const activeId = store.activeWatchlistId;
+
+  if (activeId === CARTERA_LIST_ID) {
+    // Cartera is the stocks held: nothing is added to it by hand.
+    const error = "Cartera se arma sola con tus acciones: elegí otra lista para agregar";
+    toast.error(error);
+    return { success: false, mode: 'cartera' as const, error };
+  }
 
   if (!activeId) {
     // Local watchlist

@@ -41,3 +41,22 @@ describe('chart store: Mostrar operaciones', () => {
     expect(useChartStore.getState().showTrades).toBe(false)
   })
 })
+
+describe('chart store: comparisons', () => {
+  it('start empty', () => {
+    expect(useChartStore.getState().compareSymbols).toEqual([])
+  })
+
+  it('keep each asset once and at most five', () => {
+    useChartStore.getState().setCompareSymbols(['A', 'B', 'A', 'C', 'D', 'E', 'F'])
+    expect(useChartStore.getState().compareSymbols).toEqual(['A', 'B', 'C', 'D', 'E'])
+  })
+
+  it('are kept on this device', async () => {
+    useChartStore.getState().setCompareSymbols(['SPY', '__portfolio__'])
+    expect(JSON.parse(data.get(KEY)!).state.compareSymbols).toEqual(['SPY', '__portfolio__'])
+
+    await useChartStore.persist.rehydrate()
+    expect(useChartStore.getState().compareSymbols).toEqual(['SPY', '__portfolio__'])
+  })
+})

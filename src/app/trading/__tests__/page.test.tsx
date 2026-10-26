@@ -196,3 +196,40 @@ describe('TradingPage opened on ?symbol=', () => {
     expect(new Set(nav.charts)).toEqual(new Set(['SPY']))
   })
 })
+
+describe('TradingPage — Mi cartera', () => {
+  it('a link to a ticker wins over Mi cartera left open', () => {
+    useChartStore.setState({ symbol: '__portfolio__' })
+    nav.query = new URLSearchParams('symbol=AAPL')
+    act(() => root.render(<TradingPage />))
+
+    expect(nav.charts.at(-1)).toBe('AAPL')
+  })
+
+  it('is named Mi cartera, asks for no quote and has no star to add it to a list', async () => {
+    useChartStore.setState({ symbol: '__portfolio__' })
+    await act(async () => { root.render(<TradingPage />) })
+
+    const header = host.querySelector('header')!
+    expect(header.textContent).toContain('Mi cartera')
+    expect(header.textContent).not.toContain('__portfolio__')
+    expect(header.querySelector('button[aria-label^="Agregar"]')).toBeNull()
+    const urls = vi.mocked(fetch).mock.calls.map((c) => String(c[0]))
+    expect(urls.some((u) => u.startsWith('/api/quote') && u.includes('portfolio'))).toBe(false)
+  })
+
+  it('never shows its internal name anywhere on the page', async () => {
+    useChartStore.setState({ symbol: '__portfolio__' })
+    await act(async () => { root.render(<TradingPage />) })
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+
+    expect(host.textContent).not.toContain('__portfolio__')
+  })
+
+  it('with Cartera chosen there is no star either: the list builds itself', async () => {
+    useChartStore.setState({ symbol: 'AAPL', activeWatchlistId: '__cartera__' })
+    await act(async () => { root.render(<TradingPage />) })
+
+    expect(host.querySelector('header button[aria-label^="Agregar"]')).toBeNull()
+  })
+})

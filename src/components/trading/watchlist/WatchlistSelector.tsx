@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Check, ChevronDown, ListPlus, Trash2, Edit2 } from "lucide-react";
-import { useChartStore } from "@/lib/store/chart-store";
+import { CARTERA_LIST_ID, useChartStore } from "@/lib/store/chart-store";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { NO_CONNECTION } from "@/lib/request-errors";
 
 const LOCAL_NAME = "Lista local";
+const CARTERA_NAME = "Cartera";
 
 interface WatchlistInfo {
   id: string;
@@ -162,9 +163,11 @@ export function WatchlistSelector() {
     }
   }
 
-  const activeListName = activeId
-    ? lists.find((l) => l.id === activeId)?.name || "Cargando…"
-    : LOCAL_NAME;
+  const activeListName = activeId === CARTERA_LIST_ID
+    ? CARTERA_NAME
+    : activeId
+      ? lists.find((l) => l.id === activeId)?.name || "Cargando…"
+      : LOCAL_NAME;
   const activeCount = activeId ? lists.find((l) => l.id === activeId)?.item_count : undefined;
 
   const itemClass = (active: boolean) => cn(
@@ -185,6 +188,11 @@ export function WatchlistSelector() {
             <DropdownMenuLabel className="px-2 pb-1 pt-2 text-xs font-medium text-ink-3">Tus listas</DropdownMenuLabel>
           </DropdownMenuGroup>
           <div className="max-h-[300px] overflow-y-auto">
+            {/* The stocks held: always there, first, and never renamed or deleted. */}
+            <DropdownMenuItem onClick={() => setActiveId(CARTERA_LIST_ID)} className={itemClass(activeId === CARTERA_LIST_ID)}>
+              <span className="truncate">{CARTERA_NAME}</span>
+              {activeId === CARTERA_LIST_ID && <Check className="h-4 w-4 flex-none text-accent" strokeWidth={1.5} aria-label="Lista actual" />}
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setActiveId(null)} className={itemClass(!activeId)}>
               <span className="truncate">{LOCAL_NAME}</span>
               {!activeId && <Check className="h-4 w-4 flex-none text-accent" strokeWidth={1.5} aria-label="Lista actual" />}
