@@ -10,6 +10,8 @@ import { createServiceClient } from '@/lib/supabase-server'
 import { resolveTickerIdentity } from '@/lib/ticker-identity'
 import { getCataloguedTicker, upsertTickerIdentity } from '@/lib/ticker-catalog'
 import { recordCedearTrade, TradeRecordError } from '@/lib/trade-record'
+import { loadSplits } from '@/lib/stock-splits'
+import { afterSplits } from '@/lib/after-splits'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,12 +34,20 @@ export async function GET(req: NextRequest) {
 
     if (ticker) query = query.eq('ticker', ticker.toUpperCase())
 
-    const { data, error, count } = await query
+    // after_splits is display only: an unreadable splits table serves the rows without it.
+    const [{ data, error, count }, splits] = await Promise.all([query, loadSplits().catch(err => {
+      console.warn('[Transactions] stock splits unreadable, rows served without after_splits:', err instanceof Error ? err.message : err)
+      return new Map()
+    })])
     if (error) throw error
 
     const page = Math.floor(offset / limit) + 1
     const response: PaginatedResponse<any> = {
-      data: data ?? [],
+      // S5: a stock or CEDEAR row with stored splits after its date also says what it is today.
+      data: (data ?? []).map(row => {
+        const after_splits = afterSplits(row, splits)
+        return after_splits ? { ...row, after_splits } : row
+      }),
       pagination: {
         page,
         limit,

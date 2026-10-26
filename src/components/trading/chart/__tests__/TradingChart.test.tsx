@@ -958,6 +958,40 @@ describe('TradingChart trade markers', () => {
     unmount()
   })
 
+  // odd/tasks/split-aware-ledger.md S5: a trade with stored splits after it also says what it is in today's shares.
+  const SPLIT = { splits: [{ date: '2026-10-21', numerator: 2, denominator: 1 }], factor: 2, quantity: 8, price: 620.25 }
+  const LINE = 'Tras el split 2:1 del 21/10/2026: 8 acciones a US$\u00a0620,25'
+  const withSplit = () => Response.json({ data: TRADES.map((t) => (t.id === 't2' ? { ...t, after_splits: SPLIT } : t)), pagination: { page: 1, limit: 500, total: 4, totalPages: 1 } })
+
+  it('the card shows the line under the trade with after_splits and nothing under the others, from the same request', async () => {
+    answer = withSplit
+    const { box, unmount } = await mount()
+    press(box)
+
+    click(day('2026-10-20'))
+
+    expect([...card()!.querySelectorAll('tbody tr')].map((r) => r.textContent)).toEqual(['20/10/2026Compra41.240,50', LINE, '20/10/2026Compra61.234,50'])
+    expect(tradeRequests()).toHaveLength(1)
+    unmount()
+  })
+
+  it('the phone sheet shows the line under the trade with after_splits and nothing under the others', async () => {
+    onPhone(true)
+    answer = withSplit
+    const { box, unmount } = await mount()
+    press(box, 'touch')
+
+    click(day('2026-10-20'))
+    await act(async () => {})
+
+    const sheet = [...document.querySelectorAll('[role="dialog"]')].find((d) => d.textContent?.startsWith('Operaciones'))!
+    const items = [...sheet.querySelectorAll('li')]
+    expect(items[0].querySelector('p')?.textContent).toBe(LINE)
+    expect(items[1].querySelector('p')).toBeNull()
+    expect(sheet.textContent!.split('Tras ')).toHaveLength(2)
+    unmount()
+  })
+
   it('a click elsewhere closes it, and so does Cerrar', async () => {
     const { box, unmount } = await mount()
     press(box)
