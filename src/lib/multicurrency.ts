@@ -151,8 +151,8 @@ function rowInPesos(t: LedgerTrade, fxAt: FxLookup, today: Fx) {
 }
 
 /** Today's state with automatic ON payments up to `today` (ledger-now's ledgerNowFrom). */
-export interface OnPayments { schedules: Map<string, FlowRow[]>; overrides: FlowOverride[]; today: string; splits?: SplitsByTicker }
-const NO_PAYMENTS: OnPayments = { schedules: new Map(), overrides: [], today: NO_DATE_CUTOFF }
+export interface OnPayments { schedules: Map<string, FlowRow[]>; overrides: FlowOverride[]; today: string; splits: SplitsByTicker }
+const NO_PAYMENTS: OnPayments = { schedules: new Map(), overrides: [], today: NO_DATE_CUTOFF, splits: new Map() }
 const CURRENCIES: Currency[] = ['ARS', 'MEP', 'CCL']
 const norm = (t: string) => t.trim().toUpperCase()
 
@@ -172,7 +172,7 @@ export function ledgerInCurrencies(trades: LedgerTrade[], fxAt: FxLookup, today:
         created_at: t.created_at ?? null, price: qty > 0 ? gross / qty / per : 0, commission: commission / per,
       }
     })
-    return ledgerNowFrom({ trades: converted, movements: [], overrides: payments.overrides, splits: payments.splits ?? new Map() }, payments.schedules, payments.today)
+    return ledgerNowFrom({ trades: converted, movements: [], overrides: payments.overrides, splits: payments.splits }, payments.schedules, payments.today)
   })
 
   // The three runs see the same events, so holdings and realized trades line up by index.

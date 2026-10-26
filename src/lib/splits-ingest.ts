@@ -12,7 +12,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getBars } from './bars-cache'
 import { invalidateUserCache, getRedis } from './redis'
-import { readAll, SPLITS_KEY } from './stock-splits'
+import { readTable, SPLITS_KEY } from './stock-splits'
 import { listCatalogued, yahooSymbols } from './ticker-catalog'
 
 // Every run asks Yahoo again: the bars cache is otherwise fresh all day.
@@ -33,7 +33,7 @@ export async function ingestSplits(
 ): Promise<{ tickers: number; written: number; unknown: string[] }> {
   const traders = new Map<string, Set<string>>()
   let first = ''
-  for (const t of await readAll(supabase, 'transactions', 'ticker, date, user_id, asset_type', ['date', 'id'])) {
+  for (const t of await readTable(supabase, 'transactions', 'ticker, date, user_id, asset_type', ['date', 'id'])) {
     if (String(t.asset_type ?? '').toUpperCase() === 'ON') continue
     const ticker = String(t.ticker).trim().toUpperCase()
     traders.set(ticker, (traders.get(ticker) ?? new Set()).add(t.user_id))
@@ -45,7 +45,7 @@ export async function ingestSplits(
   const symbolOf = yahooSymbols([...traders.keys()], await (deps.listCatalogued ?? listCatalogued)(supabase))
   const [charts, stored] = await Promise.all([
     (deps.getBars ?? getBars)([...new Set(symbolOf.values())], new Date(first), { maxAgeSec: FRESH_SEC }),
-    readAll(supabase, 'stock_splits', 'ticker, date, numerator, denominator', ['ticker', 'date']),
+    readTable(supabase, 'stock_splits', 'ticker, date, numerator, denominator', ['ticker', 'date']),
   ])
   const ratioOf = new Map(stored.map(r => [`${r.ticker} ${r.date}`, `${Number(r.numerator)}/${Number(r.denominator)}`]))
 

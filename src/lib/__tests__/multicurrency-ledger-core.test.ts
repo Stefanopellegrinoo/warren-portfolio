@@ -84,7 +84,7 @@ describe('multi-currency views on the ledger core', () => {
       { date: '2026-06-02', kind: 'mep', buy: 1100, sell: 1100 },
       { date: '2026-06-02', kind: 'ccl', buy: 1200, sell: 1200 },
     ])
-    const v = views([buy], { fxAt, payments: { schedules, overrides: [], today: '2026-10-22' } })
+    const v = views([buy], { fxAt, payments: { schedules, overrides: [], today: '2026-10-22', splits: new Map() } })
     // Coupon 100 × 1 = 100 MEP; the 2.500 MEP amortization is capital returned.
     expectAmounts(v.totals.realized, { ARS: 110_000, MEP: 100, CCL: 110_000 / 1200 })
   })
@@ -102,7 +102,7 @@ describe('multi-currency views on the ledger core', () => {
     const v = views([buy], {
       onPositions: [{ ticker: 'YM34D', quantity: 100, market_value: 7600 }],
       cashBalance: state.cash,
-      payments: { schedules, overrides: [], today: '2026-10-22' },
+      payments: { schedules, overrides: [], today: '2026-10-22', splits: new Map() },
     })
     // 25 % of the capital returned: cost 10.000 MEP → 7.500 MEP at the purchase FX.
     expectAmounts(v.positions.YM34D.cost, { ARS: 7_500_000, MEP: 7500, CCL: 6000 })

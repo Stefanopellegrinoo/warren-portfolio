@@ -249,6 +249,19 @@ describe('getDerivedSeries', () => {
     expect(d2.getBars.mock.calls[0][0]).toEqual(['ZZZ.BA'])
   })
 
+  it('S1: when Yahoo does not report the splits, the stored ones un-adjust the bars and reach the core', async () => {
+    let seen!: DeriveInput
+    const derive = vi.fn((i: DeriveInput) => { seen = i; return { rows: [], flags: FLAGS, income: [] } })
+    const stored = [{ date: '2026-03-04', numerator: 2, denominator: 1 }]
+    const d = deps({
+      getBars: vi.fn(async (s: string[]) => new Map(s.map(x => [x, ok([bar('2026-03-02', 25)], { splitsKnown: false })]))),
+      loadSplits: vi.fn(async () => new Map([['AAA', stored]])),
+    })
+    await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, { ...d, derive })
+    expect(seen.barsByTicker.get('AAA')).toEqual([bar('2026-03-02', 50)])
+    expect(seen.splits?.get('AAA')).toEqual(stored)
+  })
+
   it('S13: passes bars un-split-adjusted; S12.1: .BA bars go through the CCL, only when one is held', async () => {
     let seen!: DeriveInput
     const derive = vi.fn((i: DeriveInput) => { seen = i; return { rows: [], flags: FLAGS, income: [] } })
@@ -257,6 +270,8 @@ describe('getDerivedSeries', () => {
     })
     await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, { ...split, derive })
     expect(seen.barsByTicker.get('AAA')).toEqual([bar('2026-03-02', 50)])
+    // The core gets the same splits the bars were un-adjusted with (odd/tasks/split-aware-ledger.md S1).
+    expect(seen.splits?.get('AAA')).toEqual([{ date: '2026-03-04', numerator: 2, denominator: 1 }])
     expect(split.getHistoricalCCL).not.toHaveBeenCalled()
 
     const ars = deps({
