@@ -200,6 +200,23 @@ describe('ledgerAt: stock splits (odd/tasks/split-aware-ledger.md S2)', () => {
     expect(s.holdings).toEqual([])
   })
 
+  it('a split dated with a time still applies at the start of its day', () => {
+    const timed = new Map([['GOOGL', [{ date: '2022-07-18T13:30:00.000Z', numerator: 20, denominator: 1 }]]])
+    const s = ledgerAt([tx('GOOGL', 'COMPRA', 1, 2600, '2022-07-15'), tx('GOOGL', 'COMPRA', 20, 130, '2022-07-18')], [], '2022-07-18', { splits: timed })
+    expect(s.holdings[0].quantity).toBe(40)
+  })
+
+  it('a split of a ticker sold before it, or with an invalid ratio, changes nothing', () => {
+    const closed = ledgerAt([
+      tx('GOOGL', 'COMPRA', 1, 2600, '2022-03-21'),
+      tx('GOOGL', 'VENTA', -1, 2700, '2022-04-01'),
+      tx('GOOGL', 'COMPRA', 5, 130, '2022-08-01'),
+    ], [], '2022-12-31', { splits: googl })
+    expect(closed.holdings[0]).toMatchObject({ quantity: 5, costBasis: 650, firstBought: '2022-08-01' })
+    const invalid = new Map([['ABC', [{ date: '2023-01-03', numerator: 2, denominator: 0 }, { date: '2023-02-01', numerator: 0, denominator: 1 }]]])
+    expect(ledgerAt([tx('ABC', 'COMPRA', 10, 60, '2022-06-01')], [], '2023-12-31', { splits: invalid }).holdings[0].quantity).toBe(10)
+  })
+
   it('without splits nothing changes: the as-traded quantities are summed as before', () => {
     const s = ledgerAt([
       tx('GOOGL', 'COMPRA', 1, 2591.6, '2022-03-21'),

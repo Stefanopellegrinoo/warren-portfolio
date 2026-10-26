@@ -16,6 +16,8 @@ const supabase = ledgerSupabase({
   ],
   cash_movements: [movement({ amount: 50 })],
 })
+// Ledger reads load the stock splits (odd/tasks/split-aware-ledger.md T3): none in these tests.
+vi.mock('@/lib/stock-splits', () => ({ loadSplits: async () => new Map() }))
 vi.mock('@/lib/api-auth', () => ({
   requireUser: async () => ({ supabase, user: { id: 'u1' } }),
   isAuthFailure: () => false,

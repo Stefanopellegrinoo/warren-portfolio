@@ -171,8 +171,8 @@ export function ledgerAt(trades: LedgerTrade[], movements: LedgerMovement[], dat
     ...paymentEvents(options.schedules ?? new Map(), options.overrides ?? [], cutoff),
     // Empty insertion time and rank -1: a split goes before every trade of its day.
     ...Array.from(options.splits ?? new Map<string, SplitEvent[]>()).flatMap(([ticker, splits]) => splits
-      .filter(sp => sp.date <= cutoff)
-      .map((sp): Event => ({ kind: 'split', day: sp.date, created: '', rank: -1, ticker: ticker.trim().toUpperCase(), factor: sp.numerator / sp.denominator }))),
+      .filter(sp => dayOf(sp.date) <= cutoff)
+      .map((sp): Event => ({ kind: 'split', day: dayOf(sp.date), created: '', rank: -1, ticker: ticker.trim().toUpperCase(), factor: sp.numerator / sp.denominator }))),
   ].sort((a, b) => a.day.localeCompare(b.day) || a.created.localeCompare(b.created) || a.rank - b.rank)
 
   const pay = (ticker: string, payDate: string, kind: PaymentKind, computed: number, fromUser: boolean): number => {

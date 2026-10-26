@@ -13,7 +13,7 @@
  * WORKER-SAFE: relative value imports only.
  */
 import type { Quote } from '@/types'
-import type { DailyBar } from './historical-prices'
+import type { DailyBar, SplitEvent } from './historical-prices'
 import type { FlowRow } from './on-flow-history'
 import type { FlowTransaction, IncomeMovement } from './asset-universe'
 import { ledgerAt, type FlowOverride, type Holding, type Income, type LedgerMovement, type LedgerState, type LedgerTrade } from './ledger-core'
@@ -55,6 +55,8 @@ export interface DeriveInput {
   /** ON ticker -> payment schedule (loadSchedules). */
   schedules: Map<string, FlowRow[]>
   overrides: FlowOverride[]
+  /** Stock splits by ticker, the same ones the raw bars were un-adjusted with (odd/tasks/split-aware-ledger.md S1). */
+  splits?: Map<string, SplitEvent[]>
   /** Portfolio ticker -> un-adjusted USD closes. Bars dated today or later are ignored. */
   barsByTicker: Map<string, DailyBar[]>
   /** ON ticker -> recorded closes (on_price_history). */
@@ -136,7 +138,7 @@ export function deriveHistory(input: DeriveInput): DeriveResult {
   let income: Income[] = []
 
   try {
-    const { userId, transactions, movements, schedules, overrides, barsByTicker, onPricesByTicker, today, todayQuotes } = input
+    const { userId, transactions, movements, schedules, overrides, splits, barsByTicker, onPricesByTicker, today, todayQuotes } = input
     const ledgerDays = [...transactions, ...movements].map(r => day(r.date)).sort()
     if (ledgerDays.length === 0) return { rows, flags, income }
     const firstDate = ledgerDays[0]
@@ -145,7 +147,7 @@ export function deriveHistory(input: DeriveInput): DeriveResult {
     const calendar = new Set<string>()
     closes.forEach(bars => bars.forEach(b => { if (b.date >= firstDate && b.date < today) calendar.add(b.date) }))
 
-    const options = { schedules, overrides }
+    const options = { schedules, overrides, splits }
     const noBars = new Set<string>()
     for (const date of [...calendar].sort()) {
       const state = ledgerAt(transactions, movements, date, options)

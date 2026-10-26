@@ -9,6 +9,8 @@ import { MarketDataError } from '../market-data/types'
 // Mock sendTelegram so no real HTTP calls are made
 const mockSendTelegram = vi.fn().mockResolvedValue({ ok: true })
 
+// Ledger reads load the stock splits (odd/tasks/split-aware-ledger.md T3): none in these tests.
+vi.mock('@/lib/stock-splits', () => ({ loadSplits: async () => new Map() }))
 vi.mock('../notifications', async () => ({
   ...(await vi.importActual<typeof import('../notifications')>('../notifications')),
   sendTelegram: mockSendTelegram,

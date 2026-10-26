@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 
+// Ledger reads load the stock splits (odd/tasks/split-aware-ledger.md T3): none in these tests.
+vi.mock('@/lib/stock-splits', () => ({ loadSplits: async () => new Map() }))
 vi.mock('../redis', () => ({ isRedisReady: () => false, getRedis: () => null, SUMMARY_VERSION_TTL: 60 }))
 vi.mock('../yahoo-finance', () => ({ fetchQuotesWithFallback: vi.fn(async () => new Map()) }))
 vi.mock('../queue', () => ({ addPriceUpdateJob: vi.fn(async () => undefined) }))
