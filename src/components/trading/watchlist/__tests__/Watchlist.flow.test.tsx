@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { Watchlist } from '../Watchlist'
 import { useChartStore } from '@/lib/store/chart-store'
 import { NO_CONNECTION } from '@/lib/request-errors'
+import { forgetCached } from '@/lib/client-cache'
 
 // Node 25 ships a stub localStorage without methods; the persisted store needs a real one.
 vi.hoisted(() => {
@@ -158,6 +159,59 @@ describe('Watchlist — removing a symbol', () => {
     expect(useChartStore.getState().watchlist).toEqual(['MSFT'])
     expect(calls.some(c => c.method === 'DELETE')).toBe(false)
     expect(toast.success).toHaveBeenCalledWith('Quitado de la lista', { description: 'AAPL' })
+    unmount()
+  })
+})
+
+describe('Watchlist — Cartera, the stocks held', () => {
+  const POSITIONS = [
+    { ticker: 'AAPL', market_value: 300, day_change_pct: 2 },
+    { ticker: 'GGAL', market_value: 100, day_change_pct: -2 },
+  ]
+  function stubPortfolio(positions: unknown[] = POSITIONS) {
+    forgetCached()
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url)
+      if (url === '/api/positions') return Response.json({ positions, onPositions: [], summary: {}, lastRefresh: null })
+      if (url.startsWith('/api/quote')) return Response.json([])
+      if (url === '/api/watchlist/lists') return Response.json({ lists: [] })
+      throw new Error(`unexpected fetch ${url}`)
+    }))
+    return calls
+  }
+  const rowNames = (el: HTMLElement) => [...el.querySelectorAll('ul[aria-label="Símbolos de la lista"] li')].map((li) => li.querySelector('button')!.textContent)
+
+  it('shows Mi cartera with today’s change of the stocks, then each stock held; nothing to add or remove', async () => {
+    const calls = stubPortfolio()
+    const { el, unmount } = await render('__cartera__')
+
+    expect(rowNames(el)).toEqual([expect.stringContaining('Mi cartera'), expect.stringContaining('AAPL'), expect.stringContaining('GGAL')])
+    expect(rowNames(el)[0]).toContain('Rendimiento de las acciones')
+    expect(rowNames(el)[0]).toContain('1,00')
+    expect(el.querySelector('button[aria-label^="Quitar"]')).toBeNull()
+    expect(el.querySelector('button[aria-label="Agregar símbolo"]')).toBeNull()
+    expect(calls.some((u) => u.startsWith('/api/watchlist?'))).toBe(false)
+    unmount()
+  })
+
+  it('Mi cartera opens the portfolio chart; a stock opens its own', async () => {
+    stubPortfolio()
+    const { unmount } = await render('__cartera__')
+
+    act(() => button('Mi cartera')!.click())
+    expect(useChartStore.getState().symbol).toBe('__portfolio__')
+    act(() => button('GGAL')!.click())
+    expect(useChartStore.getState().symbol).toBe('GGAL')
+    unmount()
+  })
+
+  it('with nothing held it says so', async () => {
+    stubPortfolio([])
+    const { el, unmount } = await render('__cartera__')
+
+    expect(el.textContent).toContain('No tenés acciones en cartera')
+    expect(el.textContent).not.toContain('Mi cartera')
     unmount()
   })
 })

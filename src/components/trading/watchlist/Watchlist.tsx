@@ -5,7 +5,10 @@ import { Plus, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchTickers24h } from "@/lib/binance/rest";
 import { getBinanceWS } from "@/lib/binance/ws";
-import { useChartStore } from "@/lib/store/chart-store";
+import { CARTERA_LIST_ID, PORTFOLIO_SYMBOL, useChartStore } from "@/lib/store/chart-store";
+import { getPortfolio } from "@/lib/warren/positions";
+import { portfolioDayChangePct } from "@/lib/chart/compare";
+import type { Position } from "@/types";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn, formatPct } from "@/lib/utils";
 import { Chip, toneOf } from "@/components/resumen/ui";
@@ -42,6 +45,9 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
   const [removing, setRemoving] = useState<string | null>(null);
   const [rows, setRows] = useState<Record<string, Row>>({});
   const [flash, setFlash] = useState<Record<string, "up" | "down" | null>>({});
+  // Cartera: the stocks held right now, read from the portfolio, never from a stored list.
+  const cartera = activeId === CARTERA_LIST_ID;
+  const [positions, setPositions] = useState<Position[]>([]);
 
   // Effect A — local watchlist mirror (only when no activeId)
   useEffect(() => {
@@ -51,7 +57,7 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
 
   // Effect B — remote watchlist fetch (only when activeId is set)
   useEffect(() => {
-    if (!activeId) return;
+    if (!activeId || activeId === CARTERA_LIST_ID) return;
     let cancelled = false;
     setLoading(true);
     setLoadError(null);
@@ -68,6 +74,23 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [activeId, watchlistRefreshTick, attempt]);
+
+  // Effect C — Cartera: the positions held (stocks and CEDEARs)
+  useEffect(() => {
+    if (activeId !== CARTERA_LIST_ID) return;
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+    getPortfolio()
+      .then((data) => {
+        if (cancelled) return;
+        setPositions(data.positions ?? []);
+        setCurrentList((data.positions ?? []).map((p) => p.ticker));
+      })
+      .catch((e) => { if (!cancelled) setLoadError(requestErrorMessage(e, "No se pudo cargar tu cartera.")); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [activeId, attempt]);
 
   // Effect: data fetching — Binance WS + Yahoo polling, both run in parallel
   useEffect(() => {
@@ -177,15 +200,17 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-1 border-b border-line px-2 py-1.5">
         <WatchlistSelector />
-        <button
-          type="button"
-          aria-label="Agregar símbolo"
-          title="Agregar símbolo"
-          onClick={() => openSymbolDialog(true, addSymbolToCurrentWatchlist)}
-          className={iconButton}
-        >
-          <Plus className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
-        </button>
+        {!cartera && (
+          <button
+            type="button"
+            aria-label="Agregar símbolo"
+            title="Agregar símbolo"
+            onClick={() => openSymbolDialog(true, addSymbolToCurrentWatchlist)}
+            className={iconButton}
+          >
+            <Plus className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+          </button>
+        )}
       </div>
 
       <div aria-hidden="true" className="grid grid-cols-[minmax(0,1fr)_auto_76px] gap-2 border-b border-line py-1.5 pl-4 pr-10 text-xs text-ink-3">
@@ -207,6 +232,9 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
           </p>
         ) : (
           <ul aria-label="Símbolos de la lista">
+            {cartera && currentList.length > 0 && (
+              <PortfolioRow active={symbol === PORTFOLIO_SYMBOL} pct={portfolioDayChangePct(positions)} onSelect={() => { setSymbol(PORTFOLIO_SYMBOL); onSelectSymbol?.(PORTFOLIO_SYMBOL); }} />
+            )}
             {currentList.map((s) => {
               const row = rows[s];
               const isActive = s === symbol;
@@ -236,7 +264,7 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
                       {row ? <Chip tone={toneOf(row.pct)}>{formatPct(row.pct / 100)}</Chip> : <span className="text-ink-3">—</span>}
                     </span>
                   </button>
-                  <button
+                  {!cartera && <button
                     type="button"
                     aria-label={`Quitar ${s} de la lista`}
                     title="Quitar de la lista"
@@ -247,19 +275,49 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
                     {removing === s
                       ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
                       : <X className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
-                  </button>
+                  </button>}
                 </li>
               );
             })}
           </ul>
         )}
         {currentList.length === 0 && !loading && !loadError && (
-          <div className="px-4 py-6 text-[13px]">
-            <p className="text-ink-2">La lista está vacía.</p>
-            <p className="mt-1 text-ink-3">Agregá símbolos con el botón + de arriba.</p>
-          </div>
+          cartera ? (
+            <div className="px-4 py-6 text-[13px]">
+              <p className="text-ink-2">No tenés acciones en cartera.</p>
+              <p className="mt-1 text-ink-3">Cuando compres una, aparece acá sola.</p>
+            </div>
+          ) : (
+            <div className="px-4 py-6 text-[13px]">
+              <p className="text-ink-2">La lista está vacía.</p>
+              <p className="mt-1 text-ink-3">Agregá símbolos con el botón + de arriba.</p>
+            </div>
+          )
         )}
       </ScrollArea>
     </div>
+  );
+}
+
+/** Mi cartera at the top of Cartera: the stock portfolio as one more asset, with today's change. */
+function PortfolioRow({ active, pct, onSelect }: { active: boolean; pct: number | null; onSelect: () => void }) {
+  return (
+    <li className={cn("relative flex items-center border-b border-line hover:bg-hover", active && "bg-hover")}>
+      {active && <span aria-hidden="true" className="absolute inset-y-1.5 left-0 w-0.5 rounded bg-accent" />}
+      <button
+        type="button"
+        aria-current={active || undefined}
+        onClick={onSelect}
+        className="grid min-h-10 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_76px] items-center gap-2 py-1.5 pl-4 pr-10 text-left text-[13px] tabular-nums focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring max-[819px]:min-h-11"
+      >
+        <span className="flex min-w-0 flex-col">
+          <span className={cn("truncate text-ink", active && "font-semibold")}>Mi cartera</span>
+          <span className="truncate text-xs text-ink-3">Rendimiento de las acciones</span>
+        </span>
+        <span className="flex justify-end">
+          {pct !== null ? <Chip tone={toneOf(pct)}>{formatPct(pct / 100)}</Chip> : <span className="text-ink-3">—</span>}
+        </span>
+      </button>
+    </li>
   );
 }
