@@ -125,7 +125,7 @@ const DEFAULT_INDICATORS = { ...useChartStore.getState().indicators }
 const { INDICATOR_KEYS } = await import('@/lib/chart/preferences-schema')
 const lwc = await import('lightweight-charts')
 
-afterEach(() => { compare.status = 'idle'; compare.series = {}; compare.ccl = undefined; bars.status = 'ready'; bars.error = undefined; getVisibleRange.mockReset(); getVisibleRange.mockReturnValue(null); useChartStore.setState({ compareSymbols: [], compareDefaulted: true, indicators: { ...DEFAULT_INDICATORS } }); vi.clearAllMocks(); vi.unstubAllGlobals(); setupOrder.length = 0; alertsApi.alerts = []; bars.candles = [candle]; drawingState.tool = null; drawingState.selection = []; series.priceToCoordinate.mockReturnValue(null); document.body.innerHTML = '' })
+afterEach(() => { compare.status = 'idle'; compare.series = {}; compare.ccl = undefined; bars.status = 'ready'; bars.error = undefined; getVisibleRange.mockReset(); getVisibleRange.mockReturnValue(null); useChartStore.setState({ compareSymbols: [], compareDefaulted: true, compareRange: '1A', indicators: { ...DEFAULT_INDICATORS } }); vi.clearAllMocks(); vi.unstubAllGlobals(); setupOrder.length = 0; alertsApi.alerts = []; bars.candles = [candle]; drawingState.tool = null; drawingState.selection = []; series.priceToCoordinate.mockReturnValue(null); document.body.innerHTML = '' })
 
 const onPhone = (phone: boolean) => vi.stubGlobal('matchMedia', (q: string) => ({ matches: phone && q.includes('max-width'), media: q, addEventListener() {}, removeEventListener() {} }))
 const panes = (n: number) => Array.from({ length: n }, () => ({ setStretchFactor: vi.fn() }))
@@ -1110,17 +1110,53 @@ describe('TradingChart — comparing', () => {
   }
   const seriesKinds = () => (chart.addSeries.mock.calls as unknown[][]).map((c) => c[0])
   const modes = () => (priceScale.applyOptions.mock.calls as { mode?: number }[][]).map((c) => c[0].mode).filter((m) => m !== undefined)
+  // The scale's labels: the last price format the chart gave its series.
+  const lastFormat = () => (series.applyOptions.mock.calls as { priceFormat?: { formatter: (p: number) => string } }[][]).map((c) => c[0].priceFormat).filter(Boolean).at(-1)
+  const TWO_DAYS = [{ time: 0, open: 1, high: 2, low: 0.5, close: 1.5 }, { time: 86400, open: 3, high: 3, low: 3, close: 3 }]
+  const SPY_TWO = { points: [{ time: '1970-01-01', value: 400 }, { time: '1970-01-02', value: 440 }] }
+  const scaledLine = () => (series.setData.mock.calls as { time: number; value: number }[][][]).map((c) => c[0]).find((d) => d.length === 2 && d[0].value === 1.5 && !('close' in d[0]))
 
-  it('draws each compared asset as a line on the bars and turns the scale to %', async () => {
+  it('draws each compared asset from the chart\'s own price on the first day, and labels the scale in % from that day', async () => {
     compare.status = 'ready'
-    compare.series = { SPY }
+    compare.series = { SPY: SPY_TWO }
+    bars.candles = TWO_DAYS
+    useChartStore.setState({ compareRange: 'Todo' })
     const { el, unmount } = await renderTf('AAPL', '1d', ['SPY'])
 
     expect(useCompareSeries).toHaveBeenLastCalledWith(['SPY'], false)
     expect(seriesKinds()).toEqual([lwc.CandlestickSeries, lwc.LineSeries])
-    expect(series.setData).toHaveBeenCalledWith([{ time: 1, value: 400 }])
-    expect(modes().at(-1)).toBe(2)
-    expect(el.textContent).toContain('SPY')
+    expect(scaledLine()![1].value).toBeCloseTo(1.65)
+    expect(lastFormat()!.formatter(3)).toBe('+100,00 %')
+    expect(modes()).toEqual([])
+    expect(el.querySelector('[data-chart-legend]')!.textContent).toContain('AAPL+100,00 %SPY+10,00 %')
+    unmount()
+  })
+
+  it('moving the chart never changes a number: every % is from the range\'s first day, not the first one in sight', async () => {
+    compare.status = 'ready'
+    compare.series = { SPY: SPY_TWO }
+    bars.candles = TWO_DAYS
+    getVisibleRange.mockReturnValue({ from: 86400, to: 86400 })
+    useChartStore.setState({ compareRange: 'Todo' })
+    const { el, unmount } = await renderTf('AAPL', '1d', ['SPY'])
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)) })
+
+    expect(el.querySelector('[data-chart-legend]')!.textContent).toContain('AAPL+100,00 %SPY+10,00 %')
+    unmount()
+  })
+
+  it('the range buttons pick the first day, remembered; the chosen one is marked', async () => {
+    compare.status = 'ready'
+    compare.series = { SPY: SPY_TWO }
+    bars.candles = TWO_DAYS
+    useChartStore.setState({ compareRange: '1A' })
+    const { unmount } = await renderTf('AAPL', '1d', ['SPY'])
+
+    const group = document.querySelector('[role="group"][aria-label="Comparar desde"]')!
+    expect([...group.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['1M', '3M', '6M', 'YTD', '1A', 'Todo'])
+    expect(group.querySelector('[aria-pressed="true"]')!.textContent).toBe('1A')
+    await act(async () => { button('6M').click() })
+    expect(useChartStore.getState().compareRange).toBe('6M')
     unmount()
   })
 
@@ -1129,8 +1165,10 @@ describe('TradingChart — comparing', () => {
 
     expect(useCompareSeries).toHaveBeenLastCalledWith([], false)
     expect(seriesKinds()).toEqual([lwc.CandlestickSeries])
-    expect(modes()).not.toContain(2)
+    expect(modes()).toEqual([])
+    expect(lastFormat()?.formatter(3) ?? '3,00').not.toContain('%')
     expect(button('+ Comparar')).toBeTruthy()
+    expect(document.querySelector('[aria-label="Comparar desde"]')).toBeNull()
     expect(el.textContent).not.toContain('Sin datos')
     unmount()
   })
@@ -1164,12 +1202,13 @@ describe('TradingChart — comparing', () => {
     compare.status = 'ready'
     compare.series = { SPY }
     const { unmount } = await renderTf('AAPL', '1d', ['SPY'])
+    expect(lastFormat()!.formatter(3)).toContain('%')
 
     await act(async () => { document.querySelector<HTMLButtonElement>('button[aria-label="Quitar SPY de la comparación"]')!.click() })
 
     expect(useChartStore.getState().compareSymbols).toEqual([])
     expect(chart.removeSeries).toHaveBeenCalled()
-    expect(modes().at(-1)).toBe(0)
+    expect(lastFormat()!.formatter(3)).toBe('3,00')
     unmount()
   })
 
@@ -1203,7 +1242,7 @@ describe('TradingChart — comparing', () => {
     again.unmount()
   })
 
-  it('while comparing, the indicators drawn over the price wait and the ones in their own pane stay in prices', async () => {
+  it('while comparing, the indicators keep drawing: they share the price scale with every line', async () => {
     compare.status = 'ready'
     compare.series = { SPY }
     useChartStore.setState({ compareSymbols: ['SPY'], indicators: { ...NO_INDICATORS, ema20: true, rsi: true } as never })
@@ -1212,10 +1251,9 @@ describe('TradingChart — comparing', () => {
     const root = createRoot(el)
     await act(async () => { root.render(<TradingChart symbol="AAPL" timeframe="1d" />) })
 
-    expect((chart.addSeries.mock.calls as unknown[][]).filter((c) => c[2] === 0)).toEqual([])
-    expect((chart.addSeries.mock.calls as unknown[][]).some((c) => c[2] === 1)).toBe(true)
-    expect(modes().lastIndexOf(0)).toBeGreaterThan(modes().indexOf(2))
-    expect(el.textContent).toContain('Medias y Bollinger: ocultas al comparar')
+    expect((chart.addSeries.mock.calls as unknown[][]).some((c) => c[2] === 0)).toBe(true)
+    expect(modes()).toEqual([])
+    expect(el.textContent).not.toContain('ocultas al comparar')
     act(() => root.unmount())
   })
 
