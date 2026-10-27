@@ -12,13 +12,14 @@
  */
 
 import { Worker } from 'bullmq'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { PRICE_QUEUE_NAME, PRICE_REPEAT_JOB_NAME, NIGHTLY_JOB_NAME, TICKER_AUDIT_JOB_NAME, ON_TERMS_JOB_NAME, FX_RATES_JOB_NAME, ON_PRICES_PERSIST_JOB_NAME, SPLITS_INGEST_JOB_NAME } from './queue'
 import { fetchQuotesFromYahoo, cachePrice, fetchQuotes } from './yahoo-finance'
 import { fetchData912Prices, refreshLocalPrices } from './data912-client'
 import { createServiceClient } from './supabase-server'
 import { priceAlertPush, pushKeys, sendPushToUser } from './push'
 import { getRedis } from './redis'
-import { cacheUserSummaries } from './summary-cache'
+import { cacheUserSummaries, loadCycleLedgers } from './summary-cache'
 import { captureOnPriceHistory } from './on-price-history'
 import { splitQuotesByAssetClass } from './portfolio-valuation'
 import { isMarketOpen, argentinaDate } from './utils'
@@ -31,7 +32,8 @@ import { auditTickerIdentities } from './ticker-audit'
 import { ingestOnTerms } from './on-terms-ingest'
 import { ingestFxRates } from './fx-rates'
 import { ingestSplits } from './splits-ingest'
-import { loadHeldStockTickers, loadPortfolioNow } from './ledger-now'
+import { heldStockTickersOf, loadPortfolioNow } from './ledger-now'
+import { memoByAlertsVersion, memoByLedgerVersion } from './ledger-memo'
 import { fetchCryptoQuotes } from './binance/rest'
 import { getProviderForSymbol } from './market-data/resolver'
 import { isPriceValue } from './chart/alert-condition'
@@ -62,7 +64,8 @@ async function getAllTickers(): Promise<string[]> {
   if (!supabase) return []
 
   try {
-    return await loadHeldStockTickers(supabase)
+    // The same ledgers the summaries use, read again only after a write (ledger-memo.ts).
+    return heldStockTickersOf(await loadCycleLedgers())
   } catch (error) {
     console.error('[Worker] Error reading held tickers from the ledger:', error)
     return []
@@ -72,42 +75,74 @@ async function getAllTickers(): Promise<string[]> {
 /**
  * Fetch the distinct tickers that have an active price alert, held or not
  */
-async function getActiveAlertTickers(): Promise<string[]> {
+// Active alerts change only when one is created, edited, deleted or fired (each moves the alerts
+// version): the worker reads them again only then, or after an hour (ledger-memo.ts).
+const activeAlertTickers = memoByAlertsVersion(async () => {
   const supabase = getSupabase()
   if (!supabase) return []
-
   const { data, error } = await supabase
     .from('price_alerts')
     .select('ticker')
     .eq('status', 'active')
     .eq('type', 'price')
+  if (error) throw error
+  return Array.from(new Set((data || []).map((a: any) => a.ticker) as string[]))
+})
 
-  if (error) {
+async function getActiveAlertTickers(): Promise<string[]> {
+  try {
+    return await activeAlertTickers()
+  } catch (error) {
     console.error('[Worker] Error fetching alert tickers:', error)
     return []
   }
+}
 
-  return Array.from(new Set((data || []).map((a: any) => a.ticker) as string[]))
+// The active alerts of each ticker set a cycle asks for (the same set every minute), per alerts version.
+const alertRowsByTickers = memoByAlertsVersion(async () => new Map<string, Promise<any[]>>())
+
+async function activeAlertsOf(supabase: SupabaseClient, tickers: string[]): Promise<any[]> {
+  const byTickers = await alertRowsByTickers()
+  const key = [...tickers].sort().join(',')
+  let rows = byTickers.get(key)
+  if (!rows) {
+    rows = (async () => {
+      const { data, error } = await supabase
+        .from('price_alerts')
+        .select('*')
+        .eq('status', 'active')
+        .eq('type', 'price')
+        .in('ticker', tickers)
+      if (error) throw error
+      return data ?? []
+    })()
+    byTickers.set(key, rows)
+    rows.catch(() => byTickers.delete(key))
+  }
+  return rows
 }
 
 /**
- * Fetch all ON tickers from the ons table (ones users are trading)
+ * Fetch all ON tickers from the ons table (ones users are trading). The table grows on an ON trade,
+ * which moves the ledger version, so it is read again only then (ledger-memo.ts).
  */
-async function getAllONTickers(): Promise<string[]> {
+const onTickersOfCatalog = memoByLedgerVersion(async () => {
   const supabase = getSupabase()
   if (!supabase) return []
-
   const { data, error } = await supabase
     .from('ons')
     .select('ticker')
+  if (error) throw error
+  return Array.from(new Set((data || []).map((p: any) => p.ticker) as string[]))
+})
 
-  if (error) {
+async function getAllONTickers(): Promise<string[]> {
+  try {
+    return await onTickersOfCatalog()
+  } catch (error) {
     console.error('[Worker] Error fetching ONs from database:', error)
     return []
   }
-
-  const tickerSet = new Set((data || []).map((p: any) => p.ticker) as string[])
-  return Array.from(tickerSet)
 }
 
 /**
@@ -165,14 +200,10 @@ export async function evaluatePriceAlerts(
 
   if (tickers.length === 0) return
 
-  const { data: alerts, error } = await supabase
-    .from('price_alerts')
-    .select('*')
-    .eq('status', 'active')
-    .eq('type', 'price')
-    .in('ticker', tickers)
-
-  if (error) {
+  let alerts: any[]
+  try {
+    alerts = await activeAlertsOf(supabase, tickers)
+  } catch (error) {
     console.error('[Worker] evaluatePriceAlerts: fetch failed', error)
     return
   }

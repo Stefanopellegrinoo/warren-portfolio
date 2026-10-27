@@ -31,6 +31,9 @@ vi.mock('@/lib/supabase-server', () => ({
   createServerClientInstance: vi.fn(),
 }))
 
+// Each test reads its own tables: the worker's reuse between cycles is tested in summary-cache-reuse.test.ts.
+vi.mock('../ledger-memo', () => ({ memoByLedgerVersion: <T>(load: () => Promise<T>) => load, MAX_AGE_MS: 3_600_000 }))
+
 describe('setSummaryIfVersion', () => {
   beforeEach(() => {
     vi.clearAllMocks()

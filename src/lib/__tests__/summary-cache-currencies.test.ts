@@ -89,6 +89,9 @@ beforeEach(() => {
   mockRedis.eval.mockResolvedValue(1)
 })
 
+// Each test reads its own tables: the worker's reuse between cycles is tested in summary-cache-reuse.test.ts.
+vi.mock('../ledger-memo', () => ({ memoByLedgerVersion: <T>(load: () => Promise<T>) => load, MAX_AGE_MS: 3_600_000 }))
+
 describe('cacheUserSummaries with the currency views', () => {
   it('adds a versioned `currencies` field and leaves every existing field as it was', async () => {
     vi.mocked(createServiceClient).mockReturnValue(db(tables) as never)

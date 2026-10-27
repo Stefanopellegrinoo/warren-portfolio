@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
-import { invalidateUserCache } from '@/lib/redis'
+import { bumpAlertsVersion, invalidateUserCache } from '@/lib/redis'
 import { serverError } from '@/lib/api/errors'
 import { tooManyRequests } from '@/lib/rate-limit'
 import { parseAlertUpdate } from '@/lib/chart/alert-condition'
@@ -47,6 +47,7 @@ export async function PATCH(
   }
 
   await invalidateUserCache(user.id)
+  await bumpAlertsVersion()
 
   return NextResponse.json({ alert: data })
 }
@@ -80,6 +81,7 @@ export async function DELETE(
     .eq('user_id', user.id)
 
   if (error) return serverError('API /price-alerts/[id]', error)
+  await bumpAlertsVersion()
 
   return new NextResponse(null, { status: 204 })
 }

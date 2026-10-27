@@ -1,6 +1,7 @@
 import type { ONPosition, Position } from '@/types'
 import { createServiceClient } from './supabase-server'
-import { loadAllLedgers, ledgerNowFrom, onTickersOf, toPositions } from './ledger-now'
+import { loadAllLedgers, ledgerNowFrom, onTickersOf, toPositions, type UserLedger } from './ledger-now'
+import type { FlowRow } from './on-flow-history'
 import { loadSchedules } from './on-schedules'
 import { argentinaDate } from './utils'
 
@@ -26,8 +27,16 @@ export interface UserPortfolioInputs {
 export async function loadUserPortfolios(today: string = argentinaDate()): Promise<UserPortfolioInputs[]> {
   const supabase = createServiceClient()
   const ledgers = await loadAllLedgers(supabase)
-  const schedules = await loadSchedules(supabase, [...ledgers.values()].flatMap(l => onTickersOf(l.trades)), today)
+  return portfoliosFrom(ledgers, await loadAllSchedules(ledgers, today), today)
+}
 
+/** The ON schedules of every ON any of these ledgers ever traded. */
+export function loadAllSchedules(ledgers: Map<string, UserLedger>, today: string): Promise<Map<string, FlowRow[]>> {
+  return loadSchedules(createServiceClient(), [...ledgers.values()].flatMap(l => onTickersOf(l.trades)), today)
+}
+
+/** Pure: loadUserPortfolios from ledgers and schedules already read (the worker reuses them, ledger-memo.ts). */
+export function portfoliosFrom(ledgers: Map<string, UserLedger>, schedules: Map<string, FlowRow[]>, today: string): UserPortfolioInputs[] {
   const out: UserPortfolioInputs[] = []
   ledgers.forEach((ledger, userId) => {
     const state = ledgerNowFrom(ledger, schedules, today)

@@ -96,6 +96,58 @@ export function isRedisReady(): boolean {
   return redisReady && redisClient !== null
 }
 
+/** Moved by every user write (invalidateUserCache) and never expires: the worker reuses its reads until it moves (ledger-memo.ts). */
+export const LEDGER_VERSION_KEY = 'ledger:version'
+
+/** The users who wrote since the worker last looked: it re-reads only them (summary-cache.ts, S7). */
+export const LEDGER_DIRTY_KEY = 'ledger:dirty'
+
+/** Takes every user marked since the last call, at once; null when Redis cannot say (the worker reads everyone). */
+export async function takeDirtyUsers(): Promise<string[] | null> {
+  const redis = isRedisReady() ? redisClient : null
+  if (!redis) return null
+  try {
+    const replies = await redis.multi().smembers(LEDGER_DIRTY_KEY).del(LEDGER_DIRTY_KEY).exec()
+    const [err, users] = replies?.[0] ?? [new Error('no reply'), null]
+    return err ? null : (users as string[])
+  } catch {
+    return null
+  }
+}
+
+/** Moved whenever an alert is created, edited, deleted or fired: the worker reads the active alerts again. */
+export const ALERTS_VERSION_KEY = 'alerts:version'
+
+/** A version, '0' before the first bump; null when Redis cannot say (the caller reads everything again). */
+async function readVersion(key: string): Promise<string | null> {
+  const redis = isRedisReady() ? redisClient : null
+  if (!redis) return null
+  try {
+    return (await redis.get(key)) ?? '0'
+  } catch {
+    return null
+  }
+}
+
+export const readLedgerVersion = () => readVersion(LEDGER_VERSION_KEY)
+export const readAlertsVersion = () => readVersion(ALERTS_VERSION_KEY)
+
+/**
+ * Connects first: the web process may not have reached Redis yet while the worker reuses its alerts, and a
+ * lost bump would leave them stale for up to an hour. Only an unreachable Redis skips it, logged.
+ */
+export async function bumpAlertsVersion(): Promise<void> {
+  if (!(await ensureRedisConnected()) || !redisClient) {
+    console.warn('[Redis] Unreachable: the alerts version did not move')
+    return
+  }
+  try {
+    await redisClient.incr(ALERTS_VERSION_KEY)
+  } catch (err) {
+    console.warn('[Redis] Failed to move the alerts version', err)
+  }
+}
+
 /**
  * Get Redis connection options (for BullMQ).
  * Returns the URL string for BullMQ Queue/Worker connection.
@@ -158,7 +210,9 @@ export function stripKeyPrefix(key: string): string {
  * summary:version:{userId} so the summary writers (worker, /api/positions) and the derived series detect stale writes.
  */
 export async function invalidateUserCache(userId: string): Promise<void> {
-  if (!isRedisReady()) return
+  // Connects first, like bumpAlertsVersion: a write in a process that had not reached Redis yet would
+  // otherwise leave the worker reusing the old ledgers for up to an hour (ledger-memo.ts).
+  if (!(await ensureRedisConnected())) return
   try {
     const redis = getRedis()
     if (!redis) return
@@ -191,6 +245,8 @@ export async function invalidateUserCache(userId: string): Promise<void> {
     // Bump summary version before deleting so every summary and derived-series writer detects stale writes
     await redis.incr(`summary:version:${userId}`)
     await redis.expire(`summary:version:${userId}`, SUMMARY_VERSION_TTL)
+    await redis.incr(LEDGER_VERSION_KEY)
+    await redis.sadd(LEDGER_DIRTY_KEY, userId)
 
     if (keysToDelete.length > 0) {
       await redis.del(...keysToDelete)

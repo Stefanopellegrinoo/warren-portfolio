@@ -36,8 +36,19 @@ vi.mock('../yahoo-finance', () => ({
   fetchQuotes: (...a: unknown[]) => mockFetchLkp(...(a as [])),
 }))
 vi.mock('../data912-client', () => ({ fetchData912Prices: vi.fn(async () => new Map()) }))
-vi.mock('../redis', () => ({ getRedis: () => null }))
-vi.mock('../summary-cache', () => ({ cacheUserSummaries: vi.fn() }))
+// No alerts version by default: every cycle reads the alerts, as the tests below expect.
+let mockAlertsVersion: string | null = null
+const mockBumpAlerts = vi.fn(async () => {})
+vi.mock('../redis', () => ({
+  getRedis: () => null,
+  readAlertsVersion: async () => mockAlertsVersion,
+  bumpAlertsVersion: () => mockBumpAlerts(),
+}))
+// The held tickers come from the cycle's ledgers, read through the fake database below.
+vi.mock('../summary-cache', () => ({
+  cacheUserSummaries: vi.fn(),
+  loadCycleLedgers: async () => (await import('../ledger-now')).loadAllLedgers((await import('../supabase-server')).createServiceClient()),
+}))
 vi.mock('../portfolio-valuation', () => ({
   splitQuotesByAssetClass: (m: Map<string, unknown>) => ({ stockQuotes: m, onQuotes: new Map() }),
 }))
@@ -431,6 +442,39 @@ describe('periodic price job', () => {
     expect(mockIn.mock.calls[0][1]).toEqual(['AAPL'])
     expect(mockEqUpdate).toHaveBeenCalledWith('id', 'aapl-1')
     expect(mockSendTelegram).toHaveBeenCalledOnce()
+  })
+})
+
+describe('periodic price job reuses the active alerts (odd/tasks/supabase-efficiency.md S4)', () => {
+  it('reads them once while none changes, and again after one does', async () => {
+    mockPositionRows = [{ ticker: 'AAPL' }]
+    mockAlertTickerRows = [{ ticker: 'AAPL' }]
+    mockIn.mockResolvedValue({ data: [{ id: 'aapl-9', ticker: 'AAPL', operator: 'crosses_above', value: 999, name: 'n' }], error: null })
+    const tickerReads = () => mockSelectColumns.mock.calls.filter(c => c[0] === 'ticker').length
+    mockAlertsVersion = '1'
+    try {
+      await processor({ name: 'repeat', data: {} })
+      await processor({ name: 'repeat', data: {} })
+      expect(tickerReads()).toBe(1)
+      expect(mockIn).toHaveBeenCalledTimes(1)
+
+      mockAlertsVersion = '2'
+      await processor({ name: 'repeat', data: {} })
+      expect(tickerReads()).toBe(2)
+      expect(mockIn).toHaveBeenCalledTimes(2)
+    } finally {
+      mockAlertsVersion = null
+      mockIn.mockReset()
+    }
+  })
+
+  it('a fired alert moves the alerts version, so the next cycle stops checking it', async () => {
+    mockIn.mockResolvedValueOnce({ data: [{ id: 'f-1', ticker: 'AAPL', operator: 'crosses_above', value: 190, name: 'n' }], error: null })
+
+    await evaluatePriceAlerts({ AAPL: 195 }, { AAPL: 185 })
+
+    expect(mockEqUpdate).toHaveBeenCalledWith('id', 'f-1')
+    expect(mockBumpAlerts).toHaveBeenCalledTimes(1)
   })
 })
 

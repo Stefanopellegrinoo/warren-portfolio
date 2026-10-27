@@ -20,6 +20,7 @@ import { conditionText, lineLabel, priceDecimals, timeframeLabel } from './chart
 import { loadCandles, type CandleLoad } from './alert-candles'
 import { sendPushToUser, type PushPayload } from './push'
 import { escapeHtml, sendTelegram } from './notifications'
+import { bumpAlertsVersion } from './redis'
 import { formatNumber } from './utils'
 
 /** A price_alerts row with a condition that needs candles. */
@@ -63,7 +64,10 @@ export async function claimAlert(supabase: SupabaseClient, id: string, patch: { 
     console.error(`[Worker] evaluatePriceAlerts: update failed for ${id}`, error)
     return false
   }
-  return (data?.length ?? 0) > 0
+  const claimed = (data?.length ?? 0) > 0
+  // It is no longer active: the next cycle reads the active alerts again (price-worker.ts).
+  if (claimed) await bumpAlertsVersion()
+  return claimed
 }
 
 /** What the last evaluation of an alert saw; `sig` is the condition it computed. `start` is the window's first

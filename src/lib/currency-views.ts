@@ -23,9 +23,11 @@ import { loadSchedules } from './on-schedules'
 import { loadSplits, type SplitsByTicker } from './stock-splits'
 import { argentinaDate } from './utils'
 import { createServiceClient } from './supabase-server'
+import { memoByLedgerVersion } from './ledger-memo'
 
-// A superset of the ledger core's trade columns, so one read can serve both (loadPortfolioForViews).
-const LEDGER_COLUMNS =
+// A superset of the ledger core's trade columns, so one read can serve both (loadPortfolioForViews,
+// the worker's loadAllLedgers).
+export const LEDGER_COLUMNS =
   'ticker, date, created_at, operation, asset_type, quantity, price, commission, ' +
   'trade_currency, trade_quantity, trade_price, trade_commission, fx_mep, fx_ccl'
 const PAGE = 1000
@@ -51,13 +53,16 @@ async function selectAll<T>(page: (from: number, to: number) => PromiseLike<{ da
   }
 }
 
+// The CEDEAR list has no writer in the app: the worker reads it again only with the ledgers (ledger-memo.ts).
+const cedearRatios = memoByLedgerVersion(() =>
+  selectAll<{ ticker: string; ratio: number }>((a, b) => createServiceClient().from('cedears').select('ticker, ratio').range(a, b)))
+
 /**
  * Today's MEP and CCL (live, from the app's one dollar series) and the CEDEAR ratios, shared by
  * every user. null when a rate is missing: then no view is built, and the
  * Resumen keeps showing the USD figures.
  */
 export async function loadCurrencyContext(_supabase: SupabaseClient): Promise<CurrencyContext | null> {
-  const market = createServiceClient()
   const rate = async (kind: FxKind) => {
     const live = await getDollarInfo(kind)
     return live && { rate: live.rate, date: argentinaDate(new Date(live.asOf)), lkp: live.source === 'lkp' }
@@ -65,7 +70,7 @@ export async function loadCurrencyContext(_supabase: SupabaseClient): Promise<Cu
   const [mep, ccl, cedears] = await Promise.all([
     rate('mep'),
     rate('ccl'),
-    selectAll<{ ticker: string; ratio: number }>((a, b) => market.from('cedears').select('ticker, ratio').range(a, b)),
+    cedearRatios(),
   ])
   if (!mep || !ccl) return null
   const ratios = new Map<string, number>()
@@ -94,6 +99,8 @@ export interface ViewsLedger {
   overrides: FlowOverride[]
   schedules: Map<string, FlowRow[]>
   splits: SplitsByTicker
+  /** The trade-date FX, when the caller already read it (tradeDateFx). */
+  fxRows?: FxRow[]
 }
 
 /**
@@ -118,8 +125,10 @@ const byDateCreated = (a: LedgerTrade, b: LedgerTrade) =>
     : a.created_at == null ? (b.created_at == null ? 0 : 1) : b.created_at == null ? -1
       : a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0
 
+type FxRow = { date: string; kind: FxKind; buy: number; sell: number }
+
 /** Rows loaded after 044 without a ticket carry no FX: the fx_rates around their trade dates. */
-async function tradeDateFx(trades: LedgerTrade[]): Promise<{ date: string; kind: FxKind; buy: number; sell: number }[]> {
+export async function tradeDateFx(trades: LedgerTrade[]): Promise<FxRow[]> {
   const missing = trades.filter(t => t.fx_mep == null || t.fx_ccl == null).map(t => t.date).sort()
   if (missing.length === 0) return []
   const from = new Date(Date.parse(missing[0]) - FX_FALLBACK_DAYS * 86_400_000).toISOString().slice(0, 10)
@@ -148,7 +157,7 @@ export async function currencyViewsFor(
   const today = argentinaDate()
   // Independent reads, together: trade-date FX, peso-line prices, ON payment overrides and schedules, stock splits.
   const [fxRows, lkp, overrides, schedules, splits] = await Promise.all([
-    tradeDateFx(trades),
+    loaded?.fxRows ?? tradeDateFx(trades),
     fetchQuotes(symbols.map(localPriceKey)),
     loaded?.overrides ?? loadOverrides(supabase, userId),
     loaded?.schedules ?? loadSchedules(supabase, onTickersOf(trades.map(t => ({ ...t, created_at: t.created_at ?? null }))), today),
