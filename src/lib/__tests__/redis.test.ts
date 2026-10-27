@@ -214,3 +214,26 @@ describe('readLedgerVersion', () => {
     expect(await redisModule.readLedgerVersion()).toBeNull()
   })
 })
+
+describe('alerts version', () => {
+  beforeEach(() => {
+    vi.resetModules()
+  })
+
+  it('creating, editing, deleting or firing an alert moves it; the worker reads it back', async () => {
+    const redisModule = await import('../redis')
+    redisModule.getRedis()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    await redisModule.bumpAlertsVersion()
+    expect(capturedIncr).toHaveBeenCalledWith('alerts:version')
+    capturedGet.mockResolvedValueOnce('5')
+    expect(await redisModule.readAlertsVersion()).toBe('5')
+  })
+
+  it('a bump without Redis changes nothing and never throws', async () => {
+    const redisModule = await import('../redis')
+    await expect(redisModule.bumpAlertsVersion()).resolves.toBeUndefined()
+    expect(await redisModule.readAlertsVersion()).toBeNull()
+  })
+})

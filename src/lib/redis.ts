@@ -99,14 +99,31 @@ export function isRedisReady(): boolean {
 /** Moved by every user write (invalidateUserCache) and never expires: the worker reuses its reads until it moves (ledger-memo.ts). */
 export const LEDGER_VERSION_KEY = 'ledger:version'
 
-/** The ledger version, '0' before the first write; null when Redis cannot say (the caller reads everything again). */
-export async function readLedgerVersion(): Promise<string | null> {
+/** Moved whenever an alert is created, edited, deleted or fired: the worker reads the active alerts again. */
+export const ALERTS_VERSION_KEY = 'alerts:version'
+
+/** A version, '0' before the first bump; null when Redis cannot say (the caller reads everything again). */
+async function readVersion(key: string): Promise<string | null> {
   const redis = isRedisReady() ? redisClient : null
   if (!redis) return null
   try {
-    return (await redis.get(LEDGER_VERSION_KEY)) ?? '0'
+    return (await redis.get(key)) ?? '0'
   } catch {
     return null
+  }
+}
+
+export const readLedgerVersion = () => readVersion(LEDGER_VERSION_KEY)
+export const readAlertsVersion = () => readVersion(ALERTS_VERSION_KEY)
+
+/** Best effort: without Redis the worker's reuse is off too (readAlertsVersion is null), so nothing goes stale. */
+export async function bumpAlertsVersion(): Promise<void> {
+  const redis = isRedisReady() ? redisClient : null
+  if (!redis) return
+  try {
+    await redis.incr(ALERTS_VERSION_KEY)
+  } catch (err) {
+    console.warn('[Redis] Failed to move the alerts version', err)
   }
 }
 

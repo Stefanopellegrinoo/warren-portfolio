@@ -11,8 +11,10 @@ vi.mock('@/lib/api-auth', () => ({
 
 // ── Mock redis ────────────────────────────────────────────────────────────────
 const mockInvalidateUserCache = vi.fn()
+const mockBumpAlerts = vi.fn()
 vi.mock('@/lib/redis', () => ({
   invalidateUserCache: mockInvalidateUserCache,
+  bumpAlertsVersion: () => mockBumpAlerts(),
 }))
 
 // ── Rate limit: allowed unless a test says otherwise ──────────────────────────
@@ -118,6 +120,8 @@ describe('DELETE /api/price-alerts/[id]', () => {
     const res = await DELETE(makeDeleteRequest(ALERT_ID), { params: { id: ALERT_ID } })
     // Route uses 204 No Content for successful deletion
     expect(res.status).toBe(204)
+    // The worker reads the active alerts again (odd/tasks/supabase-efficiency.md S4)
+    expect(mockBumpAlerts).toHaveBeenCalledTimes(1)
   })
 
   it('returns 500 when Supabase delete fails', async () => {
@@ -206,6 +210,7 @@ describe('PATCH /api/price-alerts/[id]', () => {
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.alert).toEqual(updatedAlert)
+    expect(mockBumpAlerts).toHaveBeenCalledTimes(1)
   })
 
   it('returns 200 with updated alert on full update (all fields)', async () => {

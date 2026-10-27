@@ -12,6 +12,7 @@
  */
 
 import { Worker } from 'bullmq'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { PRICE_QUEUE_NAME, PRICE_REPEAT_JOB_NAME, NIGHTLY_JOB_NAME, TICKER_AUDIT_JOB_NAME, ON_TERMS_JOB_NAME, FX_RATES_JOB_NAME, ON_PRICES_PERSIST_JOB_NAME, SPLITS_INGEST_JOB_NAME } from './queue'
 import { fetchQuotesFromYahoo, cachePrice, fetchQuotes } from './yahoo-finance'
 import { fetchData912Prices, refreshLocalPrices } from './data912-client'
@@ -32,7 +33,7 @@ import { ingestOnTerms } from './on-terms-ingest'
 import { ingestFxRates } from './fx-rates'
 import { ingestSplits } from './splits-ingest'
 import { heldStockTickersOf, loadPortfolioNow } from './ledger-now'
-import { memoByLedgerVersion } from './ledger-memo'
+import { memoByAlertsVersion, memoByLedgerVersion } from './ledger-memo'
 import { fetchCryptoQuotes } from './binance/rest'
 import { getProviderForSymbol } from './market-data/resolver'
 import { isPriceValue } from './chart/alert-condition'
@@ -74,22 +75,51 @@ async function getAllTickers(): Promise<string[]> {
 /**
  * Fetch the distinct tickers that have an active price alert, held or not
  */
-async function getActiveAlertTickers(): Promise<string[]> {
+// Active alerts change only when one is created, edited, deleted or fired (each moves the alerts
+// version): the worker reads them again only then, or after an hour (ledger-memo.ts).
+const activeAlertTickers = memoByAlertsVersion(async () => {
   const supabase = getSupabase()
   if (!supabase) return []
-
   const { data, error } = await supabase
     .from('price_alerts')
     .select('ticker')
     .eq('status', 'active')
     .eq('type', 'price')
+  if (error) throw error
+  return Array.from(new Set((data || []).map((a: any) => a.ticker) as string[]))
+})
 
-  if (error) {
+async function getActiveAlertTickers(): Promise<string[]> {
+  try {
+    return await activeAlertTickers()
+  } catch (error) {
     console.error('[Worker] Error fetching alert tickers:', error)
     return []
   }
+}
 
-  return Array.from(new Set((data || []).map((a: any) => a.ticker) as string[]))
+// The active alerts of each ticker set a cycle asks for (the same set every minute), per alerts version.
+const alertRowsByTickers = memoByAlertsVersion(async () => new Map<string, Promise<any[]>>())
+
+async function activeAlertsOf(supabase: SupabaseClient, tickers: string[]): Promise<any[]> {
+  const byTickers = await alertRowsByTickers()
+  const key = [...tickers].sort().join(',')
+  let rows = byTickers.get(key)
+  if (!rows) {
+    rows = (async () => {
+      const { data, error } = await supabase
+        .from('price_alerts')
+        .select('*')
+        .eq('status', 'active')
+        .eq('type', 'price')
+        .in('ticker', tickers)
+      if (error) throw error
+      return data ?? []
+    })()
+    byTickers.set(key, rows)
+    rows.catch(() => byTickers.delete(key))
+  }
+  return rows
 }
 
 /**
@@ -170,14 +200,10 @@ export async function evaluatePriceAlerts(
 
   if (tickers.length === 0) return
 
-  const { data: alerts, error } = await supabase
-    .from('price_alerts')
-    .select('*')
-    .eq('status', 'active')
-    .eq('type', 'price')
-    .in('ticker', tickers)
-
-  if (error) {
+  let alerts: any[]
+  try {
+    alerts = await activeAlertsOf(supabase, tickers)
+  } catch (error) {
     console.error('[Worker] evaluatePriceAlerts: fetch failed', error)
     return
   }

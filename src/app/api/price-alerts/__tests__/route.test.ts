@@ -11,6 +11,13 @@ vi.mock('@/lib/api-auth', () => ({
 
 // ── Rate limit: allowed unless a test says otherwise ──────────────────────────
 const mockRateLimit = vi.fn(async () => true)
+// A new alert moves the alerts version, so the worker reads the active alerts again (S4).
+const mockBumpAlerts = vi.fn()
+vi.mock('@/lib/redis', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/redis')>()),
+  bumpAlertsVersion: () => mockBumpAlerts(),
+}))
+
 vi.mock('@/lib/rate-limit', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/rate-limit')>()),
   rateLimit: (...a: unknown[]) => mockRateLimit(...(a as [])),
@@ -182,6 +189,7 @@ describe('POST /api/price-alerts', () => {
     const body = await res.json()
     expect(body.alert.id).toBe('alert-1')
     expect(body.alert.ticker).toBe('AAPL')
+    expect(mockBumpAlerts).toHaveBeenCalledTimes(1)
   })
 
   it('returns 400 when ticker is missing', async () => {

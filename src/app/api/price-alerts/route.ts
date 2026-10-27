@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { serverError } from '@/lib/api/errors'
+import { bumpAlertsVersion } from '@/lib/redis'
 import { tooManyRequests } from '@/lib/rate-limit'
 import { parseAlertCreate } from '@/lib/chart/alert-condition'
 import { CHECK_VIOLATION, INVALID_CONDITION, WRITE_WINDOW_SEC, readAlertBody, writeAllowed } from './write'
@@ -61,6 +62,8 @@ export async function POST(req: NextRequest) {
 
   if (error?.code === CHECK_VIOLATION) return NextResponse.json({ error: INVALID_CONDITION }, { status: 400 })
   if (error) return serverError('API /price-alerts', error)
+  // The worker reads the active alerts again (odd/tasks/supabase-efficiency.md S4).
+  await bumpAlertsVersion()
 
   return NextResponse.json({ alert: data }, { status: 201 })
 }

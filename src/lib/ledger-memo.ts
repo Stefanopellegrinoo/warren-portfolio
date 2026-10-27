@@ -7,7 +7,7 @@
  *
  * WORKER-SAFE: relative value imports only.
  */
-import { readLedgerVersion } from './redis'
+import { readAlertsVersion, readLedgerVersion } from './redis'
 import { argentinaDate } from './utils'
 
 export const MAX_AGE_MS = 60 * 60_000
@@ -17,9 +17,14 @@ interface Clock {
   today: () => string
   now: () => number
 }
-const realClock: Clock = { version: async () => readLedgerVersion(), today: () => argentinaDate(), now: () => Date.now() }
+const clockOf = (version: () => Promise<string | null>): Clock => ({ version, today: () => argentinaDate(), now: () => Date.now() })
 
-export function memoByLedgerVersion<T>(load: () => Promise<T>, clock: Clock = realClock): () => Promise<T> {
+/** Every ledger-derived read: moved by invalidateUserCache on every user write. */
+export const memoByLedgerVersion = <T>(load: () => Promise<T>) => memoByVersion(load, clockOf(async () => readLedgerVersion()))
+/** The active price alerts: moved by bumpAlertsVersion on every alert write (odd/tasks/supabase-efficiency.md S4). */
+export const memoByAlertsVersion = <T>(load: () => Promise<T>) => memoByVersion(load, clockOf(async () => readAlertsVersion()))
+
+export function memoByVersion<T>(load: () => Promise<T>, clock: Clock): () => Promise<T> {
   let memo: { key: string; at: number; value: Promise<T> } | null = null
   return async () => {
     // Read before loading: a write that lands during the load moves the version past this key.

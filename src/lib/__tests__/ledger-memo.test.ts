@@ -3,12 +3,12 @@
  * moves, the day changes or an hour passes (odd/tasks/supabase-efficiency.md S2-S3).
  */
 import { describe, it, expect, vi } from 'vitest'
-import { memoByLedgerVersion, MAX_AGE_MS } from '../ledger-memo'
+import { memoByVersion, MAX_AGE_MS } from '../ledger-memo'
 
 function setup() {
   const clock = { version: '3' as string | null, today: '2026-10-27', now: 0 }
   const load = vi.fn(async () => ({ read: load.mock.calls.length }))
-  const reuse = memoByLedgerVersion(load, {
+  const reuse = memoByVersion(load, {
     version: async () => clock.version,
     today: () => clock.today,
     now: () => clock.now,
@@ -16,7 +16,7 @@ function setup() {
   return { clock, load, reuse }
 }
 
-describe('memoByLedgerVersion', () => {
+describe('memoByVersion', () => {
   it('reads once while nothing was written on the same day', async () => {
     const { load, reuse } = setup()
     const first = await reuse()
@@ -66,7 +66,7 @@ describe('memoByLedgerVersion', () => {
 
   it('a version read that fails counts as no version: it never breaks the read', async () => {
     const load = vi.fn(async () => 'rows')
-    const reuse = memoByLedgerVersion(load, { version: async () => { throw new Error('redis down') }, today: () => 'd', now: () => 0 })
+    const reuse = memoByVersion(load, { version: async () => { throw new Error('redis down') }, today: () => 'd', now: () => 0 })
 
     expect(await reuse()).toBe('rows')
     await reuse()
