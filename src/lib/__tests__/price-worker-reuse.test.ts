@@ -8,6 +8,8 @@ import { fakeDb, reads, resetReads, failing, TWO_USER_TABLES, quote, type Row } 
 
 const tables: Record<string, Row[]> = structuredClone(TWO_USER_TABLES)
 let ledgerV: () => Promise<string | null> = async () => '1'
+// The users who wrote since the last cycle (S7); null: Redis cannot say.
+let dirty: string[] | null = []
 let alertsV = 1
 let alertsVReadable = true
 const evals: string[][] = []
@@ -16,6 +18,7 @@ vi.mock('@/lib/redis', async (orig) => ({
   ...(await orig<object>()),
   getRedis: () => fakeRedis,
   readLedgerVersion: () => ledgerV(),
+  takeDirtyUsers: async () => { const taken = dirty; if (taken !== null) dirty = []; return taken },
   readAlertsVersion: async () => (alertsVReadable ? String(alertsV) : null),
   bumpAlertsVersion: async () => { alertsV++ },
 }))
@@ -70,7 +73,11 @@ describe('worker per-minute cycle (head)', () => {
     await import('@/lib/price-worker')
     await new Promise(r => setTimeout(r, 50))
   })
-  beforeEach(() => { resetReads(); failing.clear() })
+  beforeEach(async () => {
+    resetReads(); failing.clear(); dirty = []
+    // Each test starts from a worker that has read nothing yet.
+    ;(await import('@/lib/summary-cache')).forgetCycleInputs()
+  })
 
   it('S2/S3: same version and day -> each ledger/market table read once; summaries written every cycle, identical', async () => {
     ledgerV = async () => '2'
@@ -88,10 +95,14 @@ describe('worker per-minute cycle (head)', () => {
     expect(ledgerReads()).toEqual(none)
   })
 
-  it('a version change, a new Argentine day and max age each cause one re-read', async () => {
-    ledgerV = async () => '3'
+  it('S7: a write re-reads only the user who wrote; a new Argentine day and max age re-read everyone once', async () => {
+    await cycle()
+    resetReads()
+    dirty = ['u2']
+    ledgerV = async () => '3' // the write also moves the catalogs' version (ons, cedears)
     await cycle(); await cycle()
-    expect(ledgerReads()).toEqual(once)
+    // u2's ledger alone (stock_splits: readTable pages until empty), its FX, and the two catalogs once.
+    expect(ledgerReads()).toEqual({ ...none, transactions: 1, cash_movements: 1, on_payment_overrides: 1, stock_splits: 2, fx_rates: 1, cedears: 1, ons: 1 })
     resetReads()
     now('2026-10-28T03:01:00Z') // 00:01 ART next day
     await cycle(); await cycle()
@@ -115,15 +126,14 @@ describe('worker per-minute cycle (head)', () => {
     expect(reads.transactions ?? 0).toBe(0)
   })
 
-  for (const [name, v] of [['null', async () => null], ['throwing', async () => { throw new Error('redis down') }]] as const) {
-    it(`an unreadable version (${name}) reads every cycle, as at baseline`, async () => {
-      ledgerV = v
-      await cycle(); await cycle(); await cycle()
-      expect(reads.transactions).toBeGreaterThanOrEqual(3)
-      expect(reads.on_terms).toBeGreaterThanOrEqual(3)
-      expect(evals.length).toBe(2)
-    })
-  }
+  it('Redis unable to say who wrote: reads everyone every cycle, as at baseline', async () => {
+    dirty = null
+    await cycle(); await cycle(); await cycle()
+    expect(reads.transactions).toBeGreaterThanOrEqual(3)
+    expect(reads.on_terms).toBeGreaterThanOrEqual(3)
+    expect(evals.length).toBe(2)
+    dirty = []
+  })
 
   it('S4: alerts read once per alerts version; a POST (bump) is evaluated next cycle; a fire bumps and the next cycle re-reads', async () => {
     ledgerV = async () => '5'

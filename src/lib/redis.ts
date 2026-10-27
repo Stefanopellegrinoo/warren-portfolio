@@ -99,6 +99,22 @@ export function isRedisReady(): boolean {
 /** Moved by every user write (invalidateUserCache) and never expires: the worker reuses its reads until it moves (ledger-memo.ts). */
 export const LEDGER_VERSION_KEY = 'ledger:version'
 
+/** The users who wrote since the worker last looked: it re-reads only them (summary-cache.ts, S7). */
+export const LEDGER_DIRTY_KEY = 'ledger:dirty'
+
+/** Takes every user marked since the last call, at once; null when Redis cannot say (the worker reads everyone). */
+export async function takeDirtyUsers(): Promise<string[] | null> {
+  const redis = isRedisReady() ? redisClient : null
+  if (!redis) return null
+  try {
+    const replies = await redis.multi().smembers(LEDGER_DIRTY_KEY).del(LEDGER_DIRTY_KEY).exec()
+    const [err, users] = replies?.[0] ?? [new Error('no reply'), null]
+    return err ? null : (users as string[])
+  } catch {
+    return null
+  }
+}
+
 /** Moved whenever an alert is created, edited, deleted or fired: the worker reads the active alerts again. */
 export const ALERTS_VERSION_KEY = 'alerts:version'
 
@@ -230,6 +246,7 @@ export async function invalidateUserCache(userId: string): Promise<void> {
     await redis.incr(`summary:version:${userId}`)
     await redis.expire(`summary:version:${userId}`, SUMMARY_VERSION_TTL)
     await redis.incr(LEDGER_VERSION_KEY)
+    await redis.sadd(LEDGER_DIRTY_KEY, userId)
 
     if (keysToDelete.length > 0) {
       await redis.del(...keysToDelete)

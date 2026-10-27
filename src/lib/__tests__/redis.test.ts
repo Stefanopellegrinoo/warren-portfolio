@@ -8,6 +8,8 @@ let capturedConnect: ReturnType<typeof vi.fn>
 let capturedIncr: ReturnType<typeof vi.fn>
 let capturedExpire: ReturnType<typeof vi.fn>
 let capturedGet: ReturnType<typeof vi.fn>
+let capturedSadd: ReturnType<typeof vi.fn>
+let capturedMulti: ReturnType<typeof vi.fn>
 
 vi.mock('ioredis', () => {
   // Must be a class so `new Redis(...)` works
@@ -19,6 +21,8 @@ vi.mock('ioredis', () => {
     setex: ReturnType<typeof vi.fn>
     get: ReturnType<typeof vi.fn>
     incr: ReturnType<typeof vi.fn>
+    sadd: ReturnType<typeof vi.fn>
+    multi: ReturnType<typeof vi.fn>
     expire: ReturnType<typeof vi.fn>
 
     constructor() {
@@ -40,6 +44,13 @@ vi.mock('ioredis', () => {
       this.setex = vi.fn().mockResolvedValue('OK')
       this.get = vi.fn().mockResolvedValue(null)
       this.incr = vi.fn().mockResolvedValue(1)
+      // The users who wrote: SADD adds, MULTI(SMEMBERS, DEL) takes them all at once.
+      const dirty = new Set<string>()
+      this.sadd = vi.fn(async (_k: string, id: string) => { dirty.add(id); return 1 })
+      this.multi = vi.fn(() => {
+        const tx = { smembers: () => tx, del: () => tx, exec: async () => { const ids = [...dirty]; dirty.clear(); return [[null, ids], [null, 1]] } }
+        return tx
+      })
       this.expire = vi.fn().mockResolvedValue(1)
       // `on` captures event handlers so tests can fire 'connect'
       const handlers: Record<string, () => void> = {}
@@ -54,6 +65,8 @@ vi.mock('ioredis', () => {
       capturedIncr = this.incr
       capturedExpire = this.expire
       capturedGet = this.get
+      capturedSadd = this.sadd
+      capturedMulti = this.multi
       // Automatically fire the 'connect' event once connect() resolves
       this.connect = vi.fn(async () => {
         if (handlers['connect']) handlers['connect']()
@@ -254,5 +267,33 @@ describe('alerts version', () => {
     capturedIncr.mockRejectedValueOnce(new Error('down'))
 
     await expect(redisModule.bumpAlertsVersion()).resolves.toBeUndefined()
+  })
+})
+
+describe('users who wrote (odd/tasks/supabase-efficiency.md S7)', () => {
+  beforeEach(() => {
+    vi.resetModules()
+  })
+
+  it('a write marks its user; the worker takes every marked user once', async () => {
+    const redisModule = await import('../redis')
+    await redisModule.invalidateUserCache('u1')
+    await redisModule.invalidateUserCache('u2')
+    await redisModule.invalidateUserCache('u1')
+
+    expect(capturedSadd).toHaveBeenCalledWith('ledger:dirty', 'u1')
+    expect((await redisModule.takeDirtyUsers())?.sort()).toEqual(['u1', 'u2'])
+    expect(await redisModule.takeDirtyUsers()).toEqual([])
+    expect(capturedMulti).toHaveBeenCalledTimes(2)
+  })
+
+  it('is null when Redis cannot say, so the worker reads everyone again', async () => {
+    const redisModule = await import('../redis')
+    expect(await redisModule.takeDirtyUsers()).toBeNull()
+
+    redisModule.getRedis()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    capturedMulti.mockImplementationOnce(() => ({ smembers() { return this }, del() { return this }, exec: async () => { throw new Error('down') } }))
+    expect(await redisModule.takeDirtyUsers()).toBeNull()
   })
 })
