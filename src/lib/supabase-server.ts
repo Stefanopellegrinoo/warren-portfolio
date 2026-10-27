@@ -2,6 +2,7 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { cookies as getCookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
+import { authBreakerFetch } from './auth-breaker'
 
 /**
  * Structured JSON logging utility for cookie operations
@@ -50,6 +51,9 @@ function extractErrorDetails(error: unknown): { message: string; type: string; s
   };
 }
 
+// One per server process, shared by every middleware request (auth-breaker.ts).
+const middlewareFetch = authBreakerFetch()
+
 /**
  * Create Supabase client for Middleware contexts.
  * Uses req/res cookie manipulation for middleware-specific needs.
@@ -59,6 +63,8 @@ export function createSupabaseServerClient(req: NextRequest, res: NextResponse) 
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      // Every page request refreshes the session here: with Supabase down, one refresh reaches it, not thousands.
+      global: { fetch: middlewareFetch },
       cookies: {
         get(name: string) { 
           return req.cookies.get(name)?.value; 
