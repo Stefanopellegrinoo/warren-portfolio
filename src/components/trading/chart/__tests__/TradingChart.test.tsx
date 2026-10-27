@@ -19,6 +19,8 @@ vi.hoisted(() => {
 const getVisibleRange = vi.fn((): { from: number; to: number } | null => null)
 // Every logical range the chart asked to show (its fit on load, a comparison's range).
 const setVisibleLogicalRange = vi.fn()
+// The time axis's own options (its edges, locked while comparing).
+const timeScaleOptions = vi.fn()
 const priceScale = { applyOptions: vi.fn() }
 const series = {
   priceScale: () => priceScale,
@@ -37,7 +39,7 @@ const chart = {
   subscribeCrosshairMove: vi.fn(),
   unsubscribeCrosshairMove: vi.fn(),
   // A bar's x is its time, for the trade card's finger slop.
-  timeScale: () => ({ setVisibleLogicalRange, timeToCoordinate: (t: number) => t, subscribeVisibleTimeRangeChange: vi.fn(), unsubscribeVisibleTimeRangeChange: vi.fn(), getVisibleRange }),
+  timeScale: () => ({ setVisibleLogicalRange, applyOptions: timeScaleOptions, timeToCoordinate: (t: number) => t, subscribeVisibleTimeRangeChange: vi.fn(), unsubscribeVisibleTimeRangeChange: vi.fn(), getVisibleRange }),
   subscribeClick: vi.fn(),
   unsubscribeClick: vi.fn(),
   panes: vi.fn(() => []),
@@ -1262,6 +1264,21 @@ describe('TradingChart — comparing', () => {
     expect(rangeZooms()).toEqual([[{ from: 0, to: 7 }], [{ from: 0, to: 7 }]])
     await act(async () => { button('YTD').click() })
     expect(rangeZooms().at(-1)).toEqual([{ from: 1, to: 7 }])
+    unmount()
+  })
+
+  it('while comparing, zooming out stops at the history; otherwise the chart moves freely as before', async () => {
+    compare.status = 'ready'
+    compare.series = { SPY: SPY_YEAR_END }
+    bars.candles = YEAR_END
+    const { show, unmount } = await renderTf('AAPL', '1d', ['SPY'])
+
+    expect(timeScaleOptions).toHaveBeenLastCalledWith({ fixLeftEdge: true, fixRightEdge: true })
+    await show('1h')
+    expect(timeScaleOptions).toHaveBeenLastCalledWith({ fixLeftEdge: false, fixRightEdge: false })
+    await show('1d')
+    await act(async () => { useChartStore.getState().setCompareSymbols([]) })
+    expect(timeScaleOptions).toHaveBeenLastCalledWith({ fixLeftEdge: false, fixRightEdge: false })
     unmount()
   })
 

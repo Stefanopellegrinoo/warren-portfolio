@@ -455,6 +455,12 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	useEffect(() => {
 		if (!base) zoomedRef.current = "";
 	}, [base]);
+	// While comparing, zooming out stops at the history, so the lines always fill the width instead
+	// of floating in empty space; without a comparison the chart moves freely (room to draw ahead).
+	const locked = comparing.length > 0;
+	useEffect(() => {
+		chartRef.current?.timeScale().applyOptions({ fixLeftEdge: locked, fixRightEdge: locked });
+	}, [locked, manager]);
 
 	// The first time Mi cartera opens on this device, it opens against the market; after that, the
 	// comparisons are whatever the user left.
