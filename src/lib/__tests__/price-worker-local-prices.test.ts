@@ -30,7 +30,7 @@ vi.mock('../supabase-server', async () => {
 vi.mock('../redis', () => ({ getRedis: () => null }))
 vi.mock('../summary-cache', () => ({
   cacheUserSummaries: (...a: unknown[]) => mockCacheSummaries(...a),
-  loadCycleInputs: async () => ({ ledgers: await (await import('../ledger-now')).loadAllLedgers((await import('../supabase-server')).createServiceClient()) }),
+  loadCycleLedgers: async () => (await import('../ledger-now')).loadAllLedgers((await import('../supabase-server')).createServiceClient()),
 }))
 vi.mock('../portfolio-valuation', () => ({
   splitQuotesByAssetClass: (m: Map<string, unknown>) => ({ stockQuotes: m, onQuotes: new Map() }),

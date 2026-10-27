@@ -18,7 +18,7 @@ import { fetchData912Prices, refreshLocalPrices } from './data912-client'
 import { createServiceClient } from './supabase-server'
 import { priceAlertPush, pushKeys, sendPushToUser } from './push'
 import { getRedis } from './redis'
-import { cacheUserSummaries, loadCycleInputs } from './summary-cache'
+import { cacheUserSummaries, loadCycleLedgers } from './summary-cache'
 import { captureOnPriceHistory } from './on-price-history'
 import { splitQuotesByAssetClass } from './portfolio-valuation'
 import { isMarketOpen, argentinaDate } from './utils'
@@ -64,7 +64,7 @@ async function getAllTickers(): Promise<string[]> {
 
   try {
     // The same ledgers the summaries use, read again only after a write (ledger-memo.ts).
-    return heldStockTickersOf((await loadCycleInputs()).ledgers)
+    return heldStockTickersOf(await loadCycleLedgers())
   } catch (error) {
     console.error('[Worker] Error reading held tickers from the ledger:', error)
     return []

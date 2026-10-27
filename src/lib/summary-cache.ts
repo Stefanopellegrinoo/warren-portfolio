@@ -9,6 +9,12 @@ import { memoByLedgerVersion } from './ledger-memo'
 import { argentinaDate } from './utils'
 
 /**
+ * Every ledger, read once with the currency views' columns, until the ledger version moves
+ * (ledger-memo.ts). Alone, so the held tickers never wait on, or fail with, the ON schedules.
+ */
+export const loadCycleLedgers = memoByLedgerVersion(() => loadAllLedgers(createServiceClient(), LEDGER_COLUMNS))
+
+/**
  * What the per-minute cycle needs that only a write changes (odd/tasks/supabase-efficiency.md S2-S3):
  * every ledger, read once with the currency views' columns, the ON schedules, each user's portfolio
  * and the ledger and trade-date FX of their views. Prices change every minute; these are reused until
@@ -16,7 +22,7 @@ import { argentinaDate } from './utils'
  */
 export const loadCycleInputs = memoByLedgerVersion(async () => {
   const today = argentinaDate()
-  const ledgers = await loadAllLedgers(createServiceClient(), LEDGER_COLUMNS)
+  const ledgers = await loadCycleLedgers()
   const schedules = await loadAllSchedules(ledgers, today)
   const portfolios = portfoliosFrom(ledgers, schedules, today)
   const views = new Map<string, ViewsLedger>(await Promise.all(portfolios.map(async ({ userId }) => {

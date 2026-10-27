@@ -40,7 +40,7 @@ vi.mock('../redis', () => ({ getRedis: () => null }))
 // The held tickers come from the cycle's ledgers, read through the fake database below.
 vi.mock('../summary-cache', () => ({
   cacheUserSummaries: vi.fn(),
-  loadCycleInputs: async () => ({ ledgers: await (await import('../ledger-now')).loadAllLedgers((await import('../supabase-server')).createServiceClient()) }),
+  loadCycleLedgers: async () => (await import('../ledger-now')).loadAllLedgers((await import('../supabase-server')).createServiceClient()),
 }))
 vi.mock('../portfolio-valuation', () => ({
   splitQuotesByAssetClass: (m: Map<string, unknown>) => ({ stockQuotes: m, onQuotes: new Map() }),

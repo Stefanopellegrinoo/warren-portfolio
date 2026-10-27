@@ -65,6 +65,10 @@ describe('cacheUserSummaries reuses what only a write changes', () => {
     expect(reads.transactions).toBe(1)
     expect(reads.fx_rates).toBe(1)
     expect(redis.eval).toHaveBeenCalledTimes(2)
+    // Reused inputs leave nothing behind: the same prices give the same summary, views included.
+    const payloads = redis.eval.mock.calls.map((c: unknown[]) => JSON.parse(c.at(-1) as string))
+    expect(payloads[0].currencies).toBeDefined()
+    expect(payloads[1]).toEqual(payloads[0])
   })
 
   it('reads them again after a write moves the version', async () => {
