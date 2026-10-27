@@ -231,9 +231,20 @@ describe('alerts version', () => {
     expect(await redisModule.readAlertsVersion()).toBe('5')
   })
 
-  it('a bump without Redis changes nothing and never throws', async () => {
+  it('a bump connects first when this process had not reached Redis yet, so it is never lost', async () => {
     const redisModule = await import('../redis')
-    await expect(redisModule.bumpAlertsVersion()).resolves.toBeUndefined()
     expect(await redisModule.readAlertsVersion()).toBeNull()
+
+    await redisModule.bumpAlertsVersion()
+    expect(capturedIncr).toHaveBeenCalledWith('alerts:version')
+  })
+
+  it('a bump that fails never throws', async () => {
+    const redisModule = await import('../redis')
+    redisModule.getRedis()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    capturedIncr.mockRejectedValueOnce(new Error('down'))
+
+    await expect(redisModule.bumpAlertsVersion()).resolves.toBeUndefined()
   })
 })

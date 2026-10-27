@@ -116,12 +116,17 @@ async function readVersion(key: string): Promise<string | null> {
 export const readLedgerVersion = () => readVersion(LEDGER_VERSION_KEY)
 export const readAlertsVersion = () => readVersion(ALERTS_VERSION_KEY)
 
-/** Best effort: without Redis the worker's reuse is off too (readAlertsVersion is null), so nothing goes stale. */
+/**
+ * Connects first: the web process may not have reached Redis yet while the worker reuses its alerts, and a
+ * lost bump would leave them stale for up to an hour. Only an unreachable Redis skips it, logged.
+ */
 export async function bumpAlertsVersion(): Promise<void> {
-  const redis = isRedisReady() ? redisClient : null
-  if (!redis) return
+  if (!(await ensureRedisConnected()) || !redisClient) {
+    console.warn('[Redis] Unreachable: the alerts version did not move')
+    return
+  }
   try {
-    await redis.incr(ALERTS_VERSION_KEY)
+    await redisClient.incr(ALERTS_VERSION_KEY)
   } catch (err) {
     console.warn('[Redis] Failed to move the alerts version', err)
   }
