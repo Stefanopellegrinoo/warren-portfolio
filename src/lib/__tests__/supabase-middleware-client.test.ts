@@ -22,8 +22,9 @@ describe('createSupabaseServerClient', () => {
     createSupabaseServerClient(req, NextResponse.next())
 
     const token = 'https://x.supabase.co/auth/v1/token?grant_type=refresh_token'
-    await expect(options[0].global!.fetch!(token)).rejects.toThrow('fetch failed')
-    await expect(options[1].global!.fetch!(token)).rejects.toThrow(TypeError)
-    expect(network).toHaveBeenCalledTimes(1)
+    const { TRIP_AFTER } = await import('../auth-breaker')
+    for (let i = 0; i < TRIP_AFTER; i++) await expect(options[0].global!.fetch!(token)).rejects.toThrow('fetch failed')
+    await expect(options[1].global!.fetch!(token)).rejects.toThrow('refresh skipped')
+    expect(network).toHaveBeenCalledTimes(TRIP_AFTER)
   })
 })
