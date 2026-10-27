@@ -108,6 +108,34 @@ describe('cacheUserSummaries reuses what only a write changes', () => {
     expect(after.get('u2')).not.toEqual(before.get('u2'))
   })
 
+  it('the first buy of an ON nobody held reads the schedules again; a second buyer of it does not', async () => {
+    await cacheUserSummaries(quotes)
+    expect(readsOf('on_terms')).toHaveLength(0) // no ON held: nothing to read
+    const on = (user: string) => ({ ...trade(user, 1000), ticker: 'YMCXO', asset_type: 'ON', price: 1, trade_quantity: 1000, trade_price: 1 })
+
+    tables.transactions.push(on('u2'))
+    dirty = ['u2']
+    await cacheUserSummaries(quotes)
+    expect(readsOf('on_terms')).toHaveLength(1)
+
+    tables.transactions.push(on('u1'))
+    dirty = ['u1']
+    await cacheUserSummaries(quotes)
+    expect(readsOf('on_terms')).toHaveLength(1)
+  })
+
+  it('a user left without a ledger leaves the summaries', async () => {
+    await cacheUserSummaries(quotes)
+    tables.transactions = tables.transactions.filter(r => r.user_id !== 'u2')
+    tables.cash_movements = tables.cash_movements.filter(r => r.user_id !== 'u2')
+    vi.mocked(createServiceClient).mockReturnValue(db(tables) as never)
+    redis.eval.mockClear()
+    dirty = ['u2']
+
+    await cacheUserSummaries(quotes)
+    expect([...payloads().keys()]).toEqual(['u1'])
+  })
+
   it('reads everyone every cycle when Redis cannot say who wrote, as before', async () => {
     dirty = null
     await cacheUserSummaries(quotes)
