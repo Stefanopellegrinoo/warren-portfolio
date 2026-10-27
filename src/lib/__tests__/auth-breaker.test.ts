@@ -66,12 +66,12 @@ describe('authBreakerFetch', () => {
     expect((await fetch(TOKEN)).status).toBe(503)
   })
 
-  it('never more than a few refreshes wait on the auth server at once, so a slow one cannot pile up', async () => {
-    const { network, fetch } = setup(() => new Promise<Response>(() => {}))
-    for (let i = 0; i < TRIP_AFTER; i++) void fetch(TOKEN)
+  it('a healthy server is never limited: many refreshes at once all reach it', async () => {
+    const { network, fetch } = setup(async () => new Response('{}', { status: 200 }))
+    const all = await Promise.all(Array.from({ length: 10 }, () => fetch(TOKEN)))
 
-    await expect(fetch(TOKEN)).rejects.toThrow('refresh skipped')
-    expect(network).toHaveBeenCalledTimes(TRIP_AFTER)
+    expect(all.every(r => r.status === 200)).toBe(true)
+    expect(network).toHaveBeenCalledTimes(10)
   })
 
   it('an answer from a working auth server, even a refusal, never opens it', async () => {

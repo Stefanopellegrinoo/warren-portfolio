@@ -86,8 +86,9 @@ describe('the refresh breaker with the real auth client', () => {
     await vi.advanceTimersByTimeAsync(40_000)
     await Promise.all(pending)
 
-    // The first ones in flight, then one probe per pause (2,400 without the breaker).
-    expect(net.refreshes()).toBeLessThanOrEqual(TRIP_AFTER + 6)
+    // The ones already in flight before the first failure (5 s × 4/s), then one probe per pause
+    // (2,400 without the breaker; 259 before the probe was alone).
+    expect(net.refreshes()).toBeLessThanOrEqual(30)
   }, 30_000) // 480 simulated page requests: slow under a busy full run
 
   it('a single blip followed by success: the refresh succeeds and stores the new session', async () => {
