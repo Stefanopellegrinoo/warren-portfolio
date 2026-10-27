@@ -194,7 +194,9 @@ export function stripKeyPrefix(key: string): string {
  * summary:version:{userId} so the summary writers (worker, /api/positions) and the derived series detect stale writes.
  */
 export async function invalidateUserCache(userId: string): Promise<void> {
-  if (!isRedisReady()) return
+  // Connects first, like bumpAlertsVersion: a write in a process that had not reached Redis yet would
+  // otherwise leave the worker reusing the old ledgers for up to an hour (ledger-memo.ts).
+  if (!(await ensureRedisConnected())) return
   try {
     const redis = getRedis()
     if (!redis) return

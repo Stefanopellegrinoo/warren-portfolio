@@ -86,6 +86,14 @@ describe('invalidateUserCache', () => {
     expect(capturedExpire.mock.calls.map((c: unknown[]) => c[0])).not.toContain('ledger:version')
   })
 
+  it('a write moves the ledger version even before this process reached Redis, so the worker never misses it', async () => {
+    capturedIncr = vi.fn() // replaced only if this write creates and reaches a client
+    const { invalidateUserCache } = await import('../redis')
+    await invalidateUserCache('u1')
+
+    expect(capturedIncr).toHaveBeenCalledWith('ledger:version')
+  })
+
   it('invalidates statistics:combined:{userId}', async () => {
     const { invalidateUserCache } = await setup()
     await invalidateUserCache('u1')

@@ -50,6 +50,30 @@ describe('authBreakerFetch', () => {
     expect(network).toHaveBeenCalledTimes(TRIP_AFTER + 1)
   })
 
+  it('after the pause one refresh probes; the ones that start while it waits are skipped (a slow outage)', async () => {
+    let release: (r: Response) => void = () => {}
+    const { clock, network, fetch } = setup(async () => new Response('down', { status: 503 }))
+    for (let i = 0; i < TRIP_AFTER; i++) await fetch(TOKEN)
+    clock.now = OPEN_MS
+    network.mockImplementationOnce(() => new Promise<Response>(r => { release = r }))
+
+    const probe = fetch(TOKEN)
+    for (let i = 0; i < 5; i++) await expect(fetch(TOKEN)).rejects.toThrow('refresh skipped')
+    expect(network).toHaveBeenCalledTimes(TRIP_AFTER + 1)
+    release(new Response('{}', { status: 200 }))
+    expect((await probe).status).toBe(200)
+    // The probe got through: closed again.
+    expect((await fetch(TOKEN)).status).toBe(503)
+  })
+
+  it('never more than a few refreshes wait on the auth server at once, so a slow one cannot pile up', async () => {
+    const { network, fetch } = setup(() => new Promise<Response>(() => {}))
+    for (let i = 0; i < TRIP_AFTER; i++) void fetch(TOKEN)
+
+    await expect(fetch(TOKEN)).rejects.toThrow('refresh skipped')
+    expect(network).toHaveBeenCalledTimes(TRIP_AFTER)
+  })
+
   it('an answer from a working auth server, even a refusal, never opens it', async () => {
     const { network, fetch } = setup(async () => new Response('{"error":"invalid_grant"}', { status: 400 }))
 

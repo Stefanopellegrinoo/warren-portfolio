@@ -3,9 +3,11 @@
  * network errors and 502/503/504, backoff 200 ms doubling), and every page request and prefetch goes through
  * the middleware's refresh: 7,845 token requests in 2 minutes during the 2026-10-27 restart
  * (odd/tasks/supabase-efficiency.md S5). After TRIP_AFTER refreshes in a row fail that way, the next ones
- * fail at once, without the network, for OPEN_MS; then one goes through to probe. A single blip never trips
- * it: auth-js's own next attempt absorbs it, as before. The failure they see is the same kind (a network
- * error), so nothing about the session changes: only requests that could not have succeeded are not sent.
+ * fail at once, without the network, for OPEN_MS; then one goes through to probe, and the rest wait for its
+ * answer behind a new pause. At most TRIP_AFTER refreshes wait on the server at once, so a slow outage cannot
+ * pile them up either. A single blip never trips it: auth-js's own next attempt absorbs it, as before. The
+ * failure they see is the same kind (a network error), so nothing about the session changes: only requests
+ * that could not have succeeded are not sent.
  */
 export const OPEN_MS = 30_000
 export const TRIP_AFTER = 3
@@ -19,6 +21,7 @@ export function authBreakerFetch(
 ): typeof fetch {
   let openUntil = 0
   let failures = 0
+  let inFlight = 0
   const failed = () => {
     if (++failures < TRIP_AFTER) return
     if (now() >= openUntil) console.warn(`[auth] Supabase auth is not answering: session refreshes skipped for ${OPEN_MS / 1000} s`)
@@ -28,15 +31,23 @@ export function authBreakerFetch(
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
     // Refreshes only: a sign-in or a code exchange always reaches the auth server.
     if (!url.includes('/auth/v1/token') || !url.includes('grant_type=refresh_token')) return fetchImpl(input, init)
-    if (now() < openUntil) throw new TypeError('Supabase auth is not answering: refresh skipped')
+    if (now() < openUntil || inFlight >= TRIP_AFTER) throw new TypeError('Supabase auth is not answering: refresh skipped')
+    // Tripped before: this one is the only probe until it answers.
+    if (failures >= TRIP_AFTER) openUntil = now() + OPEN_MS
+    inFlight++
     try {
       const res = await fetchImpl(input, init)
       if (unavailable(res.status)) failed()
-      else failures = 0
+      else {
+        failures = 0
+        openUntil = 0
+      }
       return res
     } catch (err) {
       failed()
       throw err
+    } finally {
+      inFlight--
     }
   }
 }
