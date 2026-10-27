@@ -19,10 +19,15 @@ export function authBreakerFetch(
 ): typeof fetch {
   let openUntil = 0
   let failures = 0
-  const failed = () => { if (++failures >= TRIP_AFTER) openUntil = now() + OPEN_MS }
+  const failed = () => {
+    if (++failures < TRIP_AFTER) return
+    if (now() >= openUntil) console.warn(`[auth] Supabase auth is not answering: session refreshes skipped for ${OPEN_MS / 1000} s`)
+    openUntil = now() + OPEN_MS
+  }
   return async (input, init) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-    if (!url.includes('/auth/v1/token')) return fetchImpl(input, init)
+    // Refreshes only: a sign-in or a code exchange always reaches the auth server.
+    if (!url.includes('/auth/v1/token') || !url.includes('grant_type=refresh_token')) return fetchImpl(input, init)
     if (now() < openUntil) throw new TypeError('Supabase auth is not answering: refresh skipped')
     try {
       const res = await fetchImpl(input, init)

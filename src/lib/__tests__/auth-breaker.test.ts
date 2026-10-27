@@ -58,12 +58,13 @@ describe('authBreakerFetch', () => {
     expect(network).toHaveBeenCalledTimes(2)
   })
 
-  it('every other request goes to the network untouched, open or not', async () => {
+  it('every other request, a sign-in or code exchange included, goes to the network untouched, open or not', async () => {
     const { network, fetch } = setup(async () => { throw new TypeError('fetch failed') })
     for (let i = 0; i < TRIP_AFTER; i++) await expect(fetch(TOKEN)).rejects.toThrow()
 
     await expect(fetch('https://x.supabase.co/rest/v1/transactions')).rejects.toThrow('fetch failed')
     await expect(fetch(new URL('https://x.supabase.co/auth/v1/user'))).rejects.toThrow('fetch failed')
-    expect(network).toHaveBeenCalledTimes(TRIP_AFTER + 2)
+    await expect(fetch('https://x.supabase.co/auth/v1/token?grant_type=pkce')).rejects.toThrow('fetch failed')
+    expect(network).toHaveBeenCalledTimes(TRIP_AFTER + 3)
   })
 })
