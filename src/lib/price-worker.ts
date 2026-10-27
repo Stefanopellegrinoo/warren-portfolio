@@ -18,7 +18,7 @@ import { fetchData912Prices, refreshLocalPrices } from './data912-client'
 import { createServiceClient } from './supabase-server'
 import { priceAlertPush, pushKeys, sendPushToUser } from './push'
 import { getRedis } from './redis'
-import { cacheUserSummaries } from './summary-cache'
+import { cacheUserSummaries, loadCycleInputs } from './summary-cache'
 import { captureOnPriceHistory } from './on-price-history'
 import { splitQuotesByAssetClass } from './portfolio-valuation'
 import { isMarketOpen, argentinaDate } from './utils'
@@ -31,7 +31,8 @@ import { auditTickerIdentities } from './ticker-audit'
 import { ingestOnTerms } from './on-terms-ingest'
 import { ingestFxRates } from './fx-rates'
 import { ingestSplits } from './splits-ingest'
-import { loadHeldStockTickers, loadPortfolioNow } from './ledger-now'
+import { heldStockTickersOf, loadPortfolioNow } from './ledger-now'
+import { memoByLedgerVersion } from './ledger-memo'
 import { fetchCryptoQuotes } from './binance/rest'
 import { getProviderForSymbol } from './market-data/resolver'
 import { isPriceValue } from './chart/alert-condition'
@@ -62,7 +63,8 @@ async function getAllTickers(): Promise<string[]> {
   if (!supabase) return []
 
   try {
-    return await loadHeldStockTickers(supabase)
+    // The same ledgers the summaries use, read again only after a write (ledger-memo.ts).
+    return heldStockTickersOf((await loadCycleInputs()).ledgers)
   } catch (error) {
     console.error('[Worker] Error reading held tickers from the ledger:', error)
     return []
@@ -91,23 +93,26 @@ async function getActiveAlertTickers(): Promise<string[]> {
 }
 
 /**
- * Fetch all ON tickers from the ons table (ones users are trading)
+ * Fetch all ON tickers from the ons table (ones users are trading). The table grows on an ON trade,
+ * which moves the ledger version, so it is read again only then (ledger-memo.ts).
  */
-async function getAllONTickers(): Promise<string[]> {
+const onTickersOfCatalog = memoByLedgerVersion(async () => {
   const supabase = getSupabase()
   if (!supabase) return []
-
   const { data, error } = await supabase
     .from('ons')
     .select('ticker')
+  if (error) throw error
+  return Array.from(new Set((data || []).map((p: any) => p.ticker) as string[]))
+})
 
-  if (error) {
+async function getAllONTickers(): Promise<string[]> {
+  try {
+    return await onTickersOfCatalog()
+  } catch (error) {
     console.error('[Worker] Error fetching ONs from database:', error)
     return []
   }
-
-  const tickerSet = new Set((data || []).map((p: any) => p.ticker) as string[])
-  return Array.from(tickerSet)
 }
 
 /**

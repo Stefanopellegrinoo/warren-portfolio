@@ -37,7 +37,11 @@ vi.mock('../yahoo-finance', () => ({
 }))
 vi.mock('../data912-client', () => ({ fetchData912Prices: vi.fn(async () => new Map()) }))
 vi.mock('../redis', () => ({ getRedis: () => null }))
-vi.mock('../summary-cache', () => ({ cacheUserSummaries: vi.fn() }))
+// The held tickers come from the cycle's ledgers, read through the fake database below.
+vi.mock('../summary-cache', () => ({
+  cacheUserSummaries: vi.fn(),
+  loadCycleInputs: async () => ({ ledgers: await (await import('../ledger-now')).loadAllLedgers((await import('../supabase-server')).createServiceClient()) }),
+}))
 vi.mock('../portfolio-valuation', () => ({
   splitQuotesByAssetClass: (m: Map<string, unknown>) => ({ stockQuotes: m, onQuotes: new Map() }),
 }))

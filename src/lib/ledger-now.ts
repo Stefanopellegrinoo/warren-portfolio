@@ -70,10 +70,10 @@ export async function loadLedger(sb: SupabaseClient, userId: string, columns: st
   return { trades, movements, overrides, splits }
 }
 
-/** Every user's ledger (service client, worker only), keyed by user id. */
-export async function loadAllLedgers(sb: SupabaseClient): Promise<Map<string, UserLedger>> {
+/** Every user's ledger (service client, worker only), keyed by user id. `columns`: TRADE_COLUMNS or a superset. */
+export async function loadAllLedgers(sb: SupabaseClient, columns: string = TRADE_COLUMNS): Promise<Map<string, UserLedger>> {
   const [trades, movements, overrides, splits] = await Promise.all([
-    readAll<LedgerTrade & { user_id: string }>(() => sb.from('transactions').select(`user_id, ${TRADE_COLUMNS}`)),
+    readAll<LedgerTrade & { user_id: string }>(() => sb.from('transactions').select(`user_id, ${columns}`)),
     readAll<LedgerMovement & { user_id: string }>(() => sb.from('cash_movements').select('user_id, type, amount, date')),
     readAll<OverrideRow & { user_id: string }>(() => sb.from('on_payment_overrides').select('user_id, ticker, pay_date, kind, amount')),
     loadSplits(sb),
@@ -220,11 +220,16 @@ export async function loadLastCloses(
   return out
 }
 
-/** Distinct stock tickers any user holds now (service client, worker only). Stocks need no schedules. */
-export async function loadHeldStockTickers(sb: SupabaseClient): Promise<string[]> {
+/** Pure: distinct stock tickers any of these ledgers holds now. Stocks need no schedules. */
+export function heldStockTickersOf(ledgers: Map<string, UserLedger>): string[] {
   const held = new Set<string>()
-  ;(await loadAllLedgers(sb)).forEach(l => {
+  ledgers.forEach(l => {
     for (const h of ledgerAt(l.trades, [], NO_DATE_CUTOFF, { splits: l.splits }).holdings) if (h.assetType === 'STOCK') held.add(h.ticker)
   })
   return [...held]
+}
+
+/** Distinct stock tickers any user holds now (service client, worker only). */
+export async function loadHeldStockTickers(sb: SupabaseClient): Promise<string[]> {
+  return heldStockTickersOf(await loadAllLedgers(sb))
 }

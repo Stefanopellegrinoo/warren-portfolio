@@ -96,6 +96,20 @@ export function isRedisReady(): boolean {
   return redisReady && redisClient !== null
 }
 
+/** Moved by every user write (invalidateUserCache) and never expires: the worker reuses its reads until it moves (ledger-memo.ts). */
+export const LEDGER_VERSION_KEY = 'ledger:version'
+
+/** The ledger version, '0' before the first write; null when Redis cannot say (the caller reads everything again). */
+export async function readLedgerVersion(): Promise<string | null> {
+  const redis = isRedisReady() ? redisClient : null
+  if (!redis) return null
+  try {
+    return (await redis.get(LEDGER_VERSION_KEY)) ?? '0'
+  } catch {
+    return null
+  }
+}
+
 /**
  * Get Redis connection options (for BullMQ).
  * Returns the URL string for BullMQ Queue/Worker connection.
@@ -191,6 +205,7 @@ export async function invalidateUserCache(userId: string): Promise<void> {
     // Bump summary version before deleting so every summary and derived-series writer detects stale writes
     await redis.incr(`summary:version:${userId}`)
     await redis.expire(`summary:version:${userId}`, SUMMARY_VERSION_TTL)
+    await redis.incr(LEDGER_VERSION_KEY)
 
     if (keysToDelete.length > 0) {
       await redis.del(...keysToDelete)

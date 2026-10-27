@@ -1,10 +1,33 @@
 import { valuePortfolio } from './portfolio-valuation'
-import { loadUserPortfolios } from './user-portfolios'
+import { loadAllSchedules, portfoliosFrom } from './user-portfolios'
 import { getRedis, SUMMARY_CACHE_TTL } from './redis'
 import { createServiceClient } from './supabase-server'
-import { currencyViewsFor, loadCurrencyContext } from './currency-views'
-import type { CurrencyViews } from './multicurrency'
-import { loadLastCloses } from './ledger-now'
+import { currencyViewsFor, loadCurrencyContext, LEDGER_COLUMNS, tradeDateFx, type ViewsLedger } from './currency-views'
+import type { CurrencyViews, LedgerTrade } from './multicurrency'
+import { loadAllLedgers, loadLastCloses } from './ledger-now'
+import { memoByLedgerVersion } from './ledger-memo'
+import { argentinaDate } from './utils'
+
+/**
+ * What the per-minute cycle needs that only a write changes (odd/tasks/supabase-efficiency.md S2-S3):
+ * every ledger, read once with the currency views' columns, the ON schedules, each user's portfolio
+ * and the ledger and trade-date FX of their views. Prices change every minute; these are reused until
+ * the ledger version moves (ledger-memo.ts). A failed ledger read throws, as loadUserPortfolios does.
+ */
+export const loadCycleInputs = memoByLedgerVersion(async () => {
+  const today = argentinaDate()
+  const ledgers = await loadAllLedgers(createServiceClient(), LEDGER_COLUMNS)
+  const schedules = await loadAllSchedules(ledgers, today)
+  const portfolios = portfoliosFrom(ledgers, schedules, today)
+  const views = new Map<string, ViewsLedger>(await Promise.all(portfolios.map(async ({ userId }) => {
+    const ledger = ledgers.get(userId)!
+    const trades = ledger.trades as unknown as LedgerTrade[]
+    // An unreadable FX is read again by the views themselves, which fail alone, never the summary.
+    const fxRows = await tradeDateFx(trades).catch(() => undefined)
+    return [userId, { trades, overrides: ledger.overrides, schedules, splits: ledger.splits, fxRows }] as const
+  })))
+  return { ledgers, portfolios, views }
+})
 
 /**
  * Lua compare-and-set used by cacheUserSummaries to avoid overwriting a summary
@@ -90,7 +113,7 @@ export async function cacheUserSummaries(
 
   console.log('[Worker] Caching user summaries...')
 
-  const portfolios = await loadUserPortfolios()
+  const { portfolios, views } = await loadCycleInputs()
 
   const redis = getRedis()
   if (!redis) return
@@ -127,7 +150,7 @@ export async function cacheUserSummaries(
     )
 
     const currencies = currencyCtx
-      ? await currencyViewsFor(supabase, userId, currencyCtx, { positions: valued.positions, onPositions: valued.onPositions, cashBalance: portfolio.cashBalance })
+      ? await currencyViewsFor(supabase, userId, currencyCtx, { positions: valued.positions, onPositions: valued.onPositions, cashBalance: portfolio.cashBalance }, views.get(userId))
           .catch(err => { console.error(`[Worker] currency views failed for ${userId}:`, err); return undefined })
       : undefined
 

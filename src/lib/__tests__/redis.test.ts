@@ -7,6 +7,7 @@ let capturedOn: ReturnType<typeof vi.fn>
 let capturedConnect: ReturnType<typeof vi.fn>
 let capturedIncr: ReturnType<typeof vi.fn>
 let capturedExpire: ReturnType<typeof vi.fn>
+let capturedGet: ReturnType<typeof vi.fn>
 
 vi.mock('ioredis', () => {
   // Must be a class so `new Redis(...)` works
@@ -52,6 +53,7 @@ vi.mock('ioredis', () => {
       capturedConnect = this.connect
       capturedIncr = this.incr
       capturedExpire = this.expire
+      capturedGet = this.get
       // Automatically fire the 'connect' event once connect() resolves
       this.connect = vi.fn(async () => {
         if (handlers['connect']) handlers['connect']()
@@ -75,6 +77,14 @@ describe('invalidateUserCache', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
     return redisModule
   }
+
+  it('every user write moves the shared ledger version, which never expires (the worker reuses its reads until it moves)', async () => {
+    const { invalidateUserCache } = await setup()
+    await invalidateUserCache('u1')
+
+    expect(capturedIncr).toHaveBeenCalledWith('ledger:version')
+    expect(capturedExpire.mock.calls.map((c: unknown[]) => c[0])).not.toContain('ledger:version')
+  })
 
   it('invalidates statistics:combined:{userId}', async () => {
     const { invalidateUserCache } = await setup()
@@ -175,5 +185,32 @@ describe('summary TTL constants', () => {
     const { SUMMARY_CACHE_TTL, SUMMARY_VERSION_TTL } = await import('../redis')
 
     expect(SUMMARY_VERSION_TTL).toBeGreaterThan(SUMMARY_CACHE_TTL)
+  })
+})
+
+describe('readLedgerVersion', () => {
+  beforeEach(() => {
+    vi.resetModules()
+  })
+
+  it('reads the version: "0" before any write, the stored value after', async () => {
+    const redisModule = await import('../redis')
+    redisModule.getRedis()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(await redisModule.readLedgerVersion()).toBe('0')
+    capturedGet.mockResolvedValueOnce('12')
+    expect(await redisModule.readLedgerVersion()).toBe('12')
+    expect(capturedGet).toHaveBeenCalledWith('ledger:version')
+  })
+
+  it('is null when Redis cannot say, so the caller reads everything again', async () => {
+    const redisModule = await import('../redis')
+    expect(await redisModule.readLedgerVersion()).toBeNull()
+
+    redisModule.getRedis()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    capturedGet.mockRejectedValueOnce(new Error('down'))
+    expect(await redisModule.readLedgerVersion()).toBeNull()
   })
 })
