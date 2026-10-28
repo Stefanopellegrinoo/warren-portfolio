@@ -84,6 +84,17 @@ describe('getBars', () => {
     expect(again.get('AAA')!.splits).toEqual([{ date: '2026-03-01', numerator: 2, denominator: 1 }])
   })
 
+  it('keeps the dividend events with the bars; unknown (null) when the chart did not say', async () => {
+    const withDividends = vi.fn(async () => ({ ...chart(), dividends: [{ date: '2026-03-20', amount: 1.5 }] }))
+    await getBars(['SPY'], FROM, { fetchChart: withDividends, today: TODAY })
+    const again = await getBars(['SPY'], FROM, { fetchChart: withDividends, today: TODAY })
+    expect(withDividends).toHaveBeenCalledTimes(1)
+    expect(again.get('SPY')!.dividends).toEqual([{ date: '2026-03-20', amount: 1.5 }])
+
+    const unknown = await getBars(['AAA'], FROM, { fetchChart: vi.fn(async () => chart()), today: TODAY })
+    expect(unknown.get('AAA')!.dividends).toBeNull()
+  })
+
   it('refetches on a new day', async () => {
     const fetchChart = vi.fn(async () => chart())
     await getBars(['AAA'], FROM, { fetchChart, today: TODAY })

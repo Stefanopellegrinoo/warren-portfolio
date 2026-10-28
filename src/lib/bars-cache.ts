@@ -11,7 +11,7 @@
  * Redis runs noeviction: EVERY write goes through setex.
  */
 import { ensureRedisConnected, getRedis } from './redis'
-import { fetchDailyChart, type DailyBar, type DailyChart, type SplitEvent } from './historical-prices'
+import { fetchDailyChart, type DailyBar, type DailyChart, type DividendEvent, type SplitEvent } from './historical-prices'
 import { argentinaDate } from './utils'
 
 export const BARS_TTL = 7 * 86400
@@ -28,6 +28,8 @@ interface Entry {
   bars: [string, number][]
   splits: [string, number, number][]
   splitsKnown: boolean
+  /** Absent in entries written before it existed, null when the chart did not carry them. */
+  dividends?: [string, number][] | null
   /** Negative marker: epoch ms until which the symbol is known-failing. */
   missingUntil?: number
 }
@@ -36,6 +38,8 @@ export interface BarsResult {
   bars: DailyBar[]
   splits: SplitEvent[]
   splitsKnown: boolean
+  /** Dividends of the window; null when unknown. */
+  dividends: DividendEvent[] | null
   /** Stale entry served, or nothing available. */
   degraded: boolean
   /** No data at all (Yahoo failed and nothing stored). */
@@ -87,6 +91,7 @@ const toResult = (e: Entry, degraded: boolean): BarsResult => ({
   bars: e.bars.map(([date, close]) => ({ date, close })),
   splits: e.splits.map(([date, numerator, denominator]) => ({ date, numerator, denominator })),
   splitsKnown: e.splitsKnown,
+  dividends: e.dividends ? e.dividends.map(([date, amount]) => ({ date, amount })) : null,
   degraded,
   missing: false,
 })
@@ -99,7 +104,7 @@ async function getOne(symbol: string, from: Date, deps: BarsDeps): Promise<BarsR
     // A caller that wants fresh bars (maxAgeSec) tries a missing symbol again after that long, not an hour.
     const markedAt = stored.missingUntil - MISSING_TTL * 1000
     const blocked = deps.maxAgeSec === undefined ? stored.missingUntil > Date.now() : Date.now() - markedAt < deps.maxAgeSec * 1000
-    if (blocked) return { bars: [], splits: [], splitsKnown: false, degraded: true, missing: true }
+    if (blocked) return { bars: [], splits: [], splitsKnown: false, dividends: null, degraded: true, missing: true }
     stored = null
   }
   // splitsKnown=false (historical() fallback) is never fresh: chart() gets another try next request.
@@ -115,6 +120,7 @@ async function getOne(symbol: string, from: Date, deps: BarsDeps): Promise<BarsR
       bars: chart.bars.map(b => [b.date, b.close]),
       splits: chart.splits.map(s => [s.date, s.numerator, s.denominator]),
       splitsKnown: chart.splitsKnown,
+      dividends: chart.dividends ? chart.dividends.map(d => [d.date, d.amount]) : null,
     }
     await writeEntry(symbol, entry, deps.memoryOnly)
     return toResult(entry, false)
@@ -122,7 +128,7 @@ async function getOne(symbol: string, from: Date, deps: BarsDeps): Promise<BarsR
     console.warn(`[Bars] Yahoo failed for ${symbol}:`, err instanceof Error ? err.message : err)
     if (stored) return toResult(stored, true)
     await writeEntry(symbol, { fetchedOn: today, from: fromDay, bars: [], splits: [], splitsKnown: false, missingUntil: Date.now() + MISSING_TTL * 1000 }, deps.memoryOnly)
-    return { bars: [], splits: [], splitsKnown: false, degraded: true, missing: true }
+    return { bars: [], splits: [], splitsKnown: false, dividends: null, degraded: true, missing: true }
   }
 }
 

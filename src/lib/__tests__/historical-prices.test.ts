@@ -230,7 +230,20 @@ describe('fetchDailyChart', () => {
       bars: [{ date: '2024-06-07', close: 120 }],
       splits: [{ date: '2024-06-10', numerator: 10, denominator: 1 }],
       splitsKnown: true,
+      dividends: [],
     })
+  })
+
+  it('returns the dividend events from chart(), by ex-date', async () => {
+    const getYahoo = fakeYahoo({
+      chart: () => ({
+        quotes: [{ date: new Date('2024-06-07T00:00:00Z'), close: 520 }],
+        events: { dividends: [{ date: new Date('2024-06-21T13:30:00Z'), amount: 1.76 }, { date: new Date('2024-03-15T13:30:00Z'), amount: null }] },
+      }),
+    })
+    const res = await fetchDailyChart('SPY', from, to, { getYahoo })
+    // A dividend with no amount is not invented as 0: it is dropped.
+    expect(res.dividends).toEqual([{ date: '2024-06-21', amount: 1.76 }])
   })
 
   it('reports splitsKnown=false when only the legacy endpoint answered', async () => {

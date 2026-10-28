@@ -3,15 +3,17 @@
  * The portfolio side is the flow-adjusted TWR (twr-series.ts) — never raw value,
  * which would read every deposit as outperformance.
  */
-import { closeOnOrBefore, type DailyBar } from './historical-prices'
+import { closeOnOrBefore, type DailyBar, type DividendEvent } from './historical-prices'
 import { getBars } from './bars-cache'
 import { getHistoricalCCL } from './currency'
 import type { TwrPoint } from './twr-series'
 
+// The portfolio's TWR counts its dividends: an ETF is compared with its own reinvested.
+// The MERVAL is a price index (Yahoo carries no dividends for it): the screen says so.
 export const BENCHMARKS = {
-  SPY: { label: 'S&P 500 (SPY)', symbol: 'SPY', inArs: false },
-  QQQ: { label: 'Nasdaq 100 (QQQ)', symbol: 'QQQ', inArs: false },
-  MERV_CCL: { label: 'MERVAL (USD CCL)', symbol: '^MERV', inArs: true },
+  SPY: { label: 'S&P 500 (SPY)', symbol: 'SPY', inArs: false, priceOnly: false },
+  QQQ: { label: 'Nasdaq 100 (QQQ)', symbol: 'QQQ', inArs: false, priceOnly: false },
+  MERV_CCL: { label: 'MERVAL (USD CCL)', symbol: '^MERV', inArs: true, priceOnly: true },
 } as const
 export type BenchmarkId = keyof typeof BENCHMARKS
 
@@ -26,6 +28,24 @@ export interface BenchmarkComparison {
   points: BenchmarkPoint[]
   /** Portfolio cumulative TWR % minus benchmark cumulative %, in percentage points. */
   excessPp: number
+  /** The index carries no dividends while the portfolio's return does. */
+  priceOnly: boolean
+}
+
+/**
+ * Pure. Total-return closes: each dividend reinvested at the close of its ex-date (the first
+ * bar on or after it), so the index grows by (close + dividend) / previous close that day.
+ */
+export function withDividends(bars: DailyBar[], dividends: DividendEvent[]): DailyBar[] {
+  const pending = [...dividends].sort((a, b) => a.date.localeCompare(b.date))
+  const out: DailyBar[] = []
+  for (const [i, bar] of bars.entries()) {
+    let paid = 0
+    while (pending.length > 0 && pending[0].date <= bar.date) paid += pending.shift()!.amount
+    // A dividend before the first bar is outside the window.
+    out.push(i === 0 ? bar : { date: bar.date, close: (out[i - 1].close * (bar.close + paid)) / bars[i - 1].close })
+  }
+  return out
 }
 
 /**
@@ -67,7 +87,7 @@ export async function fetchBenchmarkComparison(
   twr: TwrPoint[]
 ): Promise<BenchmarkComparison | null> {
   if (twr.length === 0) return null
-  const { label, symbol, inArs } = BENCHMARKS[id]
+  const { label, symbol, inArs, priceOnly } = BENCHMARKS[id]
   // 10 days of lead-in so the first TWR date (maybe a weekend) can carry a close forward.
   const from = new Date(new Date(twr[0].date).getTime() - 10 * DAY_MS)
   const to = new Date()
@@ -89,6 +109,10 @@ export async function fetchBenchmarkComparison(
     ccl = [...rates].map(([date, close]) => ({ date, close: Number(close) }))
   }
 
-  const cmp = compareToBenchmark(twr, bars, ccl)
-  return cmp && { id, label, ...cmp }
+  // Dividends unknown would draw the ETF without them: an error, as stale bars are.
+  if (!priceOnly && !entry?.dividends) throw new Error(`No dividend data for ${symbol}`)
+  const series = priceOnly ? bars : withDividends(bars, entry!.dividends!)
+
+  const cmp = compareToBenchmark(twr, series, ccl)
+  return cmp && { id, label, priceOnly, ...cmp }
 }
