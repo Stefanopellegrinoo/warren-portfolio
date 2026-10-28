@@ -14,7 +14,11 @@ export function useCachedPerVisit<T>(key: string | null, fetcher: () => Promise<
     fetcherRef.current = fetcher
   })
   const mounted = useRef(true)
-  useEffect(() => () => { mounted.current = false }, [])
+  // Set on every mount: strict mode mounts, unmounts and mounts again in development.
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
   // The keys answered during this visit, with their failure if they failed.
   const [answers, setAnswers] = useState<Record<string, { error: unknown }>>({})
   const answer = key ? answers[key] : undefined
