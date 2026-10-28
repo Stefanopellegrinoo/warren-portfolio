@@ -3,10 +3,10 @@ import { fetchONQuotesWithFallback } from '@/lib/data912-client'
 import { getCachedRoute, cacheRoute } from '@/lib/redis'
 import { normalizeError } from '@/lib/errors'
 import { serverError } from '@/lib/api/errors'
-import { getFullPortfolio } from '@/lib/portfolio-engine'
-import { loadLastCloses } from '@/lib/ledger-now'
+import { loadLastCloses, loadPortfolioAndLedger } from '@/lib/ledger-now'
+import { argentinaDate } from '@/lib/utils'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
-import { enrichPositionsForStats } from '@/lib/position-stats'
+import { enrichPositionsForStats, classIncome, resultByAsset } from '@/lib/position-stats'
 import { computeTradeStats } from '@/lib/trade-stats'
 import { getDerivedSeries } from '@/lib/derived-series'
 import { ledgerFlows } from '@/lib/derive-history'
@@ -24,7 +24,8 @@ export async function GET() {
 
     // Check Cache First
     // v3 = income now reaches the risk computation (declared coupon/dividend
-    // flows) and the payload carries the lifetime couponsReceived total.
+    // flows). Not bumped for incomeReceived (S7): a v3 entry without it lives
+    // at most 300 s and the screen reads the field as optional.
     const cacheKey = `statistics:ons:v3:${user.id}`
     const cachedStats = await getCachedRoute(cacheKey)
     if (cachedStats) {
@@ -35,8 +36,8 @@ export async function GET() {
     // (ledger core + market data) and the declared flows do not depend on each other.
     const declaredFlows = Promise.all([fetchFlowTransactions(supabase, user.id), fetchIncomeMovements(supabase, user.id)])
       .catch((err: unknown) => normalizeError(err))
-    const [portfolio, derived, declared] = await Promise.all([
-      getFullPortfolio(supabase, user.id),
+    const [{ now: portfolio, ledger }, derived, declared] = await Promise.all([
+      loadPortfolioAndLedger(supabase, user.id, argentinaDate()),
       getDerivedSeries(supabase, user.id),
       declaredFlows,
     ])
@@ -45,7 +46,12 @@ export async function GET() {
     const positions = portfolio.onPositions
     const quotes = await fetchONQuotesWithFallback(positions.map(p => p.ticker))
     const closed = portfolio.onClosedTrades
-    const realizedPnl = closed.reduce((sum, t) => sum + t.pnl, 0)
+    // Realized: the sales and the coupons (the core's automatic ones and any CUPON row), what
+    // the dashboard calls realized, "con dividendos y cupones" (S7). Never the cash
+    // movements' copy of a recorded coupon: that is the same money's cash leg.
+    const coupons = classIncome(ledger.trades, derived.income, 'ON')
+    const incomeReceived = Array.from(coupons.values()).reduce((sum, a) => sum + a, 0)
+    const realizedPnl = closed.reduce((sum, t) => sum + t.pnl, 0) + incomeReceived
 
     // One valuation rule (S3): live quote, else last close, else cost — NEVER 0,
     // a zero valuation fabricates a -100% loss in every aggregate below.
@@ -57,9 +63,6 @@ export async function GET() {
     const totalPortfolioValue = totals.totalMarketValue
     const openPnl = totals.openPnl
 
-    const winningPositions = enrichedPositions.filter((p) => p.pnl > 0).length
-    const winRate = positions.length ? winningPositions / positions.length : 0
-
     // Allocation
     const allocation = enrichedPositions
       .filter((p: any) => p.market_value > 0)
@@ -70,8 +73,8 @@ export async function GET() {
       }))
       .sort((a: any, b: any) => b.value - a.value)
 
-    // All PnLs (for bar chart)
-    const allPnLs = [
+    // Best and worst among open positions and single sales; the worst only if something lost.
+    const operations = [
       ...enrichedPositions.map((p: any) => ({ ticker: p.ticker, pnl: p.pnl, pnl_pct: p.pnl_pct, status: 'OPEN' })),
       ...closed.map((t) => ({
         ticker: t.ticker,
@@ -81,8 +84,12 @@ export async function GET() {
       }))
     ].sort((a: any, b: any) => b.pnl - a.pnl)
 
-    const biggestWinner = allPnLs.length > 0 ? allPnLs[0] : null
-    const biggestLoser = allPnLs.length > 0 ? allPnLs[allPnLs.length - 1] : null
+    const biggestWinner = operations.length > 0 ? operations[0] : null
+    const last = operations[operations.length - 1]
+    const biggestLoser = last && last.pnl < 0 ? last : null
+
+    // One bar per asset: open result + its sales + its coupons (S7).
+    const allPnLs = resultByAsset(enrichedPositions, closed, coupons)
 
     // Closed-trade statistics from the tested pure module: win rate, profit
     // factor (gross/gross), holding periods and monthly P&L.
@@ -103,7 +110,7 @@ export async function GET() {
     // monthlyStdDev has no per-universe equivalent yet — honest null, as before.
     const monthlyStdDev = null
 
-    // NOTE: ONs are USD only (Dollar-MEP), no ARS exposure
+    // Kept for the shared payload shape; the ONs tab does not show a market split.
     const usdExposure = totalPortfolioValue
     const arsExposure = 0
 
@@ -124,8 +131,11 @@ export async function GET() {
       winRate: tradeStats.winRate,
       totalPortfolioValue,
       unpricedPositions: totals.unpricedCount,
+      unpricedTickers: enrichedPositions.filter(p => !p.priced).map(p => p.ticker),
       allocation,
+      // Sales plus coupons; incomeReceived is the coupons' share of it (lifetime).
       realizedPnl,
+      incomeReceived,
       openPnl,
       biggestWinner,
       biggestLoser,
@@ -152,12 +162,6 @@ export async function GET() {
       // interval on the ONs tab — the universe most likely to have one, with 4
       // measured points and one already dropped for its null breakdown.
       drawdownIntervalsSkipped: risk.drawdownIntervalsSkipped,
-      // Lifetime coupons, a NUMBER beside the metrics rather than a series:
-      // the ONs chart shows what the bonds are worth, and the income that
-      // left the universe is declared as having left.
-      couponsReceived: income
-        .filter((m) => m.type === 'CUPON')
-        .reduce((sum, m) => sum + m.amount, 0),
     }
 
     // A degraded series (stale bars, a failed side read) is served but never pinned for 5 minutes.

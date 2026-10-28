@@ -4,8 +4,11 @@ import { NextRequest } from 'next/server'
 const mockRequireUser = vi.fn()
 // Ledger reads load the stock splits (odd/tasks/split-aware-ledger.md T3): none in these tests.
 vi.mock('@/lib/stock-splits', () => ({ loadSplits: async () => new Map() }))
+// An ON in the ledger reads its schedule, a market table, with the service role: it serves the same fixture.
+const h = vi.hoisted(() => ({ market: null as any }))
+vi.mock('@/lib/supabase-server', () => ({ createServiceClient: () => h.market }))
 vi.mock('@/lib/api-auth', () => ({
-  requireUser: () => mockRequireUser(),
+  requireUser: async () => { const r = await mockRequireUser(); h.market = r?.supabase; return r },
   isAuthFailure: (r: any) => 'error' in r,
 }))
 
@@ -30,10 +33,14 @@ vi.mock('@/lib/snapshot-series', () => ({
   fetchSnapshotSeries: (...args: unknown[]) => mockFetchSnapshotSeries(...args),
 }))
 
+// fetchQuotes reads the cache only; fetchQuotesWithFallback also asks Yahoo for what is missing (S2).
 const mockFetchQuotes = vi.fn(async (_tickers: string[]) => new Map())
+const mockFetchQuotesWithFallback = vi.fn(async (_tickers: string[]) => new Map())
 vi.mock('@/lib/yahoo-finance', () => ({
   fetchQuotes: (...a: unknown[]) => mockFetchQuotes(...(a as [string[]])),
+  fetchQuotesWithFallback: (...a: unknown[]) => mockFetchQuotesWithFallback(...(a as [string[]])),
 }))
+const quote = (ticker: string, price: number) => ({ ticker, price, change: 0, changePercent: 0, previousClose: price })
 
 const mockFetchFlowTransactions = vi.fn()
 vi.mock('@/lib/flow-transactions', () => ({
@@ -80,6 +87,7 @@ beforeEach(() => {
   mockFetchFlowTransactions.mockResolvedValue([])
   mockFetchExternalFlows.mockResolvedValue([])
   mockFetchIncomeMovements.mockResolvedValue([])
+  mockFetchQuotesWithFallback.mockResolvedValue(new Map())
 })
 
 describe('GET /api/statistics — allocation and trade stats from the ledger core', () => {
@@ -102,6 +110,59 @@ describe('GET /api/statistics — allocation and trade stats from the ledger cor
     expect(body.allocation.map((a: any) => a.name)).toEqual(['VIST', 'AAPL'])
     expect(body.totalPortfolioValue).toBeCloseTo(1000 + 42.666667 * 43.64, 2)
     expect(body.unpricedPositions).toBe(2)
+    expect(body.unpricedTickers).toEqual(['VIST', 'AAPL'])
+  })
+
+  it('values a stock missing from the quote cache with the quote the dashboard fetches (S2)', async () => {
+    mockRequireUser.mockResolvedValue({ supabase: fakeSupabase({ transactions: [trade()] }), user: { id: 'u1' } })
+    mockFetchQuotesWithFallback.mockResolvedValue(new Map([['AAPL', quote('AAPL', 120)]]))
+
+    const body = await (await GET(makeRequest('/api/statistics?universe=stocks'))).json()
+
+    expect(mockFetchQuotesWithFallback).toHaveBeenCalledWith(['AAPL'])
+    expect(mockFetchQuotes).not.toHaveBeenCalled()
+    expect(body.totalPortfolioValue).toBe(1200)
+    expect(body.openPnl).toBe(200)
+    expect(body.unpricedPositions).toBe(0)
+    expect(body.unpricedTickers).toEqual([])
+  })
+
+  it('counts the stocks\' dividends in the realized result and in each asset\'s bar, never an ON coupon (S7)', async () => {
+    mockRequireUser.mockResolvedValue({
+      supabase: fakeSupabase({ transactions: [
+        trade(),
+        trade({ operation: 'DIVIDENDO', quantity: 1, price: 4, date: '2026-02-10' }),
+        trade({ ticker: 'VIST', quantity: 100, price: 43.64, date: '2026-03-02' }),
+        trade({ ticker: 'VIST', operation: 'VENTA', quantity: 57.333333, price: 64.8508, date: '2026-04-09' }),
+        trade({ ticker: 'ONA', asset_type: 'ON', quantity: 10, price: 95 }),
+        trade({ ticker: 'ONA', operation: 'CUPON', quantity: 1, price: 7, asset_type: null }),
+      ] }),
+      user: { id: 'u1' },
+    })
+
+    const body = await (await GET(makeRequest('/api/statistics?universe=stocks'))).json()
+
+    expect(body.incomeReceived).toBe(4)
+    expect(body.realizedPnl).toBeCloseTo(1216.09 + 4, 2)
+    // One bar per asset, open + sales + income: VIST's sale, AAPL's dividend (both unpriced: open 0).
+    expect(body.allPnLs).toHaveLength(2)
+    expect(body.allPnLs[0]).toMatchObject({ ticker: 'VIST' })
+    expect(body.allPnLs[0].pnl).toBeCloseTo(1216.09, 2)
+    expect(body.allPnLs[1]).toEqual({ ticker: 'AAPL', pnl: 4 })
+  })
+
+  it('has no worst operation when nothing lost, and no averages or holding days without sales — null, never 0 (S7)', async () => {
+    mockRequireUser.mockResolvedValue({ supabase: fakeSupabase({ transactions: [trade()] }), user: { id: 'u1' } })
+    mockFetchQuotesWithFallback.mockResolvedValue(new Map([['AAPL', quote('AAPL', 120)]]))
+
+    const body = await (await GET(makeRequest('/api/statistics?universe=stocks'))).json()
+
+    expect(body.biggestWinner).toMatchObject({ ticker: 'AAPL', pnl: 200, status: 'OPEN' })
+    expect(body.biggestLoser).toBeNull()
+    expect(body).toMatchObject({
+      avgWin: null, avgLoss: null, avgHoldingDays: null, minHoldingDays: null, maxHoldingDays: null,
+      monthlyReturns: [], totalTrades: 0,
+    })
   })
 })
 
@@ -182,10 +243,10 @@ describe('GET /api/statistics — derived series', () => {
     expect(Object.keys(body).sort()).toEqual([
       'allPnLs', 'allocation', 'annualizedVol', 'arsExposure', 'avgHoldingDays', 'avgLoss', 'avgWin', 'benchmark',
       'benchmarkError', 'biggestLoser', 'biggestWinner', 'cumulativePnl', 'drawdownIntervals', 'drawdownIntervalsSkipped',
-      'losersCount', 'maxDrawdown', 'maxHoldingDays', 'minHoldingDays', 'monthlyReturns', 'monthlyStdDev', 'openPnl',
+      'incomeReceived', 'losersCount', 'maxDrawdown', 'maxHoldingDays', 'minHoldingDays', 'monthlyReturns', 'monthlyStdDev', 'openPnl',
       'profitFactor', 'realizedPnl', 'returnIntervals', 'sharpeRatio', 'totalPortfolioValue', 'totalTrades',
-      'universe', 'unpricedPositions', 'usdExposure', 'winRate', 'winnersCount',
-    ])
+      'universe', 'unpricedPositions', 'unpricedTickers', 'usdExposure', 'winRate', 'winnersCount',
+    ].sort())
   })
 
   it('serves a degraded series without caching it', async () => {
@@ -425,7 +486,7 @@ describe('GET /api/statistics — independent reads run together', () => {
     })
     answerSeries({ rows: [], income: [], degraded: false, flags: {} })
     // The benchmark has not answered yet: the quotes are already asked for.
-    await vi.waitFor(() => expect(mockFetchQuotes).toHaveBeenCalledWith(['AAPL']))
+    await vi.waitFor(() => expect(mockFetchQuotesWithFallback).toHaveBeenCalledWith(['AAPL']))
     answerBenchmark(null)
 
     const res = await pending

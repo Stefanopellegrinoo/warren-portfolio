@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { Quote } from '@/types'
-import { enrichPositionsForStats } from '../position-stats'
+import { enrichPositionsForStats, classIncome, resultByAsset } from '../position-stats'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -122,5 +122,48 @@ describe('enrichPositionsForStats — the one valuation rule (S3)', () => {
 
     expect(positions[0]).toMatchObject({ market_value: 980, priced: false })
     expect(totals.openPnl).toBeCloseTo(30)
+  })
+})
+
+// ── Income, per-asset result and the chart's selection (odd/tasks/statistics-truth.md S7) ──
+
+const row = (ticker: string, operation: string, quantity: number, price: number, asset_type: string | null = 'ACCION') =>
+  ({ ticker, operation, quantity, price, asset_type })
+
+describe('classIncome — the dividends and coupons the headline counts', () => {
+  const rows = [
+    row('KO', 'COMPRA', 10, 60),
+    row('ko ', 'DIVIDENDO', 1, 4.5),
+    row('KO', 'DIVIDENDO', -2, 3),
+    row('ONA', 'COMPRA', 10, 95, 'ON'),
+    row('ONA', 'CUPON', 1, 7, null),
+  ]
+  const automatic = [
+    { ticker: 'ONA', kind: 'coupon', amount: 12 },
+    { ticker: 'ONA', kind: 'amortization', amount: 500 },
+  ]
+
+  it('sums each stock ticker\'s DIVIDENDO rows (|quantity| × price) and nothing from the ONs', () => {
+    expect(classIncome(rows, automatic, 'STOCK')).toEqual(new Map([['KO', 10.5]]))
+  })
+
+  it('sums each ON\'s coupon rows and the core\'s automatic coupons — an amortization is capital, not income', () => {
+    expect(classIncome(rows, automatic, 'ON')).toEqual(new Map([['ONA', 19]]))
+  })
+})
+
+describe('resultByAsset — one bar per asset', () => {
+  it('adds the open result, every sale and the income of the same ticker, best first', () => {
+    const { positions: open } = enrichPositionsForStats(
+      [position('BCBA:GGAL', 10, 5), position('KO', 10, 60)],
+      new Map([['BCBA:GGAL', quote('BCBA:GGAL', 6)], ['KO', quote('KO', 55)]])
+    )
+    const sales = [{ ticker: 'KO', pnl: 20 }, { ticker: 'KO', pnl: -5 }, { ticker: 'MELI', pnl: -30 }]
+
+    expect(resultByAsset(open, sales, new Map([['KO', 10.5]]))).toEqual([
+      { ticker: 'GGAL', pnl: 10 },
+      { ticker: 'KO', pnl: -50 + 15 + 10.5 },
+      { ticker: 'MELI', pnl: -30 },
+    ])
   })
 })

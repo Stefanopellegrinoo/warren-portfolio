@@ -71,3 +71,51 @@ export function enrichPositionsForStats(
 
   return { positions: enriched, totals: { totalMarketValue, openPnl, unpricedCount } }
 }
+
+const norm = (t: string) => String(t).trim().toUpperCase()
+const display = (t: string) => t.split(':')[1] || t
+
+interface LedgerRowLike {
+  ticker: string
+  operation: string
+  quantity: number
+  price: number
+  asset_type: string | null
+}
+
+/**
+ * Dividends and coupons of one asset class by ledger ticker, in engine dollars: the
+ * DIVIDENDO/CUPON rows (|quantity| × price) and the core's automatic coupons — the income
+ * the dashboard's "Realizado, con dividendos y cupones" counts (multicurrency.ts
+ * ledgerInCurrencies). A ticker is an ON when any of its rows says so; an automatic
+ * payment only exists for an ON, and an amortization is capital returned, not income.
+ */
+export function classIncome(
+  rows: LedgerRowLike[],
+  automatic: Array<{ ticker: string; kind: string; amount: number }>,
+  kind: 'ON' | 'STOCK'
+): Map<string, number> {
+  const ons = new Set(rows.filter(r => norm(r.asset_type ?? '') === 'ON').map(r => norm(r.ticker)))
+  const out = new Map<string, number>()
+  const add = (ticker: string, amount: number) => out.set(ticker, (out.get(ticker) ?? 0) + amount)
+  for (const r of rows) {
+    if (r.operation !== 'DIVIDENDO' && r.operation !== 'CUPON') continue
+    const ticker = norm(r.ticker)
+    if (ons.has(ticker) === (kind === 'ON')) add(ticker, Math.abs(Number(r.quantity)) * Number(r.price))
+  }
+  if (kind === 'ON') for (const p of automatic) if (p.kind === 'coupon') add(norm(p.ticker), p.amount)
+  return out
+}
+
+/** One result per asset: its open result, every sale of it and its income. Best first. */
+export function resultByAsset(
+  open: StatPosition[],
+  sales: Array<{ ticker: string; pnl: number }>,
+  income: Map<string, number>
+): Array<{ ticker: string; pnl: number }> {
+  const total = new Map(income)
+  const add = (ticker: string, pnl: number) => total.set(norm(ticker), (total.get(norm(ticker)) ?? 0) + (Number(pnl) || 0))
+  for (const p of open) add(p.fullTicker, p.pnl)
+  for (const s of sales) add(s.ticker, s.pnl)
+  return Array.from(total, ([ticker, pnl]) => ({ ticker: display(ticker), pnl })).sort((a, b) => b.pnl - a.pnl)
+}

@@ -66,6 +66,12 @@ describe('computeTradeStats — win rate over CLOSED trades', () => {
     expect(stats.avgWin).toBeCloseTo(20)
     expect(stats.avgLoss).toBeCloseTo(-8)
   })
+
+  it('has no average loss without a losing sale, and no average win without a winning one — null, never 0', () => {
+    expect(computeTradeStats([trade(10)]).avgLoss).toBeNull()
+    expect(computeTradeStats([trade(-10)]).avgWin).toBeNull()
+    expect(computeTradeStats([])).toMatchObject({ avgWin: null, avgLoss: null })
+  })
 })
 
 describe('computeTradeStats — monthly grouping', () => {
@@ -90,7 +96,18 @@ describe('computeTradeStats — monthly grouping', () => {
   it('sorts months chronologically regardless of input order', () => {
     const trades = [trade(5, '2026-03-15'), trade(7, '2026-01-10')]
     const stats = computeTradeStats(trades)
-    expect(stats.monthlyReturns.map((m) => m.month)).toEqual(['2026-01', '2026-03'])
+    expect(stats.monthlyReturns.map((m) => m.month)).toEqual(['2026-01', '2026-02', '2026-03'])
+  })
+
+  it('lists every calendar month between the first and the last sale, 0 when nothing was sold', () => {
+    // A month without sales is a month with a 0 result, not a month that never happened.
+    const stats = computeTradeStats([trade(10, '2025-11-20'), trade(-4, '2026-02-03')])
+    expect(stats.monthlyReturns).toEqual([
+      { month: '2025-11', pnl: 10, trades: 1 },
+      { month: '2025-12', pnl: 0, trades: 0 },
+      { month: '2026-01', pnl: 0, trades: 0 },
+      { month: '2026-02', pnl: -4, trades: 1 },
+    ])
   })
 })
 
@@ -108,10 +125,10 @@ describe('computeTradeStats — holding period', () => {
     expect(stats.maxHoldingDays).toBe(20)
   })
 
-  it('returns zeros when no trade has a holding period', () => {
+  it('returns null, not 0 days, when no sale has a holding period', () => {
     const stats = computeTradeStats([trade(10, '2026-03-10', null)])
-    expect(stats.avgHoldingDays).toBe(0)
-    expect(stats.minHoldingDays).toBe(0)
-    expect(stats.maxHoldingDays).toBe(0)
+    expect(stats.avgHoldingDays).toBeNull()
+    expect(stats.minHoldingDays).toBeNull()
+    expect(stats.maxHoldingDays).toBeNull()
   })
 })
