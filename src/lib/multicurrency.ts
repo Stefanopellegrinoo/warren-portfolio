@@ -56,6 +56,8 @@ export interface TickerLedger {
   income: Amounts
   /** Some lot had no FX for its date and was converted with today's. */
   costEstimated: boolean
+  /** An ON (its rows say so), not a share or CEDEAR. */
+  on: boolean
 }
 
 export type ValueSource = 'local' | 'mep' | 'estimated'
@@ -91,6 +93,8 @@ export interface CurrencyViews {
     realized: Amounts
     dayChange: Amounts
     dayChangePct: Amounts
+    /** Open result and realized (with dividends and coupons) of each class. Absent in summaries cached before it existed. */
+    byClass?: Record<'stocks' | 'ons', { openPnl: Amounts; realized: Amounts }>
   }
   /** Some position is valued with the estimated fallback. */
   estimated: boolean
@@ -178,7 +182,7 @@ export function ledgerInCurrencies(trades: LedgerTrade[], fxAt: FxLookup, today:
   // The three runs see the same events, so holdings and realized trades line up by index.
   const out = new Map<string, TickerLedger>()
   const entry = (ticker: string) => {
-    if (!out.has(ticker)) out.set(ticker, { quantity: 0, cost: ZERO, realized: ZERO, income: ZERO, costEstimated: false })
+    if (!out.has(ticker)) out.set(ticker, { quantity: 0, cost: ZERO, realized: ZERO, income: ZERO, costEstimated: false, on: false })
     return out.get(ticker)!
   }
   ars.realized.forEach((r, i) => {
@@ -205,6 +209,10 @@ export function ledgerInCurrencies(trades: LedgerTrade[], fxAt: FxLookup, today:
     e.costEstimated = rows.some(r => r.estimated && norm(r.t.ticker) === h.ticker && r.t.date.slice(0, 10) >= h.firstBought
       && (r.t.operation === 'COMPRA' || r.t.operation === 'VENTA'))
   })
+  for (const { t } of rows) {
+    const e = t.asset_type === 'ON' ? out.get(norm(t.ticker)) : undefined
+    if (e) e.on = true
+  }
   return out
 }
 
@@ -250,7 +258,7 @@ export function buildCurrencyViews(input: {
   const cash = { ARS: input.cashBalance * fx.mep, MEP: input.cashBalance, CCL: (input.cashBalance * fx.mep) / fx.ccl }
 
   const positions: Record<string, PositionView> = {}
-  let stocks = ZERO, ons = ZERO, invested = ZERO, dayChange = ZERO
+  let stocks = ZERO, ons = ZERO, investedStocks = ZERO, investedOns = ZERO, dayChange = ZERO
   let estimated = false
 
   const held = [
@@ -281,16 +289,20 @@ export function buildCurrencyViews(input: {
     }
 
     if (!v.value) continue // unpriced: out of the totals, as the engine's 'drop' policy does
-    if (p.kind === 'on') ons = add(ons, v.value)
-    else stocks = add(stocks, v.value)
-    invested = add(invested, cost)
+    if (p.kind === 'on') { ons = add(ons, v.value); investedOns = add(investedOns, cost) }
+    else { stocks = add(stocks, v.value); investedStocks = add(investedStocks, cost) }
     if (day) dayChange = add(dayChange, day)
     estimated ||= v.estimated
   }
 
-  let realized = ZERO
-  ledger.forEach(l => { realized = add(realized, add(l.realized, l.income)) })
+  let realizedStocks = ZERO, realizedOns = ZERO
+  ledger.forEach(l => {
+    if (l.on) realizedOns = add(realizedOns, add(l.realized, l.income))
+    else realizedStocks = add(realizedStocks, add(l.realized, l.income))
+  })
+  const realized = add(realizedStocks, realizedOns)
 
+  const invested = add(investedStocks, investedOns)
   const openPnl = sub(add(stocks, ons), invested)
   return {
     version: 1,
@@ -307,6 +319,10 @@ export function buildCurrencyViews(input: {
       realized,
       dayChange,
       dayChangePct: ratio(dayChange, invested),
+      byClass: {
+        stocks: { openPnl: sub(stocks, investedStocks), realized: realizedStocks },
+        ons: { openPnl: sub(ons, investedOns), realized: realizedOns },
+      },
     },
     estimated,
   }

@@ -36,8 +36,29 @@ const stats: StatData = {
   profitFactor: 2, sharpeRatio: 0.5, annualizedVol: 0.2, monthlyStdDev: null,
   winnersCount: 0, losersCount: 0, totalTrades: 0, arsExposure: 2500, usdExposure: 7500,
 }
-const part = { value: 5000, openPnl: 10, realizedPnl: 0, totalPnl: 10, positionCount: 2, closedTradesCount: 1 }
-const combined = { totalValue: 12345, composition: [{ name: 'Acciones', value: 5000, pct: 1 }], stocks: part, ons: part }
+const part = { positionCount: 2, closedTradesCount: 1 }
+const combined = { stocks: part, ons: part }
+
+// The dashboard's own answer (GET /api/positions): its Pesos / MEP / Cable views.
+const amounts = (ARS: number, MEP: number, CCL: number) => ({ ARS, MEP, CCL })
+const NONE = amounts(0, 0, 0)
+const BY_CLASS = {
+  stocks: { openPnl: amounts(180_000, 120, 110), realized: amounts(45_000, 30, 28) },
+  ons: { openPnl: amounts(15_000, 10, 9), realized: amounts(7_500, 5, 4) },
+}
+const portfolioWith = (byClass: typeof BY_CLASS | undefined) => ({
+  positions: [], onPositions: [], lastRefresh: null,
+  summary: { total_market_value: 1850, cash: { balance: 200 }, stocks: { market_value: 900 }, ons: { market_value: 750 } },
+  currencies: {
+    version: 1, fx: { mep: 1500, ccl: 1580, mepDate: '2026-10-28', cclDate: '2026-10-28' }, positions: {}, estimated: false,
+    totals: {
+      value: amounts(3_000_000, 2000, 1900), stocks: amounts(1_500_000, 1000, 950), ons: amounts(1_200_000, 800, 760),
+      cash: amounts(300_000, 200, 190), invested: NONE, openPnl: NONE, openPnlPct: NONE, realized: NONE, dayChange: NONE, dayChangePct: NONE,
+      ...(byClass && { byClass }),
+    },
+  },
+})
+const POSITIONS_URL = '/api/positions'
 
 const STATS_URLS = ['/api/statistics?universe=stocks', '/api/statistics/ons', '/api/statistics/combined', '/api/statistics?universe=total']
 const ok = (body: unknown) => () => new Response(JSON.stringify(body))
@@ -48,6 +69,7 @@ function stubFetch(overrides: Record<string, Route> = {}, offline = { value: fal
   const calls: string[] = []
   const routes: Record<string, Route> = {
     [STATS_URLS[0]]: ok(stats), [STATS_URLS[1]]: ok(stats), [STATS_URLS[2]]: ok(combined), [STATS_URLS[3]]: ok(stats),
+    [POSITIONS_URL]: ok(portfolioWith(BY_CLASS)),
     ...overrides,
   }
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -91,6 +113,64 @@ describe('StatisticsPage — headline first (S6)', () => {
     expect(at('Comparar con un índice')).toBeLessThan(at('Ratio de Sharpe'))
     expect(at('Ratio de Sharpe')).toBeLessThan(at('Composición'))
     expect(el.querySelector('[role="alert"]')).toBeNull()
+    unmount()
+  })
+})
+
+describe('StatisticsPage — the dashboard\'s total, in the dashboard\'s currency (odd/tasks/statistics-truth.md S1)', () => {
+  const shown = (el: HTMLElement) => el.textContent!.replace(/\u00a0/g, ' ')
+  // The dashboard keeps its choice in the browser's storage.
+  const choose = (currency: string) => vi.stubGlobal('localStorage', { getItem: (k: string) => (k === 'resumen:currency' ? currency : null), setItem() {} })
+
+  it('total, results and composition are the dashboard\'s views in its default currency, Dólar MEP', async () => {
+    stubFetch()
+    const { el, unmount } = await render()
+    const text = shown(el)
+    expect(text).toMatch(/Valor total de la cartera\s*US\$ 2\.000,00/)
+    // Open result plus realized with dividends and coupons, per class.
+    expect(text).toMatch(/Resultado de acciones\s*\+150,00/)
+    expect(text).toMatch(/Resultado de ONs\s*\+15,00/)
+    expect(text).toMatch(/Acciones\s*US\$ 1\.000,00/)
+    expect(text).toMatch(/Obligaciones negociables\s*US\$ 800,00/)
+    expect(text).toMatch(/Caja\s*US\$ 200,00/)
+    unmount()
+  })
+
+  it('follows the currency chosen on the dashboard: Dólar cable, Pesos', async () => {
+    choose('CCL')
+    stubFetch()
+    const cable = await render()
+    expect(shown(cable.el)).toMatch(/Valor total de la cartera\s*US\$ 1\.900,00/)
+    expect(shown(cable.el)).toMatch(/Resultado de acciones\s*\+138,00/)
+    expect(shown(cable.el)).toMatch(/Acciones\s*US\$ 950,00/)
+    cable.unmount()
+
+    choose('ARS')
+    const pesos = await render()
+    expect(shown(pesos.el)).toMatch(/Valor total de la cartera\s*\$ 3\.000\.000,00/)
+    expect(shown(pesos.el)).toMatch(/Resultado de ONs\s*\+22\.500,00/)
+    pesos.unmount()
+  })
+
+  it('a summary cached before the per-class results shows none rather than one in another currency', async () => {
+    stubFetch({ [POSITIONS_URL]: ok(portfolioWith(undefined)) })
+    const { el, unmount } = await render()
+    expect(shown(el)).toMatch(/Valor total de la cartera\s*US\$ 2\.000,00/)
+    expect(shown(el)).toMatch(/Resultado de acciones\s*—/)
+    unmount()
+  })
+
+  it('a failed portfolio load says so, and Reintentar asks again', async () => {
+    let fail = true
+    const calls = stubFetch({ [POSITIONS_URL]: () => (fail ? failed() : ok(portfolioWith(BY_CLASS))()) })
+    const { el, unmount } = await render()
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain('No se pudo cargar el valor de la cartera.')
+    fail = false
+    act(() => buttons(el, 'Reintentar')[0].click())
+    await flush()
+    await flush()
+    expect(calls.filter(u => u === POSITIONS_URL)).toHaveLength(2)
+    expect(shown(el)).toMatch(/Valor total de la cartera\s*US\$ 2\.000,00/)
     unmount()
   })
 })
@@ -189,8 +269,8 @@ describe('StatisticsPage — each block as its request answers (S9)', () => {
     unmount()
   })
 
-  it('shows the evolution chart while the portfolio summary is still on its way', async () => {
-    stubFetch({ [STATS_URLS[2]]: never })
+  it('shows the evolution chart while the portfolio value is still on its way', async () => {
+    stubFetch({ [POSITIONS_URL]: never })
     const { el, unmount } = await render()
     expect(el.textContent).toContain('Evolución de la cartera')
     expect(el.textContent).not.toContain('Valor total de la cartera')

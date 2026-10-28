@@ -12,6 +12,8 @@ interface PositionsApiResponse {
   onPositions: ONPosition[]
   summary: PortfolioSummary
   lastRefresh: string | null
+  /** The Pesos / MEP / Cable views; read them with `viewsOf`. */
+  currencies?: unknown
 }
 
 /** The portfolio; components asking at the same time share one request (the heaviest endpoint). */

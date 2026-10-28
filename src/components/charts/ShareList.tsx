@@ -1,7 +1,7 @@
 import { formatPct, formatUSD } from '@/lib/utils'
 
-/** Weights as rows with a thin bar, the Resumen "Distribución" idiom. `pct` is a fraction. */
-export default function ShareList({ items }: { items: { name: string; pct: number; value?: number }[] }) {
+/** Weights as rows with a thin bar, the Resumen "Distribución" idiom. `pct` is a fraction; amounts in US$ unless `format` says otherwise. */
+export default function ShareList({ items, format = formatUSD }: { items: { name: string; pct: number; value?: number }[]; format?: (n: number) => string }) {
   return (
     <ul>
       {items.map(d => (
@@ -11,7 +11,7 @@ export default function ShareList({ items }: { items: { name: string; pct: numbe
             <span className="absolute inset-y-0 left-0 rounded-full bg-accent" style={{ width: `${Math.min(Math.max(d.pct, 0), 1) * 100}%` }} />
           </span>
           <span className="text-right text-[13px] tabular-nums text-ink-2">
-            {d.value !== undefined && <span className="mr-2 text-ink">{formatUSD(d.value)}</span>}
+            {d.value !== undefined && <span className="mr-2 text-ink">{format(d.value)}</span>}
             {formatPct(d.pct, { digits: 1, sign: false })}
           </span>
         </li>

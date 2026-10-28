@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import KpiCard, { toneOfResult } from '@/components/ui/KpiCard'
 import RiskMetricsRow from '@/components/ui/RiskMetricsRow'
 import BenchmarkComparison from '@/components/charts/BenchmarkComparison'
@@ -10,32 +10,43 @@ import ShareList from '@/components/charts/ShareList'
 import { signed } from '@/components/charts/tokens'
 import { SectionHead } from '@/components/resumen/ui'
 import { ErrorNotice } from '@/components/strategies/ui'
-import { formatUSD } from '@/lib/utils'
+import { formatNumber } from '@/lib/utils'
 import { requestErrorMessage } from '@/lib/request-errors'
 import { useCached } from '@/lib/client-cache'
 import { useCachedPerVisit } from '@/components/charts/use-cached-per-visit'
 import { argentinaDate } from '@/lib/utils'
 import type { Universe } from '@/lib/asset-universe'
+import type { Currency } from '@/lib/multicurrency'
+import { DEFAULT_CURRENCY, headline, readCurrency, viewsOf } from '@/lib/resumen/currency'
+import { distribution } from '@/lib/resumen/holdings'
+import { getPortfolio } from '@/lib/warren/positions'
 import DetailedStats, { type StatData } from './DetailedStats'
 
-interface CombinedData {
-  totalValue: number
-  composition: { name: string; value: number; pct: number }[]
-  stocks: {
-    value: number
-    openPnl: number
-    realizedPnl: number
-    totalPnl: number
-    positionCount: number
-    closedTradesCount: number
+interface Counts { positionCount: number; closedTradesCount: number }
+interface CombinedData { stocks: Counts; ons: Counts }
+
+type Portfolio = Awaited<ReturnType<typeof getPortfolio>>
+
+/**
+ * The dashboard's own figures in the dashboard's currency: the same response and the same rule,
+ * so both pages show one total (odd/tasks/statistics-truth.md S1). A summary cached before the
+ * per-class results existed has none: no result rather than one in another currency.
+ */
+function valueOf(payload: Portfolio, currency: Currency) {
+  const views = viewsOf(payload)
+  const { prefix, total } = headline(payload.summary, views, currency)
+  const result = (c: 'stocks' | 'ons') => {
+    const b = views?.totals.byClass?.[c]
+    return b ? b.openPnl[currency] + b.realized[currency] : null
   }
-  ons: {
-    value: number
-    openPnl: number
-    realizedPnl: number
-    totalPnl: number
-    positionCount: number
-    closedTradesCount: number
+  return {
+    total,
+    money: (n: number) => `${prefix}\u00a0${formatNumber(n)}`,
+    composition: distribution(payload.summary, views, currency)
+      .filter(d => d.value > 0)
+      .map(d => ({ name: d.label, value: d.value, pct: d.pct / 100 })),
+    stocks: result('stocks'),
+    ons: result('ons'),
   }
 }
 
@@ -50,6 +61,7 @@ const UNIVERSE_BY_TAB: Record<TabType, Universe> = {
 const TAB_LABEL: Record<TabType, string> = { general: 'Toda la cartera', stocks: 'Acciones', ons: 'ONs' }
 
 const LOAD_FAILED = 'No se pudieron cargar las estadísticas.'
+const VALUE_FAILED = 'No se pudo cargar el valor de la cartera.'
 const STATS = {
   stocks: '/api/statistics?universe=stocks',
   ons: '/api/statistics/ons',
@@ -98,6 +110,13 @@ export default function StatisticsPage() {
   const stocks = useCached('statistics:stocks', statsOf<StatData>(STATS.stocks))
   const ons = useCached('statistics:ons', statsOf<StatData>(STATS.ons))
   const combined = useCached('statistics:combined', statsOf<CombinedData>(STATS.combined))
+  // Value, results and composition: the dashboard's answer, in the currency chosen there (S1).
+  const portfolio = useCached('statistics:portfolio', () => getPortfolio().catch((err: unknown) => {
+    throw err instanceof TypeError ? err : new Error(VALUE_FAILED) // its own message is for developers
+  }))
+  const [currency, setCurrency] = useState<Currency>(DEFAULT_CURRENCY)
+  useEffect(() => { setCurrency(readCurrency()) }, [])
+  const value = portfolio.data ? valueOf(portfolio.data, currency) : null
   // General-tab risk, over the whole portfolio — the same universe as its chart (S9).
   const general = useCached('statistics:total', statsOf<StatData>(STATS.total))
   // The full series of each part, asked once per visit: a period or tab change asks nothing (S9). Tolerant by
@@ -111,7 +130,7 @@ export default function StatisticsPage() {
 
   const combinedData = combined.data ?? null
   const failed = <T,>(r: { data?: T; error: unknown }) => !r.data && !!r.error
-  const retry = () => { stocks.reload(); ons.reload(); combined.reload(); general.reload() }
+  const retry = () => { stocks.reload(); ons.reload(); combined.reload(); general.reload(); portfolio.reload() }
 
   const tabs: TabType[] = combinedData
     ? (['general', 'stocks', 'ons'] as TabType[]).filter(t =>
@@ -161,20 +180,22 @@ export default function StatisticsPage() {
         // Headline first: total value and results, then how it got there. Each block
         // keeps one slot across tabs, so the chosen benchmark survives a tab switch.
         <div className="grid gap-10">
-          {activeTab === 'general' && (combinedData ? (
+          {activeTab === 'general' && (value ? (
             <dl className="grid grid-cols-3 gap-x-6 gap-y-5 border-b border-line pb-5 max-[819px]:grid-cols-2">
               <div className="min-w-0 max-[819px]:col-span-2">
                 <dt className="text-[13px] text-ink-3">Valor total de la cartera</dt>
-                <dd className="font-serif text-2xl font-normal tabular-nums">{formatUSD(combinedData.totalValue)}</dd>
+                <dd className="font-serif text-2xl font-normal tabular-nums">{value.money(value.total)}</dd>
               </div>
-              <KpiCard label="Resultado de acciones" value={signed(combinedData.stocks.totalPnl)} tone={toneOfResult(combinedData.stocks.totalPnl)}>
-                {plural(combinedData.stocks.positionCount, 'posición', 'posiciones')} · {plural(combinedData.stocks.closedTradesCount, 'operación cerrada', 'operaciones cerradas')}
+              <KpiCard label="Resultado de acciones" value={value.stocks === null ? '—' : signed(value.stocks)} tone={toneOfResult(value.stocks ?? 0)}>
+                {combinedData && <>{plural(combinedData.stocks.positionCount, 'posición', 'posiciones')} · {plural(combinedData.stocks.closedTradesCount, 'operación cerrada', 'operaciones cerradas')}</>}
               </KpiCard>
-              <KpiCard label="Resultado de ONs" value={signed(combinedData.ons.totalPnl)} tone={toneOfResult(combinedData.ons.totalPnl)}>
-                {plural(combinedData.ons.positionCount, 'posición', 'posiciones')} · {plural(combinedData.ons.closedTradesCount, 'operación cerrada', 'operaciones cerradas')}
+              <KpiCard label="Resultado de ONs" value={value.ons === null ? '—' : signed(value.ons)} tone={toneOfResult(value.ons ?? 0)}>
+                {combinedData && <>{plural(combinedData.ons.positionCount, 'posición', 'posiciones')} · {plural(combinedData.ons.closedTradesCount, 'operación cerrada', 'operaciones cerradas')}</>}
               </KpiCard>
             </dl>
-          ) : <Skeleton label="Cargando el resumen" rows={1} />)}
+          ) : failed(portfolio)
+            ? <ErrorNotice onRetry={retry}>{requestErrorMessage(portfolio.error, VALUE_FAILED)}</ErrorNotice>
+            : <Skeleton label="Cargando el resumen" rows={1} />)}
 
           {/* A tab whose own data failed says so instead of showing only part of itself. */}
           {tabData === null && (
@@ -196,10 +217,10 @@ export default function StatisticsPage() {
               <section aria-labelledby="h-composicion">
                 <SectionHead id="h-composicion" title="Composición" />
                 <p className="pt-3 text-[13px] text-ink-3">Por clase de activo.</p>
-                {!combinedData
-                  ? <div className="pt-2"><Skeleton label="Cargando la composición" rows={2} /></div>
-                  : combinedData.composition.length > 0
-                    ? <div className="pt-2"><ShareList items={combinedData.composition} /></div>
+                {!value
+                  ? !failed(portfolio) && <div className="pt-2"><Skeleton label="Cargando la composición" rows={2} /></div>
+                  : value.composition.length > 0
+                    ? <div className="pt-2"><ShareList items={value.composition} format={value.money} /></div>
                     : <p className="py-8 text-sm text-ink-3">Sin datos suficientes.</p>}
               </section>
             </>
