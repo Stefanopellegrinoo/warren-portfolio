@@ -53,6 +53,9 @@ describe('ValueChart', () => {
     const c = await mount(ok)
     expect(c.urls).toEqual([HISTORY])
     expect(c.firstDay()).toBe(label(daysAgo(60))) // 3M
+    // Its second line is cost plus cash, not money put in (statistics-truth S9).
+    expect(c.el.textContent).toContain('Costo + caja')
+    expect(c.el.textContent).not.toContain('Invertido')
     await c.pick('1M')
     expect(c.firstDay()).toBe(label(daysAgo(10)))
     expect(c.el.querySelector('svg')?.getAttribute('aria-label')).toContain('período 1M')

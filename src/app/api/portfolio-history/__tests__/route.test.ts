@@ -22,6 +22,11 @@ vi.mock('@/lib/derived-series', () => ({
   getDerivedSeries: (...args: unknown[]) => mockGetDerivedSeries(...args),
 }))
 
+const mockExternalFlows = vi.fn()
+vi.mock('@/lib/cash-flows', () => ({
+  fetchExternalFlows: (...args: unknown[]) => mockExternalFlows(...args),
+}))
+
 const route = await import('../route')
 const { GET } = route
 
@@ -56,6 +61,7 @@ beforeEach(() => {
   mockGetCachedRoute.mockResolvedValue(null)
   mockCacheRoute.mockResolvedValue(undefined)
   mockGetDerivedSeries.mockResolvedValue(series([]))
+  mockExternalFlows.mockResolvedValue([])
 })
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -70,8 +76,8 @@ describe('GET /api/portfolio-history — derived from the ledger core', () => {
     expect(res.status).toBe(200)
     expect(body).toEqual({
       data: [
-        { snapshot_date: daysAgo(1), value: 1350, invested: 800 },
-        { snapshot_date: TODAY, value: 1400, invested: 800 },
+        { snapshot_date: daysAgo(1), value: 1350, invested: 800, contributed: 1350 },
+        { snapshot_date: TODAY, value: 1400, invested: 800, contributed: 1350 },
       ],
       measuredFrom: daysAgo(1),
       negativeCashUntil: null,
@@ -116,7 +122,7 @@ describe('GET /api/portfolio-history — derived from the ledger core', () => {
 
     await GET(request())
     expect(mockCacheRoute).toHaveBeenCalledWith(
-      'history:v3:u1:90:total', { data: [], measuredFrom: null, negativeCashUntil: null, unavailableReason: null }, 300
+      'history:v4:u1:90:total', { data: [], measuredFrom: null, negativeCashUntil: null, unavailableReason: null }, 300
     )
   })
 
@@ -141,8 +147,8 @@ describe('GET /api/portfolio-history — universe parameter', () => {
     mockGetDerivedSeries.mockResolvedValue(series([row(daysAgo(1))]))
     const res = await GET(request('days=90&universe=measurable'))
     expect(res.status).toBe(200)
-    expect((await res.json()).data).toEqual([{ snapshot_date: daysAgo(1), value: 1000, invested: 900 }])
-    expect(mockGetCachedRoute).toHaveBeenCalledWith('history:v3:u1:90:total')
+    expect((await res.json()).data).toEqual([{ snapshot_date: daysAgo(1), value: 1000, invested: 900, contributed: 1000 }])
+    expect(mockGetCachedRoute).toHaveBeenCalledWith('history:v4:u1:90:total')
   })
 
   it('rejects an unknown universe with 400', async () => {
@@ -187,5 +193,32 @@ describe('GET /api/portfolio-history — the whole portfolio is measured after i
 describe('POST /api/portfolio-history', () => {
   it('no longer exists: there is no snapshot to take, Next answers 405', () => {
     expect((route as Record<string, unknown>).POST).toBeUndefined()
+  })
+
+  it('the whole portfolio carries the money put in: first measured value plus deposits minus withdrawals (S9)', async () => {
+    mockGetDerivedSeries.mockResolvedValue(series([
+      row(daysAgo(3), { total_value: 900, cash_value: -50 }), row(daysAgo(2), { total_value: 1000 }),
+      row(daysAgo(1), { total_value: 1600 }), row(TODAY, { total_value: 1500 }),
+    ]))
+    mockExternalFlows.mockResolvedValue([{ date: daysAgo(1), amount: 500 }, { date: TODAY, amount: -100 }])
+
+    const body = await (await GET(request('days=all&universe=total'))).json()
+
+    expect(mockExternalFlows).toHaveBeenCalledWith(fakeSupabase, 'u1')
+    expect(body.measuredFrom).toBe(daysAgo(2))
+    expect(body.data.map((p: { contributed: number | null }) => p.contributed)).toEqual([null, 1000, 1500, 1400])
+  })
+
+  it('a class carries no money-put-in line and reads no cash movement', async () => {
+    mockGetDerivedSeries.mockResolvedValue(series([row(daysAgo(1)), row(TODAY)]))
+    const body = await (await GET(request('days=all&universe=stocks'))).json()
+    expect(body.data[0]).toEqual({ snapshot_date: daysAgo(1), value: 600, invested: 500 })
+    expect(mockExternalFlows).not.toHaveBeenCalled()
+  })
+
+  it('caches under history:v4, the version that carries the money put in', async () => {
+    mockGetDerivedSeries.mockResolvedValue(series([row(TODAY)]))
+    await GET(request('days=all&universe=total'))
+    expect(mockGetCachedRoute).toHaveBeenCalledWith('history:v4:u1:all:total')
   })
 })

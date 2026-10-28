@@ -60,6 +60,12 @@ const UNIVERSE_BY_TAB: Record<TabType, Universe> = {
 
 const TAB_LABEL: Record<TabType, string> = { general: 'Toda la cartera', stocks: 'Acciones', ons: 'ONs' }
 
+// The evolution chart's second line (odd/tasks/statistics-truth.md S9).
+const LINE = {
+  general: { label: 'Plata que pusiste', delta: 'sobre lo que pusiste' },
+  class: { label: 'Costo de lo que tenés', delta: 'resultado abierto' },
+}
+
 const LOAD_FAILED = 'No se pudieron cargar las estadísticas.'
 const VALUE_FAILED = 'No se pudo cargar el valor de la cartera.'
 const STATS = {
@@ -99,7 +105,11 @@ async function fullHistory(universe: Universe): Promise<History> {
   const res = await fetch(`/api/portfolio-history?days=all&universe=${universe}`)
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   const body = await res.json()
-  const data: PortfolioChartPoint[] = Array.isArray(body.data) ? body.data : []
+  const raw: (PortfolioChartPoint & { contributed?: number | null })[] = Array.isArray(body.data) ? body.data : []
+  // The whole portfolio is drawn against the money put in (S9): only points that carry it.
+  const data: PortfolioChartPoint[] = universe === 'total'
+    ? raw.flatMap(p => (typeof p.contributed === 'number' ? [{ snapshot_date: p.snapshot_date, value: p.value, invested: p.contributed }] : []))
+    : raw
   const from: unknown = body.measuredFrom
   return {
     points: body.unavailableReason ? [] : typeof from === 'string' ? data.filter(p => p.snapshot_date >= from) : data,
@@ -155,9 +165,11 @@ export default function StatisticsPage() {
   const evolution = (
     <section aria-labelledby="h-evolucion">
       <SectionHead id="h-evolucion" title={activeTab === 'general' ? 'Evolución de la cartera' : `Evolución de ${TAB_LABEL[activeTab]}`} />
-      <p className="pt-3 text-[13px] text-ink-3">Valor de mercado contra el capital invertido.</p>
+      <p className="pt-3 text-[13px] text-ink-3">{activeTab === 'general'
+        ? 'Valor de mercado contra la plata que pusiste: el valor del primer día medido, más los depósitos y menos los retiros.'
+        : 'Valor de mercado contra el costo de lo que tenés.'}</p>
       {history.data?.note && <p className="pt-1 text-[13px] text-warn">{history.data.note}</p>}
-      <PortfolioChart data={cut(history.data?.points ?? [], historyPeriod)} period={historyPeriod} onPeriodChange={changePeriod} loading={!history.data && history.loading} />
+      <PortfolioChart data={cut(history.data?.points ?? [], historyPeriod)} period={historyPeriod} onPeriodChange={changePeriod} loading={!history.data && history.loading} line={LINE[activeTab === 'general' ? 'general' : 'class']} />
     </section>
   )
 

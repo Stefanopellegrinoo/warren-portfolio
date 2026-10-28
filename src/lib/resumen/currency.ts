@@ -40,7 +40,7 @@ export interface Headline {
   openPnlPct: number
   realized: number
   realizedLabel: string
-  /** Invested plus cash, as "Capital invertido" has always shown. */
+  /** Cost of the open positions plus cash: "Costo + caja", not the money put in (statistics-truth S9). */
   capital: number
 }
 

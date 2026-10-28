@@ -307,6 +307,27 @@ export interface MeasuredBase {
 }
 
 /**
+ * The money put in, as a chart line (odd/tasks/statistics-truth.md S9): the value on the first
+ * measured day, then each deposit added and each withdrawal taken on its day (one on a closed
+ * day reaches the next point). Points before `from` get none; a flow on or before the first
+ * measured day is already inside its value. Without `from`, the line starts at the first point.
+ */
+export function contributedLine(points: ProjectedPoint[], flows: ExternalFlow[], from: string | null): (number | null)[] {
+  const start = points.findIndex(p => from === null || p.snapshot_date >= from)
+  if (start < 0) return points.map(() => null)
+  const pending = flows
+    .map(f => ({ day: String(f.date).slice(0, 10), amount: f.amount }))
+    .filter(f => f.day > points[start].snapshot_date)
+    .sort((a, b) => a.day.localeCompare(b.day))
+  let line = points[start].value
+  return points.map((p, i) => {
+    if (i < start) return null
+    while (pending.length > 0 && pending[0].day <= p.snapshot_date) line += pending.shift()!.amount
+    return line
+  })
+}
+
+/**
  * The rows a universe's figures may rest on. A day whose recorded cash is negative lacks the
  * deposit that paid for what was bought, so the whole portfolio's value there is a P&L-sized base
  * and any return on it is noise. `total` therefore starts the day after the last such day; with

@@ -9,9 +9,12 @@ import StatisticsPage from '../page'
 
 // The evolution chart measures itself; this stand-in prints the days it was given and offers one period.
 vi.mock('@/components/charts/PortfolioChart', () => ({
-  default: ({ data, loading, onPeriodChange }: { data: { snapshot_date: string }[]; loading: boolean; onPeriodChange: (p: string) => void }) => (
+  default: ({ data, loading, onPeriodChange, line }: {
+    data: { snapshot_date: string; invested: number }[]; loading: boolean; onPeriodChange: (p: string) => void; line: { label: string; delta: string }
+  }) => (
     <div data-chart="">
       <output>{loading ? 'cargando' : data.map(p => p.snapshot_date).join(',')}</output>
+      <span data-line="">{line.label} · {line.delta} · {data.map(p => p.invested).join(',')}</span>
       <button type="button" onClick={() => onPeriodChange('30')}>Período 1M</button>
       <button type="button" onClick={() => onPeriodChange('all')}>Período Todo</button>
     </div>
@@ -286,8 +289,25 @@ describe('StatisticsPage — history asked once per part, cut in the browser (S9
     d.setUTCDate(d.getUTCDate() - n)
     return d.toISOString().slice(0, 10)
   }
-  const point = (n: number) => ({ snapshot_date: daysAgo(n), value: 100, invested: 90 })
+  const point = (n: number) => ({ snapshot_date: daysAgo(n), value: 100, invested: 90, contributed: 95 })
   const series = { data: [point(100), point(60), point(20), point(0)] }
+
+  it('the whole portfolio draws the money put in; a class, the cost of what it holds (statistics-truth S9)', async () => {
+    const classSeries = { data: [{ snapshot_date: daysAgo(20), value: 100, invested: 90 }, { snapshot_date: daysAgo(0), value: 110, invested: 90 }] }
+    stubFetch({
+      '/api/portfolio-history?days=all&universe=total': ok({ data: [point(20), { ...point(0), contributed: 120 }], measuredFrom: daysAgo(20) }),
+      '/api/portfolio-history?days=all&universe=stocks': ok(classSeries),
+    })
+    const { el, unmount } = await render()
+    const line = () => el.querySelector('[data-chart] [data-line]')!.textContent
+    expect(line()).toBe('Plata que pusiste · sobre lo que pusiste · 95,120')
+    expect(el.textContent).toContain('Valor de mercado contra la plata que pusiste')
+
+    await openTab(el, 'Acciones')
+    expect(line()).toBe('Costo de lo que tenés · resultado abierto · 90,90')
+    expect(el.textContent).toContain('Valor de mercado contra el costo de lo que tenés')
+    unmount()
+  })
 
   it('a period change cuts the series it already has; a part asks once', async () => {
     const calls = stubFetch({
@@ -317,7 +337,8 @@ describe('StatisticsPage — the whole portfolio is drawn from the day it is mea
     d.setUTCDate(d.getUTCDate() - n)
     return d.toISOString().slice(0, 10)
   }
-  const point = (n: number) => ({ snapshot_date: daysAgo(n), value: 100, invested: 90 })
+  // As the route serves it: the money put in from the measured base on, none before (S9).
+  const point = (n: number) => ({ snapshot_date: daysAgo(n), value: 100, invested: 90, contributed: n > 20 ? null : 100 })
   const TOTAL = '/api/portfolio-history?days=all&universe=total'
 
   it('starts the chart the day after the last negative-cash day and says why', async () => {

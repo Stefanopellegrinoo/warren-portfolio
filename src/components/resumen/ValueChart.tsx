@@ -68,7 +68,7 @@ export default function ValueChart() {
         </fieldset>
         <div className="flex gap-4 text-[13px] text-ink-3" aria-hidden="true">
           <span><i className="mr-1.5 inline-block w-3.5 border-t-2 border-accent align-middle" />Valor</span>
-          <span><i className="mr-1.5 inline-block w-3.5 border-t border-dashed border-ink-3 align-middle" />Invertido</span>
+          <span><i className="mr-1.5 inline-block w-3.5 border-t border-dashed border-ink-3 align-middle" />Costo + caja</span>
         </div>
       </div>
 
@@ -136,7 +136,7 @@ export default function ValueChart() {
                 <span className="block text-ink-3">{longDate(point.snapshot_date)}</span>
                 <b className="block text-sm font-semibold">US$ {formatNumber(point.value)}</b>
                 <span className={point.value - point.invested >= 0 ? 'text-ok' : 'text-danger'}>
-                  {formatNumber(point.value - point.invested, { sign: true })} sobre lo invertido
+                  {formatNumber(point.value - point.invested, { sign: true })} resultado abierto
                 </span>
               </div>
             )}

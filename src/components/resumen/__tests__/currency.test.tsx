@@ -46,6 +46,9 @@ describe('ValueSection figures', () => {
     expect(html).toContain('Realizado, con dividendos y cupones')
     expect(html).toContain('+12.500,00')
     expect(html).toContain('960.000,00')
+    // Cost plus cash is not money put in: it says what it is (statistics-truth S9).
+    expect(html).toContain('Costo + caja')
+    expect(html).not.toContain('Capital invertido')
     expect(html).not.toContain('Por qué los resultados cambian')
   })
 

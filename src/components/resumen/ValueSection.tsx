@@ -44,7 +44,7 @@ export default function ValueSection({ figures: f }: { figures: Headline }) {
             <span className={tone(f.realized)}>{formatNumber(f.realized, { sign: true })}</span>
           </Figure>
           <div className="col-span-2 sm:col-span-1">
-            <Figure label="Capital invertido">{formatNumber(f.capital)}</Figure>
+            <Figure label="Costo + caja">{formatNumber(f.capital)}</Figure>
           </div>
         </dl>
       </div>

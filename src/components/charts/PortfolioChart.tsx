@@ -24,13 +24,15 @@ interface Props {
   onPeriodChange: (p: Period) => void
   /** Skeleton instead of the plot while the parent fetches the series. */
   loading?: boolean
+  /** What the second line is, and how the gap to it reads in the tooltip. */
+  line: { label: string; delta: string }
 }
 
 const longDate = (iso: string) =>
   new Date(iso + 'T12:00:00').toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
 
-/** Value against invested capital, same drawing as the Resumen chart. */
-export default function PortfolioChart({ data, period, onPeriodChange, loading = false }: Props) {
+/** Value against a second line (money put in, or cost), same drawing as the Resumen chart. */
+export default function PortfolioChart({ data, period, onPeriodChange, loading = false, line }: Props) {
   const [width, setWidth] = useState(0)
   const [active, setActive] = useState<number | null>(null)
   const wrap = useRef<HTMLDivElement>(null)
@@ -73,7 +75,7 @@ export default function PortfolioChart({ data, period, onPeriodChange, loading =
         </fieldset>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-ink-3" aria-hidden="true">
           <span><i className="mr-1.5 inline-block w-3.5 border-t-2 border-accent align-middle" />Valor</span>
-          <span><i className="mr-1.5 inline-block w-3.5 border-t border-dashed border-ink-3 align-middle" />Invertido</span>
+          <span><i className="mr-1.5 inline-block w-3.5 border-t border-dashed border-ink-3 align-middle" />{line.label}</span>
         </div>
       </div>
 
@@ -131,9 +133,9 @@ export default function PortfolioChart({ data, period, onPeriodChange, loading =
               >
                 <span className="block text-ink-3">{longDate(point.snapshot_date)}</span>
                 <b className="block text-sm font-semibold">US$ {formatNumber(point.value)}</b>
-                <span className="block text-ink-2">Invertido US$ {formatNumber(point.invested)}</span>
+                <span className="block text-ink-2">{line.label} US$ {formatNumber(point.invested)}</span>
                 <span className={point.value - point.invested >= 0 ? 'text-ok' : 'text-danger'}>
-                  {formatNumber(point.value - point.invested, { sign: true })} sobre lo invertido
+                  {formatNumber(point.value - point.invested, { sign: true })} {line.delta}
                 </span>
               </div>
             )}

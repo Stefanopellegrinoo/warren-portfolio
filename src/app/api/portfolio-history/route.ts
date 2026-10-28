@@ -3,7 +3,8 @@ import { getCachedRoute, cacheRoute } from '@/lib/redis'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { getDerivedSeries } from '@/lib/derived-series'
 import { argentinaDate } from '@/lib/utils'
-import { measuredBase, parseUniverse, projectHistory, type ProjectedPoint } from '@/lib/asset-universe'
+import { contributedLine, measuredBase, parseUniverse, projectHistory, type ProjectedPoint } from '@/lib/asset-universe'
+import { fetchExternalFlows } from '@/lib/cash-flows'
 import { serverError } from '@/lib/api/errors'
 
 // GET: the portfolio evolution series, derived from the ledger core
@@ -39,9 +40,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Elegí qué ver: toda la cartera, acciones u ONs' }, { status: 400 })
     }
 
-    // v3: points are projected per-universe via projectHistory (invalidateUserCache
-    // SCANs history:v3:{userId}:*).
-    const cacheKey = `history:v3:${user.id}:${daysParam}:${universe}`
+    // v4: the whole portfolio's points carry the money put in (invalidateUserCache
+    // SCANs history:v4:{userId}:*).
+    const cacheKey = `history:v4:${user.id}:${daysParam}:${universe}`
     const cachedHistory = await getCachedRoute(cacheKey)
     if (cachedHistory) {
       return NextResponse.json(cachedHistory)
@@ -50,12 +51,19 @@ export async function GET(req: NextRequest) {
     // Derived rows are Argentine days (argentinaDate), so the window boundary
     // is computed in the same calendar.
     const today = argentinaDate()
-    const { rows, degraded } = await getDerivedSeries(supabase, user.id, { fromDate: rangeStart(daysParam, today) })
-    const data: ProjectedPoint[] = projectHistory(rows, universe)
+    // Only the whole portfolio has deposits and withdrawals crossing its boundary.
+    const [{ rows, degraded }, flows] = await Promise.all([
+      getDerivedSeries(supabase, user.id, { fromDate: rangeStart(daysParam, today) }),
+      universe === 'total' ? fetchExternalFlows(supabase, user.id) : null,
+    ])
+    const projected: ProjectedPoint[] = projectHistory(rows, universe)
     // The whole portfolio is measured from the day after its last negative-cash day
     // (odd/tasks/statistics-truth.md S4). The series is served whole — the dashboard's value
     // chart reads it too — and says where the measured part starts; /statistics draws from there.
     const { measuredFrom, negativeCashUntil, unavailableReason } = measuredBase(rows, universe)
+    // The money put in since then: /statistics draws it against the value (S9).
+    const contributed = flows ? contributedLine(projected, flows, unavailableReason ? null : measuredFrom) : null
+    const data = contributed ? projected.map((p, i) => ({ ...p, contributed: contributed[i] })) : projected
 
     const responseData = { data, measuredFrom, negativeCashUntil, unavailableReason }
     // A degraded series (stale bars, a failed side read) is served but never pinned for 5 minutes.

@@ -10,6 +10,7 @@ import {
   MIN_INTERVALS_VOLATILITY,
   MIN_INTERVALS_SHARPE,
   MIN_INTERVALS_DRAWDOWN,
+  contributedLine,
 } from '../asset-universe'
 import type {
   ProjectableSnapshot,
@@ -580,3 +581,24 @@ describe('the whole portfolio is measured after its last negative-cash day (S4)'
     }
   })
 })
+
+describe('contributedLine — the money put in (statistics-truth S9)', () => {
+  const pts = (...days: [string, number][]) => days.map(([snapshot_date, value]) => ({ snapshot_date, value, invested: 0 }))
+
+  it('starts at the first measured day\'s value and adds each deposit and withdrawal on its day', () => {
+    const points = pts(['2026-04-07', 50], ['2026-04-08', 1000], ['2026-04-09', 1100], ['2026-04-10', 900], ['2026-04-13', 950])
+    const flows = [
+      { date: '2026-04-01', amount: 5000 }, // before the measured base: already inside its value
+      { date: '2026-04-08', amount: 300 }, // on the first measured day: inside its value too
+      { date: '2026-04-09', amount: 200 },
+      { date: '2026-04-11T15:00:00Z', amount: -150 }, // a weekend withdrawal reaches the next point
+    ]
+    expect(contributedLine(points, flows, '2026-04-08')).toEqual([null, 1000, 1200, 1200, 1050])
+  })
+
+  it('without a measured base, from the first point; with none measurable, no line', () => {
+    expect(contributedLine(pts(['2026-04-08', 10], ['2026-04-09', 12]), [{ date: '2026-04-09', amount: 5 }], null)).toEqual([10, 15])
+    expect(contributedLine(pts(['2026-04-08', 10]), [], '2026-05-01')).toEqual([null])
+  })
+})
+
