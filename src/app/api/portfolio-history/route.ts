@@ -3,7 +3,7 @@ import { getCachedRoute, cacheRoute } from '@/lib/redis'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { getDerivedSeries } from '@/lib/derived-series'
 import { argentinaDate } from '@/lib/utils'
-import { parseUniverse, projectHistory, type ProjectedPoint } from '@/lib/asset-universe'
+import { measuredBase, parseUniverse, projectHistory, type ProjectedPoint } from '@/lib/asset-universe'
 import { serverError } from '@/lib/api/errors'
 
 // GET: the portfolio evolution series, derived from the ledger core
@@ -52,8 +52,12 @@ export async function GET(req: NextRequest) {
     const today = argentinaDate()
     const { rows, degraded } = await getDerivedSeries(supabase, user.id, { fromDate: rangeStart(daysParam, today) })
     const data: ProjectedPoint[] = projectHistory(rows, universe)
+    // The whole portfolio is measured from the day after its last negative-cash day
+    // (odd/tasks/statistics-truth.md S4). The series is served whole — the dashboard's value
+    // chart reads it too — and says where the measured part starts; /statistics draws from there.
+    const { measuredFrom, negativeCashUntil, unavailableReason } = measuredBase(rows, universe)
 
-    const responseData = { data }
+    const responseData = { data, measuredFrom, negativeCashUntil, unavailableReason }
     // A degraded series (stale bars, a failed side read) is served but never pinned for 5 minutes.
     if (!degraded) await cacheRoute(cacheKey, responseData, 300)
 

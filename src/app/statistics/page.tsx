@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import KpiCard, { toneOfResult } from '@/components/ui/KpiCard'
-import RiskMetricsRow from '@/components/ui/RiskMetricsRow'
+import RiskMetricsRow, { negativeCashNote } from '@/components/ui/RiskMetricsRow'
 import BenchmarkComparison from '@/components/charts/BenchmarkComparison'
 import PortfolioChart from '@/components/charts/PortfolioChart'
 import type { PortfolioChartPoint } from '@/components/charts/PortfolioChart'
@@ -88,12 +88,23 @@ const statsOf = <T,>(url: string) => async (): Promise<T> => {
   return res.json()
 }
 
-/** The full series of a part, asked once; a period is cut here, as the route cuts it (Argentine days back from today). */
-async function fullHistory(universe: Universe): Promise<PortfolioChartPoint[]> {
+interface History { points: PortfolioChartPoint[]; note: string | null }
+
+/**
+ * The full series of a part, asked once; a period is cut here, as the route cuts it (Argentine days back from today).
+ * Only its measured part is drawn: the whole portfolio starts the day after its last negative-cash day, and with
+ * negative cash today nothing is (odd/tasks/statistics-truth.md S4). The route says where, and the note says why.
+ */
+async function fullHistory(universe: Universe): Promise<History> {
   const res = await fetch(`/api/portfolio-history?days=all&universe=${universe}`)
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   const body = await res.json()
-  return Array.isArray(body.data) ? body.data : []
+  const data: PortfolioChartPoint[] = Array.isArray(body.data) ? body.data : []
+  const from: unknown = body.measuredFrom
+  return {
+    points: body.unavailableReason ? [] : typeof from === 'string' ? data.filter(p => p.snapshot_date >= from) : data,
+    note: negativeCashNote(body),
+  }
 }
 function cut(series: PortfolioChartPoint[], period: Period): PortfolioChartPoint[] {
   if (period === 'all') return series
@@ -145,7 +156,8 @@ export default function StatisticsPage() {
     <section aria-labelledby="h-evolucion">
       <SectionHead id="h-evolucion" title={activeTab === 'general' ? 'Evolución de la cartera' : `Evolución de ${TAB_LABEL[activeTab]}`} />
       <p className="pt-3 text-[13px] text-ink-3">Valor de mercado contra el capital invertido.</p>
-      <PortfolioChart data={cut(history.data ?? [], historyPeriod)} period={historyPeriod} onPeriodChange={changePeriod} loading={!history.data && history.loading} />
+      {history.data?.note && <p className="pt-1 text-[13px] text-warn">{history.data.note}</p>}
+      <PortfolioChart data={cut(history.data?.points ?? [], historyPeriod)} period={historyPeriod} onPeriodChange={changePeriod} loading={!history.data && history.loading} />
     </section>
   )
 
@@ -187,10 +199,10 @@ export default function StatisticsPage() {
                 <dd className="font-serif text-2xl font-normal tabular-nums">{value.money(value.total)}</dd>
               </div>
               <KpiCard label="Resultado de acciones" value={value.stocks === null ? '—' : signed(value.stocks)} tone={toneOfResult(value.stocks ?? 0)}>
-                {combinedData && <>{plural(combinedData.stocks.positionCount, 'posición', 'posiciones')} · {plural(combinedData.stocks.closedTradesCount, 'operación cerrada', 'operaciones cerradas')}</>}
+                {combinedData && <>{plural(combinedData.stocks.positionCount, 'posición', 'posiciones')} · {plural(combinedData.stocks.closedTradesCount, 'venta', 'ventas')}</>}
               </KpiCard>
               <KpiCard label="Resultado de ONs" value={value.ons === null ? '—' : signed(value.ons)} tone={toneOfResult(value.ons ?? 0)}>
-                {combinedData && <>{plural(combinedData.ons.positionCount, 'posición', 'posiciones')} · {plural(combinedData.ons.closedTradesCount, 'operación cerrada', 'operaciones cerradas')}</>}
+                {combinedData && <>{plural(combinedData.ons.positionCount, 'posición', 'posiciones')} · {plural(combinedData.ons.closedTradesCount, 'venta', 'ventas')}</>}
               </KpiCard>
             </dl>
           ) : failed(portfolio)

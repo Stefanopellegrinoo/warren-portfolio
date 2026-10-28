@@ -242,8 +242,8 @@ describe('GET /api/statistics — derived series', () => {
     const body = await (await GET(request())).json()
     expect(Object.keys(body).sort()).toEqual([
       'allPnLs', 'allocation', 'annualizedVol', 'arsExposure', 'avgHoldingDays', 'avgLoss', 'avgWin', 'benchmark',
-      'benchmarkError', 'biggestLoser', 'biggestWinner', 'cumulativePnl', 'drawdownIntervals', 'drawdownIntervalsSkipped',
-      'incomeReceived', 'losersCount', 'maxDrawdown', 'maxHoldingDays', 'minHoldingDays', 'monthlyReturns', 'monthlyStdDev', 'openPnl',
+      'benchmarkError', 'biggestLoser', 'biggestWinner', 'cumulativePnl', 'degraded', 'drawdownIntervals', 'drawdownIntervalsSkipped',
+      'incomeReceived', 'losersCount', 'maxDrawdown', 'measuredDays', 'measuredFrom', 'negativeCashUntil', 'unavailableReason', 'maxHoldingDays', 'minHoldingDays', 'monthlyReturns', 'monthlyStdDev', 'openPnl',
       'profitFactor', 'realizedPnl', 'returnIntervals', 'sharpeRatio', 'totalPortfolioValue', 'totalTrades',
       'universe', 'unpricedPositions', 'unpricedTickers', 'usdExposure', 'winRate', 'winnersCount',
     ].sort())
@@ -332,11 +332,12 @@ describe('GET /api/statistics — income reaches the risk computation', () => {
    *  has zero drawdown whether or not the jump is declared, so a drawdown
    *  assertion here would pass in BOTH worlds and prove nothing. */
   const COUPON_DAY = '2026-07-10'
-  const series = () =>
-    Array.from({ length: 22 }, (_, i) => {
+  const day = (i: number) => new Date(Date.UTC(2026, 6, 1 + i)).toISOString().slice(0, 10)
+  const series = (days = 22) =>
+    Array.from({ length: days }, (_, i) => {
       const paid = i >= 9
       return {
-        snapshot_date: `2026-07-${String(i + 1).padStart(2, '0')}`,
+        snapshot_date: day(i),
         total_value: 228300,
         total_invested: 200000,
         stocks_value: 100000, stocks_invested: 100000,
@@ -411,9 +412,10 @@ describe('GET /api/statistics — income reaches the risk computation', () => {
     // Inside `total` the ON leg and the cash leg move together; only deposits
     // and withdrawals cross its boundary, so nothing about the payment is declared.
     for (const kind of ['coupon', 'amortization'] as const) {
-      mockSeries(series(), coreIncome(kind))
+      // 61 days: volatility needs 60 returns before it shows a number (S5).
+      mockSeries(series(61), coreIncome(kind))
       const body = await (await GET(makeRequest('/api/statistics?universe=total'))).json()
-      expect(body.returnIntervals).toBe(21)
+      expect(body.returnIntervals).toBe(60)
       expect(body.annualizedVol).toBe(0)
       expect(body.maxDrawdown).toBe(0)
     }

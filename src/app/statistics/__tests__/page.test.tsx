@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { NO_CONNECTION } from '@/lib/request-errors'
 import { forgetCached } from '@/lib/client-cache'
-import { argentinaDate } from '@/lib/utils'
+import { argentinaDate, formatDate } from '@/lib/utils'
 import type { StatData } from '../DetailedStats'
 import StatisticsPage from '../page'
 
@@ -130,6 +130,8 @@ describe('StatisticsPage — the dashboard\'s total, in the dashboard\'s currenc
     // Open result plus realized with dividends and coupons, per class.
     expect(text).toMatch(/Resultado de acciones\s*\+150,00/)
     expect(text).toMatch(/Resultado de ONs\s*\+15,00/)
+    // The counts are sales, not round trips (statistics-truth S7).
+    expect(text).toContain('2 posiciones · 1 venta')
     expect(text).toMatch(/Acciones\s*US\$ 1\.000,00/)
     expect(text).toMatch(/Obligaciones negociables\s*US\$ 800,00/)
     expect(text).toMatch(/Caja\s*US\$ 200,00/)
@@ -305,6 +307,32 @@ describe('StatisticsPage — history asked once per part, cut in the browser (S9
     await openTab(el, 'Acciones')
     await openTab(el, 'Toda la cartera')
     expect(history()).toEqual(['/api/portfolio-history?days=all&universe=total', '/api/portfolio-history?days=all&universe=stocks'])
+    unmount()
+  })
+})
+
+describe('StatisticsPage — the whole portfolio is drawn from the day it is measured (odd/tasks/statistics-truth.md S4)', () => {
+  const daysAgo = (n: number) => {
+    const d = new Date(`${argentinaDate()}T00:00:00Z`)
+    d.setUTCDate(d.getUTCDate() - n)
+    return d.toISOString().slice(0, 10)
+  }
+  const point = (n: number) => ({ snapshot_date: daysAgo(n), value: 100, invested: 90 })
+  const TOTAL = '/api/portfolio-history?days=all&universe=total'
+
+  it('starts the chart the day after the last negative-cash day and says why', async () => {
+    stubFetch({ [TOTAL]: ok({ data: [point(80), point(60), point(20), point(0)], measuredFrom: daysAgo(20), negativeCashUntil: daysAgo(60), unavailableReason: null }) })
+    const { el, unmount } = await render()
+    expect(el.querySelector('[data-chart] output')!.textContent).toBe([daysAgo(20), daysAgo(0)].join(','))
+    expect(el.textContent).toContain(`Hasta el ${formatDate(daysAgo(60))} hay días con la caja negativa (faltan depósitos): quedan afuera.`)
+    unmount()
+  })
+
+  it('with negative cash today draws nothing and says deposits are missing', async () => {
+    stubFetch({ [TOTAL]: ok({ data: [point(1), point(0)], measuredFrom: null, negativeCashUntil: daysAgo(0), unavailableReason: 'negative_cash' }) })
+    const { el, unmount } = await render()
+    expect(el.querySelector('[data-chart] output')!.textContent).toBe('')
+    expect(el.textContent).toContain('Faltan depósitos: la caja registrada hoy es negativa y toda la cartera no se puede medir.')
     unmount()
   })
 })

@@ -61,7 +61,7 @@ beforeEach(() => {
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe('GET /api/portfolio-history — derived from the ledger core', () => {
-  it('keeps the response shape: { data: [{ snapshot_date, value, invested }] }, today last, no source', async () => {
+  it('keeps the response shape: { data: [{ snapshot_date, value, invested }] }, today last, no source, plus the measured base', async () => {
     mockGetDerivedSeries.mockResolvedValue(series([row(daysAgo(1), { total_value: 1350, pnl: 550 }), row(TODAY, { total_value: 1400, pnl: 600 })]))
 
     const res = await GET(request())
@@ -73,6 +73,9 @@ describe('GET /api/portfolio-history — derived from the ledger core', () => {
         { snapshot_date: daysAgo(1), value: 1350, invested: 800 },
         { snapshot_date: TODAY, value: 1400, invested: 800 },
       ],
+      measuredFrom: daysAgo(1),
+      negativeCashUntil: null,
+      unavailableReason: null,
     })
   })
 
@@ -112,7 +115,9 @@ describe('GET /api/portfolio-history — derived from the ledger core', () => {
     expect(mockGetDerivedSeries).not.toHaveBeenCalled()
 
     await GET(request())
-    expect(mockCacheRoute).toHaveBeenCalledWith('history:v3:u1:90:total', { data: [] }, 300)
+    expect(mockCacheRoute).toHaveBeenCalledWith(
+      'history:v3:u1:90:total', { data: [], measuredFrom: null, negativeCashUntil: null, unavailableReason: null }, 300
+    )
   })
 
   it('serves a degraded series without caching it', async () => {
@@ -143,6 +148,39 @@ describe('GET /api/portfolio-history — universe parameter', () => {
   it('rejects an unknown universe with 400', async () => {
     const res = await GET(request('universe=everything'))
     expect(res.status).toBe(400)
+  })
+})
+
+describe('GET /api/portfolio-history — the whole portfolio is measured after its last negative-cash day (odd/tasks/statistics-truth.md S4)', () => {
+  it('says from which day, and until which day the recorded cash is negative; the series itself is served whole', async () => {
+    // The dashboard's value chart reads this same series: it is not cut here, the payload says where the measured part starts.
+    mockGetDerivedSeries.mockResolvedValue(series([
+      row(daysAgo(3), { cash_value: -500 }), row(daysAgo(2)), row(daysAgo(1), { cash_value: -50 }), row(TODAY),
+    ]))
+    const body = await (await GET(request('days=all&universe=total'))).json()
+    expect(body.data.map((p: { snapshot_date: string }) => p.snapshot_date)).toEqual([daysAgo(3), daysAgo(2), daysAgo(1), TODAY])
+    expect(body.measuredFrom).toBe(TODAY)
+    expect(body.negativeCashUntil).toBe(daysAgo(1))
+    expect(body.unavailableReason).toBeNull()
+  })
+
+  it('with negative cash today nothing is measured, and the reason is given', async () => {
+    mockGetDerivedSeries.mockResolvedValue(series([row(daysAgo(1)), row(TODAY, { cash_value: -10 })]))
+    const body = await (await GET(request('days=all&universe=total'))).json()
+    expect(body.measuredFrom).toBeNull()
+    expect(body.negativeCashUntil).toBe(TODAY)
+    expect(body.unavailableReason).toBe('negative_cash')
+  })
+
+  it('stocks and ONs hold no cash: nothing is cut', async () => {
+    mockGetDerivedSeries.mockResolvedValue(series([row(daysAgo(1), { cash_value: -500 }), row(TODAY, { cash_value: -500 })]))
+    for (const universe of ['stocks', 'ons']) {
+      const body = await (await GET(request(`days=all&universe=${universe}`))).json()
+      expect(body.data).toHaveLength(2)
+      expect(body.measuredFrom).toBe(daysAgo(1))
+      expect(body.negativeCashUntil).toBeNull()
+      expect(body.unavailableReason).toBeNull()
+    }
   })
 })
 

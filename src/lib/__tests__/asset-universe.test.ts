@@ -6,7 +6,9 @@ import {
   projectSeries,
   universeFlows,
   computeUniverseRiskMetrics,
-  MIN_INTERVALS_ANNUALIZED,
+  computeUniverseTwr,
+  MIN_INTERVALS_VOLATILITY,
+  MIN_INTERVALS_SHARPE,
   MIN_INTERVALS_DRAWDOWN,
 } from '../asset-universe'
 import type {
@@ -359,12 +361,14 @@ describe('universeFlows — income crosses the boundary of the universe it left 
   })
 })
 
+/** The i-th day from 2026-06-01. */
+const dateOf = (i: number) => new Date(Date.UTC(2026, 5, 1 + i)).toISOString().slice(0, 10)
+
 /** n daily points with alternating small moves so stdDev > 0. */
 const wobble = (n: number, start = 1000): ProjectableSnapshot[] =>
   Array.from({ length: n }, (_, i) => {
-    const day = String(i + 1).padStart(2, '0')
     const v = start + (i % 2 === 0 ? i : -i)
-    return snap(`2026-06-${day}`, {
+    return snap(dateOf(i), {
       total_value: v,
       stocks_value: v - 100,
       cash_value: 100,
@@ -373,21 +377,39 @@ const wobble = (n: number, start = 1000): ProjectableSnapshot[] =>
     })
   })
 
-describe('computeUniverseRiskMetrics — A3 thresholds', () => {
-  it('21 points (20 intervals) clear the annualized threshold', () => {
-    const m = computeUniverseRiskMetrics(wobble(21), 'total', inputs())
-    expect(m.returnIntervals).toBe(MIN_INTERVALS_ANNUALIZED)
-    expect(m.annualizedVol).not.toBeNull()
-    expect(m.sharpeRatio).not.toBeNull()
-    expect(m.maxDrawdown).not.toBeNull()
+describe('computeUniverseRiskMetrics — minimum samples (S5)', () => {
+  it('volatility needs 60 daily returns: 59 is null, 60 is a number, and Sharpe is still null', () => {
+    expect(MIN_INTERVALS_VOLATILITY).toBe(60)
+    const below = computeUniverseRiskMetrics(wobble(60), 'total', inputs())
+    expect(below.returnIntervals).toBe(59)
+    expect(below.annualizedVol).toBeNull()
+    expect(below.maxDrawdown).not.toBeNull()
+
+    const at = computeUniverseRiskMetrics(wobble(61), 'total', inputs())
+    expect(at.returnIntervals).toBe(60)
+    expect(at.annualizedVol).not.toBeNull()
+    expect(at.sharpeRatio).toBeNull()
   })
 
-  it('20 points (19 intervals) return null vol/Sharpe — never a number below threshold', () => {
-    const m = computeUniverseRiskMetrics(wobble(20), 'total', inputs())
-    expect(m.returnIntervals).toBe(19)
-    expect(m.annualizedVol).toBeNull()
+  it('Sharpe needs 126 daily returns: 125 is null, 126 is a number', () => {
+    expect(MIN_INTERVALS_SHARPE).toBe(126)
+    const below = computeUniverseRiskMetrics(wobble(126), 'total', inputs())
+    expect(below.returnIntervals).toBe(125)
+    expect(below.sharpeRatio).toBeNull()
+    expect(below.annualizedVol).not.toBeNull()
+
+    const at = computeUniverseRiskMetrics(wobble(127), 'total', inputs())
+    expect(at.returnIntervals).toBe(126)
+    expect(at.sharpeRatio).not.toBeNull()
+    expect(at.annualizedVol).not.toBeNull()
+    expect(at.maxDrawdown).not.toBeNull()
+  })
+
+  it('the class universes get the same minimums', () => {
+    const m = computeUniverseRiskMetrics(wobble(61), 'stocks', inputs())
+    expect(m.returnIntervals).toBe(60)
+    expect(m.annualizedVol).not.toBeNull()
     expect(m.sharpeRatio).toBeNull()
-    expect(m.maxDrawdown).not.toBeNull() // 19 ≥ 2
   })
 
   it('3 points: drawdown is a number over 2 intervals, vol/Sharpe are null', () => {
@@ -487,13 +509,13 @@ describe('computeUniverseRiskMetrics — accounting', () => {
   })
 
   it('a class flow is adjusted away: the +10,000 gain-that-isn\'t must not inflate volatility', () => {
-    // 21 wobbling points, but day 11 jumps +10,000 because stock was BOUGHT.
-    const rows = wobble(21).map((r, i) =>
-      i >= 10
+    // 61 wobbling points (60 returns, the volatility minimum), but day 31 jumps +10,000 because stock was BOUGHT.
+    const rows = wobble(61).map((r, i) =>
+      i >= 30
         ? { ...r, stocks_value: (r.stocks_value as number) + 10000 }
         : r
     )
-    const jumpDate = rows[10].snapshot_date
+    const jumpDate = rows[30].snapshot_date
     const noFlow = computeUniverseRiskMetrics(rows, 'stocks', inputs())
     const withFlow = computeUniverseRiskMetrics(rows, 'stocks', inputs({
       transactions: [
@@ -505,5 +527,56 @@ describe('computeUniverseRiskMetrics — accounting', () => {
     expect(noFlow.annualizedVol).not.toBeNull()
     expect(withFlow.annualizedVol).not.toBeNull()
     expect(withFlow.annualizedVol!).toBeLessThan(noFlow.annualizedVol!)
+  })
+})
+
+describe('the whole portfolio is measured after its last negative-cash day (S4)', () => {
+  /** Ten days; the recorded cash is negative on days 2 and 4 (deposits missing), positive after. */
+  const rows = () => wobble(10).map((r, i) => (i === 1 || i === 3 ? { ...r, cash_value: -500 } : r))
+
+  it('total starts the day after the last negative-cash day, and says from when and why', () => {
+    const m = computeUniverseRiskMetrics(rows(), 'total', inputs())
+    expect(m.measuredFrom).toBe(dateOf(4))
+    expect(m.negativeCashUntil).toBe(dateOf(3))
+    expect(m.unavailableReason).toBeNull()
+    expect(m.pointsUsed).toBe(6)
+    expect(m.pointsDropped).toBe(0)
+    expect(m.returnIntervals).toBe(5)
+    // The same figures as a series that never had those days.
+    expect(m).toEqual({ ...computeUniverseRiskMetrics(rows().slice(4), 'total', inputs()), negativeCashUntil: dateOf(3) })
+  })
+
+  it('the TWR behind the benchmark comparison starts on the same day', () => {
+    const twr = computeUniverseTwr(rows(), 'total', inputs())
+    expect(twr.series[0].date).toBe(dateOf(4))
+    expect(twr.measuredFrom).toBe(dateOf(4))
+    expect(twr).toEqual({ ...computeUniverseTwr(rows().slice(4), 'total', inputs()), negativeCashUntil: dateOf(3) })
+  })
+
+  it('cash within the $1 tolerance is rounding, not a missing deposit', () => {
+    const m = computeUniverseRiskMetrics(wobble(5).map((r, i) => (i === 3 ? { ...r, cash_value: -0.99 } : r)), 'total', inputs())
+    expect(m.measuredFrom).toBe(dateOf(0))
+    expect(m.negativeCashUntil).toBeNull()
+    expect(m.pointsUsed).toBe(5)
+  })
+
+  it('with negative cash today nothing is measured, and the reason is given', () => {
+    const today = wobble(30).map((r, i) => (i === 29 ? { ...r, cash_value: -10 } : r))
+    const m = computeUniverseRiskMetrics(today, 'total', inputs())
+    expect(m).toMatchObject({
+      maxDrawdown: null, annualizedVol: null, sharpeRatio: null, returnIntervals: 0, pointsUsed: 0,
+      measuredFrom: null, negativeCashUntil: dateOf(29), unavailableReason: 'negative_cash',
+    })
+    expect(computeUniverseTwr(today, 'total', inputs())).toMatchObject({ series: [], unavailableReason: 'negative_cash' })
+  })
+
+  it('stocks and ONs hold no cash: their series are never cut', () => {
+    for (const universe of ['stocks', 'ons'] as const) {
+      const m = computeUniverseRiskMetrics(rows(), universe, inputs())
+      expect(m.pointsUsed).toBe(10)
+      expect(m.measuredFrom).toBe(dateOf(0))
+      expect(m.negativeCashUntil).toBeNull()
+      expect(m.unavailableReason).toBeNull()
+    }
   })
 })

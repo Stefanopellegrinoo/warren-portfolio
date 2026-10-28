@@ -219,6 +219,13 @@ export async function GET(req: NextRequest) {
       sharpeRatio: risk.sharpeRatio,
       annualizedVol: risk.annualizedVol,
       returnIntervals: risk.returnIntervals,
+      // What the risk figures rest on (odd/tasks/statistics-truth.md S4, S5): the whole portfolio is
+      // measured from the day after its last negative-cash day; with negative cash today nothing is.
+      measuredFrom: risk.measuredFrom,
+      measuredDays: risk.pointsUsed,
+      negativeCashUntil: risk.negativeCashUntil,
+      unavailableReason: risk.unavailableReason,
+      degraded: derived.degraded,
       // Retired: stddev of monthly realized P&L in dollars was not volatility.
       monthlyStdDev: null,
       winnersCount: tradeStats.winnersCount,
