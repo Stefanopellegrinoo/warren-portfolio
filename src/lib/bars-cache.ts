@@ -38,8 +38,8 @@ export interface BarsResult {
   bars: DailyBar[]
   splits: SplitEvent[]
   splitsKnown: boolean
-  /** Dividends of the window; null when unknown. */
-  dividends: DividendEvent[] | null
+  /** Dividends of the window; absent or null when unknown. */
+  dividends?: DividendEvent[] | null
   /** Stale entry served, or nothing available. */
   degraded: boolean
   /** No data at all (Yahoo failed and nothing stored). */
