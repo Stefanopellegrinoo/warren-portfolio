@@ -202,7 +202,10 @@ export function ledgerAt(trades: LedgerTrade[], movements: LedgerMovement[], dat
       const returned = pay(e.ticker, e.date, 'amortization', amountOf(e.amortization, h.quantity), fromUser)
       if (returned > 0) {
         // Share of the remaining capital returned: amount over quantity × residual (both per 100 original VN).
-        h.costBasis -= h.costBasis * Math.min(1, returned / (h.quantity * e.residualBefore))
+        const share = Math.min(1, returned / (h.quantity * e.residualBefore))
+        // All the capital back: the bond is gone, as a sale of everything would leave it.
+        if (1 - share < RESIDUE) { open.delete(e.ticker); continue }
+        h.costBasis -= h.costBasis * share
         h.avgCost = h.costBasis / h.quantity
       }
       continue
