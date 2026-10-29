@@ -15,10 +15,10 @@ Assumptions: the proposal is `fundPurchases` (`src/lib/derive-history.ts`) on th
 
 ## Tasks
 
-- T1 S5 — quiet deposit notice with (i) (statistics risk row and evolution chart) — inline — in progress
-- T2 S2 — proposal: per original deposit, the dated parts it funds (pure, from fundPurchases) + GET route — inline — pending (waiting for the write-path map)
-- T3 S3 — atomic apply: RPC migration + POST route with ownership and amount/date validation + cache invalidation — inline — pending; high risk items 1 (changes stored data) and 2 (RPC security) → independent verifier
-- T4 S1,S2 — review dialog (editable dates) and the entry points — inline — pending
+- T1 S5 — quiet deposit notice with (i) (statistics risk row and evolution chart) — inline — done (952e564); RED 2 → GREEN
+- T2 S2 — proposal: per original deposit, the dated parts it funds (pure, from fundPurchases) + GET route — inline — done (72398bf); RED 9 → GREEN
+- T3 S3 — atomic apply: RPC migration + POST route with ownership and amount/date validation + cache invalidation — inline — done (42cd805); RED 12 (6 migration text, 6 route) → GREEN; real postgres:15 proof 19/19 (`scripts/test-redate-deposits-proof.sh`); high risk items 1 (changes stored data) and 2 (RPC security) → independent verifier running
+- T4 S1,S2 — review dialog (editable dates) and the entry points — inline — done (3b8c7c1); RED 8 → GREEN; suite 3131 green; browser: 22 dated parts at 320/390/1280 px, no overflow, save button always visible
 - T5 S4 — backup, the user applies the migration, the user runs the flow on their account, verify with SELECT — with the user — pending
 
 ## Log
@@ -26,3 +26,6 @@ Assumptions: the proposal is `fundPurchases` (`src/lib/derive-history.ts`) on th
 - L1 (2026-10-29) "pero porque esto sigue estnado Algunos depósitos estaban cargados después de las compras que pagaron: para medir, US$ 154.323,07 se toman como depositados el día de esas compras, desde el 09/02/2022. El total depositado no cam"
 - L2 (2026-10-29) "Quiero que queden bien mis datos asi puedo usar la app, pero quiero que entiendas que la app no puede estar pensada solo para mi caso si quiero mas usuarios la usen, si esta solo pensada para mi lo suyo no va a estaqr bien"
 - L3 (2026-10-29) "dale, hacelo así"
+- L4 (2026-10-29) Write-path map (explorer): no code path updates a cash_movements row today; writes are `process_transaction_atomic`, direct inserts (`adjustCashBalance`) and guarded deletes; RLS is the single 003 policy; user RPCs are SECURITY INVOKER (051 pattern: fixed search_path, no EXECUTE for anon); `invalidateUserCache` after every ledger write; migrations by hand in the SQL Editor (dev and prod share one Supabase); the dashboard's value chart already reads `/api/portfolio-history`, which carries `fundedDeposits` → the notice lives under it at no extra request.
+- L5 (2026-10-29) Decisions: the POST saves only a plan equal to a fresh proposal, dates aside (amounts never editable); a refusal writes nothing; the dialog guards an unexpected answer ("No se pudo armar la propuesta."); statistics reloads the page when the dialog closes after a save (history, risk and a chosen benchmark all change), the dashboard refreshes its movements and chart in place.
+
