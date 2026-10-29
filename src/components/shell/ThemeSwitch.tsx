@@ -40,36 +40,54 @@ function applyTheme(pref: ThemePref) {
   else delete document.documentElement.dataset.theme
 }
 
-export default function ThemeSwitch() {
+// `compact`: the page may show the icon-only menu (Gráficos). While <html data-menu="icons">, from 820 px,
+// one button cycles the same choice; pinned open and below 820 px the radio group shows.
+export default function ThemeSwitch({ compact = false }: { compact?: boolean }) {
   const pref = useSyncExternalStore(subscribe, getPref, () => 'system' as ThemePref)
 
   useEffect(() => { applyTheme(pref) }, [pref])
 
+  const group = (
+    <fieldset
+      role="radiogroup"
+      aria-label="Tema"
+      className="flex w-full gap-0.5 rounded-md border border-line bg-surface-2 p-0.5"
+    >
+      {OPTIONS.map(({ value, label, icon: Icon }) => (
+        <label
+          key={value}
+          className="relative flex min-h-8 flex-1 cursor-pointer items-center justify-center gap-1 rounded px-1 text-[13px] text-ink-2 has-[:checked]:bg-surface has-[:checked]:text-ink has-[:checked]:shadow-[0_0_0_1px_var(--line)] has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-ring max-[819px]:min-h-11"
+        >
+          <input
+            type="radio"
+            name="theme"
+            value={value}
+            checked={pref === value}
+            onChange={() => savePref(value)}
+            className="absolute inset-0 m-0 cursor-pointer opacity-0"
+          />
+          <Icon className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+          {label}
+        </label>
+      ))}
+    </fieldset>
+  )
+  if (!compact) return <div className="mb-3">{group}</div>
+
+  const i = OPTIONS.findIndex(o => o.value === pref)
+  const { label, icon: Icon } = OPTIONS[i]
   return (
-    <div className="mb-3">
-      <fieldset
-        role="radiogroup"
-        aria-label="Tema"
-        className="flex w-full gap-0.5 rounded-md border border-line bg-surface-2 p-0.5"
+    <>
+      <div className="mb-3 min-[820px]:[[data-menu=icons]_&]:hidden">{group}</div>
+      <button
+        type="button"
+        onClick={() => savePref(OPTIONS[(i + 1) % OPTIONS.length].value)}
+        aria-label={`Tema: ${label}`}
+        data-tip={`Tema: ${label}`}
+        className="mb-1 hidden h-10 w-11 place-items-center rounded-md text-ink-2 hover:bg-hover hover:text-ink min-[820px]:[[data-menu=icons]_&]:grid"
       >
-        {OPTIONS.map(({ value, label, icon: Icon }) => (
-          <label
-            key={value}
-            className="relative flex min-h-8 flex-1 cursor-pointer items-center justify-center gap-1 rounded px-1 text-[13px] text-ink-2 has-[:checked]:bg-surface has-[:checked]:text-ink has-[:checked]:shadow-[0_0_0_1px_var(--line)] has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-ring max-[819px]:min-h-11"
-          >
-            <input
-              type="radio"
-              name="theme"
-              value={value}
-              checked={pref === value}
-              onChange={() => savePref(value)}
-              className="absolute inset-0 m-0 cursor-pointer opacity-0"
-            />
-            <Icon className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
-            {label}
-          </label>
-        ))}
-      </fieldset>
-    </div>
+        <Icon className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+      </button>
+    </>
   )
 }

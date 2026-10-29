@@ -78,11 +78,28 @@ export const DEFAULT_WATCHLIST = [
   "ETHUSDT",
 ];
 
+/** Every indicator false: none hidden, none minimized. */
+const NONE: Record<IndicatorKey, boolean> = {
+  ema20: false,
+  ema50: false,
+  ema200: false,
+  rsi: false,
+  macd: false,
+  volume: false,
+  bollinger: false,
+  obv: false,
+  stochastic: false,
+  adx: false,
+};
+
 interface ChartState {
   symbol: string;
   timeframe: Timeframe;
+  /** With `hidden` and `minimized`: this device's copy of the account's (src/lib/chart/indicator-sync.ts). */
   indicators: Record<IndicatorKey, boolean>;
   hidden: Record<IndicatorKey, boolean>;
+  /** A pane shrunk to a thin labeled strip, its indicator still on (odd/tasks/chart-pro-redesign.md S1). */
+  minimized: Record<IndicatorKey, boolean>;
   config: IndicatorConfig;
   watchlist: string[];
   activeWatchlistId: string | null;
@@ -105,6 +122,7 @@ interface ChartState {
   toggleIndicator: (key: IndicatorKey) => void;
   removeIndicator: (key: IndicatorKey) => void;
   toggleHidden: (key: IndicatorKey) => void;
+  toggleMinimized: (key: IndicatorKey) => void;
   setConfig: (patch: Partial<IndicatorConfig>) => void;
   addToWatchlist: (s: string) => void;
   removeFromWatchlist: (s: string) => void;
@@ -136,18 +154,8 @@ export const useChartStore = create<ChartState>()(
         stochastic: true,
         adx: true,
       },
-      hidden: {
-        ema20: false,
-        ema50: false,
-        ema200: false,
-        rsi: false,
-        macd: false,
-        volume: false,
-        bollinger: false,
-        obv: false,
-        stochastic: false,
-        adx: false,
-      },
+      hidden: { ...NONE },
+      minimized: { ...NONE },
       config: { ...DEFAULT_CONFIG },
       watchlist: DEFAULT_WATCHLIST,
       activeWatchlistId: null,
@@ -169,14 +177,20 @@ export const useChartStore = create<ChartState>()(
           hidden: !s.indicators[key]
             ? { ...s.hidden, [key]: false }
             : s.hidden,
+          minimized: !s.indicators[key]
+            ? { ...s.minimized, [key]: false }
+            : s.minimized,
         })),
       removeIndicator: (key) =>
         set((s) => ({
           indicators: { ...s.indicators, [key]: false },
           hidden: { ...s.hidden, [key]: false },
+          minimized: { ...s.minimized, [key]: false },
         })),
       toggleHidden: (key) =>
         set((s) => ({ hidden: { ...s.hidden, [key]: !s.hidden[key] } })),
+      toggleMinimized: (key) =>
+        set((s) => ({ minimized: { ...s.minimized, [key]: !s.minimized[key] } })),
       setConfig: (patch) =>
         set((s) => ({ config: { ...s.config, ...patch } })),
       addToWatchlist: (s) =>
@@ -208,6 +222,8 @@ export const useChartStore = create<ChartState>()(
         timeframe: s.timeframe,
         indicators: s.indicators,
         hidden: s.hidden,
+        // A state saved before it has none: the merge keeps the default (every pane open).
+        minimized: s.minimized,
         config: s.config,
         watchlist: s.watchlist,
         activeWatchlistId: s.activeWatchlistId,

@@ -3,11 +3,13 @@ import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { rateLimit, tooManyRequests } from '@/lib/rate-limit'
 import { serverError } from '@/lib/api/errors'
 import { INVALID_JSON } from '@/lib/api/validation'
-import { MAX_BODY_BYTES, isEmptyPatch, parsePatch, parsePreferences } from '@/lib/chart/preferences-schema'
+import { MAX_BODY_BYTES, fromIndicatorColumn, isEmptyPatch, parsePatch, parsePreferences, toIndicatorColumn } from '@/lib/chart/preferences-schema'
 
 // The user's chart preferences: favorite tools, remembered drawing styles, saved indicator settings
-// (odd/tasks/chart-customization.md S4). One row per user (migration 051); a PATCH merges per key in
-// the database, so a device that changed one tool's style never wipes another tool changed elsewhere.
+// (odd/tasks/chart-customization.md S4) and which indicators are on, hidden or minimized
+// (odd/tasks/chart-pro-redesign.md S2, kept in indicator_settings under "<key>:visibility"). One row per
+// user (migration 051); a PATCH merges per key in the database, so a device that changed one tool's style
+// never wipes another tool changed elsewhere.
 const ROUTE_LIMIT = 30
 const ROUTE_WINDOW_SEC = 60
 const TAG = 'API /chart-preferences'
@@ -39,7 +41,7 @@ export async function GET() {
   // userId lets the device tell its saved changes apart from another account's on the same browser.
   return NextResponse.json({
     userId: user.id,
-    preferences: parsePreferences({ favorites: data?.favorites, toolStyles: data?.tool_styles, indicatorSettings: data?.indicator_settings }),
+    preferences: parsePreferences({ favorites: data?.favorites, toolStyles: data?.tool_styles, ...fromIndicatorColumn(data?.indicator_settings) }),
   })
 }
 
@@ -68,7 +70,7 @@ export async function PATCH(req: NextRequest) {
   const { error } = await supabase.rpc('patch_chart_preferences', {
     p_favorites: patch.favorites ?? {},
     p_tool_styles: patch.toolStyles ?? {},
-    p_indicator_settings: patch.indicatorSettings ?? {},
+    p_indicator_settings: toIndicatorColumn(patch),
   })
   if (error) return serverError(TAG, error)
   return new NextResponse(null, { status: 204 })

@@ -49,6 +49,18 @@ describe('drawing tools on a phone (S5)', () => {
     unmount()
   })
 
+  // odd/tasks/chart-pro-redesign.md S6: the same five groups as the computer's rail.
+  it('Dibujar heads its tools with the five groups of the rail', async () => {
+    const { openTools, unmount } = await render()
+
+    await openTools()
+
+    expect([...document.querySelectorAll('[aria-label="Herramientas"] section')].map(s => s.getAttribute('aria-label'))).toEqual(['Líneas', 'Canales y Fibonacci', 'Formas y texto', 'Medición', 'Posiciones'])
+    expect([...document.querySelectorAll('[aria-label="Herramientas"] h3')].map(h => h.textContent)).toEqual(['Líneas', 'Canales y Fibonacci', 'Formas y texto', 'Medición', 'Posiciones'])
+    expect([...document.querySelectorAll('[aria-label="Posiciones"] button[aria-pressed]')].map(b => b.getAttribute('aria-label'))).toEqual(['Agregar Posición larga a favoritos', 'Agregar Posición corta a favoritos'])
+    unmount()
+  })
+
   it('a chosen tool is armed and the bar says what to do, with Cancelar', async () => {
     const { manager, openTools, unmount } = await render()
     await openTools()

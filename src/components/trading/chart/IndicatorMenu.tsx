@@ -98,7 +98,7 @@ export function IndicatorMenu({ stacked = false }: { stacked?: boolean }) {
           </DropdownMenuGroup>
         ))}
         <DropdownMenuSeparator className="-mx-1 my-1 h-px bg-line" />
-        {/* The user's buys and sells on the candles, per device like the indicators. */}
+        {/* The user's buys and sells on the candles, per device (the indicators are kept in the account). */}
         <DropdownMenuCheckboxItem
           checked={showTrades}
           onCheckedChange={toggleShowTrades}

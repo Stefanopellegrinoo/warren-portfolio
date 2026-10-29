@@ -11,6 +11,7 @@ import { IndicatorSettingsDialog } from "@/components/trading/chart/IndicatorSet
 import { useChartStore } from "@/lib/store/chart-store";
 import { getProviderForSymbol } from "@/lib/market-data/resolver";
 import { coerceTimeframe } from "@/lib/chart/timeframes";
+import { startIndicatorSync } from "@/lib/chart/indicator-sync";
 import { cn } from "@/lib/utils";
 
 export default function TradingPage() {
@@ -33,6 +34,8 @@ function Trading() {
   useEffect(() => {
     if (requested) setSymbol(requested);
   }, [requested, setSymbol]);
+  // Which indicators are on, hidden or minimized live in the account (odd/tasks/chart-pro-redesign.md S2).
+  useEffect(() => startIndicatorSync(), []);
 
   const symbol = useChartStore((s) => s.symbol);
   const timeframe = coerceTimeframe(useChartStore((s) => s.timeframe), getProviderForSymbol(symbol));

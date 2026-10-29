@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { DEFAULT_CONFIG, INDICATOR_COLORS } from '@/lib/store/chart-store'
 import type { Candle } from '@/lib/binance/types'
 import { INDICATOR_SPECS } from '../indicator-specs'
-import { BandFill, effectiveConfig, fillLook, levelLooks, lineLook, seriesPoints } from '../indicator-style'
+import { BandFill, FIXED_BANDS, axisFormat, compactNumber, effectiveConfig, fillLook, levelLooks, lineLook, seriesPoints } from '../indicator-style'
 
 const candles: Candle[] = [
   { time: 1, open: 10, high: 12, low: 9, close: 11, volume: 100 }, // up
@@ -23,13 +23,21 @@ describe('effectiveConfig', () => {
 })
 
 describe('lineLook, nothing saved', () => {
-  it("keeps today's color and width 1 for every line of every indicator", () => {
+  // odd/tasks/chart-pro-redesign.md S6 changed the volume's bars on purpose: the candles' colors at ~45 %.
+  it("keeps today's color and width 1 for every line of every indicator; only the volume has its own rising and falling colors", () => {
     for (const [key, spec] of Object.entries(INDICATOR_SPECS)) {
       for (const line of spec.lines(candles, DEFAULT_CONFIG)) {
-        expect(lineLook(line), `${key}/${line.id}`).toEqual({ color: line.color, width: 1, visible: true, upColor: line.color, downColor: line.color })
+        const bars = key === 'volume' ? { upColor: 'rgba(8, 153, 129, 0.45)', downColor: 'rgba(242, 54, 69, 0.45)' } : { upColor: line.color, downColor: line.color }
+        expect(lineLook(line), `${key}/${line.id}`).toEqual({ color: line.color, width: 1, visible: true, ...bars })
       }
     }
     expect(INDICATOR_SPECS.ema20.lines(candles, DEFAULT_CONFIG)[0].color).toBe(INDICATOR_COLORS.ema20)
+  })
+
+  it("the volume's saved colors still win over its own", () => {
+    const [volume] = INDICATOR_SPECS.volume.lines(candles, DEFAULT_CONFIG)
+
+    expect(lineLook(volume, { upColor: '#2196f3', downColor: '#ff9800' })).toMatchObject({ upColor: '#2196f3', downColor: '#ff9800' })
   })
 })
 
@@ -37,7 +45,12 @@ describe('seriesPoints', () => {
   const [volume] = INDICATOR_SPECS.volume.lines(candles, DEFAULT_CONFIG)
 
   it('gives histogram bars no color of their own while rising and falling share one (the data of today)', () => {
-    expect(seriesPoints(volume, lineLook(volume))).toEqual([{ time: 1, value: 100 }, { time: 2, value: 200 }, { time: 3, value: 300 }])
+    const [, , histogram] = INDICATOR_SPECS.macd.lines(candles, DEFAULT_CONFIG)
+    expect(seriesPoints(histogram, lineLook(histogram)).every((p) => !('color' in p))).toBe(true)
+  })
+
+  it('colors the volume bars like their candles with nothing saved (S6)', () => {
+    expect(seriesPoints(volume, lineLook(volume)).map((p) => 'color' in p && p.color)).toEqual(['rgba(8, 153, 129, 0.45)', 'rgba(242, 54, 69, 0.45)', 'rgba(8, 153, 129, 0.45)'])
   })
 
   it("colors each volume bar by its candle: up (or flat) in the rising color, down in the falling one", () => {
@@ -73,9 +86,21 @@ describe('levelLooks', () => {
 })
 
 describe('fillLook', () => {
-  it('is off by default, as there was no fill before', () => {
+  // odd/tasks/chart-pro-redesign.md S1 turned RSI's 30–70 fill on by default, on purpose; Bollinger's stays off.
+  it("is on by default for RSI's levels and off for Bollinger's bands", () => {
     expect(fillLook('bands').visible).toBe(false)
-    expect(fillLook('levels').visible).toBe(false)
+    expect(fillLook('levels').visible).toBe(true)
+  })
+
+  it('a saved fill still wins: RSI turned off stays off', () => {
+    expect(fillLook('levels', { fills: { levels: { visible: false } } }).visible).toBe(false)
+  })
+})
+
+describe('FIXED_BANDS', () => {
+  it("gives the stochastic a soft 20–80 band that is not a setting, and nothing else one", () => {
+    expect(Object.keys(FIXED_BANDS)).toEqual(['stochastic'])
+    expect(FIXED_BANDS.stochastic).toEqual({ color: INDICATOR_COLORS.stochastic, transparency: 94 })
   })
 })
 
@@ -135,5 +160,38 @@ describe('BandFill', () => {
 
     const path = paint(fill).calls.filter(([k]) => k === 'moveTo' || k === 'lineTo')
     expect(path).toEqual([['moveTo', 10, 280], ['lineTo', 20, 278], ['lineTo', 20, 288], ['lineTo', 10, 290]])
+  })
+})
+
+// odd/tasks/chart-pro-redesign.md: an indicator pane's scale reads as briefly as its numbers allow, which also
+// keeps the price scale (one width for every pane) narrow on a phone.
+describe('axisFormat', () => {
+  const read = (key: Parameters<typeof axisFormat>[0], p: number) => axisFormat(key)!.formatter(p)
+
+  it('RSI, the stochastic and ADX read in whole numbers', () => {
+    expect([read('rsi', 80), read('rsi', 25.4), read('stochastic', 50), read('adx', 24.6)]).toEqual(['80', '25', '50', '25'])
+    expect(axisFormat('rsi')!.minMove).toBe(1)
+  })
+
+  it('MACD reads in two decimals', () => {
+    expect([read('macd', 0), read('macd', -1.234), read('macd', 12.5)]).toEqual(['0,00', '−1,23', '12,50'])
+    expect(axisFormat('macd')!.minMove).toBe(0.01)
+  })
+
+  it('OBV reads compact, like the volume', () => {
+    expect([read('obv', 74_070_000), read('obv', -1_234_567), read('obv', 950)]).toEqual(['74,1 M', '−1,2 M', '950'])
+  })
+
+  it('an indicator over the price has none of its own: it reads like the price', () => {
+    expect(axisFormat('ema20')).toBeNull()
+    expect(axisFormat('bollinger')).toBeNull()
+    expect(axisFormat('volume')).toBeNull()
+  })
+})
+
+describe('compactNumber', () => {
+  it('reads a volume briefly, with plain spaces and the minus sign', () => {
+    expect([compactNumber(1_234_567), compactNumber(-2_500_000)]).toEqual(['1,2 M', '−2,5 M'])
+    expect(compactNumber(12_345)).toMatch(/^12,3 (k|mil)$/) // the thousands' suffix is the ICU's
   })
 })

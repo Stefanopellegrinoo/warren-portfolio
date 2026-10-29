@@ -5,6 +5,10 @@ import { Toaster } from 'sonner'
 import { THEME_BOOT_SCRIPT } from '@/lib/theme'
 import AppStatus from '@/components/shell/AppStatus'
 
+// Gráficos' app menu is icons only or pinned open (AppShell); <html data-menu> paints this device's
+// choice from the first frame. The key is AppShell's PIN_KEY.
+const MENU_BOOT_SCRIPT = `(function(){var m='icons';try{if(localStorage.getItem('warren-menu-pinned')==='1')m='pinned'}catch(e){}document.documentElement.dataset.menu=m})();`
+
 const plexSans = IBM_Plex_Sans({
   subsets: ['latin'],
   variable: '--font-sans',
@@ -60,6 +64,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="es" className={`${plexSans.variable} ${plexMono.variable} ${newsreader.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: MENU_BOOT_SCRIPT }} />
       </head>
       <body className="antialiased">
         {children}

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
+import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import type { DrawingKind, DrawingManager } from "lightweight-charts-drawing";
 import {
 	ArrowRightToLine,
@@ -34,6 +35,7 @@ import {
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { InlineConfirm } from "@/components/ui/InlineConfirm";
 import { barButton } from "@/components/trading/ui";
 import type { ToolKind } from "@/lib/chart/preferences-schema";
@@ -50,36 +52,57 @@ interface Tool {
 	icon: LucideIcon;
 }
 
-// The tools a stock chart needs day to day, grouped like TradingView's left bar.
-const GROUPS: Tool[][] = [
-	[
-		{ kind: "trend-line", label: "Línea de tendencia", icon: Slash },
-		{ kind: "ray", label: "Rayo", icon: MoveUpRight },
-		{ kind: "extended-line", label: "Línea extendida", icon: MoveHorizontal },
-		{ kind: "horizontal-line", label: "Línea horizontal", icon: Minus },
-		{ kind: "horizontal-ray", label: "Rayo horizontal", icon: ArrowRightToLine },
-		{ kind: "vertical-line", label: "Línea vertical", icon: SeparatorVertical },
-	],
-	[
-		{ kind: "parallel-channel", label: "Canal paralelo", icon: Columns2 },
-		{ kind: "fib-retracement", label: "Retroceso de Fibonacci", icon: Rows3 },
-		{ kind: "trend-based-fib-extension", label: "Extensión de Fibonacci", icon: GitCommitHorizontal },
-	],
-	[
-		{ kind: "rectangle", label: "Rectángulo", icon: RectangleHorizontal },
-		{ kind: "brush", label: "Pincel", icon: Brush },
-		{ kind: "text", label: "Texto", icon: Type },
-	],
-	[
-		{ kind: "price-range", label: "Rango de precio", icon: Percent },
-		{ kind: "date-and-price-range", label: "Rango de fecha y precio", icon: Ruler },
-		{ kind: "long-position", label: "Posición larga", icon: TrendingUp },
-		{ kind: "short-position", label: "Posición corta", icon: TrendingDown },
-	],
-];
+interface Group {
+	name: string;
+	tools: Tool[];
+}
 
-const GROUP_NAMES = ["Líneas", "Canales y Fibonacci", "Formas y texto", "Medir y posiciones"];
-const TOOLS = GROUPS.flat();
+// The tools a stock chart needs day to day, in the five groups of the rail (odd/tasks/chart-pro-redesign.md S6),
+// like TradingView's left bar. TOOL_KINDS (preferences-schema.ts) follows this order.
+const GROUPS: Group[] = [
+	{
+		name: "Líneas",
+		tools: [
+			{ kind: "trend-line", label: "Línea de tendencia", icon: Slash },
+			{ kind: "ray", label: "Rayo", icon: MoveUpRight },
+			{ kind: "extended-line", label: "Línea extendida", icon: MoveHorizontal },
+			{ kind: "horizontal-line", label: "Línea horizontal", icon: Minus },
+			{ kind: "horizontal-ray", label: "Rayo horizontal", icon: ArrowRightToLine },
+			{ kind: "vertical-line", label: "Línea vertical", icon: SeparatorVertical },
+		],
+	},
+	{
+		name: "Canales y Fibonacci",
+		tools: [
+			{ kind: "parallel-channel", label: "Canal paralelo", icon: Columns2 },
+			{ kind: "fib-retracement", label: "Retroceso de Fibonacci", icon: Rows3 },
+			{ kind: "trend-based-fib-extension", label: "Extensión de Fibonacci", icon: GitCommitHorizontal },
+		],
+	},
+	{
+		name: "Formas y texto",
+		tools: [
+			{ kind: "rectangle", label: "Rectángulo", icon: RectangleHorizontal },
+			{ kind: "brush", label: "Pincel", icon: Brush },
+			{ kind: "text", label: "Texto", icon: Type },
+		],
+	},
+	{
+		name: "Medición",
+		tools: [
+			{ kind: "price-range", label: "Rango de precio", icon: Percent },
+			{ kind: "date-and-price-range", label: "Rango de fecha y precio", icon: Ruler },
+		],
+	},
+	{
+		name: "Posiciones",
+		tools: [
+			{ kind: "long-position", label: "Posición larga", icon: TrendingUp },
+			{ kind: "short-position", label: "Posición corta", icon: TrendingDown },
+		],
+	},
+];
+const TOOLS = GROUPS.flatMap((g) => g.tools);
 
 export const TOOL_LABELS: Partial<Record<DrawingKind, string>> = Object.fromEntries(
 	TOOLS.map((t) => [t.kind, t.label]),
@@ -98,6 +121,7 @@ function toolHint(kind: DrawingKind) {
 
 const toolClass =
 	"grid h-8 w-8 shrink-0 place-items-center rounded text-ink-2 hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring max-[819px]:h-11 max-[819px]:w-11";
+const activeClass = "bg-accent-soft text-accent-ink hover:bg-accent-soft hover:text-accent-ink";
 
 function ToolButton({
 	label,
@@ -117,7 +141,7 @@ function ToolButton({
 			aria-label={label}
 			aria-pressed={active}
 			onClick={onClick}
-			className={cn(toolClass, active && "bg-accent-soft text-accent-ink hover:bg-accent-soft hover:text-accent-ink")}
+			className={cn(toolClass, active && activeClass)}
 		>
 			<Icon className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
 		</button>
@@ -147,10 +171,10 @@ function ToolList({ starred, onStar, barShown, onBarShown, onPick }: Favorites &
 				Barra de favoritos
 				<input type="checkbox" role="switch" checked={barShown} onChange={(e) => onBarShown(e.target.checked)} className="h-4 w-4 shrink-0 cursor-pointer accent-[var(--accent)]" />
 			</label>
-			{GROUPS.map((group, i) => (
-				<section key={GROUP_NAMES[i]} aria-label={GROUP_NAMES[i]}>
-					<h3 className="px-2 pb-1 pt-2 text-[12px] font-medium text-ink-3">{GROUP_NAMES[i]}</h3>
-					{group.map((t) => {
+			{GROUPS.map((group) => (
+				<section key={group.name} aria-label={group.name}>
+					<h3 className="px-2 pb-1 pt-2 text-[12px] font-medium text-ink-3">{group.name}</h3>
+					{group.tools.map((t) => {
 						const on = !!starred[t.kind];
 						return (
 							<div key={t.kind} className="flex items-center">
@@ -176,8 +200,103 @@ function ToolList({ starred, onStar, barShown, onBarShown, onPick }: Favorites &
 	);
 }
 
+// The tool each rail group shows, the last one chosen from it: per device, like the favorites bar's spot.
+const LAST_TOOLS_KEY = "warren:chart-draw-groups";
+const LAST_TOOLS_EVENT = "warren-draw-groups";
+// No storage (private mode, blocked site data): this visit only.
+let lastToolsSession: string | null = null;
+
+function readLastTools() {
+	if (lastToolsSession !== null) return lastToolsSession;
+	try {
+		return window.localStorage.getItem(LAST_TOOLS_KEY) ?? "";
+	} catch {
+		return "";
+	}
+}
+
+function parseLastTools(raw: string): Record<string, unknown> {
+	try {
+		return JSON.parse(raw) ?? {};
+	} catch {
+		// Nothing saved, or a broken copy: every group shows its first tool.
+		return {};
+	}
+}
+
+function saveLastTool(group: string, kind: string) {
+	const next = JSON.stringify({ ...parseLastTools(readLastTools()), [group]: kind });
+	try {
+		window.localStorage.setItem(LAST_TOOLS_KEY, next);
+		lastToolsSession = null;
+	} catch {
+		lastToolsSession = next;
+	}
+	window.dispatchEvent(new Event(LAST_TOOLS_EVENT));
+}
+
+function subscribeLastTools(onChange: () => void) {
+	window.addEventListener(LAST_TOOLS_EVENT, onChange);
+	return () => window.removeEventListener(LAST_TOOLS_EVENT, onChange);
+}
+
+const menuItem =
+	"flex min-h-8 cursor-pointer items-center rounded px-2 text-[13px] text-ink outline-none focus:bg-hover focus:text-ink data-[highlighted]:bg-hover";
+
 /**
- * Below 820px the 21 icons do not fit and have no names (a phone shows no tooltip): one
+ * A rail group: its button shows the tool last chosen from it, with TradingView's corner mark, and opens
+ * to its right the group's tools by name, each with its star (odd/tasks/chart-pro-redesign.md S6). The menu
+ * is portaled: the rail scrolls and would clip it, and so it paints over the chart's pane separators.
+ */
+function GroupMenu({
+	group,
+	shown,
+	active,
+	starred,
+	onStar,
+	onPick,
+}: Pick<Favorites, "starred" | "onStar"> & {
+	group: Group;
+	shown: Tool;
+	active: boolean;
+	onPick: (kind: ToolKind) => void;
+}) {
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger aria-label={group.name} title={`${group.name}: ${shown.label}`} aria-pressed={active} className={cn(toolClass, "relative", active && activeClass)}>
+				<shown.icon className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
+				<span className="absolute bottom-1 right-1 border-[3px] border-transparent border-b-ink-3 border-r-ink-3" aria-hidden />
+			</DropdownMenuTrigger>
+			<DropdownMenuContent side="right" align="start" aria-label={group.name} className="w-64 max-w-[calc(100vw-32px)] rounded-lg border border-line bg-surface p-1 text-ink shadow-pop ring-0">
+				<p className="px-2 pb-1 pt-2 text-[12px] font-medium text-ink-3" aria-hidden>
+					{group.name}
+				</p>
+				{group.tools.map((t) => {
+					const on = !!starred[t.kind];
+					return (
+						<div key={t.kind} className="flex items-center">
+							<DropdownMenuItem onClick={() => onPick(t.kind)} className={cn(menuItem, "min-w-0 flex-1 gap-2")}>
+								<t.icon className="size-[18px] text-ink-2" strokeWidth={1.75} aria-hidden />
+								{t.label}
+							</DropdownMenuItem>
+							<MenuPrimitive.CheckboxItem
+								checked={on}
+								onCheckedChange={(checked) => onStar(t.kind, checked)}
+								aria-label={`${t.label} en favoritos`}
+								className={cn(starButton, "cursor-pointer outline-none data-[highlighted]:bg-hover", on ? "text-accent" : "text-ink-3 hover:text-ink")}
+							>
+								<Star className={cn("size-[18px]", on && "fill-current")} strokeWidth={1.75} aria-hidden />
+							</MenuPrimitive.CheckboxItem>
+						</div>
+					);
+				})}
+			</DropdownMenuContent>
+		</DropdownMenu>
+	);
+}
+
+/**
+ * Below 820px the rail does not fit and its icons have no names (a phone shows no tooltip): one
  * "Dibujar" list with every tool by its name, the alert, and, while a tool is armed, what to
  * do with it and Cancelar over the whole bar, because a phone has no Esc
  * (odd/tasks/grafico-celular.md S5). They sit in the page's bottom bar (odd/tasks/grafico-espacio.md S3-S4).
@@ -333,6 +452,7 @@ export function DrawingTools({
 		},
 	};
 	const starred = TOOLS.filter((t) => preferences.favorites[t.kind]);
+	const lastTools = parseLastTools(useSyncExternalStore(subscribeLastTools, readLastTools, () => ""));
 
 	useEffect(() => {
 		if (!manager) return;
@@ -347,6 +467,9 @@ export function DrawingTools({
 	const arm = (kind: DrawingKind | null) => {
 		onAlertMode(false);
 		manager?.setTool(kind);
+		// Wherever it was chosen (rail, favorites bar, a list), its group shows it next.
+		const group = GROUPS.find((g) => g.tools.some((t) => t.kind === kind));
+		if (group && kind) saveLastTool(group.name, kind);
 	};
 
 	// Alerts watch a ticker's price; Mi cartera has none.
@@ -392,13 +515,16 @@ export function DrawingTools({
 			className="flex shrink-0 flex-col items-center gap-0.5 overflow-y-auto border-r border-line bg-surface px-1 py-2 max-[819px]:hidden"
 		>
 			<ToolButton label="Cursor" icon={MousePointer2} active={tool === null && !alertMode} onClick={() => arm(null)} />
-			{GROUPS.map((group, i) => (
-				<div key={i} className="contents">
-					<Divider />
-					{group.map((t) => (
-						<ToolButton key={t.kind} label={t.label} icon={t.icon} active={tool === t.kind} onClick={() => arm(tool === t.kind ? null : t.kind)} />
-					))}
-				</div>
+			{GROUPS.map((group) => (
+				<GroupMenu
+					key={group.name}
+					group={group}
+					shown={group.tools.find((t) => t.kind === lastTools[group.name]) ?? group.tools[0]}
+					active={group.tools.some((t) => t.kind === tool)}
+					starred={favorites.starred}
+					onStar={favorites.onStar}
+					onPick={arm}
+				/>
 			))}
 			<Divider />
 			{alertMenu && (
@@ -407,7 +533,7 @@ export function DrawingTools({
 						{...alertMenu}
 						side="right"
 						triggerLabel="Alertas"
-						triggerClassName={cn(toolClass, alertMode && "bg-accent-soft text-accent-ink hover:bg-accent-soft hover:text-accent-ink")}
+						triggerClassName={cn(toolClass, alertMode && activeClass)}
 					>
 						<Bell className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
 					</AlertMenu>

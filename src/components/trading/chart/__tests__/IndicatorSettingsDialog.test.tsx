@@ -1,6 +1,6 @@
 // odd/tasks/chart-customization.md S5: an indicator's settings sheet, Valores and Estilo. S4: what the user
-// saves there goes to the account for that indicator only; which indicators are on or hidden never does.
-// S8: the periods keep today's limits.
+// saves there goes to the account for that indicator only; which indicators are on or hidden never goes with it
+// (they are kept apart, odd/tasks/chart-pro-redesign.md S2). S8: the periods keep today's limits.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
@@ -25,7 +25,7 @@ vi.stubGlobal('fetch', fetchMock)
 
 const { IndicatorSettingsDialog } = await import('../IndicatorSettingsDialog')
 const { useChartStore, DEFAULT_CONFIG } = await import('@/lib/store/chart-store')
-const { getPreferences, setIndicatorSettings, subscribe, SAVE_DELAY_MS } = await import('@/lib/chart/preferences')
+const { getPreferences, setIndicatorSettings, setIndicatorVisibility, subscribe, SAVE_DELAY_MS } = await import('@/lib/chart/preferences')
 
 const initial = useChartStore.getState()
 const sleep = (ms: number) => act(async () => { await new Promise((r) => setTimeout(r, ms)) })
@@ -116,7 +116,7 @@ describe('Estilo', () => {
     unmount()
   })
 
-  it("RSI's upper level moves to 80 and takes its color; the fill between the levels turns on", async () => {
+  it("RSI's upper level moves to 80 and takes its color; the fill between the levels, on by default, turns off", async () => {
     await open('rsi')
     const upper = group('Nivel superior')!
 
@@ -125,7 +125,7 @@ describe('Estilo', () => {
     act(() => byLabel('Color rojo', upper).click())
     act(() => [...group('Fondo entre niveles')!.querySelectorAll('label')].find((l) => l.textContent === 'Fondo visible')!.querySelector('input')!.click())
 
-    expect(saved('rsi')!.style).toEqual({ levels: [{ value: 30 }, { value: 80, color: '#f23645' }], fills: { levels: { visible: true } } })
+    expect(saved('rsi')!.style).toEqual({ levels: [{ value: 30 }, { value: 80, color: '#f23645' }], fills: { levels: { visible: false } } })
     unmount()
   })
 
@@ -237,6 +237,23 @@ describe('saving to the account (S4)', () => {
     expect(saved('rsi')).toBeUndefined()
     expect(useChartStore.getState().config).toEqual({ ...DEFAULT_CONFIG, ema20: 30 })
     expect(field('Período').value).toBe('14')
+    unmount()
+  })
+
+  it('a save and Volver al de fábrica leave whether the indicator is on, hidden or minimized as it was (chart-pro-redesign S2)', async () => {
+    const kept = { on: true, hidden: true, minimized: false }
+    setIndicatorVisibility({ obv: kept })
+    await sleep(SAVE_DELAY_MS + 100)
+    fetchMock.mockClear()
+    await open('obv')
+
+    act(() => byLabel('Color rojo', group('OBV')!).click())
+    await sleep(SAVE_DELAY_MS + 100)
+    act(() => byText('Volver al de fábrica').click())
+    await sleep(SAVE_DELAY_MS + 100)
+
+    expect(patches()).toEqual([{ indicatorSettings: { obv: { style: { lines: { obv: { color: '#f23645' } } } } } }, { indicatorSettings: { obv: null } }])
+    expect(getPreferences().indicatorVisibility.obv).toEqual(kept)
     unmount()
   })
 })

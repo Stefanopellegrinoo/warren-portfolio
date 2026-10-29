@@ -9,6 +9,9 @@ export interface IndicatorLine {
   data: IndicatorPoint[]
   /** A histogram's bars that rise (true) or fall, for its two colors (S5). */
   up?: boolean[]
+  /** A histogram's own rising and falling colors when the user saved none (else both are `color`). */
+  upColor?: string
+  downColor?: string
 }
 
 export interface IndicatorSpec {
@@ -16,12 +19,18 @@ export interface IndicatorSpec {
   /** 'price' overlays the candles; 'own' gets a pane below them. */
   pane: 'price' | 'own'
   levels?: number[]
+  /** How its own pane's scale reads: whole numbers, two decimals or compact (odd/tasks/chart-pro-redesign.md);
+   *  unset over the price, which reads like the price. */
+  axis?: 0 | 2 | 'compact'
   lines: (candles: Candle[], c: IndicatorConfig) => IndicatorLine[]
 }
 
 const line = (id: string, color: string, data: IndicatorPoint[]): IndicatorLine => ({ id, type: 'line', color, data })
 const pick = <T extends { time: number }>(points: T[], f: (p: T) => number): IndicatorPoint[] =>
   points.map((p) => ({ time: p.time, value: f(p) }))
+
+/** TradingView's candles (odd/tasks/chart-pro-redesign.md S6): the chart's only, the app's tokens stay. */
+export const CANDLE_COLORS = { up: '#089981', down: '#F23645' }
 
 const SIGNAL = '#e0904a'
 const MUTED = '#8f887e'
@@ -48,11 +57,13 @@ export const INDICATOR_SPECS: Record<IndicatorKey, IndicatorSpec> = {
       ]
     },
   },
+  // At the foot of the price pane, in the candles' colors at ~45 % (S6).
   volume: {
     label: () => 'Volumen',
-    pane: 'own',
+    pane: 'price',
     lines: (candles) => [{
       id: 'volume', type: 'histogram', color: INDICATOR_COLORS.volume,
+      upColor: 'rgba(8, 153, 129, 0.45)', downColor: 'rgba(242, 54, 69, 0.45)',
       data: candles.map((k) => ({ time: k.time, value: k.volume })),
       up: candles.map((k) => k.close >= k.open),
     }],
@@ -61,11 +72,13 @@ export const INDICATOR_SPECS: Record<IndicatorKey, IndicatorSpec> = {
     label: (c) => `RSI ${c.rsi}`,
     pane: 'own',
     levels: [30, 70],
+    axis: 0,
     lines: (candles, c) => [line('rsi', INDICATOR_COLORS.rsi, rsi(candles, c.rsi))],
   },
   macd: {
     label: (c) => `MACD ${c.macdFast} ${c.macdSlow} ${c.macdSignal}`,
     pane: 'own',
+    axis: 2,
     lines: (candles, c) => {
       const m = macd(candles, c.macdFast, c.macdSlow, c.macdSignal)
       const bars = pick(m, (p) => p.histogram)
@@ -81,6 +94,7 @@ export const INDICATOR_SPECS: Record<IndicatorKey, IndicatorSpec> = {
     label: (c) => `Estocástico ${c.stochK} ${c.stochSmooth} ${c.stochD}`,
     pane: 'own',
     levels: [20, 80],
+    axis: 0,
     lines: (candles, c) => {
       const s = stochastic(candles, c.stochK, c.stochSmooth, c.stochD)
       return [line('k', INDICATOR_COLORS.stochastic, pick(s, (p) => p.k)), line('d', SIGNAL, pick(s, (p) => p.d))]
@@ -90,6 +104,7 @@ export const INDICATOR_SPECS: Record<IndicatorKey, IndicatorSpec> = {
     label: (c) => `ADX ${c.adxPeriod}`,
     pane: 'own',
     levels: [25],
+    axis: 0,
     lines: (candles, c) => {
       const a = adx(candles, c.adxPeriod)
       return [
@@ -102,6 +117,7 @@ export const INDICATOR_SPECS: Record<IndicatorKey, IndicatorSpec> = {
   obv: {
     label: () => 'OBV',
     pane: 'own',
+    axis: 'compact',
     lines: (candles) => [line('obv', INDICATOR_COLORS.obv, obv(candles))],
   },
 }

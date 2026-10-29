@@ -8,6 +8,7 @@ import {
   parsePreferences,
   type ChartPreferences,
   type IndicatorSettings,
+  type IndicatorVisibility,
   type PreferencesPatch,
   type RememberedStyle,
   type ToolKind,
@@ -42,6 +43,7 @@ let loaded = false
 let loading: Promise<void> | null = null
 let owner: string | null = null
 let state: ChartPreferences = EMPTY_PREFERENCES
+let answer: ChartPreferences | null = null
 let pending: PreferencesPatch = {}
 let sending: PreferencesPatch | null = null
 let timer: ReturnType<typeof setTimeout> | null = null
@@ -128,8 +130,9 @@ function load(): Promise<void> {
       if (owner && owner !== body.userId) pending = {}
       owner = body.userId
       loaded = true
+      answer = parsePreferences(body.preferences)
       // What this tab changed while loading (or saved before, offline) wins over the account's copy.
-      state = applyPatch(parsePreferences(body.preferences), pending)
+      state = applyPatch(answer, pending)
       writeDevice()
       notify()
       if (!isEmptyPatch(pending)) schedule()
@@ -189,6 +192,11 @@ function change(patch: PreferencesPatch) {
   schedule()
 }
 
+/** The preferences as the account answered them in this tab, before this device's changes; null until then. */
+export function getAccountAnswer(): ChartPreferences | null {
+  return answer
+}
+
 export function getPreferences(): ChartPreferences {
   init()
   return state
@@ -216,4 +224,12 @@ export function setToolStyle(kind: ToolKind, style: RememberedStyle | null) {
 /** Saves an indicator's settings to the account; null forgets them (the device's values apply again). */
 export function setIndicatorSettings(key: IndicatorKey, settings: IndicatorSettings | null) {
   change({ indicatorSettings: { [key]: settings } })
+}
+
+/**
+ * Saves whether these indicators are on, hidden or minimized (odd/tasks/chart-pro-redesign.md S2), each apart
+ * from its settings: a change made before the account answers wins over that indicator's visibility only.
+ */
+export function setIndicatorVisibility(changes: Partial<Record<IndicatorKey, IndicatorVisibility>>) {
+  change({ indicatorVisibility: changes })
 }

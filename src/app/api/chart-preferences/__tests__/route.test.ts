@@ -94,7 +94,7 @@ describe('GET /api/chart-preferences', () => {
   it('a user who never saved anything gets empty preferences, read only from their own row', async () => {
     const res = await GET()
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ userId: 'u1', preferences: { favorites: {}, toolStyles: {}, indicatorSettings: {} } })
+    expect(await res.json()).toEqual({ userId: 'u1', preferences: { favorites: {}, toolStyles: {}, indicatorSettings: {}, indicatorVisibility: {} } })
     expect(reads).toEqual([['chart_preferences', ['select', 'favorites, tool_styles, indicator_settings'], ['eq', 'user_id', 'u1']]])
   })
 
@@ -102,12 +102,16 @@ describe('GET /api/chart-preferences', () => {
     row = {
       favorites: { ray: true, 'gann-fan': true, rectangle: 'yes' },
       tool_styles: { ray: { color: '#2962ff', width: 2 }, 'trend-line': { color: 'javascript:alert(1)' }, nope: {} },
-      indicator_settings: { rsi: { values: { rsi: 21 } }, macd: { values: { macdFast: 9999 } }, sma: { values: {} } },
+      indicator_settings: {
+        rsi: { values: { rsi: 21 } }, macd: { values: { macdFast: 9999 } }, sma: { values: {} },
+        'adx:visibility': { on: true, hidden: false, minimized: false }, 'macd:visibility': { on: 1 }, 'sma:visibility': { on: true, hidden: false, minimized: false },
+      },
     }
     expect(await read()).toEqual({
       favorites: { ray: true },
       toolStyles: { ray: { color: '#2962ff', width: 2 } },
       indicatorSettings: { rsi: { values: { rsi: 21 } } },
+      indicatorVisibility: { adx: { on: true, hidden: false, minimized: false } },
     })
   })
 
@@ -159,7 +163,28 @@ describe('PATCH /api/chart-preferences', () => {
     }
     const rsi = { style: { lines: { rsi: { color: '#7e57c2' } }, levels: [{ value: 70, color: '#f23645' }, { value: 30, color: '#089981', visible: true }] } }
     expect((await PATCH(patch({ indicatorSettings: { bollinger, rsi } }))).status).toBe(204)
-    expect(await read()).toEqual({ favorites: { rectangle: true }, toolStyles: {}, indicatorSettings: { bollinger, rsi } })
+    expect(await read()).toEqual({ favorites: { rectangle: true }, toolStyles: {}, indicatorSettings: { bollinger, rsi }, indicatorVisibility: {} })
+  })
+
+  // odd/tasks/chart-pro-redesign.md S2: which indicators are on, hidden or minimized, apart from their settings.
+  it("an indicator's visibility is kept under its own key in the indicator column; its settings stay byte-identical", async () => {
+    const rsi = { values: { rsi: 21 }, style: { lines: { rsi: { color: '#f23645', width: 2 } } } }
+    row = { favorites: {}, tool_styles: {}, indicator_settings: { rsi } }
+    const vis = { on: true, hidden: true, minimized: false }
+
+    expect((await PATCH(patch({ indicatorVisibility: { rsi: vis, obv: { on: false, hidden: false, minimized: false } } }))).status).toBe(204)
+    expect(writes).toEqual([{
+      fn: 'patch_chart_preferences', p_favorites: {}, p_tool_styles: {},
+      p_indicator_settings: { 'rsi:visibility': vis, 'obv:visibility': { on: false, hidden: false, minimized: false } },
+    }])
+    expect(JSON.stringify(row!.indicator_settings)).toBe(JSON.stringify({ rsi, 'rsi:visibility': vis, 'obv:visibility': { on: false, hidden: false, minimized: false } }))
+    const prefs = await read()
+    expect(JSON.stringify(prefs.indicatorSettings)).toBe(JSON.stringify({ rsi }))
+    expect(prefs.indicatorVisibility).toEqual({ rsi: vis, obv: { on: false, hidden: false, minimized: false } })
+
+    // A save of the settings, as the previous build sends it, leaves the visibility alone.
+    await PATCH(patch({ indicatorSettings: { rsi: null } }))
+    expect(await read()).toEqual({ favorites: {}, toolStyles: {}, indicatorSettings: {}, indicatorVisibility: { rsi: vis, obv: { on: false, hidden: false, minimized: false } } })
   })
 
   it('every factory style the drawing library gives a tool can be remembered', async () => {
@@ -181,6 +206,10 @@ describe('PATCH /api/chart-preferences', () => {
     ['a width out of range', { toolStyles: { ray: { width: 500 } } }],
     ['a period out of range', { indicatorSettings: { ema20: { values: { ema20: 1 } } } }],
     ['a value field of another indicator', { indicatorSettings: { ema20: { values: { macdFast: 12 } } } }],
+    ['an indicator flag inside its settings', { indicatorSettings: { rsi: { values: { rsi: 21 }, on: true } } }],
+    ['a visibility written as a settings key', { indicatorSettings: { 'rsi:visibility': { on: true, hidden: false, minimized: false } } }],
+    ['a visibility that is not three booleans', { indicatorVisibility: { rsi: { on: 'yes', hidden: false, minimized: false } } }],
+    ['a visibility of an unknown indicator', { indicatorVisibility: { sma: { on: true, hidden: false, minimized: false } } }],
     ['a field name that is not an identifier', { toolStyles: { ray: { __proto__x: 1, 'a b': 2 } } }],
     ['a string too long', { toolStyles: { text: { text: 'x'.repeat(301) } } }],
     ['nesting too deep', { toolStyles: { ray: { a: { b: { c: { d: 1 } } } } } }],
