@@ -87,3 +87,31 @@ describe('preferences schema, indicator style', () => {
     expect(prefs.indicatorSettings).toEqual({ obv: { style: { lines: { obv: { color: '#2962ff' } } } } })
   })
 })
+
+// odd/tasks/chart-pro-redesign.md S2: which indicators are on, hidden or minimized lives in the account, in each
+// indicator's entry next to its values and style.
+describe('preferences schema, which indicators are on', () => {
+  const entry = (value: unknown) => parsePatch({ indicatorSettings: { rsi: value } })
+
+  it('accepts on, hidden and minimized alone and next to values and style', () => {
+    expect(entry({ on: true, hidden: false, minimized: true })).toEqual({ indicatorSettings: { rsi: { on: true, hidden: false, minimized: true } } })
+    expect(entry({ on: false })).not.toBeNull()
+    const full = { values: { rsi: 21 }, style: { lines: { rsi: { color: '#f23645' } } }, on: true, hidden: true, minimized: false }
+    expect(entry(full)).toEqual({ indicatorSettings: { rsi: full } })
+  })
+
+  it.each([
+    ['on that is not a boolean', { on: 'yes' }],
+    ['hidden that is a number', { hidden: 1 }],
+    ['minimized that is null', { minimized: null }],
+    ['another field next to them', { on: true, enabled: true }],
+    ['visible at the entry', { on: true, visible: false }],
+  ])('still refuses %s', (_, value) => {
+    expect(entry(value)).toBeNull()
+  })
+
+  it('keeps a stored entry with them, and drops one with a field the app does not know', () => {
+    const prefs = parsePreferences({ indicatorSettings: { rsi: { on: false, hidden: true }, obv: { on: true, pinned: true } } })
+    expect(prefs.indicatorSettings).toEqual({ rsi: { on: false, hidden: true } })
+  })
+})

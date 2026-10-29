@@ -1,5 +1,5 @@
 // odd/tasks/chart-customization.md S4: the menu names an indicator by the values the chart uses (the account's
-// over this device's), and turning one on or off stays on this device (S8: as before).
+// over this device's). odd/tasks/chart-pro-redesign.md S2: turning one on or off is kept in the account too.
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
@@ -54,14 +54,19 @@ describe('IndicatorMenu', () => {
     unmount()
   })
 
-  it('a click still turns an indicator on or off on this device, and nothing reaches the account', async () => {
+  it("a click turns an indicator on or off on this device and, with the Trading page's sync, in the account", async () => {
+    const { startIndicatorSync } = await import('@/lib/chart/indicator-sync')
+    const stop = startIndicatorSync()
     const { unmount } = await openMenu()
     expect(useChartStore.getState().indicators.obv).toBe(false)
 
     await act(async () => { item('OBV')!.click() })
 
     expect(useChartStore.getState().indicators.obv).toBe(true)
-    expect(getPreferences().indicatorSettings).toEqual({})
+    expect(JSON.parse(localStorage.getItem('tv-gratis-chart-state')!).state.indicators.obv).toBe(true)
+    // The account is not reachable here (404): the entry waits in its outbox, whole.
+    expect(getPreferences().indicatorSettings.obv).toEqual({ on: true, hidden: false, minimized: false })
+    stop()
     unmount()
   })
 })

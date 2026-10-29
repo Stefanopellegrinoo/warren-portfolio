@@ -100,7 +100,10 @@ function saveTyped(key: IndicatorKey, draft: Record<string, string>) {
 	save(key, values, levelsMoved ? (s) => moved.reduce((acc, n, i) => (n === null ? acc : { ...acc, levels: withLevel(key, acc, i, { value: n }) }), s) : undefined);
 }
 
-/** "Volver al de fábrica": the account forgets the indicator and this device goes back to its factory values. */
+/**
+ * "Volver al de fábrica": the account forgets the indicator's values and style (whether it is on, hidden or minimized
+ * stays, odd/tasks/chart-pro-redesign.md S2) and this device goes back to its factory values.
+ */
 function reset(key: IndicatorKey) {
 	setIndicatorSettings(key, null);
 	useChartStore.getState().setConfig(indicatorValues(key, DEFAULT_CONFIG));

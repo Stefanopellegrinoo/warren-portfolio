@@ -8,6 +8,7 @@ import {
   parsePreferences,
   type ChartPreferences,
   type IndicatorSettings,
+  type IndicatorVisibility,
   type PreferencesPatch,
   type RememberedStyle,
   type ToolKind,
@@ -177,16 +178,22 @@ function flush(leaving = false) {
     })
 }
 
-function change(patch: PreferencesPatch) {
+/** `patch` may be built from the preferences as they are now, another tab's last change included. */
+function change(patch: PreferencesPatch | ((prefs: ChartPreferences) => PreferencesPatch)) {
   init()
-  const valid = cleanPatch(patch)
-  if (isEmptyPatch(valid)) return
-  readDevice()
+  const fresh = readDevice()
+  const valid = cleanPatch(typeof patch === 'function' ? patch(state) : patch)
+  if (isEmptyPatch(valid)) { if (fresh) notify(); return }
   state = applyPatch(state, valid)
   pending = mergePatch(pending, valid)
   writeDevice()
   notify()
   schedule()
+}
+
+/** Whether the account answered in this tab: until then the preferences are this device's last copy. */
+export function isAccountLoaded(): boolean {
+  return loaded
 }
 
 export function getPreferences(): ChartPreferences {
@@ -213,7 +220,28 @@ export function setToolStyle(kind: ToolKind, style: RememberedStyle | null) {
   change({ toolStyles: { [kind]: style } })
 }
 
-/** Saves an indicator's settings to the account; null forgets them (the device's values apply again). */
-export function setIndicatorSettings(key: IndicatorKey, settings: IndicatorSettings | null) {
-  change({ indicatorSettings: { [key]: settings } })
+/**
+ * An indicator's entry with `fields` in place of its own (an undefined one removes it), or null when nothing is
+ * left. The account replaces an entry whole, so every write carries the fields it does not change.
+ */
+function withFields(entry: IndicatorSettings | undefined, fields: IndicatorSettings): IndicatorSettings | null {
+  const next = Object.fromEntries(Object.entries({ ...entry, ...fields }).filter(([, v]) => v !== undefined))
+  return Object.keys(next).length > 0 ? next : null
+}
+
+/**
+ * Saves an indicator's settings (values, style) to the account; null forgets them (the device's values apply
+ * again). Whether it is on, hidden or minimized stays (odd/tasks/chart-pro-redesign.md S2).
+ */
+export function setIndicatorSettings(key: IndicatorKey, settings: Pick<IndicatorSettings, 'values' | 'style'> | null) {
+  change((prefs) => ({ indicatorSettings: { [key]: withFields(prefs.indicatorSettings[key], { values: settings?.values, style: settings?.style }) } }))
+}
+
+/** Saves whether these indicators are on, hidden or minimized (S2 of chart-pro-redesign); their settings stay. */
+export function setIndicatorVisibility(changes: Partial<Record<IndicatorKey, IndicatorVisibility>>) {
+  change((prefs) => ({
+    indicatorSettings: Object.fromEntries(
+      Object.entries(changes).map(([key, visibility]) => [key, withFields(prefs.indicatorSettings[key as IndicatorKey], visibility!)]),
+    ),
+  }))
 }

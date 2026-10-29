@@ -95,6 +95,7 @@ const NONE: Record<IndicatorKey, boolean> = {
 interface ChartState {
   symbol: string;
   timeframe: Timeframe;
+  /** With `hidden` and `minimized`: this device's copy of the account's (src/lib/chart/indicator-sync.ts). */
   indicators: Record<IndicatorKey, boolean>;
   hidden: Record<IndicatorKey, boolean>;
   /** A pane shrunk to a thin labeled strip, its indicator still on (odd/tasks/chart-pro-redesign.md S1). */

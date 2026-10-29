@@ -233,3 +233,25 @@ describe('TradingPage — Mi cartera', () => {
     expect(host.querySelector('header button[aria-label^="Agregar"]')).toBeNull()
   })
 })
+
+// odd/tasks/chart-pro-redesign.md S2: the page keeps which indicators are on, hidden or minimized in the account.
+describe('TradingPage — indicators in the account', () => {
+  it("shows the account's indicators once it answers", async () => {
+    vi.resetModules()
+    const kept = { rsi: { on: false, hidden: false, minimized: false }, obv: { on: true, hidden: true, minimized: false } }
+    vi.stubGlobal('fetch', vi.fn((url: string) => ok(
+      String(url) === '/api/chart-preferences'
+        ? { userId: 'u1', preferences: { favorites: {}, toolStyles: {}, indicatorSettings: kept } }
+        : String(url).includes('/lists') ? { lists: [] } : [],
+    )))
+    const { default: Page } = await import('../page')
+    const { useChartStore: store } = await import('@/lib/store/chart-store')
+    expect([store.getState().indicators.rsi, store.getState().indicators.obv]).toEqual([true, false])
+
+    await act(async () => { root.render(<Page />) })
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+
+    const s = store.getState()
+    expect([s.indicators.rsi, s.indicators.obv, s.hidden.obv]).toEqual([false, true, true])
+  })
+})

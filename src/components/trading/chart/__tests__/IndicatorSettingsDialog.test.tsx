@@ -1,6 +1,6 @@
 // odd/tasks/chart-customization.md S5: an indicator's settings sheet, Valores and Estilo. S4: what the user
-// saves there goes to the account for that indicator only; which indicators are on or hidden never does.
-// S8: the periods keep today's limits.
+// saves there goes to the account for that indicator only. odd/tasks/chart-pro-redesign.md S2: whether it is
+// on, hidden or minimized lives in the same entry and survives a save or a reset. S8: the periods keep today's limits.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
@@ -25,7 +25,7 @@ vi.stubGlobal('fetch', fetchMock)
 
 const { IndicatorSettingsDialog } = await import('../IndicatorSettingsDialog')
 const { useChartStore, DEFAULT_CONFIG } = await import('@/lib/store/chart-store')
-const { getPreferences, setIndicatorSettings, subscribe, SAVE_DELAY_MS } = await import('@/lib/chart/preferences')
+const { getPreferences, setIndicatorSettings, setIndicatorVisibility, subscribe, SAVE_DELAY_MS } = await import('@/lib/chart/preferences')
 
 const initial = useChartStore.getState()
 const sleep = (ms: number) => act(async () => { await new Promise((r) => setTimeout(r, ms)) })
@@ -212,10 +212,9 @@ describe('saving to the account (S4)', () => {
     unmount()
   })
 
-  it("sends only that indicator's settings, never which indicators are on or hidden", async () => {
+  it("sends only that indicator's settings, as before, when the account keeps nothing else for it", async () => {
     await sleep(SAVE_DELAY_MS + 100) // whatever an earlier test left goes out first
     fetchMock.mockClear()
-    act(() => { useChartStore.getState().toggleIndicator('obv'); useChartStore.getState().toggleHidden('rsi') })
     await open('rsi')
 
     act(() => byLabel('Color rojo', group('RSI')!).click())
@@ -223,7 +222,38 @@ describe('saving to the account (S4)', () => {
     await sleep(SAVE_DELAY_MS + 100)
 
     expect(patches()).toEqual([{ indicatorSettings: { rsi: { values: { rsi: 14 }, style: { lines: { rsi: { color: '#f23645' } } } } } }])
-    expect(JSON.stringify(getPreferences())).not.toMatch(/enabled|hidden/)
+    unmount()
+  })
+
+  // The account replaces an indicator's entry whole, so a save sends the fields it does not change.
+  it('a change keeps whether the indicator is on, hidden or minimized (chart-pro-redesign S2)', async () => {
+    setIndicatorVisibility({ obv: { on: true, hidden: true, minimized: false } })
+    await sleep(SAVE_DELAY_MS + 100)
+    fetchMock.mockClear()
+    await open('obv')
+
+    act(() => byLabel('Color rojo', group('OBV')!).click())
+    await close()
+    await sleep(SAVE_DELAY_MS + 100)
+
+    const entry = { on: true, hidden: true, minimized: false, style: { lines: { obv: { color: '#f23645' } } } }
+    expect(saved('obv')).toEqual(entry)
+    expect(patches()).toEqual([{ indicatorSettings: { obv: entry } }])
+    unmount()
+  })
+
+  it('Volver al de fábrica forgets only the values and style: whether it is on, hidden or minimized stays (chart-pro-redesign S2)', async () => {
+    setIndicatorSettings('obv', { style: { lines: { obv: { color: '#f23645' } } } })
+    setIndicatorVisibility({ obv: { on: true, hidden: false, minimized: true } })
+    await sleep(SAVE_DELAY_MS + 100)
+    fetchMock.mockClear()
+    await open('obv')
+
+    act(() => byText('Volver al de fábrica').click())
+    await sleep(SAVE_DELAY_MS + 100)
+
+    expect(saved('obv')).toEqual({ on: true, hidden: false, minimized: true })
+    expect(patches()).toEqual([{ indicatorSettings: { obv: { on: true, hidden: false, minimized: true } } }])
     unmount()
   })
 

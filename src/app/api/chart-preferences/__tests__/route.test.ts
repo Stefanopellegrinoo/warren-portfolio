@@ -162,6 +162,16 @@ describe('PATCH /api/chart-preferences', () => {
     expect(await read()).toEqual({ favorites: { rectangle: true }, toolStyles: {}, indicatorSettings: { bollinger, rsi } })
   })
 
+  // odd/tasks/chart-pro-redesign.md S2: which indicators are on, hidden or minimized go in each indicator's entry.
+  it("an indicator's on, hidden and minimized are saved with its settings as one entry, which a later write replaces whole", async () => {
+    const rsi = { values: { rsi: 21 }, style: { lines: { rsi: { color: '#f23645' } } }, on: true, hidden: true, minimized: false }
+    expect((await PATCH(patch({ indicatorSettings: { rsi, obv: { on: false, hidden: false, minimized: false } } }))).status).toBe(204)
+    expect((await read()).indicatorSettings).toEqual({ rsi, obv: { on: false, hidden: false, minimized: false } })
+
+    await PATCH(patch({ indicatorSettings: { rsi: { ...rsi, hidden: false } } }))
+    expect((await read()).indicatorSettings).toEqual({ rsi: { ...rsi, hidden: false }, obv: { on: false, hidden: false, minimized: false } })
+  })
+
   it('every factory style the drawing library gives a tool can be remembered', async () => {
     const { factoryStyleFor } = await import('lightweight-charts-drawing')
     const res = await PATCH(patch({ toolStyles: { 'fib-retracement': factoryStyleFor('fib-retracement'), 'long-position': factoryStyleFor('long-position') } }))
@@ -181,6 +191,8 @@ describe('PATCH /api/chart-preferences', () => {
     ['a width out of range', { toolStyles: { ray: { width: 500 } } }],
     ['a period out of range', { indicatorSettings: { ema20: { values: { ema20: 1 } } } }],
     ['a value field of another indicator', { indicatorSettings: { ema20: { values: { macdFast: 12 } } } }],
+    ['an indicator turned on with a value that is not a boolean', { indicatorSettings: { rsi: { on: 'yes' } } }],
+    ['an unknown field next to on, hidden and minimized', { indicatorSettings: { rsi: { on: true, enabled: true } } }],
     ['a field name that is not an identifier', { toolStyles: { ray: { __proto__x: 1, 'a b': 2 } } }],
     ['a string too long', { toolStyles: { text: { text: 'x'.repeat(301) } } }],
     ['nesting too deep', { toolStyles: { ray: { a: { b: { c: { d: 1 } } } } } }],
