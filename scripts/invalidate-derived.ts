@@ -1,5 +1,5 @@
 /**
- * Drops every cached view of a user's history (derived:v1, history:v3, statistics:*, summary).
+ * Drops every cached view of a user's history (derived:v2, history:v4, statistics:*, summary).
  * For the ledger edits that bypass the API — manual SQL, one-off scripts — which are otherwise
  * only bounded by the 15 minute derived TTL.
  *

@@ -170,7 +170,7 @@ export function deriveHistory(input: DeriveInput): DeriveResult {
     // ledger the core cannot run to today moves nothing: the days below keep what they can compute.
     let funding: ReturnType<typeof fundPurchases> = { movements: recorded, funded: null }
     try {
-      funding = fundPurchases(recorded, ledgerAt(transactions, recorded, today, options).income)
+      funding = fundPurchases(recorded, ledgerAt(transactions, recorded, today, options).income, today)
     } catch { /* the day that fails is reported below, with the rows before it */ }
     const movements = funding.movements
     fundedDeposits = funding.funded
@@ -215,16 +215,19 @@ const isExternalDeposit = (m: DerivedMovement) => isExternal(m) && m.type === 'D
  * return on those days is measured against a fiction. Day by day (movements, then the income
  * paid that day), each shortfall is moved from the nearest later deposit(s) to the day it
  * happens, exactly its size. The total deposited, the trade legs, the withdrawals and the
- * income never change; a shortfall no later deposit covers stays (nothing is invented).
+ * income never change; a shortfall no later deposit covers stays (nothing is invented). Only
+ * a deposit dated up to `today` funds anything: the cash form accepts future dates, and money
+ * not yet deposited must not change today's cash.
  */
 export function fundPurchases(
   movements: DerivedMovement[],
-  income: Array<{ date: string; amount: number }>
+  income: Array<{ date: string; amount: number }>,
+  today: string
 ): { movements: DerivedMovement[]; funded: FundedDeposits | null } {
   const left = movements.map(m => (isExternalDeposit(m) ? Math.abs(Number(m.amount)) : 0))
   const pool = movements
     .map((_, i) => i)
-    .filter(i => isExternalDeposit(movements[i]))
+    .filter(i => isExternalDeposit(movements[i]) && day(movements[i].date) <= today)
     .sort((a, b) => day(movements[a].date).localeCompare(day(movements[b].date)) || a - b)
   const onDay = new Map<string, number[]>()
   movements.forEach((m, i) => onDay.set(day(m.date), [...(onDay.get(day(m.date)) ?? []), i]))

@@ -276,7 +276,7 @@ const leg = (type: string, amount: number, date: string) => ({ ...mv(type, amoun
 
 describe('fundPurchases — a deposit dated after the purchases it paid (statistics-truth S10)', () => {
   it('moves exactly the shortfall from the later deposit to the purchase day; the total deposited does not change', () => {
-    const { movements, funded } = fundPurchases([leg('RETIRO', 1000, '2026-03-02'), mv('DEPOSITO', 3000, '2026-03-06')], [])
+    const { movements, funded } = fundPurchases([leg('RETIRO', 1000, '2026-03-02'), mv('DEPOSITO', 3000, '2026-03-06')], [], TODAY)
     expect(movements).toEqual([
       leg('RETIRO', 1000, '2026-03-02'),
       { type: 'DEPOSITO', amount: 2000, date: '2026-03-06' },
@@ -289,7 +289,7 @@ describe('fundPurchases — a deposit dated after the purchases it paid (statist
     const { movements, funded } = fundPurchases([
       leg('RETIRO', 500, '2026-03-02'), leg('RETIRO', 700, '2026-03-03'),
       mv('DEPOSITO', 300, '2026-03-04'), mv('DEPOSITO', 2000, '2026-03-05'),
-    ], [])
+    ], [], TODAY)
     const deposits = movements.filter(m => m.type === 'DEPOSITO').map(m => [m.date, m.amount])
     expect(deposits).toEqual([['2026-03-05', 1100], ['2026-03-02', 500], ['2026-03-03', 700]])
     expect(deposits.reduce((sum, [, amount]) => sum + Number(amount), 0)).toBe(2300)
@@ -298,7 +298,7 @@ describe('fundPurchases — a deposit dated after the purchases it paid (statist
 
   it('invents nothing: a shortfall with no later deposit stays as it is', () => {
     const moves = [mv('DEPOSITO', 400, '2026-03-01'), leg('RETIRO', 500, '2026-03-02')]
-    expect(fundPurchases(moves, [])).toEqual({ movements: moves, funded: null })
+    expect(fundPurchases(moves, [], TODAY)).toEqual({ movements: moves, funded: null })
   })
 
   it('never moves a sale leg or a withdrawal, and counts income on its payment date', () => {
@@ -307,13 +307,23 @@ describe('fundPurchases — a deposit dated after the purchases it paid (statist
       mv('DEPOSITO', 1000, '2026-03-09'), mv('RETIRO', 100, '2026-03-09'),
     ]
     // A 300 coupon paid on 03-02 covers part of that day's purchase.
-    const { movements, funded } = fundPurchases(moves, [{ date: '2026-03-02', amount: 300 }])
+    const { movements, funded } = fundPurchases(moves, [{ date: '2026-03-02', amount: 300 }], TODAY)
     expect(movements).toEqual([
       leg('RETIRO', 1000, '2026-03-02'), leg('DEPOSITO', 5000, '2026-03-03'),
       { type: 'DEPOSITO', amount: 300, date: '2026-03-09' }, mv('RETIRO', 100, '2026-03-09'),
       { type: 'DEPOSITO', amount: 700, date: '2026-03-02', transaction_id: null },
     ])
     expect(funded).toEqual({ amount: 700, from: '2026-03-02' })
+  })
+
+  it('never moves a deposit dated after today: money not yet deposited funds nothing', () => {
+    // The cash form accepts future dates. TODAY is 03-10.
+    const moves = [leg('RETIRO', 500, '2026-03-02'), leg('DEPOSITO', 400, '2026-03-05'), mv('DEPOSITO', 1000, '2026-03-20')]
+    expect(fundPurchases(moves, [], TODAY)).toEqual({ movements: moves, funded: null })
+    const { rows, flags, fundedDeposits } = deriveHistory(input({ transactions: [tx({ date: '2026-03-02', quantity: 10, price: 50 })], movements: moves }))
+    expect(byDate(rows).get(TODAY).cash_value).toBeCloseTo(-100, 6)
+    expect(flags.negativeCash).toEqual({ date: '2026-03-02', cash: -500 })
+    expect(fundedDeposits).toBeNull()
   })
 
   it('external flows are the deposits and withdrawals with no trade behind them, signed, by date', () => {
