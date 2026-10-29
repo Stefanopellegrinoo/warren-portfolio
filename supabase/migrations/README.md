@@ -60,3 +60,13 @@ Old rows and old clients keep their meaning through the defaults (the price agai
 hand in the SQL Editor right before the merge that deploys the alert sheet; dev and prod share one Supabase. The
 `DROP CONSTRAINT`s use the names 026 got from Postgres and abort the migration if a name differs.
 Re-run its proof (throwaway local postgres:15, never touches Supabase; not run in CI): `scripts/test-alert-conditions-proof.sh`.
+
+## Deposit dates (055)
+
+`redate_deposits(p_changes jsonb)` splits a user's own external deposit (type DEPOSITO, no transaction behind it)
+into earlier dated deposits and keeps the rest on its date, all in one call: the total deposited does not change.
+It backs "Revisar fechas de depósitos" (`/api/cash/deposit-dates`, odd/tasks/deposit-dates.md): the route only
+calls it with a plan that matches a fresh proposal, dates aside. Applied by hand in the SQL Editor right before the
+merge that deploys the route; dev and prod share one Supabase. Until then the route's POST answers 500 and nothing
+is written. Re-run its proof (throwaway local postgres:15, never touches Supabase; not run in CI):
+`scripts/test-redate-deposits-proof.sh`.
