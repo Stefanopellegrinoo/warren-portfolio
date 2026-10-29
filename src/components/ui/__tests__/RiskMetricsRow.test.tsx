@@ -48,9 +48,9 @@ describe('RiskMetricsRow', () => {
 
   it('says how much deposit money was moved to the purchases it paid, and that the total does not change (S10)', () => {
     const html = renderToStaticMarkup(
-      <RiskMetricsRow data={{ ...none, measuredFrom: '2022-02-09', measuredDays: 1150, fundedDeposits: { amount: 91311.74, from: '2022-02-09' } }} />,
+      <RiskMetricsRow data={{ ...none, measuredFrom: '2023-05-02', measuredDays: 1150, fundedDeposits: { amount: 1234.56, from: '2023-05-02' } }} />,
     )
-    expect(html).toContain('Algunos depósitos estaban cargados después de las compras que pagaron: para medir, US$ 91.311,74 se toman como depositados el día de esas compras, desde el 09/02/2022. El total depositado no cambia.')
+    expect(html).toContain('Algunos depósitos estaban cargados después de las compras que pagaron: para medir, US$ 1.234,56 se toman como depositados el día de esas compras, desde el 02/05/2023. El total depositado no cambia.')
   })
 
   it('says the days with negative cash were left out (S4)', () => {

@@ -241,9 +241,9 @@ describe('GET /api/statistics — what a degraded series is missing (S11)', () =
 
 describe('GET /api/statistics — deposits moved to the purchases they paid (S10)', () => {
   it('says how much deposit money was moved and from when', async () => {
-    mockSeries([{ snapshot_date: '2026-07-01', total_value: 100, total_invested: 100 }], [], false, [], { amount: 91311.74, from: '2022-02-09' })
+    mockSeries([{ snapshot_date: '2026-07-01', total_value: 100, total_invested: 100 }], [], false, [], { amount: 1234.56, from: '2023-05-02' })
     const body = await (await GET(makeRequest('/api/statistics?universe=total'))).json()
-    expect(body.fundedDeposits).toEqual({ amount: 91311.74, from: '2022-02-09' })
+    expect(body.fundedDeposits).toEqual({ amount: 1234.56, from: '2023-05-02' })
   })
 })
 
