@@ -1,0 +1,34 @@
+# Deposit dates: any user can fix deposits recorded after the purchases they paid
+Branch `feat/deposit-dates` (stacked on `fix/statistics-numbers` a1fd719). Delivery: ask-on-risk, chained after the statistics PRs. Runner: vitest (`npm test`, `npm run type-check`).
+
+## Specs
+
+The user's rule (2026-10-29): "Quiero que queden bien mis datos asi puedo usar la app, pero quiero que entiendas que la app no puede estar pensada solo para mi caso si quiero mas usuarios la usen, si esta solo pensada para mi lo suyo no va a estaqr bien". Approved as proposed ("dale, hacelo así"):
+
+- S1 (detect): "La app lo detecta y lo ofrece: a cualquier usuario cuyas compras quedaron antes de sus depósitos le aparece una vez \"Revisar fechas de depósitos\"."
+- S2 (proposal first): "Muestra la propuesta antes de tocar nada: \"Tu depósito del [fecha] pagó compras desde el [fecha]: ¿lo repartimos en esas fechas?\". Ves el detalle y podés corregir cada fecha si sabés la real."
+- S3 (apply on confirmation): "Recién al confirmar, guarda. Lo hace de una sola vez, de forma atómica, y el total depositado no cambia. Desde ahí no hay nada que acomodar y el aviso desaparece solo."
+- S4 (own account through the flow): "Tus datos se arreglan usando ese mismo flujo, desde la app. Así lo probamos de verdad antes de que lo use otro, en vez de un SQL hecho a mano por mí." With a backup first.
+- S5 (quiet notice): "El aviso discreto con ⓘ queda solo para quien todavía no revisó." — the derived-series adjustment note (statistics-truth S10) becomes a short line with an (i) whose detail opens on hover or tap.
+
+Assumptions: the proposal is `fundPurchases` (`src/lib/derive-history.ts`) on the user's own movements, the same computation the statistics already use; an edited date can only move a part earlier than its original deposit and never after today; amounts are not edited (the total deposited never changes).
+
+## Tasks
+
+- T1 S5 — quiet deposit notice with (i) (statistics risk row and evolution chart) — inline — done (952e564); RED 2 → GREEN
+- T2 S2 — proposal: per original deposit, the dated parts it funds (pure, from fundPurchases) + GET route — inline — done (72398bf); RED 9 → GREEN
+- T3 S3 — atomic apply: RPC migration + POST route with ownership and amount/date validation + cache invalidation — inline — done (42cd805); RED 12 (6 migration text, 6 route) → GREEN; real postgres:15 proof 19/19 (`scripts/test-redate-deposits-proof.sh`); high risk items 1 (changes stored data) and 2 (RPC security) → independent verifier: 2 blockers fixed in 1351f0b, recheck PASS (L6)
+- T4 S1,S2 — review dialog (editable dates) and the entry points — inline — done (3b8c7c1); RED 8 → GREEN; suite 3131 green; browser: 22 dated parts at 320/390/1280 px, no overflow, save button always visible
+- T5 S4 — backup, the user applies the migration, the user runs the flow on their account, verify with SELECT — with the user — done (L7, L8)
+
+## Log
+
+- L1 (2026-10-29) "pero porque esto sigue estnado Algunos depósitos estaban cargados después de las compras que pagaron: para medir, US$ [monto] se toman como depositados el día de esas compras, desde el [fecha]. El total depositado no cam"
+- L2 (2026-10-29) "Quiero que queden bien mis datos asi puedo usar la app, pero quiero que entiendas que la app no puede estar pensada solo para mi caso si quiero mas usuarios la usen, si esta solo pensada para mi lo suyo no va a estaqr bien"
+- L3 (2026-10-29) "dale, hacelo así"
+- L4 (2026-10-29) Write-path map (explorer): no code path updates a cash_movements row today; writes are `process_transaction_atomic`, direct inserts (`adjustCashBalance`) and guarded deletes; RLS is the single 003 policy; user RPCs are SECURITY INVOKER (051 pattern: fixed search_path, no EXECUTE for anon); `invalidateUserCache` after every ledger write; migrations by hand in the SQL Editor (dev and prod share one Supabase); the dashboard's value chart already reads `/api/portfolio-history`, which carries `fundedDeposits` → the notice lives under it at no extra request.
+- L5 (2026-10-29) Decisions: the POST saves only a plan equal to a fresh proposal, dates aside (amounts never editable); a refusal writes nothing; the dialog guards an unexpected answer ("No se pudo armar la propuesta."); statistics reloads the page when the dialog closes after a save (history, risk and a chosen benchmark all change), the dashboard refreshes its movements and chart in place.
+- L6 (2026-10-29) Independent verifier on 72398bf + 42cd805 (base 952e564): security of `redate_deposits` PASS (19 extra adversarial SQL cases: anon, PUBLIC, no uid, service_role, other user's id, RETIRO/CUPON/linked rows, NaN/Infinity/1e20, malformed JSON, invalid dates, search_path hijack with shadow objects — every refusal left the table byte-identical; no privilege beyond the 003 policy); route rule PASS; generality PASS; consistency PASS (8 seeded accounts: after applying a proposal, a second run moves nothing and daily cash/flows match within 1e-4). Blockers: B1 a deposit used up exactly left ~1e-13 of float noise that the next shortfall took as a part of 0 (499 of 2000 random cases) — unsavable, the notice would never go; B2 two identical POSTs both passed the check and the RPC applied the split twice (reproduced with two postgres sessions). One correction batch (1351f0b): a deposit with ≤ half a cent left is used up, no zero parts in a proposal; each change carries the deposit's proposed amount and 055 refuses a deposit that changed since (second save → 409); the route saves the proposal's amounts (advisory A1). Recheck limited to B1/B2: the verifier's float-noise probe now proposes no zero part and its plan saves (its two old-behavior assertions fail as intended); its two-session race now stores one part of 500 and leaves 2500, the second session refused "changed since the proposal". Proof script 22/22, suite 3133 green. Scratch removed, node_modules intact.
+- L7 (2026-10-29) "ya pegué las dos, fijate" → verified (SELECT only): the backup table holds every live row of the account and the same external deposit total; public.redate_deposits exists, SECURITY INVOKER, search_path=public, pg_temp, anon cannot execute, authenticated can, and it is the version with the double-save guard.
+- L8 (2026-10-29) "listo" → the user saved the dates through the app (local run on this branch, shared Supabase). Verified (SELECT only, against the backup): external deposits identical before and after; the new "Parte del depósito" rows come from two lumps and add up to the amount the statistics had shown as moved; no other row changed (trade legs, withdrawals, other deposits); the row count grew by exactly the parts; cash from movements never below 0 on any day; today's cash unchanged.
+

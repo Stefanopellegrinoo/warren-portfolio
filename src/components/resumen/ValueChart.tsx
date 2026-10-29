@@ -3,19 +3,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { argentinaDate, cn, formatNumber } from '@/lib/utils'
 import { useCached } from '@/lib/client-cache'
+import MovedDepositsInfo, { fundedDepositsNote, type FundedDeposits } from '@/components/ui/MovedDepositsInfo'
+import DepositDatesDialog from './DepositDatesDialog'
 import { buildChart, HISTORY_NOTE, nearestIndex, PLOT, pointsInRange, RANGES, type HistoryPoint, type RangeId } from '@/lib/resumen/chart'
 
 const longDate = (iso: string) =>
   new Date(iso + 'T12:00:00').toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
 
-async function fetchHistory(): Promise<HistoryPoint[]> {
+interface History { points: HistoryPoint[]; fundedDeposits: FundedDeposits | null }
+
+async function fetchHistory(): Promise<History> {
   const res = await fetch('/api/portfolio-history?days=all&universe=total')
   if (!res.ok) throw new Error(String(res.status))
-  const d: { data?: HistoryPoint[] } = await res.json()
-  return d.data ?? []
+  const d: { data?: HistoryPoint[]; fundedDeposits?: FundedDeposits | null } = await res.json()
+  return { points: d.data ?? [], fundedDeposits: d.fundedDeposits ?? null }
 }
 
-export default function ValueChart() {
+/** The value chart; `onDepositsChanged` refreshes the rest of the page after deposit dates are saved. */
+export default function ValueChart({ onDepositsChanged }: { onDepositsChanged?: () => void } = {}) {
   const [range, setRange] = useState<RangeId>('3M')
   const [width, setWidth] = useState(0)
   const [active, setActive] = useState<number | null>(null)
@@ -23,6 +28,9 @@ export default function ValueChart() {
 
   // The whole series, asked once per visit and shown at once on the next; each period is cut from it.
   const history = useCached('resumen:history', fetchHistory)
+  // Deposits recorded after the purchases they paid (odd/tasks/deposit-dates.md S1, S5).
+  const [reviewing, setReviewing] = useState(false)
+  const movedNote = history.data ? fundedDepositsNote(history.data) : null
   // A retry shows the loading state again until its answer.
   const [retried, setRetried] = useState<unknown>(null)
   const status = history.data ? 'ready' : history.error && history.error !== retried ? 'error' : 'loading'
@@ -40,7 +48,7 @@ export default function ValueChart() {
     setRange(r)
   }
 
-  const points = useMemo(() => (history.data ? pointsInRange(history.data, range, argentinaDate()) : []), [history.data, range])
+  const points = useMemo(() => (history.data ? pointsInRange(history.data.points, range, argentinaDate()) : []), [history.data, range])
   const height = width && width < 560 ? 180 : 220
   const chart = width ? buildChart(points, width, height) : null
   const point = active !== null ? points[active] : null
@@ -145,6 +153,12 @@ export default function ValueChart() {
       </div>
 
       {status === 'ready' && points.length > 0 && <p className="mt-2 text-[13px] text-ink-3">{HISTORY_NOTE}</p>}
+      {movedNote && <MovedDepositsInfo className="mt-1" note={movedNote} onReview={() => setReviewing(true)} />}
+      <DepositDatesDialog
+        open={reviewing}
+        onClose={() => setReviewing(false)}
+        onDone={() => { history.reload(); onDepositsChanged?.() }}
+      />
     </div>
   )
 }

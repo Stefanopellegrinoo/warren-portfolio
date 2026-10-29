@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import KpiCard, { toneOfResult } from '@/components/ui/KpiCard'
-import RiskMetricsRow, { fundedDepositsNote, negativeCashNote } from '@/components/ui/RiskMetricsRow'
+import RiskMetricsRow, { negativeCashNote } from '@/components/ui/RiskMetricsRow'
+import MovedDepositsInfo, { fundedDepositsNote } from '@/components/ui/MovedDepositsInfo'
+import DepositDatesDialog from '@/components/resumen/DepositDatesDialog'
 import BenchmarkComparison from '@/components/charts/BenchmarkComparison'
 import PortfolioChart from '@/components/charts/PortfolioChart'
 import type { PortfolioChartPoint } from '@/components/charts/PortfolioChart'
@@ -154,6 +156,11 @@ export default function StatisticsPage() {
   const combinedData = combined.data ?? null
   const failed = <T,>(r: { data?: T; error: unknown }) => !r.data && !!r.error
   const retry = () => { stocks.reload(); ons.reload(); combined.reload(); general.reload(); portfolio.reload() }
+  // "Revisar fechas de depósitos" (odd/tasks/deposit-dates.md S1): after a save every block rests on new
+  // movements — the history, the risk, a chosen benchmark — so closing the dialog reloads the page.
+  const [reviewing, setReviewing] = useState(false)
+  const [savedDates, setSavedDates] = useState(false)
+  const closeReview = () => { setReviewing(false); if (savedDates) window.location.reload() }
 
   const tabs: TabType[] = combinedData
     ? (['general', 'stocks', 'ons'] as TabType[]).filter(t =>
@@ -170,7 +177,7 @@ export default function StatisticsPage() {
       <p className="pt-3 text-[13px] text-ink-3">{activeTab === 'general'
         ? 'Valor de mercado contra la plata que pusiste: el valor del primer día medido, más los depósitos y menos los retiros.'
         : 'Valor de mercado contra el costo de lo que tenés.'}</p>
-      {history.data?.assumption && <p className="pt-1 text-[13px] text-ink-3">{history.data.assumption}</p>}
+      {history.data?.assumption && <MovedDepositsInfo className="pt-1" note={history.data.assumption} onReview={() => setReviewing(true)} />}
       {history.data?.note && <p className="pt-1 text-[13px] text-warn">{history.data.note}</p>}
       <PortfolioChart data={cut(history.data?.points ?? [], historyPeriod)} period={historyPeriod} onPeriodChange={changePeriod} loading={!history.data && history.loading} line={LINE[activeTab === 'general' ? 'general' : 'class']} />
     </section>
@@ -236,7 +243,7 @@ export default function StatisticsPage() {
             <>
               {/* Risk over the whole portfolio — scope stated on screen */}
               {general.data
-                ? <RiskMetricsRow data={general.data} />
+                ? <RiskMetricsRow data={general.data} onReviewDeposits={() => setReviewing(true)} />
                 : failed(general)
                   ? <ErrorNotice onRetry={retry}>No se pudieron calcular las métricas de riesgo.</ErrorNotice>
                   : <Skeleton label="Cargando las métricas de riesgo" rows={1} />}
@@ -257,6 +264,7 @@ export default function StatisticsPage() {
           {own && tabData === undefined && <Skeleton label="Cargando las estadísticas" />}
         </div>
       )}
+      <DepositDatesDialog open={reviewing} onClose={closeReview} onDone={() => setSavedDates(true)} />
     </div>
   )
 }

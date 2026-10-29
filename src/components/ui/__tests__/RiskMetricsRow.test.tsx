@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
@@ -46,11 +46,35 @@ describe('RiskMetricsRow', () => {
     expect(html).toContain('Desde el 08/04/2026 · 140 días de mercado')
   })
 
-  it('says how much deposit money was moved to the purchases it paid, and that the total does not change (S10)', () => {
-    const html = renderToStaticMarkup(
-      <RiskMetricsRow data={{ ...none, measuredFrom: '2023-05-02', measuredDays: 1150, fundedDeposits: { amount: 1234.56, from: '2023-05-02' } }} />,
-    )
-    expect(html).toContain('Algunos depósitos estaban cargados después de las compras que pagaron: para medir, US$ 1.234,56 se toman como depositados el día de esas compras, desde el 02/05/2023. El total depositado no cambia.')
+  it('moved deposits are one quiet line; its (i) says how much, from when, and that the total does not change (S10; deposit-dates S5)', async () => {
+    const data = { ...none, measuredFrom: '2023-05-02', measuredDays: 1150, fundedDeposits: { amount: 1234.56, from: '2023-05-02' } }
+    const html = renderToStaticMarkup(<RiskMetricsRow data={data} />)
+    expect(html).toContain('Algunos depósitos se adelantaron a la fecha de tus compras')
+    expect(html).toContain('aria-label="Qué depósitos se adelantaron"')
+    expect(html).not.toContain('se toman como depositados')
+
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<RiskMetricsRow data={data} />) })
+    await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Qué depósitos se adelantaron"]')!.click() })
+    expect(document.body.textContent).toContain('Algunos depósitos estaban cargados después de las compras que pagaron: para medir, US$ 1.234,56 se toman como depositados el día de esas compras, desde el 02/05/2023. El total depositado no cambia.')
+    act(() => root.unmount())
+    el.remove()
+  })
+
+  it('offers to review the dates when the page can open the review (deposit-dates S1)', async () => {
+    const onReviewDeposits = vi.fn()
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<RiskMetricsRow data={{ ...none, fundedDeposits: { amount: 1, from: '2023-05-02' } }} onReviewDeposits={onReviewDeposits} />) })
+    await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Qué depósitos se adelantaron"]')!.click() })
+    const review = [...document.body.querySelectorAll('button')].find(b => b.textContent === 'Revisar fechas de depósitos')!
+    await act(async () => { review.click() })
+    expect(onReviewDeposits).toHaveBeenCalledTimes(1)
+    act(() => root.unmount())
+    el.remove()
   })
 
   it('says the days with negative cash were left out (S4)', () => {

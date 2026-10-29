@@ -296,9 +296,21 @@ describe('fundPurchases — a deposit dated after the purchases it paid (statist
     expect(funded).toEqual({ amount: 1200, from: '2026-03-02' })
   })
 
+  it('says which recorded deposit paid which day: the proposal a user reviews (deposit-dates S2)', () => {
+    const { proposals } = fundPurchases([
+      leg('RETIRO', 500, '2026-03-02'), leg('RETIRO', 700, '2026-03-03'),
+      mv('DEPOSITO', 300, '2026-03-04'), mv('DEPOSITO', 2000, '2026-03-05'), mv('DEPOSITO', 50, '2026-03-06'),
+    ], [], TODAY)
+    // By the deposit's position in the movements given; a deposit nothing was taken from is not listed.
+    expect(proposals).toEqual([
+      { index: 2, date: '2026-03-04', amount: 300, parts: [{ date: '2026-03-02', amount: 300 }], remaining: 0 },
+      { index: 3, date: '2026-03-05', amount: 2000, parts: [{ date: '2026-03-02', amount: 200 }, { date: '2026-03-03', amount: 700 }], remaining: 1100 },
+    ])
+  })
+
   it('invents nothing: a shortfall with no later deposit stays as it is', () => {
     const moves = [mv('DEPOSITO', 400, '2026-03-01'), leg('RETIRO', 500, '2026-03-02')]
-    expect(fundPurchases(moves, [], TODAY)).toEqual({ movements: moves, funded: null })
+    expect(fundPurchases(moves, [], TODAY)).toEqual({ movements: moves, funded: null, proposals: [] })
   })
 
   it('never moves a sale leg or a withdrawal, and counts income on its payment date', () => {
@@ -319,7 +331,7 @@ describe('fundPurchases — a deposit dated after the purchases it paid (statist
   it('never moves a deposit dated after today: money not yet deposited funds nothing', () => {
     // The cash form accepts future dates. TODAY is 03-10.
     const moves = [leg('RETIRO', 500, '2026-03-02'), leg('DEPOSITO', 400, '2026-03-05'), mv('DEPOSITO', 1000, '2026-03-20')]
-    expect(fundPurchases(moves, [], TODAY)).toEqual({ movements: moves, funded: null })
+    expect(fundPurchases(moves, [], TODAY)).toEqual({ movements: moves, funded: null, proposals: [] })
     const { rows, flags, fundedDeposits } = deriveHistory(input({ transactions: [tx({ date: '2026-03-02', quantity: 10, price: 50 })], movements: moves }))
     expect(byDate(rows).get(TODAY).cash_value).toBeCloseTo(-100, 6)
     expect(flags.negativeCash).toEqual({ date: '2026-03-02', cash: -500 })

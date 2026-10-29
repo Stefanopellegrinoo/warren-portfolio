@@ -1,8 +1,8 @@
 'use client'
 
-import { Info } from 'lucide-react'
 import KpiCard, { type FigureTone } from '@/components/ui/KpiCard'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import InfoLine from '@/components/ui/InfoLine'
+import MovedDepositsInfo, { fundedDepositsNote, type FundedDeposits } from '@/components/ui/MovedDepositsInfo'
 import type { DegradedReason } from '@/lib/derived-series'
 import { SectionHead } from '@/components/resumen/ui'
 import { formatDate, formatNumber, formatPct } from '@/lib/utils'
@@ -39,7 +39,7 @@ export interface RiskMetricsData {
   degraded?: boolean
   degradedReasons?: DegradedReason[]
   /** Deposit money moved to the purchases it paid, and from which day (S10). */
-  fundedDeposits?: { amount: number; from: string } | null
+  fundedDeposits?: FundedDeposits | null
 }
 
 export const sharpeTone = (s: number): FigureTone => (s >= 1 ? 'ok' : s >= 0 ? 'warn' : 'danger')
@@ -79,12 +79,6 @@ export function negativeCashNote(data: Pick<RiskMetricsData, 'negativeCashUntil'
 }
 
 /** The assumption behind a whole-portfolio series whose deposits were recorded after the purchases they paid (S10). */
-export function fundedDepositsNote(data: Pick<RiskMetricsData, 'fundedDeposits'>): string | null {
-  const f = data.fundedDeposits
-  if (!f) return null
-  return `Algunos depósitos estaban cargados después de las compras que pagaron: para medir, US$ ${formatNumber(f.amount)} se toman como depositados el día de esas compras, desde el ${formatDate(f.from)}. El total depositado no cambia.`
-}
-
 const display = (ticker: string) => ticker.split(':').pop() ?? ticker
 const listOf = (tickers: string[]) => {
   const names = tickers.map(display)
@@ -108,30 +102,6 @@ export function degradedMessages(reasons: DegradedReason[] | undefined): string[
   // An answer cached before the reasons existed only knows that something was replaced.
   if (!reasons?.length) return ['Faltó algún precio y se usó un valor de reemplazo.']
   return reasons.map(r => MESSAGES[r.kind]('tickers' in r ? r.tickers : []))
-}
-
-/** One quiet line; the (i) tells what happened on hover, on focus, or on a tap where there is no hover (S11). */
-function DegradedInfo({ reasons }: { reasons?: DegradedReason[] }) {
-  return (
-    <div className="mt-1 flex items-center gap-1 text-[13px] text-ink-3">
-      Algunos precios no estuvieron disponibles
-      <Popover>
-        <PopoverTrigger
-          openOnHover
-          delay={100}
-          aria-label="Qué precios faltaron"
-          className="-my-2.5 inline-flex h-6 w-6 items-center justify-center rounded-full text-ink-3 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring max-[819px]:h-11 max-[819px]:w-11"
-        >
-          <Info size={14} aria-hidden="true" />
-        </PopoverTrigger>
-        <PopoverContent className="max-w-[min(22rem,calc(100vw-2rem))] p-3 text-[13px] leading-snug">
-          <ul className="grid gap-1.5">
-            {degradedMessages(reasons).map(m => <li key={m}>{m}</li>)}
-          </ul>
-        </PopoverContent>
-      </Popover>
-    </div>
-  )
 }
 
 export function SharpeMetric({ data }: { data: RiskMetricsData }) {
@@ -164,7 +134,7 @@ export function DrawdownMetric({ data }: { data: RiskMetricsData }) {
   )
 }
 
-export default function RiskMetricsRow({ data }: { data: RiskMetricsData | null }) {
+export default function RiskMetricsRow({ data, onReviewDeposits }: { data: RiskMetricsData | null; onReviewDeposits?: () => void }) {
   // Tolerant fetch: a failed metrics request loses the row, not the page.
   if (!data) return null
   const note = negativeCashNote(data)
@@ -184,9 +154,15 @@ export default function RiskMetricsRow({ data }: { data: RiskMetricsData | null 
           Desde el {formatDate(data.measuredFrom)}{data.measuredDays != null && ` · ${data.measuredDays} días de mercado`}
         </p>
       )}
-      {funded && <p className="mt-1 text-[13px] text-ink-3">{funded}</p>}
+      {funded && <MovedDepositsInfo className="mt-1" note={funded} onReview={onReviewDeposits} />}
       {note && <p className="mt-1 text-[13px] text-warn">{note}</p>}
-      {data.degraded && <DegradedInfo reasons={data.degradedReasons} />}
+      {data.degraded && (
+        <InfoLine className="mt-1" label="Algunos precios no estuvieron disponibles" ariaLabel="Qué precios faltaron">
+          <ul className="grid gap-1.5">
+            {degradedMessages(data.degradedReasons).map(m => <li key={m}>{m}</li>)}
+          </ul>
+        </InfoLine>
+      )}
     </section>
   )
 }

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { DateSchema, positiveNumber } from './common'
+import { DateSchema, UUIDSchema, positiveNumber } from './common'
 
 export const CashMovementSchema = z.object({
   date: DateSchema,
@@ -35,3 +35,17 @@ export const CashMovementQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).optional().default(0),
   type: z.enum(['DEPOSITO', 'RETIRO', 'CUPON', 'DIVIDENDO']).optional(),
 })
+
+// Schema for POST /api/cash/deposit-dates (odd/tasks/deposit-dates.md S3): the proposal as the
+// user confirmed it. Only its dates may differ from a fresh proposal, which the route checks.
+export const DepositDatesSchema = z.object({
+  deposits: z.array(z.object({
+    id: UUIDSchema,
+    parts: z.array(z.object({ date: DateSchema, amount: positiveNumber('El monto') }))
+      .min(1, { message: 'Cada depósito necesita al menos una fecha' })
+      .max(1000, { message: 'Demasiadas fechas para un depósito' }),
+  }))
+    .min(1, { message: 'No hay depósitos para guardar' })
+    .max(100, { message: 'Demasiados depósitos de una vez' }),
+})
+
