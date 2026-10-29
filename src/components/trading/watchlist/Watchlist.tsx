@@ -18,6 +18,7 @@ import { addSymbolToCurrentWatchlist } from "@/lib/warren/watchlist";
 import { requestErrorMessage } from "@/lib/request-errors";
 import { LoadError } from "@/components/ons/ui";
 import { WatchlistSelector } from "./WatchlistSelector";
+import { useWatchlistExtras } from "./useWatchlistExtras";
 
 interface Row {
   symbol: string;
@@ -27,9 +28,11 @@ interface Row {
 
 interface WatchlistProps {
   onSelectSymbol?: (ticker: string) => void;
+  /** The list's width on screen (0 while hidden): wider shows each asset's name, then its last month. */
+  width?: number;
 }
 
-export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
+export function Watchlist({ onSelectSymbol, width = 0 }: WatchlistProps = {}) {
   const activeId = useChartStore((s) => s.activeWatchlistId);
   const localWatchlist = useChartStore((s) => s.watchlist);
   const watchlistRefreshTick = useChartStore((s) => s.watchlistRefreshTick);
@@ -48,6 +51,9 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
   // Cartera: the stocks held right now, read from the portfolio, never from a stored list.
   const cartera = activeId === CARTERA_LIST_ID;
   const [positions, setPositions] = useState<Position[]>([]);
+  const extras = useWatchlistExtras(currentList, width);
+  // Fixed columns once the line is there, so every row's line and price sit under their headers.
+  const cols = extras.showLine ? "grid-cols-[minmax(0,1fr)_76px_96px_76px]" : "grid-cols-[minmax(0,1fr)_auto_76px]";
 
   // Effect A — local watchlist mirror (only when no activeId)
   useEffect(() => {
@@ -215,8 +221,9 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
         )}
       </div>
 
-      <div aria-hidden="true" className="grid grid-cols-[minmax(0,1fr)_auto_76px] gap-2 border-b border-line py-1.5 pl-4 pr-10 text-xs text-ink-3">
+      <div aria-hidden="true" className={cn("grid gap-2 border-b border-line py-1.5 pl-4 pr-10 text-xs text-ink-3", cols)}>
         <span>Símbolo</span>
+        {extras.showLine && <span className="text-center">1 mes</span>}
         <span className="text-right">Precio</span>
         <span className="text-right">Var. día</span>
       </div>
@@ -242,6 +249,8 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
               const isActive = s === symbol;
               const f = flash[s];
               const isCrypto = getProviderForSymbol(s) === "binance";
+              const name = extras.name(s);
+              const line = extras.line(s);
 
               return (
                 <li key={s} className={cn("group relative flex items-center border-b border-line hover:bg-hover", isActive && "bg-hover")}>
@@ -250,12 +259,16 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
                     type="button"
                     aria-current={isActive || undefined}
                     onClick={() => { setSymbol(s); onSelectSymbol?.(s); }}
-                    className="grid min-h-10 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto_76px] items-center gap-2 py-1.5 pl-4 text-left text-[13px] tabular-nums focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring max-[819px]:min-h-11"
+                    className={cn("grid min-h-10 min-w-0 flex-1 items-center gap-2 py-1.5 pl-4 text-left text-[13px] tabular-nums focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring max-[819px]:min-h-11", cols)}
                   >
-                    <span className={cn("truncate text-ink", isActive && "font-semibold")}>
-                      {isCrypto ? s.replace("USDT", "") : s}
-                      {isCrypto && <span className="ml-1 text-xs text-ink-3">USDT</span>}
+                    <span className="flex min-w-0 flex-col">
+                      <span className={cn("truncate text-ink", isActive && "font-semibold")}>
+                        {isCrypto ? s.replace("USDT", "") : s}
+                        {isCrypto && <span className="ml-1 text-xs text-ink-3">USDT</span>}
+                      </span>
+                      {name && <span className="truncate text-xs text-ink-3">{name}</span>}
                     </span>
+                    {extras.showLine && <span className="flex justify-center">{line && <MonthLine closes={line} />}</span>}
                     <span className={cn(
                       "text-right transition-colors duration-300 motion-reduce:transition-none",
                       f === "up" ? "text-ok" : f === "down" ? "text-danger" : "text-ink",
@@ -300,6 +313,18 @@ export function Watchlist({ onSelectSymbol }: WatchlistProps = {}) {
         )}
       </ScrollArea>
     </div>
+  );
+}
+
+/** The last month's daily closes as a line, green when it ended up and red when down. */
+function MonthLine({ closes }: { closes: number[] }) {
+  const w = 72, h = 24;
+  const lo = Math.min(...closes), hi = Math.max(...closes);
+  const points = closes.map((v, i) => `${((i / (closes.length - 1)) * w).toFixed(1)},${(h - 3 - ((v - lo) / (hi - lo || 1)) * (h - 6)).toFixed(1)}`).join(" ");
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} width={w} height={h} aria-hidden="true" className={closes[closes.length - 1] >= closes[0] ? "text-ok" : "text-danger"}>
+      <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
   );
 }
 
