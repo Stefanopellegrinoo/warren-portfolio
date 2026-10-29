@@ -9,6 +9,9 @@ export interface IndicatorLine {
   data: IndicatorPoint[]
   /** A histogram's bars that rise (true) or fall, for its two colors (S5). */
   up?: boolean[]
+  /** A histogram's own rising and falling colors when the user saved none (else both are `color`). */
+  upColor?: string
+  downColor?: string
 }
 
 export interface IndicatorSpec {
@@ -22,6 +25,9 @@ export interface IndicatorSpec {
 const line = (id: string, color: string, data: IndicatorPoint[]): IndicatorLine => ({ id, type: 'line', color, data })
 const pick = <T extends { time: number }>(points: T[], f: (p: T) => number): IndicatorPoint[] =>
   points.map((p) => ({ time: p.time, value: f(p) }))
+
+/** TradingView's candles (odd/tasks/chart-pro-redesign.md S6): the chart's only, the app's tokens stay. */
+export const CANDLE_COLORS = { up: '#089981', down: '#F23645' }
 
 const SIGNAL = '#e0904a'
 const MUTED = '#8f887e'
@@ -48,11 +54,13 @@ export const INDICATOR_SPECS: Record<IndicatorKey, IndicatorSpec> = {
       ]
     },
   },
+  // At the foot of the price pane, in the candles' colors at ~45 % (S6).
   volume: {
     label: () => 'Volumen',
-    pane: 'own',
+    pane: 'price',
     lines: (candles) => [{
       id: 'volume', type: 'histogram', color: INDICATOR_COLORS.volume,
+      upColor: 'rgba(8, 153, 129, 0.45)', downColor: 'rgba(242, 54, 69, 0.45)',
       data: candles.map((k) => ({ time: k.time, value: k.volume })),
       up: candles.map((k) => k.close >= k.open),
     }],

@@ -12,7 +12,7 @@ import {
 /**
  * An indicator's saved settings (odd/tasks/chart-customization.md S5) as the chart draws them. Whatever the
  * user never changed keeps today's look: the colors of INDICATOR_SPECS, width 1, the levels in the theme's
- * color, no fills (S8).
+ * color (S8); only RSI's fill is on by default (odd/tasks/chart-pro-redesign.md S1).
  */
 
 type Saved = ChartPreferences["indicatorSettings"];
@@ -35,8 +35,8 @@ export function lineLook(line: IndicatorLine, saved?: IndicatorLineStyle): LineL
 		color: saved?.color ?? line.color,
 		width: (saved?.width ?? 1) as LineLook["width"],
 		visible: saved?.visible ?? true,
-		upColor: saved?.upColor ?? line.color,
-		downColor: saved?.downColor ?? line.color,
+		upColor: saved?.upColor ?? line.upColor ?? line.color,
+		downColor: saved?.downColor ?? line.downColor ?? line.color,
 	};
 }
 
@@ -56,11 +56,16 @@ export function levelLooks(key: IndicatorKey, style: IndicatorStyle | undefined,
 
 const FILL_COLORS: Record<string, string> = { bands: INDICATOR_COLORS.bollinger, levels: INDICATOR_COLORS.rsi };
 
-/** A fill: off until the user turns it on (there was none before). */
+/** A fill: RSI's 30–70 on until the user turns it off (odd/tasks/chart-pro-redesign.md S1); Bollinger's off until turned on. */
 export function fillLook(id: string, style?: IndicatorStyle) {
 	const saved = style?.fills?.[id];
-	return { visible: saved?.visible ?? false, color: saved?.color ?? FILL_COLORS[id], transparency: saved?.transparency ?? 90 };
+	return { visible: saved?.visible ?? id === "levels", color: saved?.color ?? FILL_COLORS[id], transparency: saved?.transparency ?? 90 };
 }
+
+/** A soft band between an indicator's levels that is always there and is not a setting: the stochastic's 20–80 (S1). */
+export const FIXED_BANDS: Partial<Record<IndicatorKey, { color: string; transparency: number }>> = {
+	stochastic: { color: INDICATOR_COLORS.stochastic, transparency: 94 },
+};
 
 type Edge = number | readonly IndicatorPoint[];
 export interface FillDraw {

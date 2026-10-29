@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { CANDLE_COLORS } from "@/lib/chart/indicator-specs";
 
 export interface ChartTheme {
 	bg: string;
@@ -9,10 +10,21 @@ export interface ChartTheme {
 	ink3: string;
 	line: string;
 	lineStrong: string;
+	/** The grid, both ways: the ink, faint. */
+	grid: string;
 	up: string;
 	down: string;
 	accent: string;
 	font: string;
+}
+
+// The grid's alpha over the ink (odd/tasks/chart-pro-redesign.md S6).
+const GRID_ALPHA = 0.07;
+/** A #rrggbb token at `alpha`; any other color as it is. */
+function faint(hex: string, alpha: number) {
+	if (!/^#[0-9a-f]{6}$/i.test(hex)) return hex;
+	const n = parseInt(hex.slice(1), 16);
+	return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
 }
 
 function readTheme(): ChartTheme {
@@ -25,8 +37,10 @@ function readTheme(): ChartTheme {
 		ink3: v("--ink-3"),
 		line: v("--line"),
 		lineStrong: v("--line-strong"),
-		up: v("--ok-dot"),
-		down: v("--danger-dot"),
+		grid: faint(v("--ink"), GRID_ALPHA),
+		// TradingView's candles on the chart only: the app's --ok-dot and --danger-dot stay for the rest.
+		up: CANDLE_COLORS.up,
+		down: CANDLE_COLORS.down,
 		accent: v("--accent"),
 		font: getComputedStyle(document.body).fontFamily,
 	};

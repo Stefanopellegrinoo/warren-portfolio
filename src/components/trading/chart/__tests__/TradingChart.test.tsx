@@ -99,7 +99,7 @@ const PRICE_VALUE = { source: 'price', target: 'value', timeframe: null, periods
 const alertsApi = { alerts: [] as unknown[], create: vi.fn(), save: vi.fn(async () => true), move: vi.fn(), rearm: vi.fn(), remove: vi.fn() }
 vi.mock('../useChartAlerts', () => ({ useChartAlerts: () => alertsApi }))
 vi.mock('../useChartTheme', () => ({
-  useChartTheme: () => ({ bg: '#fff', ink: '#000', ink2: '#111', ink3: '#222', line: '#ddd', lineStrong: '#ccc', accent: '#0a0', up: '#0f0', down: '#f00', font: 'sans' }),
+  useChartTheme: () => ({ bg: '#fff', ink: '#000', ink2: '#111', ink3: '#222', line: '#ddd', lineStrong: '#ccc', grid: '#eee', accent: '#0a0', up: '#0f0', down: '#f00', font: 'sans' }),
 }))
 // The toolbar has its own tests; here it only switches the alert mode on, and shows where the
 // chart lets it float the favorites bar.
@@ -126,22 +126,24 @@ const { setDefaultStyleOverride } = await import('lightweight-charts-drawing')
 const { setToolStyle, setIndicatorSettings } = await import('@/lib/chart/preferences')
 const { useChartStore, DEFAULT_CONFIG } = await import('@/lib/store/chart-store')
 const DEFAULT_INDICATORS = { ...useChartStore.getState().indicators }
+const DEFAULT_MINIMIZED = { ...useChartStore.getState().minimized }
 const { INDICATOR_KEYS } = await import('@/lib/chart/preferences-schema')
 const lwc = await import('lightweight-charts')
 
-afterEach(() => { compare.status = 'idle'; compare.series = {}; compare.ccl = undefined; bars.status = 'ready'; bars.error = undefined; bars.key = undefined; getVisibleRange.mockReset(); getVisibleRange.mockReturnValue(null); useChartStore.setState({ compareSymbols: [], compareDefaulted: true, compareRange: '1A', indicators: { ...DEFAULT_INDICATORS } }); vi.clearAllMocks(); vi.unstubAllGlobals(); setupOrder.length = 0; alertsApi.alerts = []; bars.candles = [candle]; drawingState.tool = null; drawingState.selection = []; series.priceToCoordinate.mockReturnValue(null); document.body.innerHTML = '' })
+afterEach(() => { compare.status = 'idle'; compare.series = {}; compare.ccl = undefined; bars.status = 'ready'; bars.error = undefined; bars.key = undefined; getVisibleRange.mockReset(); getVisibleRange.mockReturnValue(null); useChartStore.setState({ compareSymbols: [], compareDefaulted: true, compareRange: '1A', indicators: { ...DEFAULT_INDICATORS }, minimized: { ...DEFAULT_MINIMIZED } }); vi.clearAllMocks(); vi.unstubAllGlobals(); setupOrder.length = 0; alertsApi.alerts = []; bars.candles = [candle]; drawingState.tool = null; drawingState.selection = []; series.priceToCoordinate.mockReturnValue(null); document.body.innerHTML = '' })
 
 const onPhone = (phone: boolean) => vi.stubGlobal('matchMedia', (q: string) => ({ matches: phone && q.includes('max-width'), media: q, addEventListener() {}, removeEventListener() {} }))
-const panes = (n: number) => Array.from({ length: n }, () => ({ setStretchFactor: vi.fn() }))
+// Panes the library laid out: each `height` px tall (a test changes them as a separator drag would).
+const panes = (n: number, height = 100) => Array.from({ length: n }, () => ({ setStretchFactor: vi.fn(), height, getHeight() { return this.height } }))
 // jsdom has no matchMedia: a desktop unless a test says otherwise.
 beforeEach(() => onPhone(false))
 const button = (text: string) => [...document.querySelectorAll('button')].find(b => b.textContent === text)!
 
-async function render(symbol = 'BTCUSDT') {
+async function render(symbol = 'BTCUSDT', timeframe: '1d' | '15m' | '1w' = '1d') {
   const el = document.createElement('div')
   document.body.appendChild(el)
   const root = createRoot(el)
-  await act(async () => { root.render(<TradingChart symbol={symbol} timeframe="1d" />) })
+  await act(async () => { root.render(<TradingChart symbol={symbol} timeframe={timeframe} />) })
   // The element the chart is created in.
   const box = vi.mocked(createChart).mock.calls[0][0] as HTMLElement
   return { box, unmount: () => act(() => root.unmount()) }
@@ -228,27 +230,62 @@ describe('TradingChart text editor', () => {
   })
 })
 
-describe('TradingChart price pane on a phone (S6)', () => {
-  it('keeps two thirds of the height for the price with five indicator panes', async () => {
-    onPhone(true)
-    const list = panes(6)
+// odd/tasks/chart-pro-redesign.md S1 replaced, on purpose, the old factors (price 6:1 on a computer, two thirds
+// on a phone): the price keeps about half the height and the indicator panes share the rest (pane-layout.test.ts).
+describe('TradingChart pane heights by share (S1, S7)', () => {
+  // The chart box is 728 px tall: 700 for the panes over the 28 px time axis.
+  let height: ReturnType<typeof vi.spyOn>
+  beforeEach(() => { height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(728) })
+  afterEach(() => height.mockRestore())
+  // The last factor each pane was given, to a tenth of a px.
+  const factors = (list: ReturnType<typeof panes>) => list.map((p) => Math.round((p.setStretchFactor.mock.calls.at(-1)?.[0] as number) * 10) / 10)
+
+  it('on a computer the price keeps 56 % and the four indicator panes share the rest', async () => {
+    const list = panes(5)
     chart.panes.mockReturnValue(list as never)
 
     const { unmount } = await render()
 
-    expect(list[0].setStretchFactor).toHaveBeenLastCalledWith(10)
-    list.slice(1).forEach(p => expect(p.setStretchFactor).toHaveBeenLastCalledWith(1))
+    expect(factors(list)).toEqual([392, 77, 77, 77, 77])
     unmount()
   })
 
-  it('a desktop keeps the panes as they were', async () => {
-    onPhone(false)
-    const list = panes(6)
+  it('on a phone the price keeps half', async () => {
+    onPhone(true)
+    const list = panes(5)
     chart.panes.mockReturnValue(list as never)
 
     const { unmount } = await render()
 
-    expect(list[0].setStretchFactor).toHaveBeenLastCalledWith(6)
+    expect(factors(list)).toEqual([350, 87.5, 87.5, 87.5, 87.5])
+    unmount()
+  })
+
+  it('a minimized pane is a 24 px strip and its lines go; expanded, it comes back', async () => {
+    const list = panes(5)
+    chart.panes.mockReturnValue(list as never)
+    const { unmount } = await render()
+
+    await act(async () => { useChartStore.getState().toggleMinimized('macd') })
+    expect(factors(list)[2]).toBe(24)
+    expect(factors(list)[1]).toBe(factors(list)[3])
+
+    await act(async () => { useChartStore.getState().toggleMinimized('macd') })
+    expect(factors(list)).toEqual([392, 77, 77, 77, 77])
+    unmount()
+  })
+
+  it('a taller chart lays the panes out again', async () => {
+    const observed: (() => void)[] = []
+    vi.stubGlobal('ResizeObserver', class { constructor(cb: () => void) { observed.push(cb) } observe() {} disconnect() {} })
+    const list = panes(5)
+    chart.panes.mockReturnValue(list as never)
+    const { unmount } = await render()
+
+    height.mockReturnValue(1028)
+    await act(async () => { observed.forEach((cb) => cb()); await new Promise((r) => requestAnimationFrame(r)) })
+
+    expect(factors(list)).toEqual([560, 110, 110, 110, 110])
     unmount()
   })
 })
@@ -297,6 +334,157 @@ describe('TradingChart pane heights', () => {
     const bundle = readFileSync(`${lib}/dist/lightweight-charts.production.mjs`, 'utf8')
     expect(bundle).toContain('setAttribute("colspan","3")')
     expect(bundle).toMatch(/cursor="row-resize",this\.\w+\.appendChild\(\w\);const \w=document\.createElement\("div"\),\w=\w\.style;\w\.position="absolute",\w\.zIndex="50",\w\.top="-4px",\w\.height="9px"/)
+  })
+})
+
+// odd/tasks/chart-pro-redesign.md S6: TradingView's candles and soft grid on Warren's warm background, the credit as a link.
+describe('TradingChart look (S6)', () => {
+  const lastOptions = () => Object.assign({}, ...(chart.applyOptions.mock.calls as Record<string, unknown>[][]).map((c) => c[0]))
+
+  it("keeps the theme's background, draws a soft grid both ways and no logo inside the chart", async () => {
+    const { unmount } = await render()
+
+    expect(lastOptions()).toMatchObject({
+      layout: { background: { color: '#fff' }, attributionLogo: false },
+      grid: { vertLines: { color: '#eee' }, horzLines: { color: '#eee' } },
+    })
+    unmount()
+  })
+
+  it("draws the candles in the theme's up and down colors, and their last-price label in the last candle's", async () => {
+    const { unmount } = await render()
+
+    expect(series.applyOptions).toHaveBeenCalledWith({ upColor: '#0f0', downColor: '#f00', borderUpColor: '#0f0', borderDownColor: '#f00', wickUpColor: '#0f0', wickDownColor: '#f00' })
+    const candles = (chart.addSeries.mock.calls as unknown[][]).find((c) => c[0] === lwc.CandlestickSeries)![1] as Record<string, unknown>
+    expect(candles.priceLineVisible).toBe(true)
+    expect(candles).not.toHaveProperty('priceLineColor')
+    expect((series.applyOptions.mock.calls as Record<string, unknown>[][]).some((c) => 'priceLineColor' in c[0])).toBe(false)
+    unmount()
+  })
+
+  it('the theme: TradingView candles for the chart only, the grid in the ink at 7 %, the background the app\'s', async () => {
+    const { useChartTheme } = await vi.importActual<typeof import('../useChartTheme')>('../useChartTheme')
+    const root = document.documentElement
+    ;[['--bg', '#faf9f7'], ['--ink', '#1c1a17'], ['--ok-dot', '#3f8c45'], ['--danger-dot', '#c8382a']].forEach(([k, v]) => root.style.setProperty(k, v))
+    let theme: ReturnType<typeof useChartTheme> = null
+    const Probe = () => { theme = useChartTheme(); return null }
+    const el = document.createElement('div')
+    const r = createRoot(el)
+    await act(async () => { r.render(<Probe />) })
+
+    expect(theme).toMatchObject({ bg: '#faf9f7', up: '#089981', down: '#F23645', grid: 'rgba(28, 26, 23, 0.07)' })
+    expect(getComputedStyle(root).getPropertyValue('--ok-dot').trim()).toBe('#3f8c45')
+    act(() => r.unmount())
+    ;['--bg', '--ink', '--ok-dot', '--danger-dot'].forEach((k) => root.style.removeProperty(k))
+  })
+})
+
+// odd/tasks/chart-pro-redesign.md S1: every pane carries its own legend; S7: on a phone the price legend stays short.
+describe('TradingChart legends (S1, S7)', () => {
+  const priceLegend = () => document.querySelector<HTMLElement>('[data-chart-legend]')!
+  const paneLegend = (k: string) => document.querySelector<HTMLElement>(`[data-pane-legend="${k}"]`)
+  const frame = () => act(async () => { await new Promise((r) => requestAnimationFrame(r)) })
+
+  it('names the indicators over the price in its legend and gives every indicator pane its own, at its top', async () => {
+    const list = panes(5)
+    list[0].height = 300
+    chart.panes.mockReturnValue(list as never)
+    const { unmount } = await render()
+
+    expect(priceLegend().textContent).toMatch(/EMA 20.*EMA 50.*EMA 200.*Volumen/)
+    expect(priceLegend().textContent).not.toMatch(/RSI|MACD/)
+    expect(['rsi', 'macd', 'stochastic', 'adx'].map((k) => paneLegend(k)!.style.top)).toEqual(['305px', '406px', '507px', '608px'])
+    expect(paneLegend('volume')).toBeNull()
+    expect(document.body.textContent).not.toMatch(/\d indicadores/)
+    unmount()
+  })
+
+  it('a dragged separator moves the legends with their panes', async () => {
+    const list = panes(5)
+    chart.panes.mockReturnValue(list as never)
+    const { box, unmount } = await render()
+    expect(paneLegend('macd')!.style.top).toBe('206px')
+
+    list[1].height = 160
+    act(() => { box.dispatchEvent(new PointerEvent('pointermove', { buttons: 1, bubbles: true })) })
+    await frame()
+
+    expect(paneLegend('macd')!.style.top).toBe('266px')
+    unmount()
+  })
+
+  it("the legend's settings open the indicator's settings, and Quitar turns it off", async () => {
+    const { unmount } = await render()
+
+    act(() => document.querySelector<HTMLButtonElement>('button[aria-label="Ajustes RSI 14"]')!.click())
+    expect(useChartStore.getState().settingsTarget).toBe('rsi')
+    await act(async () => { document.querySelector<HTMLButtonElement>('button[aria-label="Quitar Volumen"]')!.click() })
+    expect(useChartStore.getState().indicators.volume).toBe(false)
+    expect(priceLegend().textContent).not.toContain('Volumen')
+    act(() => useChartStore.getState().setSettingsTarget(null))
+    unmount()
+  })
+
+  it('on a phone the candle data shows only while a finger is on the chart, with its date; a computer always shows it', async () => {
+    const { unmount } = await render()
+    const ohlc = () => priceLegend().querySelector<HTMLElement>('[data-ohlc]')!
+
+    expect(ohlc().textContent).toContain('Cie')
+    expect(ohlc().className).toContain('max-[819px]:hidden')
+    const onMove = chart.subscribeCrosshairMove.mock.calls.at(-1)![0] as (p: unknown) => void
+    act(() => onMove({ seriesData: new Map([[series, { ...candle, time: 86400 * 3 }]]) }))
+    expect(ohlc().className).not.toContain('max-[819px]:hidden')
+    expect(ohlc().textContent).toContain('04/01/70')
+    unmount()
+  })
+})
+
+// odd/tasks/chart-pro-redesign.md S6: the range chips and the price scale's mode under the chart, and the credit.
+describe('TradingChart range bar (S6)', () => {
+  const day = (i: number) => Date.UTC(2025, 0, 1) / 1000 + i * 86400
+  const YEAR = Array.from({ length: 400 }, (_, i) => ({ time: day(i), open: 1, high: 2, low: 0.5, close: 1.5 }))
+  const chips = (label: string) => [...document.querySelectorAll(`[role="group"][aria-label="${label}"] button`)].map((b) => b.textContent)
+  const modes = () => (priceScale.applyOptions.mock.calls as Record<string, unknown>[][]).map((c) => c[0]).filter((o) => 'mode' in o)
+
+  it("offers the timeframe's ranges; a chip shows its range up to the last bar, keeping the room on the right", async () => {
+    bars.candles = YEAR
+    const { unmount } = await render()
+    expect(chips('Período')).toEqual(['1M', '3M', '6M', '1A', '5A', 'Todo'])
+    setVisibleLogicalRange.mockClear()
+
+    await act(async () => { button('1M').click() })
+
+    // The last bar is Feb 4 2026: from Jan 4 on.
+    expect(setVisibleLogicalRange).toHaveBeenLastCalledWith({ from: 368, to: 405 })
+    expect(document.querySelector('[aria-label="Período"] [aria-pressed="true"]')!.textContent).toBe('1M')
+    unmount()
+  })
+
+  it('an intraday chart offers days', async () => {
+    const { unmount } = await render('BTCUSDT', '15m')
+
+    expect(chips('Período')).toEqual(['1D', '5D', '1M'])
+    unmount()
+  })
+
+  it('switches the price scale to %, log and back to auto, and touches nothing until asked', async () => {
+    const { unmount } = await render()
+    expect(modes()).toEqual([])
+
+    await act(async () => { button('log').click() })
+    expect(modes().at(-1)).toEqual({ mode: 1 })
+    await act(async () => { button('%').click() })
+    expect(modes().at(-1)).toEqual({ mode: 2 })
+    await act(async () => { button('auto').click() })
+    expect(modes().at(-1)).toEqual({ mode: 0, autoScale: true })
+    unmount()
+  })
+
+  it('credits TradingView with a link under the chart', async () => {
+    const { unmount } = await render()
+
+    expect(document.querySelector('a[href="https://www.tradingview.com/"]')!.textContent).toBe('Gráficos de TradingView')
+    unmount()
   })
 })
 
@@ -559,7 +747,7 @@ describe('TradingChart alerts: select before move', () => {
 // S8: with nothing saved, every series looks exactly as before.
 describe('TradingChart indicator styles', () => {
   type Rec = Record<string, unknown>
-  interface Made { type: unknown; pane: number; options: Rec; data: Rec[]; lines: { options: Rec }[]; fills: { paneViews: () => { renderer: () => unknown }[] }[] }
+  interface Made { type: unknown; pane: number; options: Rec; scale: Rec; data: Rec[]; lines: { options: Rec }[]; fills: { paneViews: () => { renderer: () => unknown }[] }[] }
   let made: Made[]
   const initial = useChartStore.getState()
   // One recording series per indicator line, in the order the chart adds them; the candles keep the shared one.
@@ -567,11 +755,11 @@ describe('TradingChart indicator styles', () => {
     made = []
     chart.addSeries.mockImplementation(((type: unknown, options: Rec, pane = 0) => {
       if (type === lwc.CandlestickSeries) return series
-      const m: Made = { type, pane, options: { ...options }, data: [], lines: [], fills: [] }
+      const m: Made = { type, pane, options: { ...options }, scale: {}, data: [], lines: [], fills: [] }
       made.push(m)
       return {
         applyOptions: (o: Rec) => Object.assign(m.options, o),
-        priceScale: () => ({ applyOptions: () => {} }),
+        priceScale: () => ({ applyOptions: (o: Rec) => Object.assign(m.scale, o) }),
         setData: (d: Rec[]) => { m.data = d },
         createPriceLine: (o: Rec) => {
           const line = { options: { ...o }, applyOptions: (p: Rec) => Object.assign(line.options, p) }
@@ -592,18 +780,23 @@ describe('TradingChart indicator styles', () => {
     useChartStore.setState(initial, true)
   })
   const options = () => made.map((m) => m.options)
-  const legend = () => document.querySelector('[data-chart-legend]')!.textContent
-  const lineOptions = (color: string) => ({ color, lineWidth: 1, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false, priceFormat: expect.objectContaining({ type: 'custom' }), visible: true })
-  const barOptions = (color: string, volume = false) => ({ color, priceLineVisible: false, lastValueVisible: false, priceFormat: volume ? { type: 'volume' } : expect.objectContaining({ type: 'custom' }), visible: true })
+  // Every legend: the price pane's and each indicator pane's.
+  const legend = () => [...document.querySelectorAll('[data-chart-legend], [data-pane-legend]')].map((l) => l.textContent).join(' ')
+  // odd/tasks/chart-pro-redesign.md S1 changed lastValueVisible on purpose: the values live in the legends.
+  const lineOptions = (color: string) => ({ color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, priceFormat: expect.objectContaining({ type: 'custom' }), visible: true })
+  const barOptions = (color: string) => ({ color, priceLineVisible: false, lastValueVisible: false, priceFormat: expect.objectContaining({ type: 'custom' }), visible: true })
+  // S6 moved the volume, on purpose, to its own scale at the foot of the price pane, in the candles' colors.
+  const volumeOptions = { color: 'rgba(8, 153, 129, 0.45)', priceLineVisible: false, lastValueVisible: false, priceFormat: { type: 'volume' }, priceScaleId: 'volume', visible: true }
   const drawsFill = (m: Made) => m.fills.some((f) => f.paneViews()[0].renderer() !== null)
 
-  it("with nothing saved, every line has today's color and width, the levels today's look, and no fill (S8)", async () => {
+  // odd/tasks/chart-pro-redesign.md S1 turned on, on purpose, RSI's 30–70 fill and the stochastic's 20–80 band.
+  it("with nothing saved, every line has today's color and width and the levels today's look; only RSI's fill and the stochastic's band are drawn (S8)", async () => {
     const { unmount } = await render()
 
     // The indicators the store turns on, in INDICATOR_ORDER.
     expect(options()).toEqual([
       lineOptions('#00BCD4'), lineOptions('#FF9800'), lineOptions('#E91E63'),
-      barOptions('#787b86', true),
+      volumeOptions,
       lineOptions('#7E57C2'),
       lineOptions('#2196F3'), lineOptions('#e0904a'), barOptions('#8f887e'),
       lineOptions('#2196F3'), lineOptions('#e0904a'),
@@ -613,8 +806,29 @@ describe('TradingChart indicator styles', () => {
     expect(made.flatMap((m) => m.lines.map(({ options: { lineVisible, ...o } }) => (lineVisible === false ? 'hidden' : o)))).toEqual(
       [30, 70, 20, 80, 25].map((price) => ({ price, color: '#222', lineStyle: 2, lineWidth: 1, axisLabelVisible: false })),
     )
-    expect(made.some((m) => m.data.some((p) => 'color' in p))).toBe(false)
-    expect(made.some(drawsFill)).toBe(false)
+    expect(made.filter((m) => m.data.some((p) => 'color' in p))).toEqual([made[3]])
+    expect(made.map(drawsFill)).toEqual(made.map((_, i) => i === 4 || i === 8))
+    unmount()
+  })
+
+  it('the volume sits at the foot of the price pane, on its own scale', async () => {
+    const { unmount } = await render()
+
+    expect(made[3].pane).toBe(0)
+    expect(made[3].scale).toEqual({ scaleMargins: { top: 0.8, bottom: 0 } })
+    expect(made[3].data).toEqual([{ time: 1, value: undefined, color: 'rgba(8, 153, 129, 0.45)' }]) // the one candle closed up
+    unmount()
+  })
+
+  it("the stochastic's band goes with its lines when it is hidden or minimized", async () => {
+    const { unmount } = await render()
+
+    act(() => useChartStore.getState().toggleHidden('stochastic'))
+    expect(drawsFill(made[8])).toBe(false)
+    act(() => { useChartStore.getState().toggleHidden('stochastic'); useChartStore.getState().toggleMinimized('stochastic') })
+    expect(drawsFill(made[8])).toBe(false)
+    expect([made[8].options.visible, made[9].options.visible]).toEqual([false, false])
+    expect(made[4].options.visible).toBe(true)
     unmount()
   })
 
@@ -637,7 +851,7 @@ describe('TradingChart indicator styles', () => {
   it('RSI levels take their saved value and color, and the fill between them follows', async () => {
     const { unmount } = await render()
     const rsi = made[4]
-    expect(drawsFill(rsi)).toBe(false)
+    expect(drawsFill(rsi)).toBe(true)
 
     act(() => setIndicatorSettings('rsi', { style: { levels: [{ value: 30 }, { value: 80, color: '#f23645' }], fills: { levels: { visible: true, color: '#9c27b0', transparency: 50 } } } }))
 
@@ -698,7 +912,8 @@ describe('TradingChart indicator styles', () => {
     const { unmount } = await render()
 
     const rsi = made[4]
-    expect(rsi.pane).toBe(2)
+    // Pane 1: the volume left its own pane (odd/tasks/chart-pro-redesign.md S6), on purpose.
+    expect(rsi.pane).toBe(1)
     expect(rsi.lines.map((l) => l.options).filter((o) => o.title === 'Alerta')).toEqual([
       { price: 70, color: '#089981', lineStyle: 0, lineWidth: 1, axisLabelVisible: true, title: 'Alerta' },
     ])
@@ -720,7 +935,7 @@ describe('TradingChart indicator styles', () => {
     const { unmount } = await render()
     act(() => setIndicatorSettings('rsi', { style: { lines: { rsi: { visible: true } }, fills: { levels: { visible: true } } } }))
 
-    act(() => useChartStore.getState().toggleHidden('rsi'))
+    act(() => document.querySelector<HTMLButtonElement>('button[aria-label="Ocultar RSI 14"]')!.click())
 
     expect(made[4].options.visible).toBe(false)
     expect(drawsFill(made[4])).toBe(false)
@@ -1226,6 +1441,37 @@ describe('TradingChart — comparing', () => {
     const formats = (ema.applyOptions.mock.calls as { priceFormat?: { formatter: (p: number) => string } }[][]).map((c) => c[0].priceFormat).filter(Boolean)
     expect(formats.at(-1)!.formatter(3)).toBe('+100,00 %')
     chart.addSeries.mockImplementation(() => series)
+    unmount()
+  })
+
+  it('the volume keeps its own scale while comparing: its bars never read in %', async () => {
+    compare.status = 'ready'
+    compare.series = { SPY: SPY_TWO }
+    bars.candles = TWO_DAYS
+    const volume = { applyOptions: vi.fn(), setData: vi.fn(), priceScale: () => ({ applyOptions: vi.fn() }), createPriceLine: vi.fn(() => ({ applyOptions: vi.fn() })), attachPrimitive: vi.fn() }
+    chart.addSeries.mockImplementation(((t: unknown) => (t === lwc.HistogramSeries ? volume : series)) as never)
+    useChartStore.setState({ compareRange: 'Todo' })
+    const { unmount } = await renderTf('AAPL', '1d', ['SPY'])
+    useChartStore.setState({ indicators: { ...NO_INDICATORS, volume: true } as never })
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+
+    expect(volume.applyOptions).toHaveBeenCalled()
+    expect((volume.applyOptions.mock.calls as Record<string, unknown>[][]).some((c) => 'priceFormat' in c[0])).toBe(false)
+    chart.addSeries.mockImplementation(() => series)
+    unmount()
+  })
+
+  it('the range chips under the chart are the comparison\'s, with the day it starts; the legend has none', async () => {
+    compare.status = 'ready'
+    compare.series = { SPY: SPY_TWO }
+    bars.candles = TWO_DAYS
+    useChartStore.setState({ compareRange: 'Todo' })
+    const { el, unmount } = await renderTf('AAPL', '1d', ['SPY'])
+
+    expect(el.querySelector('[data-chart-legend] [role="group"]')).toBeNull()
+    expect(el.querySelector('[aria-label="Período"]')).toBeNull()
+    expect(el.querySelector('[role="group"][aria-label="Comparar desde"]')!.parentElement!.textContent).toContain('desde 01/01/70')
+    expect([...el.querySelectorAll('[role="group"][aria-label="Escala"] button')].map((b) => b.textContent)).toEqual(['log', 'auto'])
     unmount()
   })
 

@@ -36,6 +36,11 @@ describe('INDICATOR_SPECS', () => {
     expect(INDICATOR_SPECS.rsi.lines(candles, DEFAULT_CONFIG)[0].data).toEqual(rsi(candles, 14))
   })
 
+  // odd/tasks/chart-pro-redesign.md S6: the volume is drawn at the foot of the price pane, not in a pane of its own.
+  it('draws the volume over the price', () => {
+    expect(INDICATOR_SPECS.volume.pane).toBe('price')
+  })
+
   it('splits MACD into line, signal and a histogram', () => {
     const lines = INDICATOR_SPECS.macd.lines(candles, DEFAULT_CONFIG)
 

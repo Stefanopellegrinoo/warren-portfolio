@@ -8,6 +8,7 @@ import {
 	HistogramSeries,
 	LineSeries,
 	LineStyle,
+	PriceScaleMode,
 	TickMarkType,
 	createChart,
 	createSeriesMarkers,
@@ -22,10 +23,11 @@ import {
 	type UTCTimestamp,
 } from "lightweight-charts";
 import { DrawingManager, type Drawing } from "lightweight-charts-drawing";
-import { ChevronDown, Eye, EyeOff, Settings2, X } from "lucide-react";
+import { Settings2, X } from "lucide-react";
 import { MAX_COMPARE, useChartStore, type IndicatorKey } from "@/lib/store/chart-store";
 import { INDICATOR_ORDER, INDICATOR_SPECS, type IndicatorLine } from "@/lib/chart/indicator-specs";
-import { BandFill, effectiveConfig, fillLook, levelLooks, lineLook, seriesPoints } from "@/lib/chart/indicator-style";
+import { BandFill, FIXED_BANDS, effectiveConfig, fillLook, levelLooks, lineLook, seriesPoints } from "@/lib/chart/indicator-style";
+import { MINIMIZED_PANE_PX, paneHeights, paneTops } from "@/lib/chart/pane-layout";
 import { INDICATOR_STYLE_PARTS, type ChartPreferences } from "@/lib/chart/preferences-schema";
 import { hitTestAlert, priceDecimals, type ChartAlert } from "@/lib/chart/alerts";
 import { indicatorOf, isPriceValue, lineIdOf } from "@/lib/chart/alert-condition";
@@ -34,7 +36,7 @@ import { onTap, selectBeforeMove } from "@/lib/chart/select-before-move";
 import { applyRememberedStyles } from "@/lib/chart/remembered-style";
 import { tradeMarkers } from "@/lib/chart/trade-markers";
 import { PORTFOLIO_SERIES, isArsSymbol, seriesLabel } from "@/lib/compare-series";
-import { COMPARE_RANGES, COMPARE_TIMEFRAMES, alignToBars, compareBase, pctFrom, scaleToBase, toUsdCandles } from "@/lib/chart/compare";
+import { COMPARE_RANGES, COMPARE_TIMEFRAMES, alignToBars, compareBase, pctFrom, scaleToBase, toUsdCandles, type CompareRange } from "@/lib/chart/compare";
 import type { Candle, Timeframe } from "@/lib/binance/types";
 import { cn, formatNumber } from "@/lib/utils";
 import { useCandles } from "./useCandles";
@@ -49,6 +51,8 @@ import { useTradeMarkers } from "./useTradeMarkers";
 import { TradeCard, TradeSheet } from "./TradeMarkers";
 import { useCompareSeries } from "./useCompareSeries";
 import { CompareSheet } from "./CompareSheet";
+import { PaneLegends } from "./PaneLegends";
+import { ChartRangeBar, rangeChips, rangeFirstBar, type RangeChip, type ScaleMode } from "./ChartRangeBar";
 
 const TZ = "America/Argentina/Buenos_Aires";
 const INTRADAY: Timeframe[] = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h"];
@@ -59,7 +63,16 @@ const TOUCH_HIT_PX = 14;
 const TOUCH_DRAG_PX = 8;
 // How far from an arrow's bar a tap still opens its card: a 44px finger target, a mouse's few px.
 const TRADE_SLOP_PX = { touch: 22, mouse: 6 };
-const LEGEND_OPEN_MAX = 3;
+// The panes share the box over the time axis; never less than this, however short the box (or before it is laid out).
+const TIME_AXIS_PX = 28;
+const MIN_PANES_PX = 200;
+// The volume at the foot of the price pane, under the candles (odd/tasks/chart-pro-redesign.md S6).
+const VOLUME_MARGINS = { top: 0.8, bottom: 0 };
+const SCALE_OPTIONS: Record<ScaleMode, { mode: PriceScaleMode; autoScale?: boolean }> = {
+	pct: { mode: PriceScaleMode.Percentage },
+	log: { mode: PriceScaleMode.Logarithmic },
+	auto: { mode: PriceScaleMode.Normal, autoScale: true },
+};
 const TEXT_EDITOR_PX = 224;
 // The text editor stays inside the chart however narrow the screen or close to the edge the text is.
 const editorLeft = (x: number, width: number) => Math.max(8, Math.min(x, width - TEXT_EDITOR_PX - 8));
@@ -75,7 +88,7 @@ const COMPARE_COLORS = ["#f59e0b", "#8b5cf6", "#06b6d4", "#ec4899", "#84cc16"];
 const NONE: string[] = [];
 const NO_ALERTS: ChartAlert[] = [];
 // A note over the chart: on its own background, so the lines under it never cross the words.
-const legendNote = "w-fit rounded bg-canvas px-1 text-ink-3";
+const legendNote = "w-fit rounded bg-canvas px-1 text-ink-3 max-[819px]:basis-full";
 const pointOf = (line: boolean, c: Candle) => (line ? { time: asTime(c.time), value: c.close } : { ...c, time: asTime(c.time) });
 const PRICE_FORMAT = { type: "custom" as const, formatter: priceText, minMove: 0.0001 };
 /** While comparing, the price scale reads in % from the base day's close: every line starts there. */
@@ -105,10 +118,11 @@ function chartOptions(t: ChartTheme, intraday: boolean) {
 			textColor: t.ink3,
 			fontFamily: t.font,
 			fontSize: 12,
-			attributionLogo: true,
+			// The license's credit is the link under the chart instead (ChartRangeBar).
+			attributionLogo: false,
 			panes: { separatorColor: t.line, separatorHoverColor: t.lineStrong },
 		},
-		grid: { vertLines: { color: t.line }, horzLines: { color: t.line } },
+		grid: { vertLines: { color: t.grid }, horzLines: { color: t.grid } },
 		crosshair: {
 			mode: CrosshairMode.Normal,
 			vertLine: { color: t.lineStrong, labelBackgroundColor: t.ink2 },
@@ -128,6 +142,7 @@ interface IndicatorSeries {
 	series: ISeriesApi<SeriesType>[];
 	levels: IPriceLine[];
 	fills: BandFill[];
+	band: BandFill | null;
 }
 
 /** What a fill spans: Bollinger's two bands, or RSI's two levels. */
@@ -137,39 +152,45 @@ function fillEdges(id: string, lines: IndicatorLine[], levels: { value: number }
 }
 
 /** Rebuilds the indicator series when the enabled set or a setting changes, then feeds every
- *  series the current candles and its style (a style change restyles, it never rebuilds the panes). */
+ *  series the current candles and its style (a style change restyles, it never rebuilds the panes).
+ *  True when it rebuilt them: the panes are new and need their heights. */
 function syncIndicators(
 	chart: IChartApi,
 	built: { signature: string; list: IndicatorSeries[] },
-	candles: Candle[],
+	lines: Map<IndicatorKey, IndicatorLine[]>,
 	enabled: IndicatorKey[],
 	hidden: Record<IndicatorKey, boolean>,
+	minimized: Record<IndicatorKey, boolean>,
 	config: Parameters<(typeof INDICATOR_SPECS)["ema20"]["lines"]>[1],
 	saved: ChartPreferences["indicatorSettings"],
 	theme: ChartTheme,
-	phone: boolean,
 	priceFormat: SeriesPartialOptionsMap["Line"]["priceFormat"],
 ) {
 	const signature = JSON.stringify([enabled, config, theme.ink3]);
-	if (built.signature !== signature) {
+	const rebuild = built.signature !== signature;
+	if (rebuild) {
 		built.list.forEach(({ series }) => series.forEach((s) => chart.removeSeries(s)));
 		let pane = 0;
 		built.list = enabled.map((key) => {
 			const spec = INDICATOR_SPECS[key];
 			const paneIndex = spec.pane === "own" ? ++pane : 0;
-			const series = spec.lines(candles, config).map((l) =>
+			// The volume has a scale of its own at the foot of the price pane (odd/tasks/chart-pro-redesign.md S6).
+			const volume = key === "volume";
+			const series = lines.get(key)!.map((l) =>
 				l.type === "histogram"
 					? chart.addSeries(
 							HistogramSeries,
-							{ color: l.color, priceLineVisible: false, lastValueVisible: false, priceFormat: key === "volume" ? { type: "volume" } : PRICE_FORMAT },
+							{ color: l.color, priceLineVisible: false, lastValueVisible: false, priceFormat: volume ? { type: "volume" } : PRICE_FORMAT, ...(volume && { priceScaleId: "volume" }) },
 							paneIndex,
 						)
-					: chart.addSeries(
+					: // No value boxes on the scale: the values live in the legends (S1).
+						chart.addSeries(
 							LineSeries,
-							{ color: l.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false, priceFormat: PRICE_FORMAT },
+							{ color: l.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, priceFormat: PRICE_FORMAT },
 							paneIndex,
 						),
 			);
+			if (volume) series[0].priceScale().applyOptions({ scaleMargins: VOLUME_MARGINS });
 			const levels = (spec.levels ?? []).map((price) =>
 				series[0].createPriceLine({ price, color: theme.ink3, lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: false }),
 			);
@@ -178,34 +199,35 @@ function syncIndicators(
 				series[0].attachPrimitive(fill);
 				return fill;
 			});
-			return { key, series, levels, fills };
+			const band = FIXED_BANDS[key] ? new BandFill() : null;
+			if (band) series[0].attachPrimitive(band);
+			return { key, series, levels, fills, band };
 		});
-		// The price pane keeps most of the height however many panes there are; on a phone,
-		// where height is scarce, at least two thirds of it.
-		const panes = chart.panes();
-		const price = phone ? Math.max(3, 2 * (panes.length - 1)) : Math.max(3, panes.length);
-		panes.forEach((p, i) => p.setStretchFactor(i === 0 ? price : 1));
 		built.signature = signature;
 	}
-	for (const { key, series, levels, fills } of built.list) {
-		const lines = INDICATOR_SPECS[key].lines(candles, config);
+	for (const { key, series, levels, fills, band } of built.list) {
+		const keyLines = lines.get(key)!;
 		const style = saved[key]?.style;
+		// Hidden, or its pane minimized: the indicator stays on with nothing drawn (S1).
+		const off = hidden[key] || (INDICATOR_SPECS[key].pane === "own" && minimized[key]);
 		series.forEach((s, i) => {
-			const look = lineLook(lines[i], style?.lines?.[lines[i].id]);
-			s.setData(seriesPoints(lines[i], look).map((p) => ({ ...p, time: asTime(p.time) })));
-			const visible = !hidden[key] && look.visible;
-			s.applyOptions(lines[i].type === "histogram" ? { visible, color: look.upColor } : { visible, color: look.color, lineWidth: look.width });
-			// Over the price, its label reads like the price scale: in % while comparing.
-			if (INDICATOR_SPECS[key].pane === "price") s.applyOptions({ priceFormat });
+			const look = lineLook(keyLines[i], style?.lines?.[keyLines[i].id]);
+			s.setData(seriesPoints(keyLines[i], look).map((p) => ({ ...p, time: asTime(p.time) })));
+			const visible = !off && look.visible;
+			s.applyOptions(keyLines[i].type === "histogram" ? { visible, color: look.upColor } : { visible, color: look.color, lineWidth: look.width });
+			// Over the price, its label reads like the price scale: in % while comparing (the volume has its own).
+			if (INDICATOR_SPECS[key].pane === "price" && key !== "volume") s.applyOptions({ priceFormat });
 		});
 		const looks = levelLooks(key, style, theme.ink3);
 		levels.forEach((l, i) => l.applyOptions({ price: looks[i].value, color: looks[i].color, lineVisible: looks[i].visible }));
 		fills.forEach((f, i) => {
 			const id = INDICATOR_STYLE_PARTS[key].fills![i];
 			const look = fillLook(id, style);
-			f.update({ ...look, visible: look.visible && !hidden[key], ...fillEdges(id, lines, looks) });
+			f.update({ ...look, visible: look.visible && !off, ...fillEdges(id, keyLines, looks) });
 		});
+		band?.update({ ...FIXED_BANDS[key]!, visible: !off, top: looks[1].value, bottom: looks[0].value });
 	}
+	return rebuild;
 }
 
 /** `phoneBar`: where the page wants the phone's drawing controls, in its bottom bar. */
@@ -230,7 +252,12 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	// The operations card of a bar with arrows: its bar and where it was tapped.
 	const [tradeCard, setTradeCard] = useState<{ chart: string; time: number; x: number; y: number; above: boolean; phone: boolean } | null>(null);
 	const [textEdit, setTextEdit] = useState<{ drawing: Drawing; x: number; y: number } | null>(null);
-	const [legendOpen, setLegendOpen] = useState(true);
+	// Where each pane starts, for its legend (S1).
+	const [tops, setTops] = useState<number[]>([]);
+	const layoutRef = useRef("");
+	// The range chip last pressed on this chart (symbol and timeframe), and the price scale's mode once picked.
+	const [viewRange, setViewRange] = useState<{ chart: string; chip: RangeChip } | null>(null);
+	const [scaleMode, setScaleMode] = useState<ScaleMode | null>(null);
 	// Where the favorites bar floats: over the chart, in its container (S3).
 	const [area, setArea] = useState<HTMLDivElement | null>(null);
 
@@ -239,19 +266,13 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	const line = symbol === PORTFOLIO_SERIES;
 	const indicators = useChartStore((s) => s.indicators);
 	const hidden = useChartStore((s) => s.hidden);
+	const minimized = useChartStore((s) => s.minimized);
 	const device = useChartStore((s) => s.config);
 	// An indicator's settings saved in the account win over this device's values (S4).
 	const saved = useChartPreferences().preferences.indicatorSettings;
 	const config = useMemo(() => effectiveConfig(device, saved), [device, saved]);
-	const toggleHidden = useChartStore((s) => s.toggleHidden);
-	const removeIndicator = useChartStore((s) => s.removeIndicator);
-	const setSettingsTarget = useChartStore((s) => s.setSettingsTarget);
 	const showTrades = useChartStore((s) => s.showTrades);
 	const enabled = useMemo(() => INDICATOR_ORDER.filter((k) => indicators[k]), [indicators]);
-
-	// The indicator list starts folded on phones, or when it is long enough to cover the candles.
-	const legendLong = enabled.length > LEGEND_OPEN_MAX;
-	useEffect(() => setLegendOpen(!legendLong && !window.matchMedia(PHONE).matches), [legendLong]);
 
 	const data = useCandles(symbol, timeframe);
 	const last = data.candles.at(-1) ?? null;
@@ -290,6 +311,8 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 	const fresh = data.key === `${symbol}:${timeframe}`;
 	// Mi cartera has no volume.
 	const drawnIndicators = useMemo(() => enabled.filter((k) => !(line && k === "volume")), [enabled, line]);
+	// Each indicator's lines, for its series and its legend.
+	const indicatorLines = useMemo(() => new Map(drawnIndicators.map((k) => [k, INDICATOR_SPECS[k].lines(data.candles, config)])), [drawnIndicators, data.candles, config]);
 	const compareLinesRef = useRef(new Map<string, ISeriesApi<"Line">>());
 	const zoomedRef = useRef("");
 	const drawnUsdRef = useRef(false);
@@ -462,6 +485,21 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		chartRef.current?.timeScale().applyOptions({ fixLeftEdge: locked, fixRightEdge: locked });
 	}, [locked, manager]);
 
+	// A range chip shows its history up to the last bar, with the same room on the right as on load (S6).
+	const chartKey = `${symbol}:${timeframe}`;
+	const showRange = (chip: RangeChip) => {
+		if (!fresh) return;
+		const times = drawn.map((c) => c.time);
+		chartRef.current?.timeScale().setVisibleLogicalRange({ from: rangeFirstBar(chip, times), to: times.length + 5 });
+		setViewRange({ chart: chartKey, chip });
+	};
+	// The scale's mode, once picked under the chart (and again on a new chart). While comparing the scale
+	// already reads in % from the first day; a % mode would count from the first bar in sight instead.
+	const scale = locked && scaleMode === "pct" ? "auto" : scaleMode;
+	useEffect(() => {
+		if (scale) seriesRef.current?.priceScale().applyOptions(SCALE_OPTIONS[scale]);
+	}, [scale, manager]);
+
 	// The first time Mi cartera opens on this device, it opens against the market; after that, the
 	// comparisons are whatever the user left.
 	useEffect(() => {
@@ -533,12 +571,67 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		manager?.select([]);
 	};
 
+	// Where each pane starts, as the library laid them out, for the legends.
+	const measurePanes = useCallback(() => {
+		const chart = chartRef.current;
+		if (!chart) return;
+		const next = paneTops(chart.panes().map((p) => p.getHeight()));
+		setTops((prev) => (prev.join() === next.join() ? prev : next));
+	}, []);
+	// The panes' heights by share (S1): for new panes (`force`), a pane minimized or expanded, a phone turned
+	// or a box of another height; never for a new symbol, so the heights a finger set stay (grafico-espacio S5).
+	const layoutPanes = useCallback(
+		(force: boolean) => {
+			const chart = chartRef.current;
+			const box = boxRef.current;
+			if (!chart || !box) return;
+			const own = indicatorsRef.current.list.filter((i) => INDICATOR_SPECS[i.key].pane === "own").map((i) => minimized[i.key]);
+			const phone = window.matchMedia(PHONE).matches;
+			const key = JSON.stringify([own, phone, box.clientHeight]);
+			if (force || key !== layoutRef.current) {
+				layoutRef.current = key;
+				const heights = paneHeights(Math.max(MIN_PANES_PX, box.clientHeight - TIME_AXIS_PX), phone, own);
+				chart.panes().forEach((p, i) => p.setStretchFactor(heights[i] ?? MINIMIZED_PANE_PX));
+			}
+			// The library lays the panes out on its next frame.
+			measurePanes();
+			requestAnimationFrame(measurePanes);
+		},
+		[minimized, measurePanes],
+	);
+
 	// Indicators follow the candles and the store.
 	useEffect(() => {
 		const chart = chartRef.current;
 		if (!chart || !theme || data.status !== "ready") return;
-		syncIndicators(chart, indicatorsRef.current, data.candles, drawnIndicators, hidden, config, saved, theme, window.matchMedia(PHONE).matches, scaleFormat);
-	}, [data.status, data.candles, drawnIndicators, hidden, config, saved, theme, manager, scaleFormat]);
+		const rebuilt = syncIndicators(chart, indicatorsRef.current, indicatorLines, drawnIndicators, hidden, minimized, config, saved, theme, scaleFormat);
+		layoutPanes(rebuilt);
+	}, [data.status, indicatorLines, drawnIndicators, hidden, minimized, config, saved, theme, manager, scaleFormat, layoutPanes]);
+
+	// A resized chart lays its panes out again, and a dragged separator (which moves the panes with no event
+	// of its own) takes the legends with it.
+	useEffect(() => {
+		const box = boxRef.current;
+		if (!box || !manager) return;
+		let frame = 0;
+		const soon = () => {
+			cancelAnimationFrame(frame);
+			frame = requestAnimationFrame(() => layoutPanes(false));
+		};
+		const resize = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(soon);
+		resize?.observe(box);
+		const onMove = (e: PointerEvent) => {
+			if (e.buttons) soon();
+		};
+		box.addEventListener("pointermove", onMove);
+		window.addEventListener("pointerup", soon);
+		return () => {
+			cancelAnimationFrame(frame);
+			resize?.disconnect();
+			box.removeEventListener("pointermove", onMove);
+			window.removeEventListener("pointerup", soon);
+		};
+	}, [manager, layoutPanes]);
 
 	// Alert lines: only an alert against a value has one, in its color (the accent when it has none), the selected
 	// one thicker. The price's on the candles; an indicator's in that indicator's pane while it is on (S6). Removed on
@@ -712,225 +805,210 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 				onNewAlert={() => setSheet({ id: null })}
 				onOpenAlert={(id) => setSheet({ id })}
 			/>
-			<div ref={setArea} className="relative min-h-0 min-w-0 flex-1">
-				{/* touch-none: the chart pans and zooms itself; left to the browser, a finger drag on a
-				    drawing or an alert is taken over as a page scroll and cancelled halfway. isolate: the
-				    library's pane separators sit at z-index 50, above the phone's app menu, unless kept in
-				    here; only there, as a computer's text rendering changes with it. */}
-				<div ref={boxRef} data-chart-box className={cn("absolute inset-0 touch-none max-[819px]:isolate", alertMode && "cursor-crosshair")} />
+			<div className="flex min-h-0 min-w-0 flex-1 flex-col">
+				<div ref={setArea} className="relative min-h-0 min-w-0 flex-1">
+					{/* touch-none: the chart pans and zooms itself; left to the browser, a finger drag on a
+					    drawing or an alert is taken over as a page scroll and cancelled halfway. isolate: the
+					    library's pane separators sit at z-index 50, above the phone's app menu, unless kept in
+					    here; only there, as a computer's text rendering changes with it. */}
+					<div ref={boxRef} data-chart-box className={cn("absolute inset-0 touch-none max-[819px]:isolate", alertMode && "cursor-crosshair")} />
 
-				<div data-chart-legend className="pointer-events-none absolute left-3 top-2 z-10 flex max-w-[calc(100%-5rem)] flex-col gap-1 text-[13px]">
-					<div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 tabular-nums">
-						{shown && line && <span className="text-ink-3">Valor <span className="text-ink">{priceText(shown.close)}</span></span>}
-						{shown && !line && (
+					<PaneLegends
+						keys={drawnIndicators}
+						lines={indicatorLines}
+						config={config}
+						saved={saved}
+						at={at}
+						tops={tops}
+						head={
 							<>
-								<span className="text-ink-3">Ap <span className="text-ink">{priceText(shown.open)}</span></span>
-								<span className="text-ink-3">Máx <span className="text-ink">{priceText(shown.high)}</span></span>
-								<span className="text-ink-3">Mín <span className="text-ink">{priceText(shown.low)}</span></span>
-								<span className="text-ink-3">Cie <span className="text-ink">{priceText(shown.close)}</span></span>
-								{change !== null && Number.isFinite(change) && (
-									<span className={change >= 0 ? "text-ok" : "text-danger"}>{formatNumber(change * 100, { sign: true })} %</span>
-								)}
-							</>
-						)}
-					</div>
-					{/* Chips that wrap, so on a phone three comparisons take two lines, not three. */}
-					{compareRows.length > 0 && (
-						<div className="flex flex-wrap gap-1">
-							{compareRows.map((r) => (
-								<div key={r.symbol} className="pointer-events-auto flex w-fit items-center gap-1.5 rounded bg-canvas px-1 tabular-nums text-ink-2">
-									<span aria-hidden className="h-0.5 w-3 rounded" style={{ background: r.color }} />
-									<span className="text-ink">{seriesLabel(r.symbol)}</span>
-									{r.missing ? (
-										<span className="text-ink-3">Sin datos</span>
-									) : (
-										r.pct !== null && <span className={r.pct >= 0 ? "text-ok" : "text-danger"}>{formatNumber(r.pct, { sign: true })} %</span>
-									)}
-									{!r.main && (
-										<button type="button" aria-label={`Quitar ${seriesLabel(r.symbol)} de la comparación`} title="Quitar" onClick={() => setCompareSymbols(compareSymbols.filter((s) => s !== r.symbol))} className="grid h-6 w-6 place-items-center rounded text-ink-3 hover:bg-hover hover:text-ink max-[819px]:h-7 max-[819px]:w-7">
-											<X className="h-3.5 w-3.5" aria-hidden />
-										</button>
+								{/* A computer always shows the candle data; a phone, whose header shows the price, while a finger is on the chart (S7). */}
+								<div data-ohlc className={cn("flex flex-wrap items-baseline gap-x-3 gap-y-0.5 px-1 tabular-nums max-[819px]:basis-full", !hover && "max-[819px]:hidden")}>
+									{hover && <span className="text-ink-3 min-[820px]:hidden">{intraday ? DAY_TIME.format(new Date(hover.time * 1000)) : dayText(hover.time)}</span>}
+									{shown && line && <span className="text-ink-3">Valor <span className="text-ink">{priceText(shown.close)}</span></span>}
+									{shown && !line && (
+										<>
+											<span className="text-ink-3">Ap <span className="text-ink">{priceText(shown.open)}</span></span>
+											<span className="text-ink-3">Máx <span className="text-ink">{priceText(shown.high)}</span></span>
+											<span className="text-ink-3">Mín <span className="text-ink">{priceText(shown.low)}</span></span>
+											<span className="text-ink-3">Cie <span className="text-ink">{priceText(shown.close)}</span></span>
+											{change !== null && Number.isFinite(change) && (
+												<span className={change >= 0 ? "text-ok" : "text-danger"}>{formatNumber(change * 100, { sign: true })} %</span>
+											)}
+										</>
 									)}
 								</div>
-							))}
-						</div>
-					)}
-					{comparingNow && (
-						<div role="group" aria-label="Comparar desde" className="pointer-events-auto flex w-fit flex-wrap items-center gap-0.5 rounded bg-canvas p-0.5 text-[12px] tabular-nums">
-							{COMPARE_RANGES.map((r) => (
-								<button
-									key={r}
-									type="button"
-									aria-pressed={r === compareRange}
-									onClick={() => (r === compareRange ? fitRange() : setCompareRange(r))}
-									className={cn("rounded px-1.5 py-0.5 text-ink-3 hover:bg-hover hover:text-ink max-[819px]:min-h-7", r === compareRange && "bg-accent-soft font-medium text-accent-ink")}
-								>
-									{r}
-								</button>
-							))}
-							{base && <span className="px-1 text-ink-3">desde {dayText(base.time)}</span>}
-						</div>
-					)}
-					{comparingNow && compared.status === "error" && <p className={legendNote}>No se pudieron cargar las comparaciones.</p>}
-					{usd && <p className={legendNote}>Dibujos y alertas: en pausa al comparar en dólares</p>}
-					{!daily && others.length > 0 && <p className={legendNote}>Las comparaciones se ven en diario, semanal o mensual</p>}
-					{daily && others.length < MAX_COMPARE && (
-						<button type="button" onClick={() => setCompareOpen(true)} className="pointer-events-auto inline-flex w-fit items-center rounded bg-canvas px-1 text-ink-2 hover:bg-hover hover:text-ink max-[819px]:min-h-8">
-							+ Comparar
-						</button>
-					)}
-					{enabled.length > 0 && (
-						<button
-							type="button"
-							aria-expanded={legendOpen}
-							onClick={() => setLegendOpen(!legendOpen)}
-							className="pointer-events-auto inline-flex w-fit items-center gap-1 rounded px-1 text-ink-3 hover:bg-hover hover:text-ink max-[819px]:min-h-8"
-						>
-							<ChevronDown className={cn("h-3.5 w-3.5 transition-transform motion-reduce:transition-none", !legendOpen && "-rotate-90")} aria-hidden />
-							{enabled.length === 1 ? "1 indicador" : `${enabled.length} indicadores`}
-						</button>
-					)}
-					{legendOpen && enabled.map((key) => (
-						<div key={key} className="pointer-events-auto flex items-center gap-1 text-ink-2">
-							<span className={cn(hidden[key] && "text-ink-3 line-through")}>{INDICATOR_SPECS[key].label(config)}</span>
-							<button type="button" aria-label={hidden[key] ? "Mostrar" : "Ocultar"} title={hidden[key] ? "Mostrar" : "Ocultar"} onClick={() => toggleHidden(key)} className="grid h-6 w-6 place-items-center rounded text-ink-3 hover:bg-hover hover:text-ink max-[819px]:h-8 max-[819px]:w-8">
-								{hidden[key] ? <EyeOff className="h-3.5 w-3.5" aria-hidden /> : <Eye className="h-3.5 w-3.5" aria-hidden />}
-							</button>
-							<button type="button" aria-label="Configurar" title="Configurar" onClick={() => setSettingsTarget(key)} className="grid h-6 w-6 place-items-center rounded text-ink-3 hover:bg-hover hover:text-ink max-[819px]:h-8 max-[819px]:w-8">
-								<Settings2 className="h-3.5 w-3.5" aria-hidden />
-							</button>
-							<button type="button" aria-label="Quitar" title="Quitar" onClick={() => removeIndicator(key)} className="grid h-6 w-6 place-items-center rounded text-ink-3 hover:bg-hover hover:text-ink max-[819px]:h-8 max-[819px]:w-8">
-								<X className="h-3.5 w-3.5" aria-hidden />
-							</button>
-						</div>
-					))}
-				</div>
-
-				{alertMode && (
-					// A phone says it, with Cancelar, in its bottom bar; there is no Esc there.
-					<p role="status" className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded bg-ink px-3 py-1.5 text-[13px] text-canvas shadow-[var(--shadow-toast)] max-[819px]:hidden">
-						Tocá el gráfico en el precio de la alerta<span className="[@media(pointer:coarse)]:hidden"> · Esc para cancelar</span>
-					</p>
-				)}
-
-				{selected && selectedAlert && (
-					<div
-						role="dialog"
-						aria-label={selected.name}
-						className="absolute right-20 z-20 flex items-center gap-2 rounded border border-line bg-surface px-3 py-2 text-[13px] shadow-[var(--shadow-pop)] max-[819px]:left-3 max-[819px]:right-auto"
-						// Above the line and clear of it (the panel is up to ~62px with a wrapped
-						// name), so the line can still be dragged; below it near the top.
-						style={{ top: selectedAlert.y > 80 ? selectedAlert.y - 72 : selectedAlert.y + 16 }}
+								{/* Chips that wrap, so on a phone three comparisons take two lines, not three. */}
+								{compareRows.length > 0 && (
+									<div className="flex flex-wrap gap-1 max-[819px]:basis-full">
+										{compareRows.map((r) => (
+											<div key={r.symbol} className="pointer-events-auto flex w-fit items-center gap-1.5 rounded bg-canvas px-1 tabular-nums text-ink-2">
+												<span aria-hidden className="h-0.5 w-3 rounded" style={{ background: r.color }} />
+												<span className="text-ink">{seriesLabel(r.symbol)}</span>
+												{r.missing ? (
+													<span className="text-ink-3">Sin datos</span>
+												) : (
+													r.pct !== null && <span className={r.pct >= 0 ? "text-ok" : "text-danger"}>{formatNumber(r.pct, { sign: true })} %</span>
+												)}
+												{!r.main && (
+													<button type="button" aria-label={`Quitar ${seriesLabel(r.symbol)} de la comparación`} title="Quitar" onClick={() => setCompareSymbols(compareSymbols.filter((s) => s !== r.symbol))} className="grid h-6 w-6 place-items-center rounded text-ink-3 hover:bg-hover hover:text-ink max-[819px]:h-7 max-[819px]:w-7">
+														<X className="h-3.5 w-3.5" aria-hidden />
+													</button>
+												)}
+											</div>
+										))}
+									</div>
+								)}
+							</>
+						}
 					>
-						<span className="text-ink">{selected.name}</span>
-						{selected.status !== "active" && (
-							<button type="button" onClick={() => rearm(selected.id)} className="rounded px-2 py-1 text-accent-ink hover:bg-accent-soft max-[819px]:min-h-11 max-[819px]:px-3">
-								Reactivar
+						{comparingNow && compared.status === "error" && <p className={legendNote}>No se pudieron cargar las comparaciones.</p>}
+						{usd && <p className={legendNote}>Dibujos y alertas: en pausa al comparar en dólares</p>}
+						{!daily && others.length > 0 && <p className={legendNote}>Las comparaciones se ven en diario, semanal o mensual</p>}
+						{daily && others.length < MAX_COMPARE && (
+							<button type="button" onClick={() => setCompareOpen(true)} className="pointer-events-auto inline-flex w-fit items-center rounded bg-canvas px-1 text-ink-2 hover:bg-hover hover:text-ink max-[819px]:min-h-8">
+								+ Comparar
 							</button>
 						)}
-						<button
-							type="button"
-							aria-label="Configuración"
-							title="Configuración"
-							onClick={() => setSheet({ id: selected.id })}
-							className="grid shrink-0 place-items-center rounded px-1.5 py-1 text-ink-2 hover:bg-hover hover:text-ink max-[819px]:min-h-11 max-[819px]:min-w-11"
+					</PaneLegends>
+
+					{alertMode && (
+						// A phone says it, with Cancelar, in its bottom bar; there is no Esc there.
+						<p role="status" className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded bg-ink px-3 py-1.5 text-[13px] text-canvas shadow-[var(--shadow-toast)] max-[819px]:hidden">
+							Tocá el gráfico en el precio de la alerta<span className="[@media(pointer:coarse)]:hidden"> · Esc para cancelar</span>
+						</p>
+					)}
+
+					{selected && selectedAlert && (
+						<div
+							role="dialog"
+							aria-label={selected.name}
+							className="absolute right-20 z-20 flex items-center gap-2 rounded border border-line bg-surface px-3 py-2 text-[13px] shadow-[var(--shadow-pop)] max-[819px]:left-3 max-[819px]:right-auto"
+							// Above the line and clear of it (the panel is up to ~62px with a wrapped
+							// name), so the line can still be dragged; below it near the top.
+							style={{ top: selectedAlert.y > 80 ? selectedAlert.y - 72 : selectedAlert.y + 16 }}
 						>
-							<Settings2 className="h-4 w-4" aria-hidden />
-						</button>
-						<button
-							type="button"
-							onClick={() => {
-								remove(selected.id);
+							<span className="text-ink">{selected.name}</span>
+							{selected.status !== "active" && (
+								<button type="button" onClick={() => rearm(selected.id)} className="rounded px-2 py-1 text-accent-ink hover:bg-accent-soft max-[819px]:min-h-11 max-[819px]:px-3">
+									Reactivar
+								</button>
+							)}
+							<button
+								type="button"
+								aria-label="Configuración"
+								title="Configuración"
+								onClick={() => setSheet({ id: selected.id })}
+								className="grid shrink-0 place-items-center rounded px-1.5 py-1 text-ink-2 hover:bg-hover hover:text-ink max-[819px]:min-h-11 max-[819px]:min-w-11"
+							>
+								<Settings2 className="h-4 w-4" aria-hidden />
+							</button>
+							<button
+								type="button"
+								onClick={() => {
+									remove(selected.id);
+									setSelectedAlert(null);
+								}}
+								className="rounded px-2 py-1 text-danger hover:bg-danger-soft max-[819px]:min-h-11 max-[819px]:px-3"
+							>
+								Borrar
+							</button>
+							<button type="button" onClick={() => setSelectedAlert(null)} className="shrink-0 rounded px-2 py-1 font-medium text-ink hover:bg-hover max-[819px]:min-h-11 max-[819px]:px-3">
+								Listo
+							</button>
+						</div>
+					)}
+
+					{/* A card is for the bars it was opened on: another symbol or timeframe drops it. */}
+					{tradeCard?.chart === `${symbol}:${timeframe}` && trades.get(tradeCard.time) && (
+						tradeCard.phone ? (
+							<TradeSheet trades={trades.get(tradeCard.time)!} onClose={() => setTradeCard(null)} />
+						) : (
+							<TradeCard trades={trades.get(tradeCard.time)!} x={tradeCard.x} y={tradeCard.y} above={tradeCard.above} onClose={() => setTradeCard(null)} />
+						)
+					)}
+
+					<DrawingActions manager={manager} onEditText={(drawing) => setTextEdit({ drawing, x: 12, y: 56 })} />
+
+					{sheet && (sheet.id === null || sheetAlert) && (
+						<AlertSheet
+							key={sheet.id ?? "new"}
+							open
+							onOpenChange={(open) => !open && setSheet(null)}
+							ticker={symbol}
+							alert={sheetAlert}
+							timeframe={timeframe}
+							config={config}
+							lastValue={lastValue}
+							onSave={async (draft) => {
+								if (await save(sheet.id, draft)) setSheet(null);
+							}}
+							onDelete={() => {
+								if (sheet.id) remove(sheet.id);
+								setSheet(null);
 								setSelectedAlert(null);
 							}}
-							className="rounded px-2 py-1 text-danger hover:bg-danger-soft max-[819px]:min-h-11 max-[819px]:px-3"
-						>
-							Borrar
-						</button>
-						<button type="button" onClick={() => setSelectedAlert(null)} className="shrink-0 rounded px-2 py-1 font-medium text-ink hover:bg-hover max-[819px]:min-h-11 max-[819px]:px-3">
-							Listo
-						</button>
-					</div>
-				)}
+							onRearm={() => sheet.id && rearm(sheet.id)}
+						/>
+					)}
 
-				{/* A card is for the bars it was opened on: another symbol or timeframe drops it. */}
-				{tradeCard?.chart === `${symbol}:${timeframe}` && trades.get(tradeCard.time) && (
-					tradeCard.phone ? (
-						<TradeSheet trades={trades.get(tradeCard.time)!} onClose={() => setTradeCard(null)} />
-					) : (
-						<TradeCard trades={trades.get(tradeCard.time)!} x={tradeCard.x} y={tradeCard.y} above={tradeCard.above} onClose={() => setTradeCard(null)} />
-					)
-				)}
+					{compareOpen && <CompareSheet open onOpenChange={setCompareOpen} main={symbol} />}
 
-				<DrawingActions manager={manager} onEditText={(drawing) => setTextEdit({ drawing, x: 12, y: 56 })} />
-
-				{sheet && (sheet.id === null || sheetAlert) && (
-					<AlertSheet
-						key={sheet.id ?? "new"}
-						open
-						onOpenChange={(open) => !open && setSheet(null)}
-						ticker={symbol}
-						alert={sheetAlert}
-						timeframe={timeframe}
-						config={config}
-						lastValue={lastValue}
-						onSave={async (draft) => {
-							if (await save(sheet.id, draft)) setSheet(null);
-						}}
-						onDelete={() => {
-							if (sheet.id) remove(sheet.id);
-							setSheet(null);
-							setSelectedAlert(null);
-						}}
-						onRearm={() => sheet.id && rearm(sheet.id)}
-					/>
-				)}
-
-				{compareOpen && <CompareSheet open onOpenChange={setCompareOpen} main={symbol} />}
-
-				{textEdit && (
-					<input
-						autoFocus
-						aria-label="Texto del dibujo"
-						defaultValue={textEdit.drawing.text ?? ""}
-						className="absolute z-20 w-56 max-w-[calc(100%-16px)] rounded border border-line-strong bg-surface px-2 py-1 text-[13px] text-ink outline-none focus:border-ring"
-						style={{ left: textEdit.x, top: textEdit.y }}
-						onKeyDown={(e) => {
-							if (e.key === "Enter") {
+					{textEdit && (
+						<input
+							autoFocus
+							aria-label="Texto del dibujo"
+							defaultValue={textEdit.drawing.text ?? ""}
+							className="absolute z-20 w-56 max-w-[calc(100%-16px)] rounded border border-line-strong bg-surface px-2 py-1 text-[13px] text-ink outline-none focus:border-ring"
+							style={{ left: textEdit.x, top: textEdit.y }}
+							onKeyDown={(e) => {
+								if (e.key === "Enter") {
+									manager?.update({ ...textEdit.drawing, text: e.currentTarget.value });
+									setTextEdit(null);
+								} else if (e.key === "Escape") setTextEdit(null);
+							}}
+							onBlur={(e) => {
 								manager?.update({ ...textEdit.drawing, text: e.currentTarget.value });
 								setTextEdit(null);
-							} else if (e.key === "Escape") setTextEdit(null);
-						}}
-						onBlur={(e) => {
-							manager?.update({ ...textEdit.drawing, text: e.currentTarget.value });
-							setTextEdit(null);
-						}}
-					/>
-				)}
+							}}
+						/>
+					)}
 
-				{data.status !== "ready" && (
-					<div className="absolute inset-0 z-30 grid place-items-center bg-canvas text-[14px]">
-						{data.status === "loading" ? (
-							<p role="status" className="text-ink-3">Cargando {seriesLabel(symbol)}…</p>
-						) : (
-							<div role="alert" className="flex flex-col items-center gap-3 text-center">
-								<p className="text-ink">No se pudo cargar {seriesLabel(symbol)}</p>
-								<p className="max-w-sm text-[13px] text-ink-3">{data.error}</p>
-								<button type="button" onClick={data.retry} className="rounded bg-primary px-3 py-1.5 text-primary-on hover:bg-primary-hover">
-									Reintentar
-								</button>
-							</div>
-						)}
-					</div>
-				)}
-				{data.status === "ready" && data.candles.length === 0 && (
-					<p role="status" className="absolute inset-0 grid place-items-center text-ink-3">Sin datos para {symbol} en este período</p>
-				)}
-				{drawingsStatus === "error" && (
-					<p role="alert" className="absolute bottom-3 right-20 z-10 rounded bg-danger-soft px-3 py-1.5 text-[13px] text-danger">
-						Dibujos sin guardar: falló la carga
-					</p>
-				)}
+					{data.status !== "ready" && (
+						<div className="absolute inset-0 z-30 grid place-items-center bg-canvas text-[14px]">
+							{data.status === "loading" ? (
+								<p role="status" className="text-ink-3">Cargando {seriesLabel(symbol)}…</p>
+							) : (
+								<div role="alert" className="flex flex-col items-center gap-3 text-center">
+									<p className="text-ink">No se pudo cargar {seriesLabel(symbol)}</p>
+									<p className="max-w-sm text-[13px] text-ink-3">{data.error}</p>
+									<button type="button" onClick={data.retry} className="rounded bg-primary px-3 py-1.5 text-primary-on hover:bg-primary-hover">
+										Reintentar
+									</button>
+								</div>
+							)}
+						</div>
+					)}
+					{data.status === "ready" && data.candles.length === 0 && (
+						<p role="status" className="absolute inset-0 grid place-items-center text-ink-3">Sin datos para {symbol} en este período</p>
+					)}
+					{drawingsStatus === "error" && (
+						<p role="alert" className="absolute bottom-3 right-20 z-10 rounded bg-danger-soft px-3 py-1.5 text-[13px] text-danger">
+							Dibujos sin guardar: falló la carga
+						</p>
+					)}
+				</div>
+				<ChartRangeBar
+					chips={comparingNow ? COMPARE_RANGES : rangeChips(timeframe)}
+					active={comparingNow ? compareRange : viewRange?.chart === chartKey ? viewRange.chip : null}
+					label={comparingNow ? "Comparar desde" : "Período"}
+					note={comparingNow && base ? `desde ${dayText(base.time)}` : null}
+					// While comparing, the chips are the day every line starts from: the one chosen shows it whole again.
+					onPick={(chip) => (comparingNow ? (chip === compareRange ? fitRange() : setCompareRange(chip as CompareRange)) : showRange(chip as RangeChip))}
+					scale={scale ?? "auto"}
+					onScale={setScaleMode}
+					percent={!comparingNow}
+				/>
 			</div>
 		</div>
 	);

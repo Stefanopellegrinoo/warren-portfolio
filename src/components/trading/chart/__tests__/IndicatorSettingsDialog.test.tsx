@@ -116,7 +116,7 @@ describe('Estilo', () => {
     unmount()
   })
 
-  it("RSI's upper level moves to 80 and takes its color; the fill between the levels turns on", async () => {
+  it("RSI's upper level moves to 80 and takes its color; the fill between the levels, on by default, turns off", async () => {
     await open('rsi')
     const upper = group('Nivel superior')!
 
@@ -125,7 +125,7 @@ describe('Estilo', () => {
     act(() => byLabel('Color rojo', upper).click())
     act(() => [...group('Fondo entre niveles')!.querySelectorAll('label')].find((l) => l.textContent === 'Fondo visible')!.querySelector('input')!.click())
 
-    expect(saved('rsi')!.style).toEqual({ levels: [{ value: 30 }, { value: 80, color: '#f23645' }], fills: { levels: { visible: true } } })
+    expect(saved('rsi')!.style).toEqual({ levels: [{ value: 30 }, { value: 80, color: '#f23645' }], fills: { levels: { visible: false } } })
     unmount()
   })
 
