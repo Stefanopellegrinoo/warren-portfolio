@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
@@ -59,6 +59,20 @@ describe('RiskMetricsRow', () => {
     await act(async () => { root.render(<RiskMetricsRow data={data} />) })
     await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Qué depósitos se adelantaron"]')!.click() })
     expect(document.body.textContent).toContain('Algunos depósitos estaban cargados después de las compras que pagaron: para medir, US$ 1.234,56 se toman como depositados el día de esas compras, desde el 02/05/2023. El total depositado no cambia.')
+    act(() => root.unmount())
+    el.remove()
+  })
+
+  it('offers to review the dates when the page can open the review (deposit-dates S1)', async () => {
+    const onReviewDeposits = vi.fn()
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<RiskMetricsRow data={{ ...none, fundedDeposits: { amount: 1, from: '2022-02-09' } }} onReviewDeposits={onReviewDeposits} />) })
+    await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Qué depósitos se adelantaron"]')!.click() })
+    const review = [...document.body.querySelectorAll('button')].find(b => b.textContent === 'Revisar fechas de depósitos')!
+    await act(async () => { review.click() })
+    expect(onReviewDeposits).toHaveBeenCalledTimes(1)
     act(() => root.unmount())
     el.remove()
   })

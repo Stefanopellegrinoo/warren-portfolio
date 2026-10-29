@@ -2,6 +2,7 @@
 
 import KpiCard, { type FigureTone } from '@/components/ui/KpiCard'
 import InfoLine from '@/components/ui/InfoLine'
+import MovedDepositsInfo, { fundedDepositsNote, type FundedDeposits } from '@/components/ui/MovedDepositsInfo'
 import type { DegradedReason } from '@/lib/derived-series'
 import { SectionHead } from '@/components/resumen/ui'
 import { formatDate, formatNumber, formatPct } from '@/lib/utils'
@@ -38,7 +39,7 @@ export interface RiskMetricsData {
   degraded?: boolean
   degradedReasons?: DegradedReason[]
   /** Deposit money moved to the purchases it paid, and from which day (S10). */
-  fundedDeposits?: { amount: number; from: string } | null
+  fundedDeposits?: FundedDeposits | null
 }
 
 export const sharpeTone = (s: number): FigureTone => (s >= 1 ? 'ok' : s >= 0 ? 'warn' : 'danger')
@@ -78,12 +79,6 @@ export function negativeCashNote(data: Pick<RiskMetricsData, 'negativeCashUntil'
 }
 
 /** The assumption behind a whole-portfolio series whose deposits were recorded after the purchases they paid (S10). */
-export function fundedDepositsNote(data: Pick<RiskMetricsData, 'fundedDeposits'>): string | null {
-  const f = data.fundedDeposits
-  if (!f) return null
-  return `Algunos depósitos estaban cargados después de las compras que pagaron: para medir, US$ ${formatNumber(f.amount)} se toman como depositados el día de esas compras, desde el ${formatDate(f.from)}. El total depositado no cambia.`
-}
-
 const display = (ticker: string) => ticker.split(':').pop() ?? ticker
 const listOf = (tickers: string[]) => {
   const names = tickers.map(display)
@@ -107,15 +102,6 @@ export function degradedMessages(reasons: DegradedReason[] | undefined): string[
   // An answer cached before the reasons existed only knows that something was replaced.
   if (!reasons?.length) return ['Faltó algún precio y se usó un valor de reemplazo.']
   return reasons.map(r => MESSAGES[r.kind]('tickers' in r ? r.tickers : []))
-}
-
-/** Deposits moved by the derived series (statistics-truth S10): a quiet line, the detail behind its (i) (deposit-dates S5). */
-export function MovedDepositsInfo({ note, className }: { note: string; className?: string }) {
-  return (
-    <InfoLine className={className} label="Algunos depósitos se adelantaron a la fecha de tus compras" ariaLabel="Qué depósitos se adelantaron">
-      <p>{note}</p>
-    </InfoLine>
-  )
 }
 
 export function SharpeMetric({ data }: { data: RiskMetricsData }) {
@@ -148,7 +134,7 @@ export function DrawdownMetric({ data }: { data: RiskMetricsData }) {
   )
 }
 
-export default function RiskMetricsRow({ data }: { data: RiskMetricsData | null }) {
+export default function RiskMetricsRow({ data, onReviewDeposits }: { data: RiskMetricsData | null; onReviewDeposits?: () => void }) {
   // Tolerant fetch: a failed metrics request loses the row, not the page.
   if (!data) return null
   const note = negativeCashNote(data)
@@ -168,7 +154,7 @@ export default function RiskMetricsRow({ data }: { data: RiskMetricsData | null 
           Desde el {formatDate(data.measuredFrom)}{data.measuredDays != null && ` · ${data.measuredDays} días de mercado`}
         </p>
       )}
-      {funded && <MovedDepositsInfo className="mt-1" note={funded} />}
+      {funded && <MovedDepositsInfo className="mt-1" note={funded} onReview={onReviewDeposits} />}
       {note && <p className="mt-1 text-[13px] text-warn">{note}</p>}
       {data.degraded && (
         <InfoLine className="mt-1" label="Algunos precios no estuvieron disponibles" ariaLabel="Qué precios faltaron">

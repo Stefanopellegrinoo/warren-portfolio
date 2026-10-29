@@ -360,6 +360,21 @@ describe('StatisticsPage — the whole portfolio is drawn from the day it is mea
     unmount()
   })
 
+  it('the notice opens the review of the deposit dates (deposit-dates S1)', async () => {
+    HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true }
+    const calls = stubFetch({
+      [TOTAL]: ok({ data: [point(20), point(0)], measuredFrom: daysAgo(20), negativeCashUntil: null, unavailableReason: null, fundedDeposits: { amount: 91311.74, from: '2022-02-09' } }),
+      '/api/cash/deposit-dates': ok({ deposits: [{ id: 'c40e252b-0b57-4aad-b679-63fbf1b2bcb1', date: '2026-03-31', amount: 165000, remaining: 73688.26, parts: [{ date: '2022-02-09', amount: 91311.74 }] }], total: 91311.74, from: '2022-02-09' }),
+    })
+    const { el, unmount } = await render()
+    await act(async () => { el.querySelector<HTMLButtonElement>('[aria-labelledby="h-evolucion"] button[aria-label="Qué depósitos se adelantaron"]')!.click() })
+    await act(async () => { [...document.body.querySelectorAll('button')].find(b => b.textContent === 'Revisar fechas de depósitos')!.click() })
+    await flush()
+    expect(calls).toContain('/api/cash/deposit-dates')
+    expect(document.body.querySelector('dialog[open]')?.textContent).toContain('Tu depósito del 31/03/2026 pagó compras desde el 09/02/2022: ¿lo repartimos en esas fechas?')
+    unmount()
+  })
+
   it('with negative cash today draws nothing and says deposits are missing', async () => {
     stubFetch({ [TOTAL]: ok({ data: [point(1), point(0)], measuredFrom: null, negativeCashUntil: daysAgo(0), unavailableReason: 'negative_cash' }) })
     const { el, unmount } = await render()

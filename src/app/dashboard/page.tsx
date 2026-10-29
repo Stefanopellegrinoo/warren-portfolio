@@ -208,7 +208,7 @@ export default function DashboardPage() {
 
             <section aria-labelledby="h-evolucion" className="min-w-0 [grid-area:chart]">
               <SectionHead id="h-evolucion" title="Evolución" action={{ href: '/statistics', label: 'Rendimiento' }} />
-              <ValueChart />
+              <ValueChart onDepositsChanged={refreshAll} />
             </section>
 
             {summary && figures && <div className="min-w-0 [grid-area:dist]"><DistributionList items={distribution(summary, views, currency, rows)} prefix={figures.prefix} /></div>}

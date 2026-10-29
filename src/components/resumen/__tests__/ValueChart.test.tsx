@@ -34,7 +34,7 @@ async function mount(answer: () => Promise<Response>) {
     observe() { this.cb([{ contentRect: { width: 600 } }]) }
     disconnect() {}
   })
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => { urls.push(url); return answer() }))
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => { urls.push(url); lastAsked = url; return answer() }))
   const el = document.createElement('div')
   document.body.appendChild(el)
   root = createRoot(el)
@@ -46,6 +46,7 @@ async function mount(answer: () => Promise<Response>) {
     pick: (id: string) => act(() => { el.querySelector<HTMLInputElement>(`input[value="${id}"]`)!.click() }),
   }
 }
+let lastAsked = ''
 const ok = async () => new Response(JSON.stringify({ data: SERIES }))
 
 describe('ValueChart', () => {
@@ -89,3 +90,28 @@ describe('ValueChart', () => {
     expect(c.firstDay()).toBe(label(daysAgo(60)))
   })
 })
+
+describe('ValueChart — deposits recorded after the purchases they paid (odd/tasks/deposit-dates.md S1, S5)', () => {
+  const withMoved = async () => new Response(JSON.stringify(lastAsked === '/api/cash/deposit-dates'
+    ? { deposits: [], total: 0, from: null }
+    : { data: SERIES, fundedDeposits: { amount: 154323.07, from: '2022-02-09' } }))
+
+  it('says so in one quiet line under the chart, and its (i) offers to review the dates', async () => {
+    HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true }
+    const c = await mount(withMoved)
+    expect(c.el.textContent).toContain('Algunos depósitos se adelantaron a la fecha de tus compras')
+    await act(async () => { c.el.querySelector<HTMLButtonElement>('button[aria-label="Qué depósitos se adelantaron"]')!.click() })
+    const review = [...document.body.querySelectorAll('button')].find(b => b.textContent === 'Revisar fechas de depósitos')!
+    expect(review).toBeTruthy()
+    await act(async () => { review.click() })
+    await act(async () => {})
+    expect(c.urls).toContain('/api/cash/deposit-dates')
+    expect(document.body.querySelector('dialog[open]')?.textContent).toContain('Revisar fechas de depósitos')
+  })
+
+  it('says nothing when every deposit came before what it paid', async () => {
+    const c = await mount(ok)
+    expect(c.el.textContent).not.toContain('Algunos depósitos se adelantaron')
+  })
+})
+
