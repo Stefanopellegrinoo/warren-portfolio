@@ -58,7 +58,7 @@ describe('GET /api/cash/deposit-dates (odd/tasks/deposit-dates.md S2)', () => {
 })
 
 describe('POST /api/cash/deposit-dates (odd/tasks/deposit-dates.md S3)', () => {
-  const D1 = 'c40e252b-0b57-4aad-b679-63fbf1b2bcb1'
+  const D1 = '7d1c3f0e-5b8a-4c2e-9f6d-2a4b8e1c9d3f'
   const tables = () => ({ cash_movements: [row('a', 'RETIRO', 500, '2026-03-02', 'tx-a'), row('b', 'RETIRO', 250.12345, '2026-03-05', 'tx-b'), row(D1, 'DEPOSITO', 3000, '2026-03-31')] })
   const rpc = vi.fn()
   const signedIn = () => mockRequireUser.mockResolvedValue({ supabase: { ...ledgerSupabase(tables()), rpc }, user: { id: 'u1' } })

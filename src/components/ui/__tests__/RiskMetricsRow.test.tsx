@@ -68,7 +68,7 @@ describe('RiskMetricsRow', () => {
     const el = document.createElement('div')
     document.body.appendChild(el)
     const root = createRoot(el)
-    await act(async () => { root.render(<RiskMetricsRow data={{ ...none, fundedDeposits: { amount: 1, from: '2022-02-09' } }} onReviewDeposits={onReviewDeposits} />) })
+    await act(async () => { root.render(<RiskMetricsRow data={{ ...none, fundedDeposits: { amount: 1, from: '2023-05-02' } }} onReviewDeposits={onReviewDeposits} />) })
     await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Qué depósitos se adelantaron"]')!.click() })
     const review = [...document.body.querySelectorAll('button')].find(b => b.textContent === 'Revisar fechas de depósitos')!
     await act(async () => { review.click() })

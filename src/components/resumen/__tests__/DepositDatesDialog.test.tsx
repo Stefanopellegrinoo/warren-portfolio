@@ -13,11 +13,11 @@ afterEach(() => { vi.unstubAllGlobals(); forgetCached(); document.body.innerHTML
 
 const PROPOSAL = {
   deposits: [{
-    id: 'c40e252b-0b57-4aad-b679-63fbf1b2bcb1', date: '2026-03-31', amount: 165000, remaining: 73688.2649,
-    parts: [{ date: '2022-02-09', amount: 2723.3 }, { date: '2022-03-02', amount: 2845.92 }],
+    id: '7d1c3f0e-5b8a-4c2e-9f6d-2a4b8e1c9d3f', date: '2026-05-20', amount: 120000, remaining: 116099.25,
+    parts: [{ date: '2023-05-02', amount: 1500.25 }, { date: '2023-06-01', amount: 2400.5 }],
   }],
-  total: 5569.22,
-  from: '2022-02-09',
+  total: 3900.75,
+  from: '2023-05-02',
 }
 
 function stub(post: () => Response = () => new Response(JSON.stringify({ saved: 2 }))) {
@@ -44,13 +44,13 @@ describe('DepositDatesDialog (odd/tasks/deposit-dates.md S2, S3)', () => {
     const calls = stub()
     const { el, unmount } = await mount()
     expect(calls.map(c => c.init?.method ?? 'GET')).toEqual(['GET'])
-    expect(text(el)).toContain('Tu depósito del 31/03/2026 pagó compras desde el 09/02/2022: ¿lo repartimos en esas fechas?')
+    expect(text(el)).toContain('Tu depósito del 20/05/2026 pagó compras desde el 02/05/2023: ¿lo repartimos en esas fechas?')
     const dates = [...el.querySelectorAll<HTMLInputElement>('input[type="date"]')]
-    expect(dates.map(d => d.value)).toEqual(['2022-02-09', '2022-03-02'])
+    expect(dates.map(d => d.value)).toEqual(['2023-05-02', '2023-06-01'])
     // A part can move, but never to its deposit's day or later.
-    expect(dates.every(d => d.max === '2026-03-30')).toBe(true)
-    expect(text(el)).toContain('US$ 2.723,30')
-    expect(text(el)).toContain('Queda el 31/03/2026: US$ 73.688,26')
+    expect(dates.every(d => d.max === '2026-05-19')).toBe(true)
+    expect(text(el)).toContain('US$ 1.500,25')
+    expect(text(el)).toContain('Queda el 20/05/2026: US$ 116.099,25')
     expect(text(el)).toContain('El total depositado no cambia.')
     unmount()
   })
@@ -60,7 +60,7 @@ describe('DepositDatesDialog (odd/tasks/deposit-dates.md S2, S3)', () => {
     const { el, onDone, unmount } = await mount()
     const first = el.querySelector<HTMLInputElement>('input[type="date"]')!
     await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(first, '2022-02-01')
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(first, '2023-04-20')
       first.dispatchEvent(new Event('input', { bubbles: true }))
     })
     await act(async () => { el.querySelector<HTMLFormElement>('form')!.requestSubmit() })
@@ -69,7 +69,7 @@ describe('DepositDatesDialog (odd/tasks/deposit-dates.md S2, S3)', () => {
     const post = calls.find(c => c.init?.method === 'POST')!
     expect(post.url).toBe('/api/cash/deposit-dates')
     expect(JSON.parse(String(post.init!.body))).toEqual({
-      deposits: [{ id: PROPOSAL.deposits[0].id, parts: [{ date: '2022-02-01', amount: 2723.3 }, { date: '2022-03-02', amount: 2845.92 }] }],
+      deposits: [{ id: PROPOSAL.deposits[0].id, parts: [{ date: '2023-04-20', amount: 1500.25 }, { date: '2023-06-01', amount: 2400.5 }] }],
     })
     expect(el.querySelector('[role="status"]')?.textContent).toBe('Listo: guardamos 2 fechas. El total depositado no cambió.')
     expect(onDone).toHaveBeenCalledTimes(1)

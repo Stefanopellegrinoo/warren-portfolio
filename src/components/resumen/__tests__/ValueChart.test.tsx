@@ -94,7 +94,7 @@ describe('ValueChart', () => {
 describe('ValueChart — deposits recorded after the purchases they paid (odd/tasks/deposit-dates.md S1, S5)', () => {
   const withMoved = async () => new Response(JSON.stringify(lastAsked === '/api/cash/deposit-dates'
     ? { deposits: [], total: 0, from: null }
-    : { data: SERIES, fundedDeposits: { amount: 154323.07, from: '2022-02-09' } }))
+    : { data: SERIES, fundedDeposits: { amount: 1234.56, from: '2023-05-02' } }))
 
   it('says so in one quiet line under the chart, and its (i) offers to review the dates', async () => {
     HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true }
