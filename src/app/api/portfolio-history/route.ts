@@ -4,7 +4,6 @@ import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { getDerivedSeries } from '@/lib/derived-series'
 import { argentinaDate } from '@/lib/utils'
 import { contributedLine, measuredBase, parseUniverse, projectHistory, type ProjectedPoint } from '@/lib/asset-universe'
-import { fetchExternalFlows } from '@/lib/cash-flows'
 import { serverError } from '@/lib/api/errors'
 
 // GET: the portfolio evolution series, derived from the ledger core
@@ -51,11 +50,10 @@ export async function GET(req: NextRequest) {
     // Derived rows are Argentine days (argentinaDate), so the window boundary
     // is computed in the same calendar.
     const today = argentinaDate()
-    // Only the whole portfolio has deposits and withdrawals crossing its boundary.
-    const [{ rows, degraded }, flows] = await Promise.all([
-      getDerivedSeries(supabase, user.id, { fromDate: rangeStart(daysParam, today) }),
-      universe === 'total' ? fetchExternalFlows(supabase, user.id) : null,
-    ])
+    // The deposits and withdrawals come with the rows they were built from (S10); only the whole
+    // portfolio has them crossing its boundary.
+    const { rows, degraded, externalFlows, fundedDeposits } = await getDerivedSeries(supabase, user.id, { fromDate: rangeStart(daysParam, today) })
+    const flows = universe === 'total' ? externalFlows : null
     const projected: ProjectedPoint[] = projectHistory(rows, universe)
     // The whole portfolio is measured from the day after its last negative-cash day
     // (odd/tasks/statistics-truth.md S4). The series is served whole — the dashboard's value
@@ -65,7 +63,7 @@ export async function GET(req: NextRequest) {
     const contributed = flows ? contributedLine(projected, flows, unavailableReason ? null : measuredFrom) : null
     const data = contributed ? projected.map((p, i) => ({ ...p, contributed: contributed[i] })) : projected
 
-    const responseData = { data, measuredFrom, negativeCashUntil, unavailableReason }
+    const responseData = { data, measuredFrom, negativeCashUntil, unavailableReason, fundedDeposits: flows ? fundedDeposits : null }
     // A degraded series (stale bars, a failed side read) is served but never pinned for 5 minutes.
     if (!degraded) await cacheRoute(cacheKey, responseData, 300)
 

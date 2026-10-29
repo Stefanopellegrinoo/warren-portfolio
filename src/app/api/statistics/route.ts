@@ -8,7 +8,7 @@ import { argentinaDate } from '@/lib/utils'
 import { getDerivedSeries } from '@/lib/derived-series'
 import { ledgerFlows } from '@/lib/derive-history'
 import { fetchFlowTransactions } from '@/lib/flow-transactions'
-import { fetchExternalFlows, fetchIncomeMovements } from '@/lib/cash-flows'
+import { fetchIncomeMovements } from '@/lib/cash-flows'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { enrichPositionsForStats, classIncome, resultByAsset } from '@/lib/position-stats'
 import { computeTradeStats } from '@/lib/trade-stats'
@@ -70,13 +70,15 @@ export async function GET(req: NextRequest) {
       ? null
       : Promise.all([fetchFlowTransactions(supabase, user.id), fetchIncomeMovements(supabase, user.id)])
           .catch((err: unknown) => normalizeError(err))
-    const [derived, externalFlows, { now: portfolio, ledger }, declared] = await Promise.all([
+    const [derived, { now: portfolio, ledger }, declared] = await Promise.all([
       getDerivedSeries(supabase, user.id),
-      fetchExternalFlows(supabase, user.id),
       loadPortfolioAndLedger(supabase, user.id, argentinaDate()),
       declaredFlows,
     ])
     if (declared instanceof Error) return serverError('Statistics', declared)
+    // The deposits and withdrawals the rows were built from: never a second read of the movements,
+    // or a deposit moved to the purchase it paid (S10) would read as a gain on one side only.
+    const externalFlows = derived.externalFlows
 
     const rows = derived.rows
     // The core's automatic ON payments: coupons as CUPON income, amortizations as ON sales.
@@ -226,6 +228,8 @@ export async function GET(req: NextRequest) {
       negativeCashUntil: risk.negativeCashUntil,
       unavailableReason: risk.unavailableReason,
       degraded: derived.degraded,
+      // Deposit money moved to the purchases it paid, so the screen can say so (S10).
+      fundedDeposits: universe === 'total' ? derived.fundedDeposits : null,
       // Retired: stddev of monthly realized P&L in dollars was not volatility.
       monthlyStdDev: null,
       winnersCount: tradeStats.winnersCount,

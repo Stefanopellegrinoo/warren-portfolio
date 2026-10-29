@@ -34,6 +34,8 @@ export interface RiskMetricsData {
   unavailableReason?: string | null
   /** Prices missing on some days: valued at cost (S5). */
   degraded?: boolean
+  /** Deposit money moved to the purchases it paid, and from which day (S10). */
+  fundedDeposits?: { amount: number; from: string } | null
 }
 
 export const sharpeTone = (s: number): FigureTone => (s >= 1 ? 'ok' : s >= 0 ? 'warn' : 'danger')
@@ -72,6 +74,13 @@ export function negativeCashNote(data: Pick<RiskMetricsData, 'negativeCashUntil'
   return null
 }
 
+/** The assumption behind a whole-portfolio series whose deposits were recorded after the purchases they paid (S10). */
+export function fundedDepositsNote(data: Pick<RiskMetricsData, 'fundedDeposits'>): string | null {
+  const f = data.fundedDeposits
+  if (!f) return null
+  return `Algunos depósitos estaban cargados después de las compras que pagaron: para medir, US$ ${formatNumber(f.amount)} se toman como depositados el día de esas compras, desde el ${formatDate(f.from)}. El total depositado no cambia.`
+}
+
 export function SharpeMetric({ data }: { data: RiskMetricsData }) {
   const s = data.sharpeRatio
   return (
@@ -106,6 +115,7 @@ export default function RiskMetricsRow({ data }: { data: RiskMetricsData | null 
   // Tolerant fetch: a failed metrics request loses the row, not the page.
   if (!data) return null
   const note = negativeCashNote(data)
+  const funded = fundedDepositsNote(data)
 
   return (
     <section aria-labelledby="h-riesgo">
@@ -121,6 +131,7 @@ export default function RiskMetricsRow({ data }: { data: RiskMetricsData | null 
           Desde el {formatDate(data.measuredFrom)}{data.measuredDays != null && ` · ${data.measuredDays} días de mercado`}
         </p>
       )}
+      {funded && <p className="mt-1 text-[13px] text-ink-3">{funded}</p>}
       {note && <p className="mt-1 text-[13px] text-warn">{note}</p>}
       {data.degraded && <p className="mt-1 text-[13px] text-warn">Faltan precios de algunos días: se valuaron al costo.</p>}
     </section>

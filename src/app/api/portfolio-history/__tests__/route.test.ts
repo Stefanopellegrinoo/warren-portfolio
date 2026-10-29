@@ -22,11 +22,6 @@ vi.mock('@/lib/derived-series', () => ({
   getDerivedSeries: (...args: unknown[]) => mockGetDerivedSeries(...args),
 }))
 
-const mockExternalFlows = vi.fn()
-vi.mock('@/lib/cash-flows', () => ({
-  fetchExternalFlows: (...args: unknown[]) => mockExternalFlows(...args),
-}))
-
 const route = await import('../route')
 const { GET } = route
 
@@ -46,7 +41,8 @@ function row(date: string, over: Record<string, number> = {}) {
     stocks_value: 600, stocks_invested: 500, ons_value: 300, ons_invested: 300, cash_value: 100, ...over,
   }
 }
-const series = (rows: unknown[], degraded = false) => ({ rows, degraded, flags: {}, income: [] })
+const series = (rows: unknown[], degraded = false, externalFlows: unknown[] = [], fundedDeposits: unknown = null) =>
+  ({ rows, degraded, flags: {}, income: [], externalFlows, fundedDeposits })
 
 function request(query = 'days=90'): NextRequest {
   return new Request(`http://test.local/api/portfolio-history?${query}`) as unknown as NextRequest
@@ -61,7 +57,6 @@ beforeEach(() => {
   mockGetCachedRoute.mockResolvedValue(null)
   mockCacheRoute.mockResolvedValue(undefined)
   mockGetDerivedSeries.mockResolvedValue(series([]))
-  mockExternalFlows.mockResolvedValue([])
 })
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -82,6 +77,7 @@ describe('GET /api/portfolio-history — derived from the ledger core', () => {
       measuredFrom: daysAgo(1),
       negativeCashUntil: null,
       unavailableReason: null,
+      fundedDeposits: null,
     })
   })
 
@@ -122,7 +118,7 @@ describe('GET /api/portfolio-history — derived from the ledger core', () => {
 
     await GET(request())
     expect(mockCacheRoute).toHaveBeenCalledWith(
-      'history:v4:u1:90:total', { data: [], measuredFrom: null, negativeCashUntil: null, unavailableReason: null }, 300
+      'history:v4:u1:90:total', { data: [], measuredFrom: null, negativeCashUntil: null, unavailableReason: null, fundedDeposits: null }, 300
     )
   })
 
@@ -196,24 +192,24 @@ describe('POST /api/portfolio-history', () => {
   })
 
   it('the whole portfolio carries the money put in: first measured value plus deposits minus withdrawals (S9)', async () => {
+    // The flows come with the rows they were built from (S10).
     mockGetDerivedSeries.mockResolvedValue(series([
       row(daysAgo(3), { total_value: 900, cash_value: -50 }), row(daysAgo(2), { total_value: 1000 }),
       row(daysAgo(1), { total_value: 1600 }), row(TODAY, { total_value: 1500 }),
-    ]))
-    mockExternalFlows.mockResolvedValue([{ date: daysAgo(1), amount: 500 }, { date: TODAY, amount: -100 }])
+    ], false, [{ date: daysAgo(1), amount: 500 }, { date: TODAY, amount: -100 }], { amount: 250, from: daysAgo(3) }))
 
     const body = await (await GET(request('days=all&universe=total'))).json()
 
-    expect(mockExternalFlows).toHaveBeenCalledWith(fakeSupabase, 'u1')
+    expect(body.fundedDeposits).toEqual({ amount: 250, from: daysAgo(3) })
     expect(body.measuredFrom).toBe(daysAgo(2))
     expect(body.data.map((p: { contributed: number | null }) => p.contributed)).toEqual([null, 1000, 1500, 1400])
   })
 
-  it('a class carries no money-put-in line and reads no cash movement', async () => {
-    mockGetDerivedSeries.mockResolvedValue(series([row(daysAgo(1)), row(TODAY)]))
+  it('a class carries no money-put-in line and says nothing about deposits', async () => {
+    mockGetDerivedSeries.mockResolvedValue(series([row(daysAgo(1)), row(TODAY)], false, [{ date: TODAY, amount: 5 }], { amount: 1, from: TODAY }))
     const body = await (await GET(request('days=all&universe=stocks'))).json()
     expect(body.data[0]).toEqual({ snapshot_date: daysAgo(1), value: 600, invested: 500 })
-    expect(mockExternalFlows).not.toHaveBeenCalled()
+    expect(body.fundedDeposits).toBeNull()
   })
 
   it('caches under history:v4, the version that carries the money put in', async () => {

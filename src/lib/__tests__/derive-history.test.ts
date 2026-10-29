@@ -1,6 +1,6 @@
 // src/lib/__tests__/derive-history.test.ts
 import { describe, it, expect } from 'vitest'
-import { deriveHistory, ledgerFlows, type DeriveInput } from '../derive-history'
+import { deriveHistory, externalFlowsOf, fundPurchases, ledgerFlows, type DeriveInput } from '../derive-history'
 import { computeUniverseTwr, projectHistory } from '../asset-universe'
 import type { LedgerMovement, LedgerTrade } from '../ledger-core'
 import type { DailyBar } from '../historical-prices'
@@ -270,3 +270,91 @@ describe('deriveHistory — stock splits (odd/tasks/split-aware-ledger.md S1, S2
     for (const d of ['2026-03-03', '2026-03-04', '2026-03-09', TODAY]) expect(rows.get(d).total_value).toBeCloseTo(600, 6)
   })
 })
+
+// A cash leg the bulk import wrote beside its trade, and money that came from outside.
+const leg = (type: string, amount: number, date: string) => ({ ...mv(type, amount, date), transaction_id: `t-${date}-${amount}` })
+
+describe('fundPurchases — a deposit dated after the purchases it paid (statistics-truth S10)', () => {
+  it('moves exactly the shortfall from the later deposit to the purchase day; the total deposited does not change', () => {
+    const { movements, funded } = fundPurchases([leg('RETIRO', 1000, '2026-03-02'), mv('DEPOSITO', 3000, '2026-03-06')], [])
+    expect(movements).toEqual([
+      leg('RETIRO', 1000, '2026-03-02'),
+      { type: 'DEPOSITO', amount: 2000, date: '2026-03-06' },
+      { type: 'DEPOSITO', amount: 1000, date: '2026-03-02', transaction_id: null },
+    ])
+    expect(funded).toEqual({ amount: 1000, from: '2026-03-02' })
+  })
+
+  it('takes from the nearest later deposit first, then the next one, day by day', () => {
+    const { movements, funded } = fundPurchases([
+      leg('RETIRO', 500, '2026-03-02'), leg('RETIRO', 700, '2026-03-03'),
+      mv('DEPOSITO', 300, '2026-03-04'), mv('DEPOSITO', 2000, '2026-03-05'),
+    ], [])
+    const deposits = movements.filter(m => m.type === 'DEPOSITO').map(m => [m.date, m.amount])
+    expect(deposits).toEqual([['2026-03-05', 1100], ['2026-03-02', 500], ['2026-03-03', 700]])
+    expect(deposits.reduce((sum, [, amount]) => sum + Number(amount), 0)).toBe(2300)
+    expect(funded).toEqual({ amount: 1200, from: '2026-03-02' })
+  })
+
+  it('invents nothing: a shortfall with no later deposit stays as it is', () => {
+    const moves = [mv('DEPOSITO', 400, '2026-03-01'), leg('RETIRO', 500, '2026-03-02')]
+    expect(fundPurchases(moves, [])).toEqual({ movements: moves, funded: null })
+  })
+
+  it('never moves a sale leg or a withdrawal, and counts income on its payment date', () => {
+    const moves = [
+      leg('RETIRO', 1000, '2026-03-02'), leg('DEPOSITO', 5000, '2026-03-03'),
+      mv('DEPOSITO', 1000, '2026-03-09'), mv('RETIRO', 100, '2026-03-09'),
+    ]
+    // A 300 coupon paid on 03-02 covers part of that day's purchase.
+    const { movements, funded } = fundPurchases(moves, [{ date: '2026-03-02', amount: 300 }])
+    expect(movements).toEqual([
+      leg('RETIRO', 1000, '2026-03-02'), leg('DEPOSITO', 5000, '2026-03-03'),
+      { type: 'DEPOSITO', amount: 300, date: '2026-03-09' }, mv('RETIRO', 100, '2026-03-09'),
+      { type: 'DEPOSITO', amount: 700, date: '2026-03-02', transaction_id: null },
+    ])
+    expect(funded).toEqual({ amount: 700, from: '2026-03-02' })
+  })
+
+  it('external flows are the deposits and withdrawals with no trade behind them, signed, by date', () => {
+    expect(externalFlowsOf([
+      mv('RETIRO', 100, '2026-03-09'), leg('RETIRO', 1000, '2026-03-02'),
+      { type: 'DEPOSITO', amount: 700, date: '2026-03-02', transaction_id: null }, mv('DIVIDENDO', 5, '2026-03-04'),
+    ])).toEqual([{ date: '2026-03-02', amount: 700 }, { date: '2026-03-09', amount: -100 }])
+  })
+})
+
+describe('deriveHistory — deposits dated after the purchases they paid (statistics-truth S10)', () => {
+  const late = input({
+    transactions: [tx({ date: '2026-03-02', quantity: 10, price: 50 })],
+    movements: [leg('RETIRO', 500, '2026-03-02'), mv('DEPOSITO', 5000, '2026-03-06')],
+  })
+
+  it('daily cash never goes negative, and the flows say where the money was moved', () => {
+    const { rows, flags, externalFlows, fundedDeposits } = deriveHistory(late)
+    const R = byDate(rows)
+    for (const d of ['2026-03-02', '2026-03-03', '2026-03-04', '2026-03-05']) expect(R.get(d).cash_value).toBeCloseTo(0, 6)
+    expect(R.get('2026-03-06').cash_value).toBeCloseTo(4500, 6)
+    expect(R.get(TODAY).cash_value).toBeCloseTo(4500, 6)
+    expect(flags.negativeCash).toBeNull()
+    expect(externalFlows).toEqual([{ date: '2026-03-02', amount: 500 }, { date: '2026-03-06', amount: 4500 }])
+    expect(fundedDeposits).toEqual({ amount: 500, from: '2026-03-02' })
+  })
+
+  it('the whole portfolio returns what its shares did: no gain or loss from moving the deposit', () => {
+    const { rows, externalFlows } = deriveHistory(late)
+    const { series } = computeUniverseTwr(rows, 'total', { externalFlows, transactions: [], income: [] })
+    // 03-02 → 03-06 only AAA moves (500 → 630); from 03-06 the 4.500 deposited sits as cash and
+    // earns nothing: 5.130 → 5.200 today. Neither deposit day adds or takes anything.
+    expect(series[0].date).toBe('2026-03-02')
+    expect(series[1].twrIndex / series[0].twrIndex).toBeCloseTo(600 / 500, 9)
+    expect(series[series.length - 1].twrIndex / series[0].twrIndex).toBeCloseTo((630 / 500) * (5200 / 5130), 9)
+  })
+
+  it('with the deposit on time nothing moves', () => {
+    const { externalFlows, fundedDeposits } = deriveHistory(input())
+    expect(fundedDeposits).toBeNull()
+    expect(externalFlows).toEqual([{ date: '2026-03-01', amount: 5000 }])
+  })
+})
+

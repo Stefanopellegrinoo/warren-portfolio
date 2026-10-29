@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import KpiCard, { toneOfResult } from '@/components/ui/KpiCard'
-import RiskMetricsRow, { negativeCashNote } from '@/components/ui/RiskMetricsRow'
+import RiskMetricsRow, { fundedDepositsNote, negativeCashNote } from '@/components/ui/RiskMetricsRow'
 import BenchmarkComparison from '@/components/charts/BenchmarkComparison'
 import PortfolioChart from '@/components/charts/PortfolioChart'
 import type { PortfolioChartPoint } from '@/components/charts/PortfolioChart'
@@ -94,7 +94,7 @@ const statsOf = <T,>(url: string) => async (): Promise<T> => {
   return res.json()
 }
 
-interface History { points: PortfolioChartPoint[]; note: string | null }
+interface History { points: PortfolioChartPoint[]; note: string | null; assumption: string | null }
 
 /**
  * The full series of a part, asked once; a period is cut here, as the route cuts it (Argentine days back from today).
@@ -114,6 +114,8 @@ async function fullHistory(universe: Universe): Promise<History> {
   return {
     points: body.unavailableReason ? [] : typeof from === 'string' ? data.filter(p => p.snapshot_date >= from) : data,
     note: negativeCashNote(body),
+    // Deposits moved to the purchases they paid (S10): what the line assumes.
+    assumption: fundedDepositsNote(body),
   }
 }
 function cut(series: PortfolioChartPoint[], period: Period): PortfolioChartPoint[] {
@@ -168,6 +170,7 @@ export default function StatisticsPage() {
       <p className="pt-3 text-[13px] text-ink-3">{activeTab === 'general'
         ? 'Valor de mercado contra la plata que pusiste: el valor del primer día medido, más los depósitos y menos los retiros.'
         : 'Valor de mercado contra el costo de lo que tenés.'}</p>
+      {history.data?.assumption && <p className="pt-1 text-[13px] text-ink-3">{history.data.assumption}</p>}
       {history.data?.note && <p className="pt-1 text-[13px] text-warn">{history.data.note}</p>}
       <PortfolioChart data={cut(history.data?.points ?? [], historyPeriod)} period={historyPeriod} onPeriodChange={changePeriod} loading={!history.data && history.loading} line={LINE[activeTab === 'general' ? 'general' : 'class']} />
     </section>

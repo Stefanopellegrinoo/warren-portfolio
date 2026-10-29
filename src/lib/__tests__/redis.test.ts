@@ -133,12 +133,12 @@ describe('invalidateUserCache', () => {
     expect(delArgs).toContain('statistics:v4:u1:stocks')
   })
 
-  it('invalidates derived:v1:{userId}', async () => {
+  it('invalidates derived:v2:{userId}', async () => {
     const { invalidateUserCache } = await setup()
     await invalidateUserCache('u1')
 
     const delArgs = capturedDel.mock.calls.flatMap((call: unknown[]) => call)
-    expect(delArgs).toContain('derived:v1:u1')
+    expect(delArgs).toContain('derived:v2:u1')
   })
 
   it('invalidates summary:{userId}', async () => {

@@ -206,7 +206,7 @@ export function stripKeyPrefix(key: string): string {
  * Invalidates all user-specific route caches when data mutates.
  * Clears history:v4:{userId}:* and statistics:v4:{userId}:*
  * (SCAN+DEL), plus the exact-match keys statistics:combined:{userId},
- * statistics:ons:v3:{userId}, summary:{userId} and derived:v1:{userId}. Also bumps
+ * statistics:ons:v3:{userId}, summary:{userId} and derived:v2:{userId}. Also bumps
  * summary:version:{userId} so the summary writers (worker, /api/positions) and the derived series detect stale writes.
  */
 export async function invalidateUserCache(userId: string): Promise<void> {
@@ -240,7 +240,7 @@ export async function invalidateUserCache(userId: string): Promise<void> {
     keysToDelete.push(`statistics:combined:${userId}`)
     keysToDelete.push(`statistics:ons:v3:${userId}`)
     keysToDelete.push(`summary:${userId}`)
-    keysToDelete.push(`derived:v1:${userId}`)
+    keysToDelete.push(`derived:v2:${userId}`)
 
     // Bump summary version before deleting so every summary and derived-series writer detects stale writes
     await redis.incr(`summary:version:${userId}`)

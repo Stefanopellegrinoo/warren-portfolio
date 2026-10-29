@@ -23,9 +23,9 @@ const mockGetDerivedSeries = vi.fn()
 vi.mock('@/lib/derived-series', () => ({
   getDerivedSeries: (...args: unknown[]) => mockGetDerivedSeries(...args),
 }))
-/** The derived series the route reads: rows plus the core's automatic ON payments. */
-const mockSeries = (rows: unknown[], income: unknown[] = [], degraded = false) =>
-  mockGetDerivedSeries.mockResolvedValue({ rows, income, degraded, flags: {} })
+/** The derived series the route reads: rows, the core's automatic ON payments and the deposits and withdrawals the rows were built from. */
+const mockSeries = (rows: unknown[], income: unknown[] = [], degraded = false, externalFlows: unknown[] = [], fundedDeposits: unknown = null) =>
+  mockGetDerivedSeries.mockResolvedValue({ rows, income, degraded, flags: {}, externalFlows, fundedDeposits })
 
 // Tripwire: statistics no longer read portfolio_snapshots.
 const mockFetchSnapshotSeries = vi.fn()
@@ -47,10 +47,8 @@ vi.mock('@/lib/flow-transactions', () => ({
   fetchFlowTransactions: (...args: unknown[]) => mockFetchFlowTransactions(...args),
 }))
 
-const mockFetchExternalFlows = vi.fn()
 const mockFetchIncomeMovements = vi.fn()
 vi.mock('@/lib/cash-flows', () => ({
-  fetchExternalFlows: (...args: unknown[]) => mockFetchExternalFlows(...args),
   fetchIncomeMovements: (...args: unknown[]) => mockFetchIncomeMovements(...args),
 }))
 
@@ -85,7 +83,6 @@ beforeEach(() => {
   mockCacheRoute.mockResolvedValue(undefined)
   mockSeries([])
   mockFetchFlowTransactions.mockResolvedValue([])
-  mockFetchExternalFlows.mockResolvedValue([])
   mockFetchIncomeMovements.mockResolvedValue([])
   mockFetchQuotesWithFallback.mockResolvedValue(new Map())
 })
@@ -208,26 +205,33 @@ describe('GET /api/statistics — which universes need the transaction list', ()
     expect(body.maxDrawdown).toBe(0)
   })
 
-  it('passes the fetched external flows through to `total` — its ONLY flow input', async () => {
+  it('passes the derived series\' external flows through to `total` — its ONLY flow input (S10)', async () => {
     // `total` has no transactions or income fetch (every trade and payment is
     // internal to it) — externalFlows (deposits/withdrawals) is the SOLE flow
     // source for this universe (asset-universe.ts:247, `universeFlows`
-    // returns externalFlows unmodified for `total`). mockFetchExternalFlows
-    // is defaulted to [] and never otherwise asserted in this file, so a
-    // route that fetched it and threw the result away — e.g. reverted to
-    // `const externalFlows: ExternalFlow[] = []` — would leave every other
-    // test here green.
+    // returns externalFlows unmodified for `total`). The series' flows default
+    // to [] everywhere else in this file, so a route that dropped them — e.g.
+    // `const externalFlows: ExternalFlow[] = []` — would leave every other test
+    // green. They come with the rows they were built from: one read, one set of
+    // movements (S10).
     mockSeries([
       { snapshot_date: '2026-07-01', total_value: 100000, total_invested: 100000 },
       { snapshot_date: '2026-07-02', total_value: 75000, total_invested: 100000 },
       { snapshot_date: '2026-07-03', total_value: 75000, total_invested: 100000 },
-    ])
-    mockFetchExternalFlows.mockResolvedValue([{ date: '2026-07-02', amount: -25000 }])
+    ], [], false, [{ date: '2026-07-02', amount: -25000 }])
 
     const body = await (await GET(makeRequest('/api/statistics?universe=total'))).json()
     // 100,000 -> 75,000 with a declared -25,000 withdrawal is a flat interval.
     // Undeclared, that same day reads as a real -25% drawdown.
     expect(body.maxDrawdown).toBe(0)
+  })
+})
+
+describe('GET /api/statistics — deposits moved to the purchases they paid (S10)', () => {
+  it('says how much deposit money was moved and from when', async () => {
+    mockSeries([{ snapshot_date: '2026-07-01', total_value: 100, total_invested: 100 }], [], false, [], { amount: 91311.74, from: '2022-02-09' })
+    const body = await (await GET(makeRequest('/api/statistics?universe=total'))).json()
+    expect(body.fundedDeposits).toEqual({ amount: 91311.74, from: '2022-02-09' })
   })
 })
 
@@ -242,7 +246,7 @@ describe('GET /api/statistics — derived series', () => {
     const body = await (await GET(request())).json()
     expect(Object.keys(body).sort()).toEqual([
       'allPnLs', 'allocation', 'annualizedVol', 'arsExposure', 'avgHoldingDays', 'avgLoss', 'avgWin', 'benchmark',
-      'benchmarkError', 'biggestLoser', 'biggestWinner', 'cumulativePnl', 'degraded', 'drawdownIntervals', 'drawdownIntervalsSkipped',
+      'benchmarkError', 'biggestLoser', 'biggestWinner', 'cumulativePnl', 'degraded', 'drawdownIntervals', 'drawdownIntervalsSkipped', 'fundedDeposits',
       'incomeReceived', 'losersCount', 'maxDrawdown', 'measuredDays', 'measuredFrom', 'negativeCashUntil', 'unavailableReason', 'maxHoldingDays', 'minHoldingDays', 'monthlyReturns', 'monthlyStdDev', 'openPnl',
       'profitFactor', 'realizedPnl', 'returnIntervals', 'sharpeRatio', 'totalPortfolioValue', 'totalTrades',
       'universe', 'unpricedPositions', 'unpricedTickers', 'usdExposure', 'winRate', 'winnersCount',
@@ -290,7 +294,6 @@ describe('GET /api/statistics — universe parameter', () => {
       mockRequireUser.mockResolvedValue({ supabase: fakeSupabase(), user: { id: 'u1' } })
       mockGetCachedRoute.mockResolvedValue(null)
       mockSeries([])
-      mockFetchExternalFlows.mockResolvedValue([])
       mockFetchIncomeMovements.mockResolvedValue([])
       const res = await GET(makeRequest(`/api/statistics?universe=${u}`))
       expect(res.status).toBe(200)
@@ -481,12 +484,11 @@ describe('GET /api/statistics — independent reads run together', () => {
     const pending = GET(makeRequest('/api/statistics?universe=stocks&benchmark=SPY'))
     // The series has not answered yet: the flows and the ledger read have started.
     await vi.waitFor(() => {
-      expect(mockFetchExternalFlows).toHaveBeenCalledTimes(1)
       expect(mockFetchFlowTransactions).toHaveBeenCalledTimes(1)
       expect(mockFetchIncomeMovements).toHaveBeenCalledTimes(1)
       expect(log).toContain('transactions')
     })
-    answerSeries({ rows: [], income: [], degraded: false, flags: {} })
+    answerSeries({ rows: [], income: [], degraded: false, flags: {}, externalFlows: [], fundedDeposits: null })
     // The benchmark has not answered yet: the quotes are already asked for.
     await vi.waitFor(() => expect(mockFetchQuotesWithFallback).toHaveBeenCalledWith(['AAPL']))
     answerBenchmark(null)

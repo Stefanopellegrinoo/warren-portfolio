@@ -8,7 +8,7 @@
  * reach back to its first trade gets one Rava + bonistas backfill (at most once a
  * day per ticker); a failure is logged and the valuation rule covers the gap.
  *
- * The full series is cached once per user in `derived:v1:{uid}` (15 min) with the
+ * The full series is cached once per user in `derived:v2:{uid}` (15 min) with the
  * same version compare-and-set the summary cache uses: the version is read BEFORE
  * the database, and the write is discarded if a mutation bumped it meanwhile.
  * A degraded result (stale/missing bars, unknown splits, no CCL, a failed side
@@ -30,12 +30,13 @@ import { getHistoricalCCL } from './currency'
 import { argentinaDate } from './utils'
 import { addDays } from './ar-calendar'
 import { unadjustSplits, toUsd, type DailyBar, type SplitEvent } from './historical-prices'
-import { deriveHistory, type DerivedRow, type DeriveFlags } from './derive-history'
+import { deriveHistory, type DerivedMovement, type DerivedRow, type DeriveFlags, type FundedDeposits } from './derive-history'
+import type { ExternalFlow } from './drawdown'
 import { loadSchedules } from './on-schedules'
 import { backfillOnPriceHistory } from './rava-history'
 import { backfillPastFlows } from './bonistas-flows'
 import type { FlowRow } from './on-flow-history'
-import type { Income, LedgerMovement, LedgerTrade } from './ledger-core'
+import type { Income, LedgerTrade } from './ledger-core'
 import { loadOverrides } from './ledger-now'
 import { createServiceClient } from './supabase-server'
 import { loadSplits } from './stock-splits'
@@ -61,6 +62,10 @@ export interface DerivedSeries {
   flags: DeriveFlags
   /** The core's ON payments up to today (ledgerFlows turns them into risk-metric flows). */
   income: Income[]
+  /** The deposits and withdrawals the rows were built from: the whole portfolio's flows (S10). */
+  externalFlows: ExternalFlow[]
+  /** Deposit money moved to the purchases it paid, if any (statistics-truth S10). */
+  fundedDeposits: FundedDeposits | null
 }
 
 export interface DerivedDeps {
@@ -98,11 +103,12 @@ function inRange(rows: DerivedRow[], { fromDate, toDate }: SeriesRange): Derived
 async function readCache(userId: string, today: string) {
   try {
     if (!(await ensureRedisConnected())) return null
-    const raw = await getRedis()?.get(`derived:v1:${userId}`)
+    const raw = await getRedis()?.get(`derived:v2:${userId}`)
     const parsed = raw ? JSON.parse(raw) : null
-    // Array.isArray(income): an entry written before T4.1 has another row meaning — recompute it.
-    return parsed?.asOf === today && Array.isArray(parsed.income)
-      ? (parsed as { rows: DerivedRow[]; flags: DeriveFlags; income: Income[] })
+    // Array.isArray(income): an entry written before T4.1 has another row meaning; without
+    // externalFlows its rows may rest on deposits its flows do not know about (S10) — recompute.
+    return parsed?.asOf === today && Array.isArray(parsed.income) && Array.isArray(parsed.externalFlows)
+      ? (parsed as Omit<DerivedSeries, 'degraded'>)
       : null
   } catch {
     return null
@@ -119,11 +125,11 @@ async function readVersion(userId: string): Promise<string | null | undefined> {
   }
 }
 
-async function writeCache(userId: string, version: string | null, today: string, rows: DerivedRow[], flags: DeriveFlags, income: Income[]) {
+async function writeCache(userId: string, version: string | null, today: string, series: Omit<DerivedSeries, 'degraded'>) {
   try {
     await getRedis()?.eval(
-      SUMMARY_SETEX_LUA, 2, `derived:v1:${userId}`, `summary:version:${userId}`,
-      version ?? '', DERIVED_TTL, JSON.stringify({ asOf: today, rows, flags, income })
+      SUMMARY_SETEX_LUA, 2, `derived:v2:${userId}`, `summary:version:${userId}`,
+      version ?? '', DERIVED_TTL, JSON.stringify({ asOf: today, ...series })
     )
   } catch (err) {
     console.warn('[Derived] cache write failed:', err instanceof Error ? err.message : err)
@@ -204,7 +210,7 @@ export async function getDerivedSeries(
   const today = deps.today ?? argentinaDate()
 
   const hit = await readCache(userId, today)
-  if (hit) return { rows: inRange(hit.rows, range), degraded: false, flags: hit.flags, income: hit.income }
+  if (hit) return { ...hit, rows: inRange(hit.rows, range), degraded: false }
 
   const startVersion = await readVersion(userId)
 
@@ -217,8 +223,8 @@ export async function getDerivedSeries(
       building.set(key, build)
     }
   }
-  const { rows, degraded, flags, income } = await build
-  return { rows: inRange(rows, range), degraded, flags, income }
+  const series = await build
+  return { ...series, rows: inRange(series.rows, range) }
 }
 
 /** The ON closes from `firstDate` on, backfilled on demand when a held ON lacks them. */
@@ -267,8 +273,9 @@ async function buildSeries(
         .select('ticker, operation, quantity, price, commission, date, asset_type, created_at').eq('user_id', userId),
       ['id']
     ),
-    readAll<LedgerMovement>(
-      () => supabase.from('cash_movements').select('type, amount, date').eq('user_id', userId),
+    readAll<DerivedMovement>(
+      // transaction_id: which movements a trade wrote, and which are money in or out (S10).
+      () => supabase.from('cash_movements').select('type, amount, date, transaction_id').eq('user_id', userId),
       ['id']
     ),
     loadOverrides(supabase, userId),
@@ -333,7 +340,7 @@ async function buildSeries(
     barsByTicker.set(ticker, bars)
   }
 
-  const { rows, flags, income } = (deps.derive ?? deriveHistory)({
+  const { rows, flags, income, externalFlows, fundedDeposits } = (deps.derive ?? deriveHistory)({
     userId, transactions, movements, schedules: schedules ?? new Map(), overrides, splits: splitsByTicker, barsByTicker,
     onPricesByTicker: onCloses.closes, today, todayQuotes,
   })
@@ -342,7 +349,7 @@ async function buildSeries(
   // no intraday quote by design (on_price_history covers them), so they do not degrade.
   if (flags.todayUnpriced.some(t => !onTickers.includes(norm(t)))) degraded = true
 
-  if (!degraded && startVersion !== undefined) await writeCache(userId, startVersion, today, rows, flags, income)
+  if (!degraded && startVersion !== undefined) await writeCache(userId, startVersion, today, { rows, flags, income, externalFlows, fundedDeposits })
 
-  return { rows, degraded, flags, income }
+  return { rows, degraded, flags, income, externalFlows, fundedDeposits }
 }
