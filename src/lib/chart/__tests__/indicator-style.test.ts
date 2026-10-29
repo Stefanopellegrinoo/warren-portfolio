@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { DEFAULT_CONFIG, INDICATOR_COLORS } from '@/lib/store/chart-store'
 import type { Candle } from '@/lib/binance/types'
 import { INDICATOR_SPECS } from '../indicator-specs'
-import { BandFill, FIXED_BANDS, effectiveConfig, fillLook, levelLooks, lineLook, seriesPoints } from '../indicator-style'
+import { BandFill, FIXED_BANDS, axisFormat, compactNumber, effectiveConfig, fillLook, levelLooks, lineLook, seriesPoints } from '../indicator-style'
 
 const candles: Candle[] = [
   { time: 1, open: 10, high: 12, low: 9, close: 11, volume: 100 }, // up
@@ -160,5 +160,38 @@ describe('BandFill', () => {
 
     const path = paint(fill).calls.filter(([k]) => k === 'moveTo' || k === 'lineTo')
     expect(path).toEqual([['moveTo', 10, 280], ['lineTo', 20, 278], ['lineTo', 20, 288], ['lineTo', 10, 290]])
+  })
+})
+
+// odd/tasks/chart-pro-redesign.md: an indicator pane's scale reads as briefly as its numbers allow, which also
+// keeps the price scale (one width for every pane) narrow on a phone.
+describe('axisFormat', () => {
+  const read = (key: Parameters<typeof axisFormat>[0], p: number) => axisFormat(key)!.formatter(p)
+
+  it('RSI, the stochastic and ADX read in whole numbers', () => {
+    expect([read('rsi', 80), read('rsi', 25.4), read('stochastic', 50), read('adx', 24.6)]).toEqual(['80', '25', '50', '25'])
+    expect(axisFormat('rsi')!.minMove).toBe(1)
+  })
+
+  it('MACD reads in two decimals', () => {
+    expect([read('macd', 0), read('macd', -1.234), read('macd', 12.5)]).toEqual(['0,00', '−1,23', '12,50'])
+    expect(axisFormat('macd')!.minMove).toBe(0.01)
+  })
+
+  it('OBV reads compact, like the volume', () => {
+    expect([read('obv', 74_070_000), read('obv', -1_234_567), read('obv', 950)]).toEqual(['74,1 M', '−1,2 M', '950'])
+  })
+
+  it('an indicator over the price has none of its own: it reads like the price', () => {
+    expect(axisFormat('ema20')).toBeNull()
+    expect(axisFormat('bollinger')).toBeNull()
+    expect(axisFormat('volume')).toBeNull()
+  })
+})
+
+describe('compactNumber', () => {
+  it('reads a volume briefly, with plain spaces and the minus sign', () => {
+    expect([compactNumber(1_234_567), compactNumber(-2_500_000)]).toEqual(['1,2 M', '−2,5 M'])
+    expect(compactNumber(12_345)).toMatch(/^12,3 (k|mil)$/) // the thousands' suffix is the ICU's
   })
 })

@@ -26,7 +26,7 @@ import { DrawingManager, type Drawing } from "lightweight-charts-drawing";
 import { Settings2, X } from "lucide-react";
 import { MAX_COMPARE, useChartStore, type IndicatorKey } from "@/lib/store/chart-store";
 import { INDICATOR_ORDER, INDICATOR_SPECS, type IndicatorLine } from "@/lib/chart/indicator-specs";
-import { BandFill, FIXED_BANDS, effectiveConfig, fillLook, levelLooks, lineLook, seriesPoints } from "@/lib/chart/indicator-style";
+import { BandFill, FIXED_BANDS, axisFormat, effectiveConfig, fillLook, levelLooks, lineLook, seriesPoints } from "@/lib/chart/indicator-style";
 import { MINIMIZED_PANE_PX, paneHeights, paneTops } from "@/lib/chart/pane-layout";
 import { INDICATOR_STYLE_PARTS, type ChartPreferences } from "@/lib/chart/preferences-schema";
 import { hitTestAlert, priceDecimals, type ChartAlert } from "@/lib/chart/alerts";
@@ -174,19 +174,21 @@ function syncIndicators(
 		built.list = enabled.map((key) => {
 			const spec = INDICATOR_SPECS[key];
 			const paneIndex = spec.pane === "own" ? ++pane : 0;
-			// The volume has a scale of its own at the foot of the price pane (odd/tasks/chart-pro-redesign.md S6).
+			// The volume has a scale of its own at the foot of the price pane (odd/tasks/chart-pro-redesign.md S6);
+			// an indicator pane's scale reads as briefly as its numbers allow (80, not 80,00).
 			const volume = key === "volume";
+			const format = axisFormat(key) ?? PRICE_FORMAT;
 			const series = lines.get(key)!.map((l) =>
 				l.type === "histogram"
 					? chart.addSeries(
 							HistogramSeries,
-							{ color: l.color, priceLineVisible: false, lastValueVisible: false, priceFormat: volume ? { type: "volume" } : PRICE_FORMAT, ...(volume && { priceScaleId: "volume" }) },
+							{ color: l.color, priceLineVisible: false, lastValueVisible: false, priceFormat: volume ? { type: "volume" } : format, ...(volume && { priceScaleId: "volume" }) },
 							paneIndex,
 						)
 					: // No value boxes on the scale: the values live in the legends (S1).
 						chart.addSeries(
 							LineSeries,
-							{ color: l.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, priceFormat: PRICE_FORMAT },
+							{ color: l.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, priceFormat: format },
 							paneIndex,
 						),
 			);

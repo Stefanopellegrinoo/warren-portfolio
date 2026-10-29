@@ -811,6 +811,18 @@ describe('TradingChart indicator styles', () => {
     unmount()
   })
 
+  it("each indicator pane's scale reads briefly: whole numbers for RSI, the stochastic and ADX, two decimals for MACD, compact OBV; the overlays like the price", async () => {
+    useChartStore.setState({ indicators: { ...initial.indicators, obv: true } })
+    const { unmount } = await render()
+    const read = (m: Made, p: number) => (m.options.priceFormat as { formatter: (p: number) => string }).formatter(p)
+
+    expect([read(made[4], 80), read(made[8], 20), read(made[10], 25)]).toEqual(['80', '20', '25'])
+    expect([read(made[5], 0), read(made[7], -0.5)]).toEqual(['0,00', '−0,50'])
+    expect(read(made[13], 74_070_000)).toBe('74,1 M')
+    expect(read(made[0], 141.08)).toBe('141,08')
+    unmount()
+  })
+
   it('the volume sits at the foot of the price pane, on its own scale', async () => {
     const { unmount } = await render()
 

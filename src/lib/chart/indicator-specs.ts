@@ -19,6 +19,9 @@ export interface IndicatorSpec {
   /** 'price' overlays the candles; 'own' gets a pane below them. */
   pane: 'price' | 'own'
   levels?: number[]
+  /** How its own pane's scale reads: whole numbers, two decimals or compact (odd/tasks/chart-pro-redesign.md);
+   *  unset over the price, which reads like the price. */
+  axis?: 0 | 2 | 'compact'
   lines: (candles: Candle[], c: IndicatorConfig) => IndicatorLine[]
 }
 
@@ -69,11 +72,13 @@ export const INDICATOR_SPECS: Record<IndicatorKey, IndicatorSpec> = {
     label: (c) => `RSI ${c.rsi}`,
     pane: 'own',
     levels: [30, 70],
+    axis: 0,
     lines: (candles, c) => [line('rsi', INDICATOR_COLORS.rsi, rsi(candles, c.rsi))],
   },
   macd: {
     label: (c) => `MACD ${c.macdFast} ${c.macdSlow} ${c.macdSignal}`,
     pane: 'own',
+    axis: 2,
     lines: (candles, c) => {
       const m = macd(candles, c.macdFast, c.macdSlow, c.macdSignal)
       const bars = pick(m, (p) => p.histogram)
@@ -89,6 +94,7 @@ export const INDICATOR_SPECS: Record<IndicatorKey, IndicatorSpec> = {
     label: (c) => `Estocástico ${c.stochK} ${c.stochSmooth} ${c.stochD}`,
     pane: 'own',
     levels: [20, 80],
+    axis: 0,
     lines: (candles, c) => {
       const s = stochastic(candles, c.stochK, c.stochSmooth, c.stochD)
       return [line('k', INDICATOR_COLORS.stochastic, pick(s, (p) => p.k)), line('d', SIGNAL, pick(s, (p) => p.d))]
@@ -98,6 +104,7 @@ export const INDICATOR_SPECS: Record<IndicatorKey, IndicatorSpec> = {
     label: (c) => `ADX ${c.adxPeriod}`,
     pane: 'own',
     levels: [25],
+    axis: 0,
     lines: (candles, c) => {
       const a = adx(candles, c.adxPeriod)
       return [
@@ -110,6 +117,7 @@ export const INDICATOR_SPECS: Record<IndicatorKey, IndicatorSpec> = {
   obv: {
     label: () => 'OBV',
     pane: 'own',
+    axis: 'compact',
     lines: (candles) => [line('obv', INDICATOR_COLORS.obv, obv(candles))],
   },
 }

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { ChevronRight, Eye, EyeOff, Minus, Settings2, X } from "lucide-react";
 import { useChartStore, type IndicatorConfig, type IndicatorKey } from "@/lib/store/chart-store";
 import { CANDLE_COLORS, INDICATOR_SPECS, type IndicatorLine } from "@/lib/chart/indicator-specs";
-import { lineLook } from "@/lib/chart/indicator-style";
+import { compactNumber, lineLook } from "@/lib/chart/indicator-style";
 import type { ChartPreferences, IndicatorStyle } from "@/lib/chart/preferences-schema";
 import { priceDecimals } from "@/lib/chart/alerts";
 import { cn, formatNumber } from "@/lib/utils";
@@ -13,20 +13,17 @@ import { cn, formatNumber } from "@/lib/utils";
  * Every pane's legend (odd/tasks/chart-pro-redesign.md S1): the price pane's at the chart's top-left, between
  * the candle data (`head`) and the comparisons (`children`); each indicator pane's at its own top-left. Each
  * indicator is named with its values at the crosshair (or the last bar) and its actions: minimize (panes only),
- * hide, settings, remove. On a phone the price pane's values wait for a finger on the chart (S7).
+ * hide, settings, remove. On a phone the price pane's rows are compact, so its names and values fit in two short rows (S7).
  */
 
 const LABELS: Record<string, string> = { k: "%K", d: "%D", adx: "ADX", plusDI: "+DI", minusDI: "−DI" };
 const ONE_DECIMAL: IndicatorKey[] = ["rsi", "stochastic", "adx"];
 const COMPACT: IndicatorKey[] = ["volume", "obv"];
-const compact = new Intl.NumberFormat("es-AR", { notation: "compact", maximumFractionDigits: 1 });
 // Under its pane's top edge, clear of the separator.
 const PANE_LEGEND_GAP_PX = 4;
 
-// Volume and OBV compact ("1,2 M", with a plain space where Intl puts a non-breaking one).
 function valueText(key: IndicatorKey, v: number, decimals: number) {
-	if (COMPACT.includes(key)) return (v < 0 ? "−" : "") + compact.format(Math.abs(v)).replace(/\s/g, " ");
-	return formatNumber(v, { decimals });
+	return COMPACT.includes(key) ? compactNumber(v) : formatNumber(v, { decimals });
 }
 
 /** The point of a line at `at` (null: its last), or -1 where it has none (before its first value). */
@@ -60,7 +57,7 @@ function Action({ label, title, onClick, children }: { label: string; title: str
 	);
 }
 
-function LegendRow({ k, name, swatch, values, own, touching }: { k: IndicatorKey; name: string; swatch?: string; values: ReturnType<typeof valuesAt>; own: boolean; touching: boolean }) {
+function LegendRow({ k, name, swatch, values, own }: { k: IndicatorKey; name: string; swatch?: string; values: ReturnType<typeof valuesAt>; own: boolean }) {
 	const hidden = useChartStore((s) => s.hidden[k]);
 	const minimized = useChartStore((s) => own && s.minimized[k]);
 	const toggleHidden = useChartStore((s) => s.toggleHidden);
@@ -71,20 +68,28 @@ function LegendRow({ k, name, swatch, values, own, touching }: { k: IndicatorKey
 	const [open, setOpen] = useState(false);
 	const icon = "h-3.5 w-3.5";
 	return (
-		<div data-row className={cn("group pointer-events-auto flex w-fit max-w-full flex-wrap items-center gap-x-2 rounded bg-[color-mix(in_srgb,var(--bg)_80%,transparent)] px-1 text-ink-2", hidden && "opacity-50")}>
+		<div
+			data-row
+			className={cn(
+				"group pointer-events-auto flex w-fit max-w-full flex-wrap items-center gap-x-2 rounded bg-[color-mix(in_srgb,var(--bg)_80%,transparent)] px-1 text-ink-2",
+				// Over the price on a phone: name and value close together, so the rows stay two (S7).
+				!own && "max-[819px]:gap-x-1 max-[819px]:px-0.5",
+				hidden && "opacity-50",
+			)}
+		>
 			<button
 				type="button"
 				aria-expanded={minimized ? undefined : open}
 				title={minimized ? "Expandir" : undefined}
 				onClick={() => (minimized ? toggleMinimized(k) : setOpen(!open))}
-				className="inline-flex items-center gap-1.5 whitespace-nowrap rounded max-[819px]:min-h-7"
+				className="inline-flex items-center gap-1.5 whitespace-nowrap rounded max-[819px]:min-h-7 max-[819px]:gap-1"
 			>
-				{swatch && <span aria-hidden className="h-0.5 w-2.5 rounded" style={{ background: swatch }} />}
+				{swatch && <span aria-hidden className="h-0.5 w-2.5 rounded max-[819px]:w-1.5" style={{ background: swatch }} />}
 				{name}
 				{minimized && <span className="text-ink-3"> · minimizado</span>}
 			</button>
 			{!minimized && (
-				<span data-values={k} className={cn("inline-flex flex-wrap gap-x-2 tabular-nums", !own && !touching && "max-[819px]:hidden")}>
+				<span data-values={k} className="inline-flex flex-wrap gap-x-2 tabular-nums max-[819px]:gap-x-1">
 					{values.map((v) => (
 						<span key={v.id} className="whitespace-nowrap">
 							{v.label && <span className="text-ink-3">{v.label} </span>}
@@ -138,13 +143,13 @@ export function PaneLegends({
 	const row = (k: IndicatorKey, own: boolean) => {
 		const l = lines.get(k) ?? [];
 		const style = saved[k]?.style;
-		return <LegendRow key={k} k={k} name={INDICATOR_SPECS[k].label(config)} swatch={own ? undefined : l[0] && lineLook(l[0], style?.lines?.[l[0].id]).color} values={valuesAt(k, l, style, at)} own={own} touching={at !== null} />;
+		return <LegendRow key={k} k={k} name={INDICATOR_SPECS[k].label(config)} swatch={own ? undefined : l[0] && lineLook(l[0], style?.lines?.[l[0].id]).color} values={valuesAt(k, l, style, at)} own={own} />;
 	};
 	const own = keys.filter((k) => INDICATOR_SPECS[k].pane === "own");
 	return (
 		<>
 			{/* On a phone it flows in short rows: the candle data and the notes take a row each, the rest wraps. */}
-			<div data-chart-legend className="pointer-events-none absolute left-3 top-2 z-10 flex max-w-[calc(100%-5rem)] flex-col items-start gap-1 text-[13px] max-[819px]:flex-row max-[819px]:flex-wrap max-[819px]:items-center max-[819px]:gap-x-1 max-[819px]:text-[12px]">
+			<div data-chart-legend className="pointer-events-none absolute left-3 top-2 z-10 flex max-w-[calc(100%-5rem)] flex-col items-start gap-1 text-[13px] max-[819px]:flex-row max-[819px]:flex-wrap max-[819px]:items-center max-[819px]:gap-x-1 max-[819px]:text-[11.5px]">
 				{head}
 				{keys.filter((k) => INDICATOR_SPECS[k].pane === "price").map((k) => row(k, false))}
 				{children}

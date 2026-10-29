@@ -1,6 +1,7 @@
 import type { IPrimitivePaneRenderer, IPrimitivePaneView, ISeriesPrimitive, SeriesAttachedParameter, Time } from "lightweight-charts";
 import { INDICATOR_COLORS, type IndicatorConfig, type IndicatorKey } from "@/lib/store/chart-store";
 import type { IndicatorPoint } from "@/lib/indicators";
+import { formatNumber } from "@/lib/utils";
 import { INDICATOR_SPECS, type IndicatorLine } from "./indicator-specs";
 import {
 	INDICATOR_VALUE_BOUNDS,
@@ -60,6 +61,20 @@ const FILL_COLORS: Record<string, string> = { bands: INDICATOR_COLORS.bollinger,
 export function fillLook(id: string, style?: IndicatorStyle) {
 	const saved = style?.fills?.[id];
 	return { visible: saved?.visible ?? id === "levels", color: saved?.color ?? FILL_COLORS[id], transparency: saved?.transparency ?? 90 };
+}
+
+const compact = new Intl.NumberFormat("es-AR", { notation: "compact", maximumFractionDigits: 1 });
+/** A volume, briefly: "1,2 M" (a plain space where Intl puts a non-breaking one, and the app's minus sign). */
+export function compactNumber(v: number) {
+	return (v < 0 ? "−" : "") + compact.format(Math.abs(v)).replace(/\s/g, " ");
+}
+
+/** The format of an indicator pane's scale, from its spec's `axis`; null over the price, which reads like the price. */
+export function axisFormat(key: IndicatorKey) {
+	const axis = INDICATOR_SPECS[key].axis;
+	if (axis === undefined) return null;
+	if (axis === "compact") return { type: "custom" as const, formatter: compactNumber, minMove: 1 };
+	return { type: "custom" as const, formatter: (p: number) => formatNumber(p, { decimals: axis }), minMove: 10 ** -axis };
 }
 
 /** A soft band between an indicator's levels that is always there and is not a setting: the stochastic's 20–80 (S1). */

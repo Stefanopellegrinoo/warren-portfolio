@@ -66,13 +66,24 @@ describe('PaneLegends: the price pane', () => {
     expect(price().querySelector('button[aria-label^="Minimizar"]')).toBeNull()
   })
 
-  it('on a phone, the values over the price wait for a finger on the chart', () => {
-    const { draw } = render()
-    const values = () => price().querySelector('[data-values="ema20"]')!
+  // Changed on purpose: a phone used to wait for a finger before showing these values.
+  it('on a phone each value over the price shows at rest too, next to its name, in compact rows', () => {
+    render()
+    const row = price().querySelector<HTMLElement>('[data-values="ema20"]')!.closest<HTMLElement>('[data-row]')!
 
-    expect(values().className).toContain('max-[819px]:hidden')
-    draw(1050)
-    expect(values().className).not.toContain('max-[819px]:hidden')
+    expect(row.querySelector('[data-values]')!.className).not.toContain('hidden')
+    expect(row.className).toMatch(/max-\[819px\]:gap-x-1(\s|$)/)
+    expect(row.className).toMatch(/max-\[819px\]:px-0\.5(\s|$)/)
+    expect(price().className).toMatch(/max-\[819px\]:text-\[11\.5px\]/)
+  })
+
+  it('a computer keeps its spacing', () => {
+    render()
+    const row = price().querySelector<HTMLElement>('[data-values="ema20"]')!.closest<HTMLElement>('[data-row]')!
+
+    expect(row.className).toMatch(/(^|\s)gap-x-2(\s|$)/)
+    expect(row.className).toMatch(/(^|\s)px-1(\s|$)/)
+    expect(price().className).toMatch(/(^|\s)text-\[13px\](\s|$)/)
   })
 })
 
