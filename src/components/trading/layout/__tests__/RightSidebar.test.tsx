@@ -23,11 +23,15 @@ const WIDTH_KEY = 'warren:watchlist-width'
 // jsdom has no layout and no matchMedia: each test says how wide the window and the chart row are.
 const atWindow = (wide: boolean) => vi.stubGlobal('matchMedia', (q: string) => ({ matches: wide && q.includes('min-width: 1100px'), media: q, addEventListener() {}, removeEventListener() {} }))
 // What the list takes on screen, as the browser's ResizeObserver reports it (0 while hidden behind the chart).
-const measured = (width: number) => vi.stubGlobal('ResizeObserver', class {
-  constructor(private report: ResizeObserverCallback) {}
-  observe() { this.report([{ contentRect: { width } } as ResizeObserverEntry], this as unknown as ResizeObserver) }
-  disconnect() {}
-})
+// With a ResizeObserver the list's ScrollArea also asks for getAnimations, which jsdom lacks: none run here.
+const measured = (width: number) => {
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(private report: ResizeObserverCallback) {}
+    observe() { this.report([{ contentRect: { width } } as ResizeObserverEntry], this as unknown as ResizeObserver) }
+    disconnect() {}
+  })
+  Element.prototype.getAnimations = () => []
+}
 // A month of rising daily bars.
 const month = Array.from({ length: 24 }, (_, i) => ({ time: `2026-09-${String(i + 1).padStart(2, '0')}`, open: 1, high: 1, low: 1, close: 100 + i }))
 
@@ -47,7 +51,13 @@ beforeEach(() => {
   }))
   atWindow(true)
 })
-afterEach(() => { vi.unstubAllGlobals(); document.body.innerHTML = '' })
+afterEach(() => {
+  vi.unstubAllGlobals()
+  // jsdom has neither: put it back as it was.
+  delete (Element.prototype as Partial<Element>).setPointerCapture
+  delete (Element.prototype as Partial<Element>).getAnimations
+  document.body.innerHTML = ''
+})
 
 const flush = () => act(async () => { await new Promise(r => setTimeout(r, 0)) })
 
