@@ -59,6 +59,19 @@ export interface FundedDeposits {
   from: string
 }
 
+/**
+ * One recorded deposit and the earlier days it paid for: what a user reviews before the dates
+ * are saved (odd/tasks/deposit-dates.md S2). `index` is its position in the movements given.
+ */
+export interface DepositProposal {
+  index: number
+  date: string
+  amount: number
+  parts: Array<{ date: string; amount: number }>
+  /** What stays on its own date. */
+  remaining: number
+}
+
 export interface DeriveInput {
   userId: string
   transactions: LedgerTrade[]
@@ -168,7 +181,7 @@ export function deriveHistory(input: DeriveInput): DeriveResult {
     // Every row and every flow comes from the same movements: a deposit dated after the purchases
     // it paid is moved to them (S10). Income does not depend on cash, so today's run gives it. A
     // ledger the core cannot run to today moves nothing: the days below keep what they can compute.
-    let funding: ReturnType<typeof fundPurchases> = { movements: recorded, funded: null }
+    let funding: ReturnType<typeof fundPurchases> = { movements: recorded, funded: null, proposals: [] }
     try {
       funding = fundPurchases(recorded, ledgerAt(transactions, recorded, today, options).income, today)
     } catch { /* the day that fails is reported below, with the rows before it */ }
@@ -223,8 +236,9 @@ export function fundPurchases(
   movements: DerivedMovement[],
   income: Array<{ date: string; amount: number }>,
   today: string
-): { movements: DerivedMovement[]; funded: FundedDeposits | null } {
+): { movements: DerivedMovement[]; funded: FundedDeposits | null; proposals: DepositProposal[] } {
   const left = movements.map(m => (isExternalDeposit(m) ? Math.abs(Number(m.amount)) : 0))
+  const parts = new Map<number, Array<{ date: string; amount: number }>>()
   const pool = movements
     .map((_, i) => i)
     .filter(i => isExternalDeposit(movements[i]) && day(movements[i].date) <= today)
@@ -246,18 +260,26 @@ export function fundPurchases(
       const take = Math.min(left[i], -(cash + moved))
       left[i] -= take
       moved += take
+      parts.set(i, [...(parts.get(i) ?? []), { date: d, amount: take }])
     }
     if (moved === 0) continue
     added.push({ type: 'DEPOSITO', amount: moved, date: d, transaction_id: null })
     cash += moved
   }
 
-  if (added.length === 0) return { movements, funded: null }
+  if (added.length === 0) return { movements, funded: null, proposals: [] }
   const kept = movements.flatMap((m, i) => {
     if (!isExternalDeposit(m) || left[i] === Math.abs(Number(m.amount))) return [m]
     return left[i] > CENT ? [{ ...m, amount: left[i] }] : []
   })
-  return { movements: [...kept, ...added], funded: { amount: added.reduce((sum, m) => sum + m.amount, 0), from: added[0].date } }
+  const proposals = Array.from(parts, ([index, dated]) => ({
+    index, date: day(movements[index].date), amount: Math.abs(Number(movements[index].amount)), parts: dated, remaining: left[index],
+  })).sort((a, b) => a.index - b.index)
+  return {
+    movements: [...kept, ...added],
+    funded: { amount: added.reduce((sum, m) => sum + m.amount, 0), from: added[0].date },
+    proposals,
+  }
 }
 
 /** Money in and out of the whole portfolio: the deposits and withdrawals no trade wrote, signed, by date. */
