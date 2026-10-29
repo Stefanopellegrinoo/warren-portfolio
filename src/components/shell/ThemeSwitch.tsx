@@ -40,8 +40,8 @@ function applyTheme(pref: ThemePref) {
   else delete document.documentElement.dataset.theme
 }
 
-// `compact`: the icon-only menu (Gráficos from 820 px) cycles the same choice with one button;
-// below 820 px its drawer keeps the radio group.
+// `compact`: the page may show the icon-only menu (Gráficos). While <html data-menu="icons">, from 820 px,
+// one button cycles the same choice; pinned open and below 820 px the radio group shows.
 export default function ThemeSwitch({ compact = false }: { compact?: boolean }) {
   const pref = useSyncExternalStore(subscribe, getPref, () => 'system' as ThemePref)
 
@@ -78,13 +78,13 @@ export default function ThemeSwitch({ compact = false }: { compact?: boolean }) 
   const { label, icon: Icon } = OPTIONS[i]
   return (
     <>
-      <div className="mb-3 min-[820px]:hidden">{group}</div>
+      <div className="mb-3 min-[820px]:[[data-menu=icons]_&]:hidden">{group}</div>
       <button
         type="button"
         onClick={() => savePref(OPTIONS[(i + 1) % OPTIONS.length].value)}
         aria-label={`Tema: ${label}`}
         data-tip={`Tema: ${label}`}
-        className="mb-1 hidden h-10 w-11 place-items-center rounded-md text-ink-2 hover:bg-hover hover:text-ink min-[820px]:grid"
+        className="mb-1 hidden h-10 w-11 place-items-center rounded-md text-ink-2 hover:bg-hover hover:text-ink min-[820px]:[[data-menu=icons]_&]:grid"
       >
         <Icon className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
       </button>

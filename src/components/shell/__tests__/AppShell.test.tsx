@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { renderToStaticMarkup } from 'react-dom/server'
-import { createRoot } from 'react-dom/client'
+import { renderToStaticMarkup, renderToString } from 'react-dom/server'
+import { createRoot, hydrateRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { forgetCached, setCachedValue } from '@/lib/client-cache'
 import { POSITIONS_KEY } from '@/lib/warren/positions'
@@ -22,8 +22,14 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/dashboard',
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
 }))
+vi.mock('next/font/google', () => ({
+  IBM_Plex_Sans: () => ({ variable: 'font-sans' }),
+  IBM_Plex_Mono: () => ({ variable: 'font-mono' }),
+  Newsreader: () => ({ variable: 'font-serif' }),
+}))
 
 import AppShell, { useShellMenu } from '../AppShell'
+import RootLayout from '@/app/layout'
 
 const render = (path: string) => renderToStaticMarkup(<AppShell pathnameForTest={path}><p>contenido</p></AppShell>)
 
@@ -152,6 +158,86 @@ describe('AppShell — a page with its own phone bar', () => {
   })
 })
 
+// The icon-only look applies from 820 px while <html data-menu="icons">; the root layout's boot
+// script sets it from the device's choice before the first paint.
+const ICONS = 'min-[820px]:[[data-menu=icons]_&]:'
+
+// odd/tasks/chart-pro-redesign.md S4: a full page load paints the device's choice from the first frame.
+describe('AppShell — the first paint of the menu on Gráficos', () => {
+  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  afterEach(() => {
+    vi.restoreAllMocks()
+    localStorage.clear()
+    delete document.documentElement.dataset.menu
+    document.body.innerHTML = ''
+  })
+
+  const menuBoot = () => {
+    const html = renderToStaticMarkup(<RootLayout><p>contenido</p></RootLayout>)
+    const script = [...html.matchAll(/<script>(.*?)<\/script>/g)].map(m => m[1]).find(s => s.includes('warren-menu-pinned'))
+    expect(script).toBeDefined()
+    return (storage: { getItem: (k: string) => string | null }) => {
+      const dataset: Record<string, string> = {}
+      new Function('document', 'localStorage', script!)({ documentElement: { dataset } }, storage)
+      return dataset.menu
+    }
+  }
+
+  it('the root layout marks <html> from the stored choice before the page paints, defensively', () => {
+    const boot = menuBoot()
+    expect(boot({ getItem: () => '1' })).toBe('pinned')
+    expect(boot({ getItem: () => '0' })).toBe('icons')
+    expect(boot({ getItem: () => null })).toBe('icons')
+    expect(boot({ getItem: () => { throw new Error('blocked') } })).toBe('icons')
+  })
+
+  it('a page load after » paints the full menu: the boot script reads what the button stored', () => {
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    act(() => root.render(<AppShell pathnameForTest="/trading"><p>contenido</p></AppShell>))
+    act(() => el.querySelector<HTMLButtonElement>('button[aria-controls="sidebar"]')!.click())
+    act(() => root.unmount())
+    expect(menuBoot()(localStorage)).toBe('pinned')
+  })
+
+  it('the server markup carries both widths and <html data-menu> picks one', () => {
+    const el = document.createElement('div')
+    el.innerHTML = render('/trading')
+    const grid = el.firstElementChild!.classList
+    expect(grid.contains('min-[820px]:grid-cols-[264px_minmax(0,1fr)]')).toBe(true)
+    expect(grid.contains(`${ICONS}grid-cols-[64px_minmax(0,1fr)]`)).toBe(true)
+    expect(el.querySelector('button[aria-controls="sidebar"]')!.textContent).toBe('Contraer menú')
+  })
+
+  it('the server markup carries both theme controls and <html data-menu> picks one', () => {
+    const el = document.createElement('div')
+    el.innerHTML = render('/trading')
+    const cycle = el.querySelector('button[aria-label^="Tema:"]')!
+    expect(cycle.classList.contains('hidden')).toBe(true)
+    expect(cycle.classList.contains(`${ICONS}grid`)).toBe(true)
+    expect(el.querySelector('[role="radiogroup"]')!.parentElement!.classList.contains(`${ICONS}hidden`)).toBe(true)
+  })
+
+  it('hydrates a pinned device without a mismatch warning, then » reads as open', () => {
+    localStorage.setItem('warren-menu-pinned', '1')
+    document.documentElement.dataset.menu = 'pinned'
+    const el = document.createElement('div')
+    el.innerHTML = renderToString(<AppShell pathnameForTest="/trading"><p>contenido</p></AppShell>)
+    document.body.appendChild(el)
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    let root: ReturnType<typeof hydrateRoot> | undefined
+    act(() => { root = hydrateRoot(el, <AppShell pathnameForTest="/trading"><p>contenido</p></AppShell>) })
+    expect(errors).not.toHaveBeenCalled()
+    expect(el.querySelector('button[aria-controls="sidebar"]')!.getAttribute('aria-expanded')).toBe('true')
+    expect(document.documentElement.dataset.menu).toBe('pinned')
+    // Nothing is swapped after hydration: both theme controls stay and CSS keeps showing the group.
+    expect(el.querySelector('button[aria-label^="Tema:"]')).not.toBeNull()
+    expect(el.querySelector('[role="radiogroup"]')).not.toBeNull()
+    act(() => root!.unmount())
+  })
+})
+
 // odd/tasks/chart-pro-redesign.md S4: on Gráficos, from 820 px, the menu keeps only its icons.
 describe('AppShell — the icon-only menu on Gráficos', () => {
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -159,6 +245,7 @@ describe('AppShell — the icon-only menu on Gráficos', () => {
     vi.restoreAllMocks()
     localStorage.clear()
     delete document.documentElement.dataset.theme
+    delete document.documentElement.dataset.menu
     document.body.innerHTML = ''
   })
 
@@ -170,7 +257,9 @@ describe('AppShell — the icon-only menu on Gráficos', () => {
     act(() => root.render(<AppShell pathnameForTest={path}><p>contenido</p></AppShell>))
     const named = (label: string) => el.querySelector<HTMLElement>(`[aria-label="${label}"]`)
     const button = (text: string) => [...el.querySelectorAll('button')].find(b => b.textContent?.includes(text))
-    return { el, named, button, unmount: () => act(() => root.unmount()) }
+    // On Gráficos the shell draws no phone bar, so the only button bound to the menu is » / «.
+    const toggle = () => el.querySelector<HTMLButtonElement>('button[aria-controls="sidebar"]')!
+    return { el, named, button, toggle, unmount: () => act(() => root.unmount()) }
   }
   // Hidden below 820 px: the element or an ancestor inside the menu carries an unprefixed hiding class.
   const hiddenOnPhone = (node: Element) => {
@@ -182,11 +271,13 @@ describe('AppShell — the icon-only menu on Gráficos', () => {
 
   it('shows only the icons from 820 px: a 64 px column, each entry named by its aria-label', () => {
     const { el, named } = mount()
-    expect(el.firstElementChild!.className).toContain('min-[820px]:grid-cols-[64px_minmax(0,1fr)]')
+    expect(el.firstElementChild!.classList.contains(`${ICONS}grid-cols-[64px_minmax(0,1fr)]`)).toBe(true)
     for (const label of [...LABELS, 'Buscar activo', 'Cerrar sesión']) {
       const entry = named(label)
       expect(entry, label).not.toBeNull()
-      expect(entry!.querySelector('.min-\\[820px\\]\\:hidden')?.textContent, label).toBe(label)
+      const text = entry!.querySelector('span')!
+      expect(text.textContent, label).toBe(label)
+      expect(text.classList.contains(`${ICONS}hidden`), label).toBe(true)
     }
     expect(el.querySelector('#sidebar')!.textContent).toContain('W')
   })
@@ -235,7 +326,7 @@ describe('AppShell — the icon-only menu on Gráficos', () => {
     const { el } = mount()
     const heading = el.querySelector('#h-personal')!
     expect(heading.textContent).toBe('Personal')
-    expect(heading.className).toContain('min-[820px]:sr-only')
+    expect(heading.classList.contains(`${ICONS}sr-only`)).toBe(true)
   })
 
   it('cycles the theme Claro → Oscuro → Auto with one button, the same choice as the radio group', () => {
@@ -261,28 +352,32 @@ describe('AppShell — the icon-only menu on Gráficos', () => {
 
   it('» pins the full menu open, « folds it back, and the device remembers', () => {
     const first = mount()
-    const expand = first.named('Expandir menú')!
-    expect(expand.getAttribute('aria-expanded')).toBe('false')
-    act(() => expand.click())
-    const collapse = first.button('Contraer menú')!
-    expect(collapse.getAttribute('aria-expanded')).toBe('true')
-    expect(first.el.firstElementChild!.className).toContain('min-[820px]:grid-cols-[264px_minmax(0,1fr)]')
-    expect(first.el.querySelector('[data-tip]')).toBeNull()
+    expect(first.toggle().getAttribute('aria-label')).toBe('Expandir menú')
+    expect(first.toggle().getAttribute('aria-expanded')).toBe('false')
+    act(() => first.toggle().click())
+    expect(first.toggle().getAttribute('aria-expanded')).toBe('true')
+    // Named by its visible label once open.
+    expect(first.toggle().hasAttribute('aria-label')).toBe(false)
+    expect(first.toggle().textContent).toBe('Contraer menú')
+    expect(document.documentElement.dataset.menu).toBe('pinned')
+    expect(first.el.querySelector('a[data-tip]')).toBeNull()
+    act(() => { first.el.querySelector<HTMLElement>('a[href="/history"]')!.focus() })
+    expect(document.querySelector('[role="tooltip"]')).toBeNull()
     first.unmount()
 
     const again = mount()
-    expect(again.button('Contraer menú')).toBeDefined()
-    act(() => again.button('Contraer menú')!.click())
-    expect(again.named('Expandir menú')).not.toBeNull()
+    expect(again.toggle().getAttribute('aria-expanded')).toBe('true')
+    act(() => again.toggle().click())
+    expect(again.toggle().getAttribute('aria-label')).toBe('Expandir menú')
+    expect(document.documentElement.dataset.menu).toBe('icons')
     again.unmount()
-    expect(mount().named('Expandir menú')).not.toBeNull()
+    expect(mount().toggle().getAttribute('aria-expanded')).toBe('false')
   })
 
   it('keeps the phone drawer as it is below 820 px: full labels, no » and no theme button', () => {
     const { el, named, button } = mount()
     for (const label of [...LABELS, 'Buscar activo', 'Cerrar sesión']) {
-      const text = named(label)!.querySelector('.min-\\[820px\\]\\:hidden')!
-      expect(hiddenOnPhone(text), label).toBe(false)
+      expect(hiddenOnPhone(named(label)!.querySelector('span')!), label).toBe(false)
     }
     expect(hiddenOnPhone(el.querySelector('#h-personal')!)).toBe(false)
     expect(hiddenOnPhone(el.querySelector('[role="radiogroup"]')!)).toBe(false)
@@ -304,8 +399,9 @@ describe('AppShell — the icon-only menu on Gráficos', () => {
   it('works without storage: the menu renders folded and » still pins it for the session', () => {
     vi.spyOn(localStorage, 'getItem').mockImplementation(() => { throw new Error('blocked') })
     vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('blocked') })
-    const { named, button } = mount()
-    act(() => named('Expandir menú')!.click())
-    expect(button('Contraer menú')?.getAttribute('aria-expanded')).toBe('true')
+    const { toggle } = mount()
+    act(() => toggle().click())
+    expect(toggle().getAttribute('aria-expanded')).toBe('true')
+    expect(document.documentElement.dataset.menu).toBe('pinned')
   })
 })
