@@ -14,6 +14,10 @@
  * Monthly grouping slices the date STRING (close_date is a plain date):
  * new Date('2026-01-01') shifts to the previous month on any server west of
  * UTC, and these numbers must not depend on where the container runs.
+ *
+ * A "trade" here is one SALE (the ledger core's realized row), not a round trip,
+ * and its holding days run from the position's first purchase (average cost, no
+ * lots). A figure with nothing to measure is null, never 0.
  */
 
 export interface ClosedTradeLike {
@@ -34,13 +38,17 @@ export interface TradeStats {
   losersCount: number
   /** winners / total closed trades; null when there are no closed trades. */
   winRate: number | null
-  avgWin: number
-  avgLoss: number
+  /** null without a winning sale. */
+  avgWin: number | null
+  /** null without a losing sale. */
+  avgLoss: number | null
   /** gross profit / gross loss; null when no losses (∞) or no trades. */
   profitFactor: number | null
-  avgHoldingDays: number
-  maxHoldingDays: number
-  minHoldingDays: number
+  /** Days from the position's first purchase to the sale; null when no sale carries them. */
+  avgHoldingDays: number | null
+  maxHoldingDays: number | null
+  minHoldingDays: number | null
+  /** Every calendar month from the first sale to the last, 0 for a month without sales. */
   monthlyReturns: MonthlyReturn[]
 }
 
@@ -53,8 +61,8 @@ export function computeTradeStats(trades: ClosedTradeLike[]): TradeStats {
   const grossProfit = winners.reduce((s, p) => s + p, 0)
   const grossLoss = losers.reduce((s, p) => s + p, 0) // negative sum
 
-  const avgWin = winners.length > 0 ? grossProfit / winners.length : 0
-  const avgLoss = losers.length > 0 ? grossLoss / losers.length : 0
+  const avgWin = winners.length > 0 ? grossProfit / winners.length : null
+  const avgLoss = losers.length > 0 ? grossLoss / losers.length : null
 
   const profitFactor = grossLoss < 0 ? grossProfit / Math.abs(grossLoss) : null
   const winRate = trades.length > 0 ? winners.length / trades.length : null
@@ -67,9 +75,9 @@ export function computeTradeStats(trades: ClosedTradeLike[]): TradeStats {
   const avgHoldingDays =
     holdingDays.length > 0
       ? Math.round(holdingDays.reduce((s, d) => s + d, 0) / holdingDays.length)
-      : 0
-  const maxHoldingDays = holdingDays.length > 0 ? Math.max(...holdingDays) : 0
-  const minHoldingDays = holdingDays.length > 0 ? Math.min(...holdingDays) : 0
+      : null
+  const maxHoldingDays = holdingDays.length > 0 ? Math.max(...holdingDays) : null
+  const minHoldingDays = holdingDays.length > 0 ? Math.min(...holdingDays) : null
 
   // Monthly realized P&L — string slice, never new Date() (TZ-proof).
   const monthMap = new Map<string, { pnl: number; trades: number }>()
@@ -80,9 +88,11 @@ export function computeTradeStats(trades: ClosedTradeLike[]): TradeStats {
     entry.trades += 1
     monthMap.set(month, entry)
   }
-  const monthlyReturns = Array.from(monthMap.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([month, data]) => ({ month, ...data }))
+  const months = Array.from(monthMap.keys()).sort()
+  const monthlyReturns: MonthlyReturn[] = []
+  for (let m = months[0]; m && m <= months[months.length - 1]; m = nextMonth(m)) {
+    monthlyReturns.push({ month: m, ...(monthMap.get(m) ?? { pnl: 0, trades: 0 }) })
+  }
 
   return {
     totalTrades: trades.length,
@@ -97,4 +107,10 @@ export function computeTradeStats(trades: ClosedTradeLike[]): TradeStats {
     minHoldingDays,
     monthlyReturns,
   }
+}
+
+/** 'YYYY-MM' → the following month, by string arithmetic (TZ-proof, like the grouping). */
+function nextMonth(month: string): string {
+  const [y, m] = month.split('-').map(Number)
+  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`
 }

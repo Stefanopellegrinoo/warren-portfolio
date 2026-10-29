@@ -6,6 +6,8 @@ import type { StatData } from './DetailedStats'
 
 // The recharts drawings of DetailedStats, loaded on their own (odd/tasks/rendimiento.md S9).
 const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+/** 'YYYY-MM' → 'Mar 2026': a month always with its year. */
+const monthLabel = (v: string) => { const [y, m] = v.split('-'); return `${MONTHS[parseInt(m) - 1]} ${y}` }
 
 export function CumulativeChart({ data }: { data: StatData['cumulativePnl'] }) {
   return (
@@ -13,7 +15,7 @@ export function CumulativeChart({ data }: { data: StatData['cumulativePnl'] }) {
       <LineChart data={data} margin={{ top: 6, right: 4, left: 0, bottom: 0 }} accessibilityLayer>
         <CartesianGrid {...GRID} />
         <XAxis dataKey="date" {...AXIS} minTickGap={24}
-          tickFormatter={(v: string) => { const d = new Date(v); return `${d.getUTCDate()}/${d.getUTCMonth() + 1}` }} />
+          tickFormatter={(v: string) => { const d = new Date(v); return `${d.getUTCDate()}/${d.getUTCMonth() + 1}/${String(d.getUTCFullYear()).slice(2)}` }} />
         <YAxis {...AXIS} width={52} tickFormatter={axisSigned} />
         <Tooltip {...TOOLTIP}
           formatter={(value: number) => [signed(value), 'Acumulado']}
@@ -29,12 +31,11 @@ export function MonthlyChart({ data }: { data: StatData['monthlyReturns'] }) {
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={data} margin={{ top: 6, right: 4, left: 0, bottom: 0 }} accessibilityLayer>
         <CartesianGrid {...GRID} />
-        <XAxis dataKey="month" {...AXIS}
-          tickFormatter={(v: string) => { const [y, m] = v.split('-'); return `${m}/${y.slice(2)}` }} />
+        <XAxis dataKey="month" {...AXIS} minTickGap={12} tickFormatter={monthLabel} />
         <YAxis {...AXIS} width={52} tickFormatter={axisSigned} />
         <Tooltip {...TOOLTIP}
           formatter={(value: number) => [signed(value), 'Resultado']}
-          labelFormatter={(label: string) => { const [y, m] = label.split('-'); return `${MONTHS[parseInt(m) - 1]} ${y}` }} />
+          labelFormatter={monthLabel} />
         <Bar dataKey="pnl" radius={[2, 2, 0, 0]} maxBarSize={28} isAnimationActive={false}>
           {data.map((entry, i) => <Cell key={i} fill={entry.pnl >= 0 ? GAIN : LOSS} />)}
         </Bar>

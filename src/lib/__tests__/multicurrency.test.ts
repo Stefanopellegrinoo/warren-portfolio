@@ -271,6 +271,20 @@ describe('totals with cash', () => {
     expect(v.estimated).toBe(true) // DIS is valued with Yahoo × CCL
   })
 
+  it('per class: open result of priced positions and realized with income, stocks apart from ONs', () => {
+    // A 50 MEP coupon on the ON (no ticket: typed in MEP, 50.000 ARS at 1000).
+    const coupon = trade({ ticker: 'YM34D', date: '2026-06-01', operation: 'CUPON', asset_type: 'ON', quantity: 1, price: 50, fx_mep: 1000, fx_ccl: 1250 })
+    const v = buildCurrencyViews({ ...input, trades: [...input.trades, coupon] })
+
+    // Stocks: AAPL 284.200 + DIS 480.000 ARS against a cost of 200.000 + 250.000 ARS (MEP 450, CCL 360).
+    expectAmounts(v.totals.byClass?.stocks.openPnl, { ARS: 314_200, MEP: 764_200 / 1500 - 450, CCL: 764_200 / 1600 - 360 })
+    expectAmounts(v.totals.byClass?.stocks.realized, { ARS: 127_500, MEP: 127.5, CCL: 102 })
+    // ONs: 16.500.000 ARS against 10.000.000 ARS (MEP 10.000, CCL 8.000); the coupon is ON income.
+    expectAmounts(v.totals.byClass?.ons.openPnl, { ARS: 6_500_000, MEP: 1000, CCL: 16_500_000 / 1600 - 8000 })
+    expectAmounts(v.totals.byClass?.ons.realized, { ARS: 50_000, MEP: 50, CCL: 40 })
+    expectAmounts(v.totals.realized, { ARS: 177_500, MEP: 177.5, CCL: 142 })
+  })
+
   it('per position: value, cost, average cost, result, price, day change and flags', () => {
     const v = buildCurrencyViews(input)
     expect(Object.keys(v.positions).sort()).toEqual(['AAPL', 'DIS', 'MISS', 'YM34D'])

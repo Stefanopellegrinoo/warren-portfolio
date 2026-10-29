@@ -1,5 +1,5 @@
 // REQ-6 matrix: every path that writes the ledger must drop the derived history
-// (invalidateUserCache deletes derived:v1:{uid} — see redis.test.ts) AFTER the write.
+// (invalidateUserCache deletes derived:v2:{uid} — see redis.test.ts) AFTER the write.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
 

@@ -91,8 +91,34 @@ describe('GET /api/statistics/ons — positions and trades from the ledger core'
     expect(body.totalPortfolioValue).toBeCloseTo(6 * 98)
     expect(body.openPnl).toBeCloseTo(6 * 3)
     expect(body.realizedPnl).toBeCloseTo(20)
-    expect(body.allPnLs.map((p: any) => p.status)).toEqual(['CLOSED', 'OPEN'])
+    // One bar per asset: the open 18 and the sale's 20 of the same ON.
+    expect(body.allPnLs).toHaveLength(1)
+    expect(body.allPnLs[0].ticker).toBe('ONA')
+    expect(body.allPnLs[0].pnl).toBeCloseTo(38)
     expect(body.avgHoldingDays).toBe(5)
+    expect(body.unpricedPositions).toBe(1)
+    expect(body.unpricedTickers).toEqual(['ONA'])
+  })
+
+  it('counts the core\'s automatic coupons in the realized result and in the ON\'s bar (S7)', async () => {
+    const on = (over: Record<string, unknown>) => trade({ ticker: 'ONA', asset_type: 'ON', quantity: 10, price: 95, ...over })
+    mockRequireUser.mockResolvedValue({
+      supabase: fakeSupabase({
+        transactions: [on({}), on({ operation: 'VENTA', quantity: 4, price: 100, date: '2026-01-10' })],
+        on_price_history: [{ ticker: 'ONA', price_date: '2026-01-20', close: 98 }],
+      }),
+      user: { id: 'u1' },
+    })
+    mockSeries([], [
+      { ticker: 'ONA', date: '2026-02-01', kind: 'coupon', amount: 7, source: 'schedule' },
+      { ticker: 'ONA', date: '2026-02-01', kind: 'amortization', amount: 50, source: 'schedule' },
+    ])
+
+    const body = await (await GET()).json()
+
+    expect(body.incomeReceived).toBe(7)
+    expect(body.realizedPnl).toBeCloseTo(20 + 7)
+    expect(body.allPnLs[0].pnl).toBeCloseTo(18 + 20 + 7)
   })
 })
 
@@ -113,10 +139,10 @@ describe('GET /api/statistics/ons — computed risk metrics', () => {
     const body = await (await GET()).json()
     expect(Object.keys(body).sort()).toEqual([
       'allPnLs', 'allocation', 'annualizedVol', 'arsExposure', 'avgHoldingDays', 'avgLoss', 'avgWin',
-      'biggestLoser', 'biggestWinner', 'couponsReceived', 'cumulativePnl', 'drawdownIntervals', 'drawdownIntervalsSkipped',
+      'biggestLoser', 'biggestWinner', 'cumulativePnl', 'drawdownIntervals', 'drawdownIntervalsSkipped', 'incomeReceived',
       'losersCount', 'maxDrawdown', 'maxHoldingDays', 'minHoldingDays', 'monthlyReturns', 'monthlyStdDev', 'openPnl',
       'profitFactor', 'realizedPnl', 'returnIntervals', 'sharpeRatio', 'totalPortfolioValue', 'totalTrades',
-      'unpricedPositions', 'usdExposure', 'winRate', 'winnersCount',
+      'unpricedPositions', 'unpricedTickers', 'usdExposure', 'winRate', 'winnersCount',
     ])
   })
 
@@ -175,14 +201,21 @@ describe('GET /api/statistics/ons — coupons', () => {
     expect(body.drawdownIntervalsSkipped).toBe(1)
   })
 
-  it('reports the lifetime coupon total', async () => {
-    mockFetchIncomeMovements.mockResolvedValue([
-      { date: '2026-07-25', type: 'CUPON', amount: 8300 },
-      { date: '2026-01-25', type: 'CUPON', amount: 8100 },
-      { date: '2026-07-25', type: 'DIVIDENDO', amount: 500 },
-    ])
+  it('reports the lifetime coupons the headline counts: the ledger\'s, never their cash leg a second time', async () => {
+    // A recorded coupon writes its ledger row AND a CUPON cash movement: the result counts it once.
+    mockRequireUser.mockResolvedValue({
+      supabase: fakeSupabase({ transactions: [
+        trade({ ticker: 'ONA', asset_type: 'ON', quantity: 10, price: 95 }),
+        trade({ ticker: 'ONA', operation: 'CUPON', quantity: 1, price: 8300, asset_type: null, date: '2026-07-25' }),
+      ] }),
+      user: { id: 'u1' },
+    })
+    mockFetchIncomeMovements.mockResolvedValue([{ date: '2026-07-25', type: 'CUPON', amount: 8300 }])
+    mockSeries([], [{ ticker: 'ONA', date: '2026-01-25', kind: 'coupon', amount: 8100, source: 'schedule' }])
+
     const body = await (await GET()).json()
-    expect(body.couponsReceived).toBe(16400)
+    expect(body.incomeReceived).toBe(16400)
+    expect(body.realizedPnl).toBe(16400)
   })
 
   it('skips the day of an automatic coupon from the core, and counts it in the lifetime total', async () => {
@@ -198,12 +231,12 @@ describe('GET /api/statistics/ons — coupons', () => {
     const body = await (await GET()).json()
     expect(body.maxDrawdown).toBe(0)
     expect(body.drawdownIntervalsSkipped).toBe(1)
-    expect(body.couponsReceived).toBe(42)
+    expect(body.incomeReceived).toBe(32)
   })
 
   it('reports 0 coupons received when there are none, never undefined', async () => {
     const body = await (await GET()).json()
-    expect(body.couponsReceived).toBe(0)
+    expect(body.incomeReceived).toBe(0)
   })
 
   it('uses the v3 cache key', async () => {

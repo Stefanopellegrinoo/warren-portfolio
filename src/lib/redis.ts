@@ -204,9 +204,9 @@ export function stripKeyPrefix(key: string): string {
 
 /**
  * Invalidates all user-specific route caches when data mutates.
- * Clears history:v3:{userId}:* and statistics:v4:{userId}:*
+ * Clears history:v4:{userId}:* and statistics:v4:{userId}:*
  * (SCAN+DEL), plus the exact-match keys statistics:combined:{userId},
- * statistics:ons:v3:{userId}, summary:{userId} and derived:v1:{userId}. Also bumps
+ * statistics:ons:v3:{userId}, summary:{userId} and derived:v2:{userId}. Also bumps
  * summary:version:{userId} so the summary writers (worker, /api/positions) and the derived series detect stale writes.
  */
 export async function invalidateUserCache(userId: string): Promise<void> {
@@ -217,12 +217,12 @@ export async function invalidateUserCache(userId: string): Promise<void> {
     const redis = getRedis()
     if (!redis) return
 
-    // Find keys matching history:v3:{userId}:* — MATCH must carry the prefix
+    // Find keys matching history:v4:{userId}:* — MATCH must carry the prefix
     let cursor = '0'
     const keysToDelete: string[] = []
 
     do {
-      const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', `${KEY_PREFIX}history:v3:${userId}:*`, 'COUNT', 100)
+      const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', `${KEY_PREFIX}history:v4:${userId}:*`, 'COUNT', 100)
       cursor = nextCursor
       // Strip the prefix — ioredis will re-add it when calling DEL
       keysToDelete.push(...keys.map(stripKeyPrefix))
@@ -240,7 +240,7 @@ export async function invalidateUserCache(userId: string): Promise<void> {
     keysToDelete.push(`statistics:combined:${userId}`)
     keysToDelete.push(`statistics:ons:v3:${userId}`)
     keysToDelete.push(`summary:${userId}`)
-    keysToDelete.push(`derived:v1:${userId}`)
+    keysToDelete.push(`derived:v2:${userId}`)
 
     // Bump summary version before deleting so every summary and derived-series writer detects stale writes
     await redis.incr(`summary:version:${userId}`)

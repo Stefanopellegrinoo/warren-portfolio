@@ -63,11 +63,27 @@ export interface SplitEvent {
   denominator: number
 }
 
+/** A cash dividend per share, on its ex-date. */
+export interface DividendEvent {
+  /** YYYY-MM-DD */
+  date: string
+  amount: number
+}
+
 export interface DailyChart {
   bars: DailyBar[]
   splits: SplitEvent[]
   /** false when the answer came from historical(), which carries no split events. */
   splitsKnown: boolean
+  /** The window's dividends when chart() answered; absent from historical(), which carries no events. */
+  dividends?: DividendEvent[]
+}
+
+function normalizeDividends(rows: any[]): DividendEvent[] {
+  // Number(null) is 0: a dividend with no amount is dropped, never a priced zero.
+  return (rows ?? [])
+    .filter(r => r?.date && Number(r.amount) > 0)
+    .map(r => ({ date: new Date(r.date).toISOString().slice(0, 10), amount: Number(r.amount) }))
 }
 
 function normalizeSplits(rows: any[]): SplitEvent[] {
@@ -103,7 +119,9 @@ export async function fetchDailyChart(
     // Decide on USABLE bars, not on the raw array: a non-empty response whose
     // closes are all null must still fall through to the legacy endpoint, or
     // [] would stop meaning "Yahoo genuinely has no bars".
-    if (bars.length > 0) return { bars, splits: normalizeSplits(res?.events?.splits), splitsKnown: true }
+    if (bars.length > 0) {
+      return { bars, splits: normalizeSplits(res?.events?.splits), splitsKnown: true, dividends: normalizeDividends(res?.events?.dividends) }
+    }
   } catch (err) {
     chartFailure = err
   }

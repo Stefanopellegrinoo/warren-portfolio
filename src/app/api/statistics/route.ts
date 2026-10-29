@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { fetchQuotes } from '@/lib/yahoo-finance'
+import { fetchQuotesWithFallback } from '@/lib/yahoo-finance'
 import { getCachedRoute, cacheRoute } from '@/lib/redis'
 import { normalizeError } from '@/lib/errors'
 import { serverError } from '@/lib/api/errors'
-import { getFullPortfolio } from '@/lib/portfolio-engine'
+import { loadPortfolioAndLedger } from '@/lib/ledger-now'
+import { argentinaDate } from '@/lib/utils'
 import { getDerivedSeries } from '@/lib/derived-series'
 import { ledgerFlows } from '@/lib/derive-history'
 import { fetchFlowTransactions } from '@/lib/flow-transactions'
-import { fetchExternalFlows, fetchIncomeMovements } from '@/lib/cash-flows'
+import { fetchIncomeMovements } from '@/lib/cash-flows'
 import { requireUser, isAuthFailure } from '@/lib/api-auth'
-import { enrichPositionsForStats } from '@/lib/position-stats'
+import { enrichPositionsForStats, classIncome, resultByAsset } from '@/lib/position-stats'
 import { computeTradeStats } from '@/lib/trade-stats'
 import { isBenchmarkId, fetchBenchmarkComparison, type BenchmarkComparison } from '@/lib/benchmark'
 import {
@@ -69,13 +70,15 @@ export async function GET(req: NextRequest) {
       ? null
       : Promise.all([fetchFlowTransactions(supabase, user.id), fetchIncomeMovements(supabase, user.id)])
           .catch((err: unknown) => normalizeError(err))
-    const [derived, externalFlows, portfolio, declared] = await Promise.all([
+    const [derived, { now: portfolio, ledger }, declared] = await Promise.all([
       getDerivedSeries(supabase, user.id),
-      fetchExternalFlows(supabase, user.id),
-      getFullPortfolio(supabase, user.id),
+      loadPortfolioAndLedger(supabase, user.id, argentinaDate()),
       declaredFlows,
     ])
     if (declared instanceof Error) return serverError('Statistics', declared)
+    // The deposits and withdrawals the rows were built from: never a second read of the movements,
+    // or a deposit moved to the purchase it paid (S10) would read as a gain on one side only.
+    const externalFlows = derived.externalFlows
 
     const rows = derived.rows
     // The core's automatic ON payments: coupons as CUPON income, amortizations as ON sales.
@@ -110,15 +113,21 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Quotes as the dashboard asks for them (/api/positions): the cache, then Yahoo for what
+    // it misses (S2) — a cache miss alone never values a stock at cost.
     const positions = portfolio.stockPositions
+    const tickers = positions.map(p => p.ticker)
     const [{ benchmark, benchmarkError }, quotes] = await Promise.all([
       compareBenchmark(),
-      fetchQuotes(positions.map(p => p.ticker)),
+      tickers.length > 0 ? fetchQuotesWithFallback(tickers) : Promise.resolve(new Map()),
     ])
 
-    // 3. Realized sales, in close-date order
+    // 3. Realized: the sales, in close-date order, and the stocks' dividends — what the
+    // dashboard calls realized, "con dividendos y cupones" (S7).
     const closed = portfolio.stockClosedTrades
-    const realizedPnl = closed.reduce((sum, t) => sum + t.pnl, 0)
+    const dividends = classIncome(ledger.trades, derived.income, 'STOCK')
+    const incomeReceived = Array.from(dividends.values()).reduce((sum, a) => sum + a, 0)
+    const realizedPnl = closed.reduce((sum, t) => sum + t.pnl, 0) + incomeReceived
 
     // One valuation rule (S3): live quote, else last close, else cost — NEVER 0,
     // a zero valuation fabricates a -100% loss in every aggregate below.
@@ -136,8 +145,8 @@ export async function GET(req: NextRequest) {
       }))
       .sort((a: any, b: any) => b.value - a.value)
 
-    // All PnLs (for bar chart)
-    const allPnLs = [
+    // Best and worst among open positions and single sales; the worst only if something lost.
+    const operations = [
       ...enrichedPositions.map((p: any) => ({ ticker: p.ticker, pnl: p.pnl, pnl_pct: p.pnl_pct, status: 'OPEN' })),
       ...closed.map((t: any) => ({
         ticker: t.ticker.split(':')[1] || t.ticker,
@@ -147,8 +156,12 @@ export async function GET(req: NextRequest) {
       }))
     ].sort((a: any, b: any) => b.pnl - a.pnl)
 
-    const biggestWinner = allPnLs.length > 0 ? allPnLs[0] : null
-    const biggestLoser = allPnLs.length > 0 ? allPnLs[allPnLs.length - 1] : null
+    const biggestWinner = operations.length > 0 ? operations[0] : null
+    const last = operations[operations.length - 1]
+    const biggestLoser = last && last.pnl < 0 ? last : null
+
+    // One bar per asset: open result + its sales + its dividends (S7).
+    const allPnLs = resultByAsset(enrichedPositions, closed, dividends)
 
     // === ADVANCED ANALYTICS ===
 
@@ -168,7 +181,7 @@ export async function GET(req: NextRequest) {
       }
     })
 
-    // Currency exposure
+    // By market, not by currency: shares with a local BCBA ticker vs the rest.
     const arsExposure = enrichedPositions.filter((p: any) => p.fullTicker.startsWith('BCBA:')).reduce((s: number, p: any) => s + p.market_value, 0)
     const usdExposure = totalPortfolioValue - arsExposure
 
@@ -186,8 +199,11 @@ export async function GET(req: NextRequest) {
       // Positions marked at cost because no quote was available — surfaced so
       // the UI can badge "N sin precio" instead of silently absorbing them.
       unpricedPositions: totals.unpricedCount,
+      unpricedTickers: enrichedPositions.filter(p => !p.priced).map(p => p.ticker),
       allocation,
+      // Sales plus dividends; incomeReceived is the dividends' share of it.
       realizedPnl,
+      incomeReceived,
       openPnl,
       biggestWinner,
       biggestLoser,
@@ -205,6 +221,17 @@ export async function GET(req: NextRequest) {
       sharpeRatio: risk.sharpeRatio,
       annualizedVol: risk.annualizedVol,
       returnIntervals: risk.returnIntervals,
+      // What the risk figures rest on (odd/tasks/statistics-truth.md S4, S5): the whole portfolio is
+      // measured from the day after its last negative-cash day; with negative cash today nothing is.
+      measuredFrom: risk.measuredFrom,
+      measuredDays: risk.pointsUsed,
+      negativeCashUntil: risk.negativeCashUntil,
+      unavailableReason: risk.unavailableReason,
+      degraded: derived.degraded,
+      // What was missing, per asset, for the (i) on the risk row (S11).
+      degradedReasons: derived.degradedReasons ?? [],
+      // Deposit money moved to the purchases it paid, so the screen can say so (S10).
+      fundedDeposits: universe === 'total' ? derived.fundedDeposits : null,
       // Retired: stddev of monthly realized P&L in dollars was not volatility.
       monthlyStdDev: null,
       winnersCount: tradeStats.winnersCount,

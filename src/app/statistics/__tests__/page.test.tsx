@@ -3,15 +3,18 @@ import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { NO_CONNECTION } from '@/lib/request-errors'
 import { forgetCached } from '@/lib/client-cache'
-import { argentinaDate } from '@/lib/utils'
+import { argentinaDate, formatDate } from '@/lib/utils'
 import type { StatData } from '../DetailedStats'
 import StatisticsPage from '../page'
 
 // The evolution chart measures itself; this stand-in prints the days it was given and offers one period.
 vi.mock('@/components/charts/PortfolioChart', () => ({
-  default: ({ data, loading, onPeriodChange }: { data: { snapshot_date: string }[]; loading: boolean; onPeriodChange: (p: string) => void }) => (
+  default: ({ data, loading, onPeriodChange, line }: {
+    data: { snapshot_date: string; invested: number }[]; loading: boolean; onPeriodChange: (p: string) => void; line: { label: string; delta: string }
+  }) => (
     <div data-chart="">
       <output>{loading ? 'cargando' : data.map(p => p.snapshot_date).join(',')}</output>
+      <span data-line="">{line.label} · {line.delta} · {data.map(p => p.invested).join(',')}</span>
       <button type="button" onClick={() => onPeriodChange('30')}>Período 1M</button>
       <button type="button" onClick={() => onPeriodChange('all')}>Período Todo</button>
     </div>
@@ -36,8 +39,29 @@ const stats: StatData = {
   profitFactor: 2, sharpeRatio: 0.5, annualizedVol: 0.2, monthlyStdDev: null,
   winnersCount: 0, losersCount: 0, totalTrades: 0, arsExposure: 2500, usdExposure: 7500,
 }
-const part = { value: 5000, openPnl: 10, realizedPnl: 0, totalPnl: 10, positionCount: 2, closedTradesCount: 1 }
-const combined = { totalValue: 12345, composition: [{ name: 'Acciones', value: 5000, pct: 1 }], stocks: part, ons: part }
+const part = { positionCount: 2, closedTradesCount: 1 }
+const combined = { stocks: part, ons: part }
+
+// The dashboard's own answer (GET /api/positions): its Pesos / MEP / Cable views.
+const amounts = (ARS: number, MEP: number, CCL: number) => ({ ARS, MEP, CCL })
+const NONE = amounts(0, 0, 0)
+const BY_CLASS = {
+  stocks: { openPnl: amounts(180_000, 120, 110), realized: amounts(45_000, 30, 28) },
+  ons: { openPnl: amounts(15_000, 10, 9), realized: amounts(7_500, 5, 4) },
+}
+const portfolioWith = (byClass: typeof BY_CLASS | undefined) => ({
+  positions: [], onPositions: [], lastRefresh: null,
+  summary: { total_market_value: 1850, cash: { balance: 200 }, stocks: { market_value: 900 }, ons: { market_value: 750 } },
+  currencies: {
+    version: 1, fx: { mep: 1500, ccl: 1580, mepDate: '2026-10-28', cclDate: '2026-10-28' }, positions: {}, estimated: false,
+    totals: {
+      value: amounts(3_000_000, 2000, 1900), stocks: amounts(1_500_000, 1000, 950), ons: amounts(1_200_000, 800, 760),
+      cash: amounts(300_000, 200, 190), invested: NONE, openPnl: NONE, openPnlPct: NONE, realized: NONE, dayChange: NONE, dayChangePct: NONE,
+      ...(byClass && { byClass }),
+    },
+  },
+})
+const POSITIONS_URL = '/api/positions'
 
 const STATS_URLS = ['/api/statistics?universe=stocks', '/api/statistics/ons', '/api/statistics/combined', '/api/statistics?universe=total']
 const ok = (body: unknown) => () => new Response(JSON.stringify(body))
@@ -48,6 +72,7 @@ function stubFetch(overrides: Record<string, Route> = {}, offline = { value: fal
   const calls: string[] = []
   const routes: Record<string, Route> = {
     [STATS_URLS[0]]: ok(stats), [STATS_URLS[1]]: ok(stats), [STATS_URLS[2]]: ok(combined), [STATS_URLS[3]]: ok(stats),
+    [POSITIONS_URL]: ok(portfolioWith(BY_CLASS)),
     ...overrides,
   }
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -91,6 +116,66 @@ describe('StatisticsPage — headline first (S6)', () => {
     expect(at('Comparar con un índice')).toBeLessThan(at('Ratio de Sharpe'))
     expect(at('Ratio de Sharpe')).toBeLessThan(at('Composición'))
     expect(el.querySelector('[role="alert"]')).toBeNull()
+    unmount()
+  })
+})
+
+describe('StatisticsPage — the dashboard\'s total, in the dashboard\'s currency (odd/tasks/statistics-truth.md S1)', () => {
+  const shown = (el: HTMLElement) => el.textContent!.replace(/\u00a0/g, ' ')
+  // The dashboard keeps its choice in the browser's storage.
+  const choose = (currency: string) => vi.stubGlobal('localStorage', { getItem: (k: string) => (k === 'resumen:currency' ? currency : null), setItem() {} })
+
+  it('total, results and composition are the dashboard\'s views in its default currency, Dólar MEP', async () => {
+    stubFetch()
+    const { el, unmount } = await render()
+    const text = shown(el)
+    expect(text).toMatch(/Valor total de la cartera\s*US\$ 2\.000,00/)
+    // Open result plus realized with dividends and coupons, per class.
+    expect(text).toMatch(/Resultado de acciones\s*\+150,00/)
+    expect(text).toMatch(/Resultado de ONs\s*\+15,00/)
+    // The counts are sales, not round trips (statistics-truth S7).
+    expect(text).toContain('2 posiciones · 1 venta')
+    expect(text).toMatch(/Acciones\s*US\$ 1\.000,00/)
+    expect(text).toMatch(/Obligaciones negociables\s*US\$ 800,00/)
+    expect(text).toMatch(/Caja\s*US\$ 200,00/)
+    unmount()
+  })
+
+  it('follows the currency chosen on the dashboard: Dólar cable, Pesos', async () => {
+    choose('CCL')
+    stubFetch()
+    const cable = await render()
+    expect(shown(cable.el)).toMatch(/Valor total de la cartera\s*US\$ 1\.900,00/)
+    expect(shown(cable.el)).toMatch(/Resultado de acciones\s*\+138,00/)
+    expect(shown(cable.el)).toMatch(/Acciones\s*US\$ 950,00/)
+    cable.unmount()
+
+    choose('ARS')
+    const pesos = await render()
+    expect(shown(pesos.el)).toMatch(/Valor total de la cartera\s*\$ 3\.000\.000,00/)
+    expect(shown(pesos.el)).toMatch(/Resultado de ONs\s*\+22\.500,00/)
+    pesos.unmount()
+  })
+
+  it('a summary cached before the per-class results shows none rather than one in another currency', async () => {
+    stubFetch({ [POSITIONS_URL]: ok(portfolioWith(undefined)) })
+    const { el, unmount } = await render()
+    expect(shown(el)).toMatch(/Valor total de la cartera\s*US\$ 2\.000,00/)
+    expect(shown(el)).toMatch(/Resultado de acciones\s*—/)
+    unmount()
+  })
+
+  it('a failed portfolio load says so, and Reintentar asks again', async () => {
+    let fail = true
+    const calls = stubFetch({ [POSITIONS_URL]: () => (fail ? failed() : ok(portfolioWith(BY_CLASS))()) })
+    const { el, unmount } = await render()
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain('No se pudo cargar el valor de la cartera.')
+    fail = false
+    act(() => buttons(el, 'Reintentar')[0].click())
+    await flush()
+    await flush()
+    expect(calls.filter(u => u === POSITIONS_URL)).toHaveLength(2)
+    expect(shown(el)).toMatch(/Valor total de la cartera\s*US\$ 2\.000,00/)
     unmount()
   })
 })
@@ -189,8 +274,8 @@ describe('StatisticsPage — each block as its request answers (S9)', () => {
     unmount()
   })
 
-  it('shows the evolution chart while the portfolio summary is still on its way', async () => {
-    stubFetch({ [STATS_URLS[2]]: never })
+  it('shows the evolution chart while the portfolio value is still on its way', async () => {
+    stubFetch({ [POSITIONS_URL]: never })
     const { el, unmount } = await render()
     expect(el.textContent).toContain('Evolución de la cartera')
     expect(el.textContent).not.toContain('Valor total de la cartera')
@@ -204,8 +289,25 @@ describe('StatisticsPage — history asked once per part, cut in the browser (S9
     d.setUTCDate(d.getUTCDate() - n)
     return d.toISOString().slice(0, 10)
   }
-  const point = (n: number) => ({ snapshot_date: daysAgo(n), value: 100, invested: 90 })
+  const point = (n: number) => ({ snapshot_date: daysAgo(n), value: 100, invested: 90, contributed: 95 })
   const series = { data: [point(100), point(60), point(20), point(0)] }
+
+  it('the whole portfolio draws the money put in; a class, the cost of what it holds (statistics-truth S9)', async () => {
+    const classSeries = { data: [{ snapshot_date: daysAgo(20), value: 100, invested: 90 }, { snapshot_date: daysAgo(0), value: 110, invested: 90 }] }
+    stubFetch({
+      '/api/portfolio-history?days=all&universe=total': ok({ data: [point(20), { ...point(0), contributed: 120 }], measuredFrom: daysAgo(20) }),
+      '/api/portfolio-history?days=all&universe=stocks': ok(classSeries),
+    })
+    const { el, unmount } = await render()
+    const line = () => el.querySelector('[data-chart] [data-line]')!.textContent
+    expect(line()).toBe('Plata que pusiste · sobre lo que pusiste · 95,120')
+    expect(el.textContent).toContain('Valor de mercado contra la plata que pusiste')
+
+    await openTab(el, 'Acciones')
+    expect(line()).toBe('Costo de lo que tenés · resultado abierto · 90,90')
+    expect(el.textContent).toContain('Valor de mercado contra el costo de lo que tenés')
+    unmount()
+  })
 
   it('a period change cuts the series it already has; a part asks once', async () => {
     const calls = stubFetch({
@@ -225,6 +327,40 @@ describe('StatisticsPage — history asked once per part, cut in the browser (S9
     await openTab(el, 'Acciones')
     await openTab(el, 'Toda la cartera')
     expect(history()).toEqual(['/api/portfolio-history?days=all&universe=total', '/api/portfolio-history?days=all&universe=stocks'])
+    unmount()
+  })
+})
+
+describe('StatisticsPage — the whole portfolio is drawn from the day it is measured (odd/tasks/statistics-truth.md S4)', () => {
+  const daysAgo = (n: number) => {
+    const d = new Date(`${argentinaDate()}T00:00:00Z`)
+    d.setUTCDate(d.getUTCDate() - n)
+    return d.toISOString().slice(0, 10)
+  }
+  // As the route serves it: the money put in from the measured base on, none before (S9).
+  const point = (n: number) => ({ snapshot_date: daysAgo(n), value: 100, invested: 90, contributed: n > 20 ? null : 100 })
+  const TOTAL = '/api/portfolio-history?days=all&universe=total'
+
+  it('starts the chart the day after the last negative-cash day and says why', async () => {
+    stubFetch({ [TOTAL]: ok({ data: [point(80), point(60), point(20), point(0)], measuredFrom: daysAgo(20), negativeCashUntil: daysAgo(60), unavailableReason: null }) })
+    const { el, unmount } = await render()
+    expect(el.querySelector('[data-chart] output')!.textContent).toBe([daysAgo(20), daysAgo(0)].join(','))
+    expect(el.textContent).toContain(`Hasta el ${formatDate(daysAgo(60))} hay días con la caja negativa (faltan depósitos): quedan afuera.`)
+    unmount()
+  })
+
+  it('says how much deposit money was moved to the purchases it paid (S10)', async () => {
+    stubFetch({ [TOTAL]: ok({ data: [point(20), point(0)], measuredFrom: daysAgo(20), negativeCashUntil: null, unavailableReason: null, fundedDeposits: { amount: 1234.56, from: '2023-05-02' } }) })
+    const { el, unmount } = await render()
+    expect(el.textContent).toContain('Algunos depósitos estaban cargados después de las compras que pagaron: para medir, US$ 1.234,56 se toman como depositados el día de esas compras, desde el 02/05/2023. El total depositado no cambia.')
+    unmount()
+  })
+
+  it('with negative cash today draws nothing and says deposits are missing', async () => {
+    stubFetch({ [TOTAL]: ok({ data: [point(1), point(0)], measuredFrom: null, negativeCashUntil: daysAgo(0), unavailableReason: 'negative_cash' }) })
+    const { el, unmount } = await render()
+    expect(el.querySelector('[data-chart] output')!.textContent).toBe('')
+    expect(el.textContent).toContain('Faltan depósitos: la caja registrada hoy es negativa y toda la cartera no se puede medir.')
     unmount()
   })
 })

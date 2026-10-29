@@ -42,7 +42,7 @@ function fakeSupabase(tables: Tables, log: string[] = [], filters: string[] = []
       const cfg = tables[name] ?? { data: [] }
       let offset = 0
       const b: any = {
-        select: () => b, lte: () => b, order: () => b,
+        select: (cols: string) => { filters.push(`${name}.select(${cols})`); return b }, lte: () => b, order: () => b,
         eq: (c: string, v: unknown) => { filters.push(`${name}.eq(${c},${v})`); return b },
         gte: (c: string, v: unknown) => { filters.push(`${name}.gte(${c},${v})`); return b },
         in: (c: string, v: unknown[]) => { filters.push(`${name}.in(${c},${v.join('|')})`); return b },
@@ -97,16 +97,17 @@ describe('getDerivedSeries', () => {
     expect(res.rows.length).toBeGreaterThan(2)
     expect(redisMock.eval).toHaveBeenCalledTimes(1)
     const args = redisMock.eval.mock.calls[0] as unknown[]
-    expect(args.slice(0, 6)).toEqual([SUMMARY_SETEX_LUA, 2, 'derived:v1:u1', 'summary:version:u1', '7', DERIVED_TTL])
+    expect(args.slice(0, 6)).toEqual([SUMMARY_SETEX_LUA, 2, 'derived:v2:u1', 'summary:version:u1', '7', DERIVED_TTL])
     expect(DERIVED_TTL).toBe(900)
-    expect(JSON.parse(args[6] as string)).toMatchObject({ asOf: TODAY, income: [] })
+    // v2 carries the deposits and withdrawals the rows were built from (statistics-truth S10).
+    expect(JSON.parse(args[6] as string)).toMatchObject({ asOf: TODAY, income: [], externalFlows: [{ date: '2026-03-01', amount: 5000 }], fundedDeposits: null })
     expect(redisMock.set).not.toHaveBeenCalled()
     expect(redisMock.setex).not.toHaveBeenCalled()
   })
 
   it('serves a same-day hit filtered by range without touching the database', async () => {
     const first = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, deps())
-    store.set('derived:v1:u1', JSON.stringify({ asOf: TODAY, rows: first.rows, flags: first.flags, income: first.income }))
+    store.set('derived:v2:u1', JSON.stringify({ asOf: TODAY, rows: first.rows, flags: first.flags, income: first.income, externalFlows: first.externalFlows, fundedDeposits: null }))
 
     const log: string[] = []
     const hit = await getDerivedSeries(fakeSupabase({}, log), 'u1', { fromDate: '2026-03-05' }, deps())
@@ -115,18 +116,41 @@ describe('getDerivedSeries', () => {
     expect(hit.rows.every(r => r.snapshot_date >= '2026-03-05')).toBe(true)
     expect(hit.rows.length).toBeLessThan(first.rows.length)
     expect(hit.degraded).toBe(false)
+    expect(hit.externalFlows).toEqual([{ date: '2026-03-01', amount: 5000 }])
   })
 
   it('ignores an entry cached before the core (no income field): it recomputes', async () => {
-    store.set('derived:v1:u1', JSON.stringify({ asOf: TODAY, rows: [], flags: FLAGS }))
+    store.set('derived:v2:u1', JSON.stringify({ asOf: TODAY, rows: [], flags: FLAGS }))
     const log: string[] = []
     const res = await getDerivedSeries(fakeSupabase(tables(), log), 'u1', {}, deps())
     expect(log).toContain('transactions')
     expect(res.rows.length).toBeGreaterThan(0)
   })
 
+  it('ignores an entry without the flows its rows were built from: it recomputes (S10)', async () => {
+    store.set('derived:v2:u1', JSON.stringify({ asOf: TODAY, rows: [], flags: FLAGS, income: [] }))
+    const log: string[] = []
+    const res = await getDerivedSeries(fakeSupabase(tables(), log), 'u1', {}, deps())
+    expect(log).toContain('transactions')
+    expect(res.externalFlows).toEqual([{ date: '2026-03-01', amount: 5000 }])
+  })
+
+  it('reads which movements a trade wrote, and funds purchases from a later deposit (S10)', async () => {
+    const filters: string[] = []
+    const res = await getDerivedSeries(fakeSupabase(tables({
+      cash_movements: { data: [
+        { type: 'RETIRO', amount: 500, date: '2026-03-02', transaction_id: 't1' },
+        { type: 'DEPOSITO', amount: 5000, date: '2026-03-06', transaction_id: null },
+      ] },
+    }), [], filters), 'u1', {}, deps())
+    expect(filters.find(f => f.startsWith('cash_movements.select'))).toContain('transaction_id')
+    expect(res.externalFlows).toEqual([{ date: '2026-03-02', amount: 500 }, { date: '2026-03-06', amount: 4500 }])
+    expect(res.fundedDeposits).toEqual({ amount: 500, from: '2026-03-02' })
+    expect(res.flags.negativeCash).toBeNull()
+  })
+
   it('ignores a hit from another day', async () => {
-    store.set('derived:v1:u1', JSON.stringify({ asOf: '2026-03-09', rows: [], flags: null }))
+    store.set('derived:v2:u1', JSON.stringify({ asOf: '2026-03-09', rows: [], flags: null }))
     const log: string[] = []
     const res = await getDerivedSeries(fakeSupabase(tables(), log), 'u1', {}, deps())
     expect(log).toContain('transactions')
@@ -166,10 +190,13 @@ describe('getDerivedSeries', () => {
     const stale = deps({ getBars: vi.fn(async (s: string[]) => new Map(s.map(x => [x, ok(AAA_BARS, { degraded: true })]))) })
     const bad = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, stale)
     expect(bad.degraded).toBe(true)
+    // Why, and which asset (statistics-truth S11).
+    expect(bad.degradedReasons).toEqual([{ kind: 'stale_bars', tickers: ['AAA'] }])
     expect(redisMock.eval).not.toHaveBeenCalled()
 
     const good = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, deps())
     expect(good.degraded).toBe(false)
+    expect(good.degradedReasons).toEqual([])
     expect(redisMock.eval).toHaveBeenCalledTimes(1)
   })
 
@@ -179,17 +206,19 @@ describe('getDerivedSeries', () => {
     }))
     const res = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, deps({ derive }))
     expect(res.degraded).toBe(true)
+    expect(res.degradedReasons).toEqual([{ kind: 'failure' }])
     expect(redisMock.eval).not.toHaveBeenCalled()
   })
 
   it('a stock held today with no quote is degraded and never cached; an unpriced ON alone is not', async () => {
     const withUnpriced = (todayUnpriced: string[]) => deps({
-      derive: vi.fn(() => ({ rows: [], flags: { ...FLAGS, todayUnpriced }, income: [] })),
+      derive: vi.fn(() => ({ rows: [], flags: { ...FLAGS, todayUnpriced }, income: [], externalFlows: [], fundedDeposits: null })),
     })
     const onTx = tx({ ticker: 'ONX', asset_type: 'ON', quantity: 100, price: 1 })
 
     const stock = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, withUnpriced(['AAA']))
     expect(stock.degraded).toBe(true)
+    expect(stock.degradedReasons).toEqual([{ kind: 'today_unpriced', tickers: ['AAA'] }])
     expect(redisMock.eval).not.toHaveBeenCalled()
 
     const on = await getDerivedSeries(fakeSupabase(tables({ transactions: { data: [tx(), onTx] } })), 'u1', {}, withUnpriced(['ONX']))
@@ -199,7 +228,9 @@ describe('getDerivedSeries', () => {
 
   it('a bars source with unknown splits is degraded; a clean chart() answering [] is not', async () => {
     const unknownSplits = deps({ getBars: vi.fn(async (s: string[]) => new Map(s.map(x => [x, ok(AAA_BARS, { splitsKnown: false })]))) })
-    expect((await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, unknownSplits)).degraded).toBe(true)
+    const splits = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, unknownSplits)
+    expect(splits.degraded).toBe(true)
+    expect(splits.degradedReasons).toEqual([{ kind: 'splits_unknown', tickers: ['AAA'] }])
 
     const empty = deps({ getBars: vi.fn(async (s: string[]) => new Map(s.map(x => [x, ok([], { splitsKnown: true })]))) })
     const res = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, empty)
@@ -225,13 +256,15 @@ describe('getDerivedSeries', () => {
       expect(res.degraded).toBe(true)
       expect(res.rows.length).toBeGreaterThan(0)
     }
+    expect(prices.degradedReasons).toEqual([{ kind: 'on_prices' }])
+    expect(schedules.degradedReasons).toEqual([{ kind: 'on_schedules' }])
     expect(redisMock.eval).not.toHaveBeenCalled()
   })
 
   it('catalog symbol wins; without the catalog it falls back to the exchange-normalized ticker; bars are keyed by portfolio ticker', async () => {
     const d = deps()
     let seen!: DeriveInput
-    const derive = vi.fn((i: DeriveInput) => { seen = i; return { rows: [], flags: FLAGS, income: [] } })
+    const derive = vi.fn((i: DeriveInput) => { seen = i; return { rows: [], flags: FLAGS, income: [], externalFlows: [], fundedDeposits: null } })
     await getDerivedSeries(
       fakeSupabase(tables({
         transactions: { data: [tx({ ticker: 'aaa ' }), tx({ ticker: 'BCBA:ZZZ' })] },
@@ -251,7 +284,7 @@ describe('getDerivedSeries', () => {
 
   it('S1: when Yahoo does not report the splits, the stored ones un-adjust the bars and reach the core', async () => {
     let seen!: DeriveInput
-    const derive = vi.fn((i: DeriveInput) => { seen = i; return { rows: [], flags: FLAGS, income: [] } })
+    const derive = vi.fn((i: DeriveInput) => { seen = i; return { rows: [], flags: FLAGS, income: [], externalFlows: [], fundedDeposits: null } })
     const stored = [{ date: '2026-03-04', numerator: 2, denominator: 1 }]
     const d = deps({
       getBars: vi.fn(async (s: string[]) => new Map(s.map(x => [x, ok([bar('2026-03-02', 25)], { splitsKnown: false })]))),
@@ -264,7 +297,7 @@ describe('getDerivedSeries', () => {
 
   it('S13: passes bars un-split-adjusted; S12.1: .BA bars go through the CCL, only when one is held', async () => {
     let seen!: DeriveInput
-    const derive = vi.fn((i: DeriveInput) => { seen = i; return { rows: [], flags: FLAGS, income: [] } })
+    const derive = vi.fn((i: DeriveInput) => { seen = i; return { rows: [], flags: FLAGS, income: [], externalFlows: [], fundedDeposits: null } })
     const split = deps({
       getBars: vi.fn(async (s: string[]) => new Map(s.map(x => [x, ok([bar('2026-03-02', 25)], { splits: [{ date: '2026-03-04', numerator: 2, denominator: 1 }] })]))),
     })
@@ -293,7 +326,7 @@ describe('getDerivedSeries', () => {
 
   it('feeds ON closes, schedules and payment overrides to the core, never portfolio_snapshots, and asks quotes for every traded ticker', async () => {
     let seen!: DeriveInput
-    const derive = vi.fn((i: DeriveInput) => { seen = i; return { rows: [], flags: FLAGS, income: [] } })
+    const derive = vi.fn((i: DeriveInput) => { seen = i; return { rows: [], flags: FLAGS, income: [], externalFlows: [], fundedDeposits: null } })
     const schedule = new Map([['AERBD', [{ date: '2026-03-05', ren: 2, amo: 0 }]]])
     const d = deps({ loadSchedules: vi.fn(async () => schedule) })
     const log: string[] = []
@@ -370,7 +403,14 @@ describe('getDerivedSeries', () => {
     const d = deps({ getBars: vi.fn(async (symbols: string[]) => new Map(symbols.map(s => [s, ok([], { splitsKnown: false })]))) })
     const res = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, d)
     expect(res.degraded).toBe(true)
+    // No bars at all: the stock is at its purchase price, whatever else is unknown.
+    expect(res.degradedReasons).toEqual([{ kind: 'no_bars', tickers: ['AAA'] }])
     expect(redisMock.eval).not.toHaveBeenCalled()
+  })
+
+  it('a local share whose days have no CCL says so, with its ticker (S11)', async () => {
+    const res = await getDerivedSeries(fakeSupabase(tables({ transactions: { data: [tx({ ticker: 'BCBA:ZZZ' })] } })), 'u1', {}, deps())
+    expect(res.degradedReasons).toContainEqual({ kind: 'ccl_missing', tickers: ['BCBA:ZZZ'] })
   })
 })
 

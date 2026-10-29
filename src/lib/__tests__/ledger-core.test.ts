@@ -117,6 +117,18 @@ describe('ledgerAt: automatic ON payments', () => {
     expect(s.cash).toBeCloseTo(6400)
   })
 
+  it('a bond whose capital was fully returned leaves the holdings: no position without capital (statistics-truth S8)', () => {
+    const maturing = new Map([['YM42D', [{ date: '2026-06-02', ren: 3.5, amo: 50 }, { date: '2026-12-02', ren: 1.75, amo: 50 }]]])
+    const halfway = ledgerAt([on('COMPRA', 200, 100, '2026-04-01')], [], '2026-06-30', { schedules: maturing })
+    expect(halfway.holdings[0]).toMatchObject({ quantity: 200, costBasis: 10000 })
+
+    const matured = ledgerAt([on('COMPRA', 200, 100, '2026-04-01')], [], '2026-12-31', { schedules: maturing })
+    expect(matured.holdings).toEqual([])
+    expect(matured.realized).toEqual([])
+    expect(matured.income.map(i => [i.kind, i.amount])).toEqual([['coupon', 700], ['amortization', 10000], ['coupon', 350], ['amortization', 10000]])
+    expect(matured.cash).toBeCloseTo(21050)
+  })
+
   it('the user can correct a payment amount or mark it not received', () => {
     const overrides = [
       { ticker: 'YM42D', date: '2026-06-02', kind: 'coupon' as const, amount: 690 },

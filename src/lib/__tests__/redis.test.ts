@@ -32,8 +32,8 @@ vi.mock('ioredis', () => {
       // and MATCH is evaluated against the FULL key string.
       this.scan = vi.fn(async (_cursor: string, _matchKw: string, pattern: string) => {
         const KEYSPACE = [
-          'warren:history:v3:u1:90',
-          'warren:history:v3:u1:all',
+          'warren:history:v4:u1:90',
+          'warren:history:v4:u1:all',
           'warren:statistics:v4:u1:measurable',
           'warren:statistics:v4:u1:stocks',
         ]
@@ -133,12 +133,12 @@ describe('invalidateUserCache', () => {
     expect(delArgs).toContain('statistics:v4:u1:stocks')
   })
 
-  it('invalidates derived:v1:{userId}', async () => {
+  it('invalidates derived:v2:{userId}', async () => {
     const { invalidateUserCache } = await setup()
     await invalidateUserCache('u1')
 
     const delArgs = capturedDel.mock.calls.flatMap((call: unknown[]) => call)
-    expect(delArgs).toContain('derived:v1:u1')
+    expect(delArgs).toContain('derived:v2:u1')
   })
 
   it('invalidates summary:{userId}', async () => {
@@ -153,13 +153,13 @@ describe('invalidateUserCache', () => {
     // Before the fix the pattern was `history:u1:*`, which matches NOTHING
     // against keys stored as `warren:history:u1:*` — a silent no-op that left
     // the evolution chart serving stale data for its full TTL. The pattern is
-    // now versioned (`history:v3:{userId}:*` and `statistics:v4:{userId}:*`)
+    // now versioned (`history:v4:{userId}:*` and `statistics:v4:{userId}:*`)
     // so a stale prior-shape payload can never serve past a shape change.
     const { invalidateUserCache } = await setup()
     await invalidateUserCache('u1')
 
     const patterns = capturedScan.mock.calls.map((call: unknown[]) => call[2])
-    expect(patterns).toContain('warren:history:v3:u1:*')
+    expect(patterns).toContain('warren:history:v4:u1:*')
     expect(patterns).toContain('warren:statistics:v4:u1:*')
     expect(patterns).not.toContain('warren:statistics:v3:u1:*')
   })
@@ -169,8 +169,8 @@ describe('invalidateUserCache', () => {
     await invalidateUserCache('u1')
 
     const delArgs = capturedDel.mock.calls.flatMap((call: unknown[]) => call)
-    expect(delArgs).toContain('history:v3:u1:90')
-    expect(delArgs).toContain('history:v3:u1:all')
+    expect(delArgs).toContain('history:v4:u1:90')
+    expect(delArgs).toContain('history:v4:u1:all')
     expect(delArgs).toContain('statistics:v4:u1:measurable')
     expect(delArgs).toContain('statistics:v4:u1:stocks')
     // Never the double-prefix form

@@ -285,20 +285,88 @@ export function universeFlows(
   return toFlows(net)
 }
 
-/** A3 (spec): below these interval counts a metric is null, never a number.
- *  20 ≈ one trading month for the annualized pair; 2 for the drawdown,
- *  which is an extremum rather than an annualization. */
-export const MIN_INTERVALS_ANNUALIZED = 20
+/** Below these counts of daily returns a metric is null, never a number
+ *  (S5 of odd/tasks/statistics-truth.md): about three months for an annualized
+ *  volatility and six for a Sharpe ratio, whose mean is far noisier than its
+ *  spread; 2 for the drawdown, an extremum rather than an annualization. */
+export const MIN_INTERVALS_VOLATILITY = 60
+export const MIN_INTERVALS_SHARPE = 126
 export const MIN_INTERVALS_DRAWDOWN = 2
 
-export interface UniverseRiskMetrics {
+/** $1, the tolerance derive-history.ts flags `negativeCash` with: rounding noise vs a missing deposit. */
+const NEGATIVE_CASH_TOLERANCE = 1
+
+/** The part of a series a universe's figures rest on (S4 of odd/tasks/statistics-truth.md). */
+export interface MeasuredBase {
+  /** First day measured; null when no day is. */
+  measuredFrom: string | null
+  /** Last day whose recorded cash is negative (deposits missing); null when none is. */
+  negativeCashUntil: string | null
+  /** Why nothing is measured: today's recorded cash is negative. */
+  unavailableReason: 'negative_cash' | null
+}
+
+/**
+ * The money put in, as a chart line (odd/tasks/statistics-truth.md S9): the value on the first
+ * measured day, then each deposit added and each withdrawal taken on its day (one on a closed
+ * day reaches the next point). Points before `from` get none; a flow on or before the first
+ * measured day is already inside its value. Without `from`, the line starts at the first point.
+ */
+export function contributedLine(points: ProjectedPoint[], flows: ExternalFlow[], from: string | null): (number | null)[] {
+  const start = points.findIndex(p => from === null || p.snapshot_date >= from)
+  if (start < 0) return points.map(() => null)
+  const pending = flows
+    .map(f => ({ day: String(f.date).slice(0, 10), amount: f.amount }))
+    .filter(f => f.day > points[start].snapshot_date)
+    .sort((a, b) => a.day.localeCompare(b.day))
+  let line = points[start].value
+  return points.map((p, i) => {
+    if (i < start) return null
+    while (pending.length > 0 && pending[0].day <= p.snapshot_date) line += pending.shift()!.amount
+    return line
+  })
+}
+
+/**
+ * The rows a universe's figures may rest on. A day whose recorded cash is negative lacks the
+ * deposit that paid for what was bought, so the whole portfolio's value there is a P&L-sized base
+ * and any return on it is noise. `total` therefore starts the day after the last such day; with
+ * today's cash negative no day is left. Stocks and ONs hold no cash: they are never cut.
+ */
+export function measuredBase<T extends ProjectableSnapshot>(
+  rows: T[],
+  universe: Universe
+): MeasuredBase & { rows: T[] } {
+  let negativeCashUntil: string | null = null
+  if (universe === 'total') {
+    for (const r of rows) {
+      const cash = finiteOrNull(r.cash_value)
+      if (cash !== null && cash < -NEGATIVE_CASH_TOLERANCE && (negativeCashUntil === null || r.snapshot_date > negativeCashUntil)) {
+        negativeCashUntil = r.snapshot_date
+      }
+    }
+  }
+  const until = negativeCashUntil
+  const base = until === null ? rows : rows.filter((r) => r.snapshot_date > until)
+  const measuredFrom = base.reduce<string | null>((min, r) => (min === null || r.snapshot_date < min ? r.snapshot_date : min), null)
+  return {
+    rows: base,
+    measuredFrom,
+    negativeCashUntil,
+    unavailableReason: until !== null && base.length === 0 ? 'negative_cash' : null,
+  }
+}
+
+export interface UniverseRiskMetrics extends MeasuredBase {
   maxDrawdown: number | null
   annualizedVol: number | null
   sharpeRatio: number | null
   returnIntervals: number
   drawdownIntervals: number
   drawdownIntervalsSkipped: number
+  /** Days measured (after the S4 cut), the period the figures rest on. */
   pointsUsed: number
+  /** Measured rows dropped by the projection for lacking what the universe needs. */
   pointsDropped: number
 }
 
@@ -309,14 +377,15 @@ function universeReturnInputs(
   universe: Universe,
   inputs: UniverseFlowInputs
 ) {
-  const points = projectSeries(snapshots, universe)
+  const { rows, ...base } = measuredBase(snapshots, universe)
+  const points = projectSeries(rows, universe)
   const flows = universeFlows(universe, inputs)
   // In `ons` a coupon day is not measured at all — see universeFlows. Only
   // this universe: `total` holds the cash the payment lands in, so there the
   // two legs cancel and every interval stays measured.
   const options =
     universe === 'ons' ? { unmeasurableDates: couponDates(inputs.income) } : {}
-  return { points, flows, options }
+  return { base, rows: rows.length, points, flows, options }
 }
 
 /** Cumulative time-weighted return curve of a universe (same inputs as the metrics). */
@@ -324,9 +393,9 @@ export function computeUniverseTwr(
   snapshots: ProjectableSnapshot[],
   universe: Universe,
   inputs: UniverseFlowInputs
-): TwrSeries {
-  const { points, flows, options } = universeReturnInputs(snapshots, universe, inputs)
-  return computeTwrSeries(points, flows, options)
+): TwrSeries & MeasuredBase {
+  const { base, points, flows, options } = universeReturnInputs(snapshots, universe, inputs)
+  return { ...computeTwrSeries(points, flows, options), ...base }
 }
 
 export function computeUniverseRiskMetrics(
@@ -334,22 +403,22 @@ export function computeUniverseRiskMetrics(
   universe: Universe,
   inputs: UniverseFlowInputs
 ): UniverseRiskMetrics {
-  const { points, flows, options } = universeReturnInputs(snapshots, universe, inputs)
+  const { base, rows, points, flows, options } = universeReturnInputs(snapshots, universe, inputs)
 
   const drawdown = computeFlowAdjustedMaxDrawdown(points, flows, options)
   const returnSeries = computeFlowAdjustedReturns(points, flows, options)
   const stats = computeReturnStats(returnSeries.returns)
 
-  const annualizedOk = stats.intervals >= MIN_INTERVALS_ANNUALIZED
   return {
     maxDrawdown:
       drawdown.intervalsUsed >= MIN_INTERVALS_DRAWDOWN ? drawdown.maxDrawdown : null,
-    annualizedVol: annualizedOk ? stats.annualizedVol : null,
-    sharpeRatio: annualizedOk ? stats.sharpeRatio : null,
+    annualizedVol: stats.intervals >= MIN_INTERVALS_VOLATILITY ? stats.annualizedVol : null,
+    sharpeRatio: stats.intervals >= MIN_INTERVALS_SHARPE ? stats.sharpeRatio : null,
     returnIntervals: returnSeries.intervalsUsed,
     drawdownIntervals: drawdown.intervalsUsed,
     drawdownIntervalsSkipped: drawdown.intervalsSkipped,
     pointsUsed: points.length,
-    pointsDropped: snapshots.length - points.length,
+    pointsDropped: rows - points.length,
+    ...base,
   }
 }

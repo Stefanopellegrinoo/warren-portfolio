@@ -16,6 +16,8 @@ import type { Quote } from '@/types'
 import type { DailyBar, SplitEvent } from './historical-prices'
 import type { FlowRow } from './on-flow-history'
 import type { FlowTransaction, IncomeMovement } from './asset-universe'
+import type { ExternalFlow } from './drawdown'
+import { cashDelta } from './cash-signs'
 import { ledgerAt, type FlowOverride, type Holding, type Income, type LedgerMovement, type LedgerState, type LedgerTrade } from './ledger-core'
 
 
@@ -48,10 +50,19 @@ export interface DeriveFlags {
   failure: string | null
 }
 
+/** A cash movement as the derived series reads it: `transaction_id` is set when a trade wrote it. */
+export type DerivedMovement = LedgerMovement & { transaction_id?: string | null }
+
+/** Deposit money moved to the purchases it paid (fundPurchases): how much, from which day. */
+export interface FundedDeposits {
+  amount: number
+  from: string
+}
+
 export interface DeriveInput {
   userId: string
   transactions: LedgerTrade[]
-  movements: LedgerMovement[]
+  movements: DerivedMovement[]
   /** ON ticker -> payment schedule (loadSchedules). */
   schedules: Map<string, FlowRow[]>
   overrides: FlowOverride[]
@@ -70,6 +81,10 @@ export interface DeriveResult {
   flags: DeriveFlags
   /** The core's ON payments up to today: what ledgerFlows declares to the risk metrics. */
   income: Income[]
+  /** Deposits and withdrawals of the movements the rows were built from (after fundPurchases). */
+  externalFlows: ExternalFlow[]
+  /** What fundPurchases moved, if anything. */
+  fundedDeposits: FundedDeposits | null
 }
 
 /** $1: rounding noise vs a real missing deposit. */
@@ -136,11 +151,13 @@ export function deriveHistory(input: DeriveInput): DeriveResult {
   const flags: DeriveFlags = { negativeCash: null, costMarkedStocks: [], todayUnpriced: [], failure: null }
   const rows: DerivedRow[] = []
   let income: Income[] = []
+  let externalFlows: ExternalFlow[] = []
+  let fundedDeposits: FundedDeposits | null = null
 
   try {
-    const { userId, transactions, movements, schedules, overrides, splits, barsByTicker, onPricesByTicker, today, todayQuotes } = input
-    const ledgerDays = [...transactions, ...movements].map(r => day(r.date)).sort()
-    if (ledgerDays.length === 0) return { rows, flags, income }
+    const { userId, transactions, movements: recorded, schedules, overrides, splits, barsByTicker, onPricesByTicker, today, todayQuotes } = input
+    const ledgerDays = [...transactions, ...recorded].map(r => day(r.date)).sort()
+    if (ledgerDays.length === 0) return { rows, flags, income, externalFlows, fundedDeposits }
     const firstDate = ledgerDays[0]
 
     const closes = indexBars(barsByTicker, onPricesByTicker)
@@ -148,6 +165,16 @@ export function deriveHistory(input: DeriveInput): DeriveResult {
     closes.forEach(bars => bars.forEach(b => { if (b.date >= firstDate && b.date < today) calendar.add(b.date) }))
 
     const options = { schedules, overrides, splits }
+    // Every row and every flow comes from the same movements: a deposit dated after the purchases
+    // it paid is moved to them (S10). Income does not depend on cash, so today's run gives it. A
+    // ledger the core cannot run to today moves nothing: the days below keep what they can compute.
+    let funding: ReturnType<typeof fundPurchases> = { movements: recorded, funded: null }
+    try {
+      funding = fundPurchases(recorded, ledgerAt(transactions, recorded, today, options).income, today)
+    } catch { /* the day that fails is reported below, with the rows before it */ }
+    const movements = funding.movements
+    fundedDeposits = funding.funded
+    externalFlows = externalFlowsOf(movements)
     const noBars = new Set<string>()
     for (const date of [...calendar].sort()) {
       const state = ledgerAt(transactions, movements, date, options)
@@ -172,7 +199,73 @@ export function deriveHistory(input: DeriveInput): DeriveResult {
     flags.failure = err instanceof Error ? err.message : String(err)
   }
 
-  return { rows, flags, income }
+  return { rows, flags, income, externalFlows, fundedDeposits }
+}
+
+/** Half a cent: float noise, never a shortfall to fund. */
+const CENT = 0.005
+
+const isExternal = (m: DerivedMovement) => m.transaction_id == null && (m.type === 'DEPOSITO' || m.type === 'RETIRO')
+const isExternalDeposit = (m: DerivedMovement) => isExternal(m) && m.type === 'DEPOSITO'
+
+/**
+ * Deposits dated after the purchases they paid (odd/tasks/statistics-truth.md S10). The bulk
+ * import dated each trade's cash leg on the trade day but a user may record the money that
+ * paid for it later, in a few lump deposits: the cash then reads negative for years and every
+ * return on those days is measured against a fiction. Day by day (movements, then the income
+ * paid that day), each shortfall is moved from the nearest later deposit(s) to the day it
+ * happens, exactly its size. The total deposited, the trade legs, the withdrawals and the
+ * income never change; a shortfall no later deposit covers stays (nothing is invented). Only
+ * a deposit dated up to `today` funds anything: the cash form accepts future dates, and money
+ * not yet deposited must not change today's cash.
+ */
+export function fundPurchases(
+  movements: DerivedMovement[],
+  income: Array<{ date: string; amount: number }>,
+  today: string
+): { movements: DerivedMovement[]; funded: FundedDeposits | null } {
+  const left = movements.map(m => (isExternalDeposit(m) ? Math.abs(Number(m.amount)) : 0))
+  const pool = movements
+    .map((_, i) => i)
+    .filter(i => isExternalDeposit(movements[i]) && day(movements[i].date) <= today)
+    .sort((a, b) => day(movements[a].date).localeCompare(day(movements[b].date)) || a - b)
+  const onDay = new Map<string, number[]>()
+  movements.forEach((m, i) => onDay.set(day(m.date), [...(onDay.get(day(m.date)) ?? []), i]))
+  const paid = new Map<string, number>()
+  for (const p of income) paid.set(day(p.date), (paid.get(day(p.date)) ?? 0) + p.amount)
+
+  const added: DerivedMovement[] = []
+  let cash = 0
+  for (const d of Array.from(new Set([...onDay.keys(), ...paid.keys()])).sort()) {
+    for (const i of onDay.get(d) ?? []) cash += isExternalDeposit(movements[i]) ? left[i] : cashDelta(movements[i].type, movements[i].amount)
+    cash += paid.get(d) ?? 0
+    let moved = 0
+    for (const i of pool) {
+      if (cash + moved >= -CENT) break
+      if (day(movements[i].date) <= d || left[i] <= 0) continue
+      const take = Math.min(left[i], -(cash + moved))
+      left[i] -= take
+      moved += take
+    }
+    if (moved === 0) continue
+    added.push({ type: 'DEPOSITO', amount: moved, date: d, transaction_id: null })
+    cash += moved
+  }
+
+  if (added.length === 0) return { movements, funded: null }
+  const kept = movements.flatMap((m, i) => {
+    if (!isExternalDeposit(m) || left[i] === Math.abs(Number(m.amount))) return [m]
+    return left[i] > CENT ? [{ ...m, amount: left[i] }] : []
+  })
+  return { movements: [...kept, ...added], funded: { amount: added.reduce((sum, m) => sum + m.amount, 0), from: added[0].date } }
+}
+
+/** Money in and out of the whole portfolio: the deposits and withdrawals no trade wrote, signed, by date. */
+export function externalFlowsOf(movements: DerivedMovement[]): ExternalFlow[] {
+  return movements
+    .filter(isExternal)
+    .map(m => ({ date: day(m.date), amount: m.type === 'RETIRO' ? -Math.abs(Number(m.amount)) : Math.abs(Number(m.amount)) }))
+    .sort((a, b) => a.date.localeCompare(b.date))
 }
 
 /**

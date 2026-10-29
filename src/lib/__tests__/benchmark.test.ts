@@ -69,8 +69,8 @@ describe('compareToBenchmark', () => {
 
 describe('fetchBenchmarkComparison', () => {
   beforeEach(() => vi.clearAllMocks())
-  const result = (bars: { date: string; close: number }[]) =>
-    ({ bars, splits: [], splitsKnown: true, degraded: false, missing: false })
+  const result = (bars: { date: string; close: number }[], dividends: { date: string; amount: number }[] | null = []) =>
+    ({ bars, splits: [], splitsKnown: true, dividends, degraded: false, missing: false })
 
   it('reads the benchmark through the daily bars cache, with ten days of lead-in, never Yahoo directly', async () => {
     mockGetBars.mockResolvedValue(new Map([['SPY', result([{ date: '2024-01-02', close: 100 }, { date: '2024-01-04', close: 105 }])]]))
@@ -99,6 +99,26 @@ describe('fetchBenchmarkComparison', () => {
 
     expect(mockGetBars.mock.calls[0][0]).toEqual(['^MERV'])
     expect(r!.points.map((p) => p.benchmarkPct)).toEqual([0, expect.closeTo(10, 9), 0])
+    // A price index: the screen says it carries no dividends.
+    expect(r!.priceOnly).toBe(true)
+  })
+
+  it('S&P 500 with its dividends: each one reinvested on its ex-date, like the portfolio\'s own', async () => {
+    // Close 100 → 98 on the ex-date of a 2 dividend → 100: price −0 %, total return +2 %.
+    mockGetBars.mockResolvedValue(new Map([['SPY', result(
+      [{ date: '2024-01-02', close: 100 }, { date: '2024-01-03', close: 98 }, { date: '2024-01-04', close: 100 }],
+      [{ date: '2024-01-03', amount: 2 }],
+    )]]))
+
+    const r = await fetchBenchmarkComparison('SPY', series)
+
+    expect(r!.points.map((p) => p.benchmarkPct)).toEqual([0, expect.closeTo(0, 9), expect.closeTo(100 * (100 / 98) - 100, 9)])
+    expect(r!.priceOnly).toBe(false)
+  })
+
+  it('S&P 500 with dividends unknown is an error, never drawn as if it had none', async () => {
+    mockGetBars.mockResolvedValue(new Map([['SPY', result([{ date: '2024-01-02', close: 100 }, { date: '2024-01-04', close: 105 }], null)]]))
+    await expect(fetchBenchmarkComparison('SPY', series)).rejects.toThrow('No dividend data for SPY')
   })
 
   it('bars served stale after a Yahoo failure are an error too, never drawn as today\'s', async () => {

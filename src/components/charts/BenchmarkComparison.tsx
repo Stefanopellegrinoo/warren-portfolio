@@ -49,7 +49,7 @@ export default function BenchmarkComparison({ universe }: { universe: string }) 
           </select>
         }
       />
-      <p className="pt-3 text-[13px] text-ink-3">Retorno ponderado por tiempo, sin depósitos ni retiros, contra el índice elegido, en USD.</p>
+      <p className="pt-3 text-[13px] text-ink-3">Retorno ponderado por tiempo, sin depósitos ni retiros, contra el índice elegido con sus dividendos reinvertidos, en USD.</p>
 
       {benchmark && loading && <p role="status" className="pt-3 text-sm text-ink-3">Cargando…</p>}
       {benchmark && !loading && failed && (
@@ -66,6 +66,7 @@ export default function BenchmarkComparison({ universe }: { universe: string }) 
                 {formatNumber(excess, { decimals: 1, sign: true })} pp
               </dd>
             </dl>
+            {result.priceOnly && <p className="pt-1 text-[13px] text-ink-3">El MERVAL no publica dividendos: se compara solo su precio.</p>}
             <div className="mt-3 flex gap-4 text-[13px] text-ink-3" aria-hidden="true">
               <span><i className="mr-1.5 inline-block w-3.5 border-t-2 border-accent align-middle" />Cartera</span>
               <span><i className="mr-1.5 inline-block w-3.5 border-t border-dashed border-ink-3 align-middle" />{result.label}</span>
