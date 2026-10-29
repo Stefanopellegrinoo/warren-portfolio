@@ -27,6 +27,10 @@ describe('055_redate_deposits.sql', () => {
     expect(sql).toMatch(/WHERE id = \(v_change->>'id'\)::uuid AND user_id = v_user AND type = 'DEPOSITO' AND transaction_id IS NULL FOR UPDATE/i)
   })
 
+  it('only while the deposit still has the amount the proposal saw: a second save of the same plan writes nothing', () => {
+    expect(sql).toMatch(/IF v_change->'amount' IS NULL OR abs\(v_row\.amount - \(v_change->>'amount'\)::numeric\) > 0\.00005 THEN RAISE EXCEPTION 'redate_deposits: deposit % changed since the proposal'/i)
+  })
+
   it('refuses parts that exceed the deposit, are not positive, or are not dated before it', () => {
     expect(sql).toMatch(/IF v_sum > v_row\.amount \+ 0\.005 THEN RAISE EXCEPTION/i)
     expect(sql).toMatch(/\(p->>'amount'\)::numeric <= 0 OR \(p->>'date'\)::date >= v_row\.date/i)

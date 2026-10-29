@@ -24,6 +24,19 @@ describe('proposalFrom — the deposits a user reviews (odd/tasks/deposit-dates.
     })
   })
 
+  it('never proposes a part of 0: a deposit used up to float noise is used up (verifier B1)', () => {
+    // D pays a and b exactly; 2783.1968 − 1301.6552 − 1481.5416 leaves ~2e-13 in floating point.
+    const p = proposalFrom([
+      leg('a', 'RETIRO', 1301.6552, '2026-01-05'), leg('b', 'RETIRO', 1481.5416, '2026-01-06'), leg('c', 'RETIRO', 100, '2026-01-07'),
+      deposit('D', 2783.1968, '2026-01-08'), deposit('E', 1000, '2026-01-09'),
+    ], [], TODAY)
+    expect(p.deposits).toEqual([
+      { id: 'D', date: '2026-01-08', amount: 2783.1968, remaining: 0, parts: [{ date: '2026-01-05', amount: 1301.6552 }, { date: '2026-01-06', amount: 1481.5416 }] },
+      { id: 'E', date: '2026-01-09', amount: 1000, remaining: 900, parts: [{ date: '2026-01-07', amount: 100 }] },
+    ])
+    expect(p.deposits.flatMap(d => d.parts).every(x => x.amount > 0)).toBe(true)
+  })
+
   it('nothing to review when every deposit came before what it paid', () => {
     expect(proposalFrom([deposit('d1', 5000, '2026-03-01'), leg('a', 'RETIRO', 500, '2026-03-02')], [], TODAY))
       .toEqual({ deposits: [], total: 0, from: null })
@@ -34,10 +47,14 @@ describe('checkRedatePlan — what the user confirms must be the proposal, dates
   const proposal = proposalFrom(MOVES, [], TODAY)
   const asProposed = proposal.deposits.map(d => ({ id: d.id, parts: d.parts.map(p => ({ ...p })) }))
 
-  it('accepts the proposal as is, and a date the user moved earlier', () => {
-    expect(checkRedatePlan(asProposed, proposal, TODAY)).toEqual({ ok: true, changes: asProposed })
-    const edited = [{ id: 'd1', parts: [{ date: '2026-02-20', amount: 300 }] }]
-    expect(checkRedatePlan(edited, proposal, TODAY)).toEqual({ ok: true, changes: edited })
+  it('accepts the proposal as is, and a date the user moved earlier — saving the proposal\'s own amounts, with the deposit amount it expects', () => {
+    expect(checkRedatePlan(asProposed, proposal, TODAY)).toEqual({
+      ok: true,
+      changes: proposal.deposits.map(d => ({ id: d.id, amount: d.amount, parts: d.parts })),
+    })
+    // The browser's amount may differ by float noise; the proposal's is what gets saved.
+    const edited = [{ id: 'd1', parts: [{ date: '2026-02-20', amount: 300.00004 }] }]
+    expect(checkRedatePlan(edited, proposal, TODAY)).toEqual({ ok: true, changes: [{ id: 'd1', amount: 300, parts: [{ date: '2026-02-20', amount: 300 }] }] })
   })
 
   it('refuses other amounts, other deposits or a different split: the movements changed meanwhile (409)', () => {

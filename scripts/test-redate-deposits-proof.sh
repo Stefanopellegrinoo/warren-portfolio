@@ -63,33 +63,38 @@ GRANT SELECT ON totals TO authenticated;
 
 -- Nobody signed in, anon, an empty plan
 SET ROLE authenticated;
-SELECT expect_fail('no signed-in user', $q$SELECT redate_deposits('[{"id":"11111111-0000-0000-0000-000000000002","parts":[{"date":"2022-02-09","amount":500}]}]')$q$, 'no signed-in user');
+SELECT expect_fail('no signed-in user', $q$SELECT redate_deposits('[{"id":"11111111-0000-0000-0000-000000000002","amount":3000,"parts":[{"date":"2022-02-09","amount":500}]}]')$q$, 'no signed-in user');
 RESET ROLE; SET ROLE anon; SET test.uid = 'aaaaaaaa-0000-0000-0000-000000000001';
 SELECT expect_fail('anon cannot execute', $q$SELECT redate_deposits('[]')$q$, 'permission denied');
 RESET ROLE; SET ROLE authenticated; SET test.uid = 'aaaaaaaa-0000-0000-0000-000000000001';
 SELECT expect_fail('an empty plan', $q$SELECT redate_deposits('[]')$q$, 'no changes');
 
 -- Refusals write nothing
-SELECT expect_fail('another user''s deposit', $q$SELECT redate_deposits('[{"id":"22222222-0000-0000-0000-000000000001","parts":[{"date":"2022-02-09","amount":1}]}]')$q$, 'not found');
-SELECT expect_fail('a deposit a trade wrote', $q$SELECT redate_deposits('[{"id":"11111111-0000-0000-0000-000000000004","parts":[{"date":"2022-02-09","amount":1}]}]')$q$, 'not found');
-SELECT expect_fail('a purchase leg', $q$SELECT redate_deposits('[{"id":"11111111-0000-0000-0000-000000000001","parts":[{"date":"2022-01-09","amount":1}]}]')$q$, 'not found');
-SELECT expect_fail('parts over the deposit', $q$SELECT redate_deposits('[{"id":"11111111-0000-0000-0000-000000000002","parts":[{"date":"2022-02-09","amount":3000.01}]}]')$q$, 'exceed');
-SELECT expect_fail('a part on the deposit''s own day', $q$SELECT redate_deposits('[{"id":"11111111-0000-0000-0000-000000000002","parts":[{"date":"2026-03-31","amount":1}]}]')$q$, 'not dated before');
-SELECT expect_fail('a zero part', $q$SELECT redate_deposits('[{"id":"11111111-0000-0000-0000-000000000002","parts":[{"date":"2022-02-09","amount":0}]}]')$q$, 'not positive');
-SELECT expect_fail('a deposit without parts', $q$SELECT redate_deposits('[{"id":"11111111-0000-0000-0000-000000000002","parts":[]}]')$q$, 'no parts');
+SELECT expect_fail('another user''s deposit', $q$SELECT redate_deposits('[{"id":"22222222-0000-0000-0000-000000000001","amount":999,"parts":[{"date":"2022-02-09","amount":1}]}]')$q$, 'not found');
+SELECT expect_fail('a deposit a trade wrote', $q$SELECT redate_deposits('[{"id":"11111111-0000-0000-0000-000000000004","amount":70,"parts":[{"date":"2022-02-09","amount":1}]}]')$q$, 'not found');
+SELECT expect_fail('a purchase leg', $q$SELECT redate_deposits('[{"id":"11111111-0000-0000-0000-000000000001","amount":500,"parts":[{"date":"2022-01-09","amount":1}]}]')$q$, 'not found');
+SELECT expect_fail('parts over the deposit', $q$SELECT redate_deposits('[{"id":"11111111-0000-0000-0000-000000000002","amount":3000,"parts":[{"date":"2022-02-09","amount":3000.01}]}]')$q$, 'exceed');
+SELECT expect_fail('a part on the deposit''s own day', $q$SELECT redate_deposits('[{"id":"11111111-0000-0000-0000-000000000002","amount":3000,"parts":[{"date":"2026-03-31","amount":1}]}]')$q$, 'not dated before');
+SELECT expect_fail('a zero part', $q$SELECT redate_deposits('[{"id":"11111111-0000-0000-0000-000000000002","amount":3000,"parts":[{"date":"2022-02-09","amount":0}]}]')$q$, 'not positive');
+SELECT expect_fail('a deposit without parts', $q$SELECT redate_deposits('[{"id":"11111111-0000-0000-0000-000000000002","amount":3000,"parts":[]}]')$q$, 'no parts');
 -- one good change and one bad one: the good one is not kept either
-SELECT expect_fail('all or nothing', $q$SELECT redate_deposits('[{"id":"11111111-0000-0000-0000-000000000002","parts":[{"date":"2022-02-09","amount":500}]},{"id":"11111111-0000-0000-0000-000000000003","parts":[{"date":"2026-04-09","amount":1}]}]')$q$, 'not dated before');
+SELECT expect_fail('all or nothing', $q$SELECT redate_deposits('[{"id":"11111111-0000-0000-0000-000000000002","amount":3000,"parts":[{"date":"2022-02-09","amount":500}]},{"id":"11111111-0000-0000-0000-000000000003","amount":1000,"parts":[{"date":"2026-04-09","amount":1}]}]')$q$, 'not dated before');
 SELECT expect_eq('after every refusal nothing changed',
   (SELECT jsonb_agg(jsonb_build_array(date, type, amount) ORDER BY date, amount) FROM public.cash_movements),
   '[["2022-02-09","RETIRO",500.0000],["2026-03-31","DEPOSITO",3000.0000],["2026-04-09","DEPOSITO",1000.0000],["2026-04-10","DEPOSITO",70.0000]]');
 
 -- A splits the 03-31 lump in two parts and gives the whole 04-09 one to a single earlier day
 SELECT expect_eq('returns the deposits inserted',
-  to_jsonb(redate_deposits('[{"id":"11111111-0000-0000-0000-000000000002","parts":[{"date":"2022-02-09","amount":500},{"date":"2023-05-02","amount":1234.5678}]},{"id":"11111111-0000-0000-0000-000000000003","parts":[{"date":"2026-04-01","amount":1000}]}]')),
+  to_jsonb(redate_deposits('[{"id":"11111111-0000-0000-0000-000000000002","amount":3000,"parts":[{"date":"2022-02-09","amount":500},{"date":"2023-05-02","amount":1234.5678}]},{"id":"11111111-0000-0000-0000-000000000003","amount":1000,"parts":[{"date":"2026-04-01","amount":1000}]}]')),
   '3');
 SELECT expect_eq('the parts are deposits on their days; the lump keeps the rest; a lump given away is gone',
   (SELECT jsonb_agg(jsonb_build_array(date, type, amount, description) ORDER BY date, amount) FROM public.cash_movements WHERE type = 'DEPOSITO' AND transaction_id IS NULL),
   '[["2022-02-09","DEPOSITO",500.0000,"Parte del depósito del 31/03/2026"],["2023-05-02","DEPOSITO",1234.5678,"Parte del depósito del 31/03/2026"],["2026-03-31","DEPOSITO",1265.4322,null],["2026-04-01","DEPOSITO",1000.0000,"Parte del depósito del 09/04/2026"]]');
+-- The same plan saved twice (a double click): the deposit no longer has the amount it was proposed with.
+SELECT expect_fail('a second save of the same plan', $q$SELECT redate_deposits('[{"id":"11111111-0000-0000-0000-000000000002","amount":3000,"parts":[{"date":"2022-02-09","amount":500},{"date":"2023-05-02","amount":1234.5678}]}]')$q$, 'changed since the proposal');
+SELECT expect_fail('a change without the amount it expects', $q$SELECT redate_deposits('[{"id":"11111111-0000-0000-0000-000000000002","parts":[{"date":"2022-02-09","amount":1}]}]')$q$, 'changed since the proposal');
+SELECT expect_eq('nothing was split twice',
+  (SELECT to_jsonb(count(*)) FROM public.cash_movements WHERE description = 'Parte del depósito del 31/03/2026'), '2');
 SELECT expect_eq('the total deposited did not change',
   (SELECT to_jsonb(deposited) FROM totals WHERE user_id = 'aaaaaaaa-0000-0000-0000-000000000001'), '4000.0000');
 SELECT expect_eq('the trade legs were not touched',
@@ -97,7 +102,7 @@ SELECT expect_eq('the trade legs were not touched',
   '[["2022-02-09","RETIRO",500.0000],["2026-04-10","DEPOSITO",70.0000]]');
 -- A rounding half a cent over the deposit is accepted and leaves nothing behind
 SELECT expect_eq('half a cent of rounding over the rest: the lump is gone, nothing negative',
-  to_jsonb(redate_deposits('[{"id":"11111111-0000-0000-0000-000000000002","parts":[{"date":"2024-01-02","amount":1265.4362}]}]')), '1');
+  to_jsonb(redate_deposits('[{"id":"11111111-0000-0000-0000-000000000002","amount":1265.4322,"parts":[{"date":"2024-01-02","amount":1265.4362}]}]')), '1');
 SELECT expect_eq('no lump left on 2026-03-31 and no negative deposit',
   (SELECT to_jsonb(count(*)) FROM public.cash_movements WHERE date = '2026-03-31' OR amount < 0), '0');
 

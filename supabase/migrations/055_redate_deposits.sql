@@ -9,7 +9,8 @@
 --
 -- WHAT
 -- public.redate_deposits(p_changes jsonb) RETURNS integer — p_changes is
---   [{ "id": "<deposit uuid>", "parts": [{ "date": "YYYY-MM-DD", "amount": 123.4567 }, ...] }, ...]
+--   [{ "id": "<deposit uuid>", "amount": <the deposit's amount when proposed>,
+--      "parts": [{ "date": "YYYY-MM-DD", "amount": 123.4567 }, ...] }, ...]
 -- and the result is the number of deposits inserted. One call is one transaction: any refused
 -- change refuses them all and nothing is written.
 --
@@ -17,7 +18,9 @@
 -- SECURITY INVOKER: it runs as the signed-in user, so the own_cash_movements policy (003) still
 -- decides, and it also filters on auth.uid() itself. Only the user's own external deposits
 -- (type DEPOSITO, no transaction behind them) can be split, locked FOR UPDATE while the call
--- works. A part must be positive and dated before its deposit; the parts may not exceed the
+-- works, and only while it still has the amount the proposal saw: a second save of the same plan
+-- (a double click) finds it changed and writes nothing. A part must be positive and dated before
+-- its deposit; the parts may not exceed the
 -- deposit by more than half a cent (rounding to the column's 4 decimals). The route checks the
 -- plan against a fresh proposal before calling (only dates may differ) and that no date is after
 -- today. No EXECUTE for PUBLIC or anon.
@@ -47,6 +50,9 @@ BEGIN
     SELECT * INTO v_row FROM public.cash_movements
       WHERE id = (v_change->>'id')::uuid AND user_id = v_user AND type = 'DEPOSITO' AND transaction_id IS NULL FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'redate_deposits: deposit % not found', v_change->>'id'; END IF;
+    IF v_change->'amount' IS NULL OR abs(v_row.amount - (v_change->>'amount')::numeric) > 0.00005 THEN
+      RAISE EXCEPTION 'redate_deposits: deposit % changed since the proposal', v_row.id;
+    END IF;
 
     v_parts := v_change->'parts';
     IF jsonb_typeof(v_parts) IS DISTINCT FROM 'array' OR jsonb_array_length(v_parts) = 0 THEN

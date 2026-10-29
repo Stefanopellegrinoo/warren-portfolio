@@ -256,7 +256,8 @@ export function fundPurchases(
     let moved = 0
     for (const i of pool) {
       if (cash + moved >= -CENT) break
-      if (day(movements[i].date) <= d || left[i] <= 0) continue
+      // Half a cent or less left is float noise, not money: the deposit is used up.
+      if (day(movements[i].date) <= d || left[i] <= CENT) continue
       const take = Math.min(left[i], -(cash + moved))
       left[i] -= take
       moved += take

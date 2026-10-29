@@ -22,8 +22,11 @@ export interface DepositDatesProposal {
 
 export interface RedateChange { id: string; parts: DepositPart[] }
 
+/** What is saved: the proposal's own amounts with the user's dates, and the amount the deposit must still have. */
+export interface SavedChange extends RedateChange { amount: number }
+
 export type RedateCheck =
-  | { ok: true; changes: RedateChange[] }
+  | { ok: true; changes: SavedChange[] }
   | { ok: false; status: 400 | 409; error: string }
 
 type IdMovement = DerivedMovement & { id: string }
@@ -37,7 +40,8 @@ const sameAmount = (a: number, b: number) => Math.abs(a - b) < 1e-4
 export function proposalFrom(movements: IdMovement[], income: Array<{ date: string; amount: number }>, today: string): DepositDatesProposal {
   const { proposals } = fundPurchases(movements, income, today)
   const deposits = proposals.map(p => {
-    const parts = p.parts.map(x => ({ date: x.date, amount: round4(x.amount) }))
+    // A part that rounds to nothing is not a part (a remainder of float noise).
+    const parts = p.parts.map(x => ({ date: x.date, amount: round4(x.amount) })).filter(x => x.amount > 0)
     const amount = round4(p.amount)
     return { id: movements[p.index].id, date: p.date, amount, remaining: round4(amount - parts.reduce((s, x) => s + x.amount, 0)), parts }
   })
@@ -58,6 +62,7 @@ export function checkRedatePlan(changes: RedateChange[], proposal: DepositDatesP
   if (new Set(changes.map(c => c.id)).size !== changes.length) {
     return { ok: false, status: 400, error: 'Cada depósito puede aparecer una sola vez.' }
   }
+  const saved: SavedChange[] = []
   for (const change of changes) {
     const proposed = proposal.deposits.find(d => d.id === change.id)
     const sameSplit = proposed && proposed.parts.length === change.parts.length
@@ -71,8 +76,9 @@ export function checkRedatePlan(changes: RedateChange[], proposal: DepositDatesP
     if (change.parts.some(p => p.date > today)) {
       return { ok: false, status: 400, error: 'Una fecha no puede ser posterior a hoy.' }
     }
+    saved.push({ id: proposed.id, amount: proposed.amount, parts: proposed.parts.map((p, i) => ({ date: change.parts[i].date, amount: p.amount })) })
   }
-  return { ok: true, changes }
+  return { ok: true, changes: saved }
 }
 
 /** Every cash movement of the user with its id, in the order the derived series reads them. */

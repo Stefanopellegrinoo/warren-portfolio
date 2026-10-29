@@ -72,14 +72,15 @@ describe('POST /api/cash/deposit-dates (odd/tasks/deposit-dates.md S3)', () => {
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ saved: 2 })
     expect(rpc).toHaveBeenCalledTimes(1)
-    expect(rpc).toHaveBeenCalledWith('redate_deposits', { p_changes: [PROPOSED] })
+    // With the amount the deposit must still have: a second identical save finds it changed (verifier B2).
+    expect(rpc).toHaveBeenCalledWith('redate_deposits', { p_changes: [{ ...PROPOSED, amount: 3000 }] })
     expect(mockInvalidate).toHaveBeenCalledWith('u1')
   })
 
   it('accepts a date the user moved earlier, as long as the amounts are the proposal\'s', async () => {
     const edited = { id: D1, parts: [{ date: '2026-02-20', amount: 500 }, { date: '2026-03-05', amount: 250.1235 }] }
     expect((await post({ deposits: [edited] })).status).toBe(200)
-    expect(rpc).toHaveBeenCalledWith('redate_deposits', { p_changes: [edited] })
+    expect(rpc).toHaveBeenCalledWith('redate_deposits', { p_changes: [{ ...edited, amount: 3000 }] })
   })
 
   it('a plan that is not the current proposal is refused with 409 and writes nothing', async () => {
