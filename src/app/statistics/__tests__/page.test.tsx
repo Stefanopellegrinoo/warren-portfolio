@@ -352,7 +352,11 @@ describe('StatisticsPage — the whole portfolio is drawn from the day it is mea
   it('says how much deposit money was moved to the purchases it paid (S10)', async () => {
     stubFetch({ [TOTAL]: ok({ data: [point(20), point(0)], measuredFrom: daysAgo(20), negativeCashUntil: null, unavailableReason: null, fundedDeposits: { amount: 1234.56, from: '2023-05-02' } }) })
     const { el, unmount } = await render()
-    expect(el.textContent).toContain('Algunos depósitos estaban cargados después de las compras que pagaron: para medir, US$ 1.234,56 se toman como depositados el día de esas compras, desde el 02/05/2023. El total depositado no cambia.')
+    // One quiet line under the chart; the detail opens from its (i) (deposit-dates S5).
+    expect(el.querySelector('[aria-labelledby="h-evolucion"]')!.textContent).toContain('Algunos depósitos se adelantaron a la fecha de tus compras')
+    expect(el.textContent).not.toContain('se toman como depositados')
+    await act(async () => { el.querySelector<HTMLButtonElement>('[aria-labelledby="h-evolucion"] button[aria-label="Qué depósitos se adelantaron"]')!.click() })
+    expect(document.body.textContent).toContain('Algunos depósitos estaban cargados después de las compras que pagaron: para medir, US$ 1.234,56 se toman como depositados el día de esas compras, desde el 02/05/2023. El total depositado no cambia.')
     unmount()
   })
 

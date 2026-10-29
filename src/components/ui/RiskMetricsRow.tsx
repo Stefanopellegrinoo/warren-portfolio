@@ -1,8 +1,7 @@
 'use client'
 
-import { Info } from 'lucide-react'
 import KpiCard, { type FigureTone } from '@/components/ui/KpiCard'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import InfoLine from '@/components/ui/InfoLine'
 import type { DegradedReason } from '@/lib/derived-series'
 import { SectionHead } from '@/components/resumen/ui'
 import { formatDate, formatNumber, formatPct } from '@/lib/utils'
@@ -110,27 +109,12 @@ export function degradedMessages(reasons: DegradedReason[] | undefined): string[
   return reasons.map(r => MESSAGES[r.kind]('tickers' in r ? r.tickers : []))
 }
 
-/** One quiet line; the (i) tells what happened on hover, on focus, or on a tap where there is no hover (S11). */
-function DegradedInfo({ reasons }: { reasons?: DegradedReason[] }) {
+/** Deposits moved by the derived series (statistics-truth S10): a quiet line, the detail behind its (i) (deposit-dates S5). */
+export function MovedDepositsInfo({ note, className }: { note: string; className?: string }) {
   return (
-    <div className="mt-1 flex items-center gap-1 text-[13px] text-ink-3">
-      Algunos precios no estuvieron disponibles
-      <Popover>
-        <PopoverTrigger
-          openOnHover
-          delay={100}
-          aria-label="Qué precios faltaron"
-          className="-my-2.5 inline-flex h-6 w-6 items-center justify-center rounded-full text-ink-3 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring max-[819px]:h-11 max-[819px]:w-11"
-        >
-          <Info size={14} aria-hidden="true" />
-        </PopoverTrigger>
-        <PopoverContent className="max-w-[min(22rem,calc(100vw-2rem))] p-3 text-[13px] leading-snug">
-          <ul className="grid gap-1.5">
-            {degradedMessages(reasons).map(m => <li key={m}>{m}</li>)}
-          </ul>
-        </PopoverContent>
-      </Popover>
-    </div>
+    <InfoLine className={className} label="Algunos depósitos se adelantaron a la fecha de tus compras" ariaLabel="Qué depósitos se adelantaron">
+      <p>{note}</p>
+    </InfoLine>
   )
 }
 
@@ -184,9 +168,15 @@ export default function RiskMetricsRow({ data }: { data: RiskMetricsData | null 
           Desde el {formatDate(data.measuredFrom)}{data.measuredDays != null && ` · ${data.measuredDays} días de mercado`}
         </p>
       )}
-      {funded && <p className="mt-1 text-[13px] text-ink-3">{funded}</p>}
+      {funded && <MovedDepositsInfo className="mt-1" note={funded} />}
       {note && <p className="mt-1 text-[13px] text-warn">{note}</p>}
-      {data.degraded && <DegradedInfo reasons={data.degradedReasons} />}
+      {data.degraded && (
+        <InfoLine className="mt-1" label="Algunos precios no estuvieron disponibles" ariaLabel="Qué precios faltaron">
+          <ul className="grid gap-1.5">
+            {degradedMessages(data.degradedReasons).map(m => <li key={m}>{m}</li>)}
+          </ul>
+        </InfoLine>
+      )}
     </section>
   )
 }
