@@ -43,6 +43,7 @@ let loaded = false
 let loading: Promise<void> | null = null
 let owner: string | null = null
 let state: ChartPreferences = EMPTY_PREFERENCES
+let answer: ChartPreferences | null = null
 let pending: PreferencesPatch = {}
 let sending: PreferencesPatch | null = null
 let timer: ReturnType<typeof setTimeout> | null = null
@@ -129,8 +130,9 @@ function load(): Promise<void> {
       if (owner && owner !== body.userId) pending = {}
       owner = body.userId
       loaded = true
+      answer = parsePreferences(body.preferences)
       // What this tab changed while loading (or saved before, offline) wins over the account's copy.
-      state = applyPatch(parsePreferences(body.preferences), pending)
+      state = applyPatch(answer, pending)
       writeDevice()
       notify()
       if (!isEmptyPatch(pending)) schedule()
@@ -178,12 +180,11 @@ function flush(leaving = false) {
     })
 }
 
-/** `patch` may be built from the preferences as they are now, another tab's last change included. */
-function change(patch: PreferencesPatch | ((prefs: ChartPreferences) => PreferencesPatch)) {
+function change(patch: PreferencesPatch) {
   init()
-  const fresh = readDevice()
-  const valid = cleanPatch(typeof patch === 'function' ? patch(state) : patch)
-  if (isEmptyPatch(valid)) { if (fresh) notify(); return }
+  const valid = cleanPatch(patch)
+  if (isEmptyPatch(valid)) return
+  readDevice()
   state = applyPatch(state, valid)
   pending = mergePatch(pending, valid)
   writeDevice()
@@ -191,9 +192,9 @@ function change(patch: PreferencesPatch | ((prefs: ChartPreferences) => Preferen
   schedule()
 }
 
-/** Whether the account answered in this tab: until then the preferences are this device's last copy. */
-export function isAccountLoaded(): boolean {
-  return loaded
+/** The preferences as the account answered them in this tab, before this device's changes; null until then. */
+export function getAccountAnswer(): ChartPreferences | null {
+  return answer
 }
 
 export function getPreferences(): ChartPreferences {
@@ -220,28 +221,15 @@ export function setToolStyle(kind: ToolKind, style: RememberedStyle | null) {
   change({ toolStyles: { [kind]: style } })
 }
 
-/**
- * An indicator's entry with `fields` in place of its own (an undefined one removes it), or null when nothing is
- * left. The account replaces an entry whole, so every write carries the fields it does not change.
- */
-function withFields(entry: IndicatorSettings | undefined, fields: IndicatorSettings): IndicatorSettings | null {
-  const next = Object.fromEntries(Object.entries({ ...entry, ...fields }).filter(([, v]) => v !== undefined))
-  return Object.keys(next).length > 0 ? next : null
+/** Saves an indicator's settings to the account; null forgets them (the device's values apply again). */
+export function setIndicatorSettings(key: IndicatorKey, settings: IndicatorSettings | null) {
+  change({ indicatorSettings: { [key]: settings } })
 }
 
 /**
- * Saves an indicator's settings (values, style) to the account; null forgets them (the device's values apply
- * again). Whether it is on, hidden or minimized stays (odd/tasks/chart-pro-redesign.md S2).
+ * Saves whether these indicators are on, hidden or minimized (odd/tasks/chart-pro-redesign.md S2), each apart
+ * from its settings: a change made before the account answers wins over that indicator's visibility only.
  */
-export function setIndicatorSettings(key: IndicatorKey, settings: Pick<IndicatorSettings, 'values' | 'style'> | null) {
-  change((prefs) => ({ indicatorSettings: { [key]: withFields(prefs.indicatorSettings[key], { values: settings?.values, style: settings?.style }) } }))
-}
-
-/** Saves whether these indicators are on, hidden or minimized (S2 of chart-pro-redesign); their settings stay. */
 export function setIndicatorVisibility(changes: Partial<Record<IndicatorKey, IndicatorVisibility>>) {
-  change((prefs) => ({
-    indicatorSettings: Object.fromEntries(
-      Object.entries(changes).map(([key, visibility]) => [key, withFields(prefs.indicatorSettings[key as IndicatorKey], visibility!)]),
-    ),
-  }))
+  change({ indicatorVisibility: changes })
 }

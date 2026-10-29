@@ -1,22 +1,24 @@
 import { useChartStore, type IndicatorKey } from '@/lib/store/chart-store'
-import { INDICATOR_KEYS, type IndicatorVisibility } from './preferences-schema'
-import { getPreferences, isAccountLoaded, setIndicatorVisibility, subscribe } from './preferences'
+import { INDICATOR_KEYS, type ChartPreferences, type IndicatorVisibility } from './preferences-schema'
+import { getAccountAnswer, getPreferences, setIndicatorVisibility, subscribe } from './preferences'
 
 /**
  * Which indicators are on, hidden or minimized, kept in the account (odd/tasks/chart-pro-redesign.md S2) so the
  * phone and the computer show the same set. The chart store stays this device's copy: the first paint and
- * offline use read it.
+ * offline use read it. Each indicator's visibility is kept apart from its settings, so nothing here ever
+ * writes an indicator's values or style.
  *
- * - Once the account answered, every indicator it keeps them for is shown that way here; one it keeps nothing
- *   for (the first time after this shipped) is saved as this device has it, so the account ends up with all ten.
- * - A change here (on, hidden, minimized), before the account answered too, saves that indicator alone through
- *   the account's outbox (src/lib/chart/preferences.ts): debounced, kept on the device, sent once it answers.
+ * - Once the account answered, every indicator it shows a way is shown that way here (a change made here before
+ *   it answered wins for that indicator). One the answer has nothing for (the first time after this shipped, or
+ *   an indicator added later) is saved as this device has it, once per answer.
+ * - A change here saves that indicator's visibility alone through the account's outbox
+ *   (src/lib/chart/preferences.ts): debounced, kept on the device, sent once the account answers.
  * - Showing the account's set here saves nothing back.
  */
 
 type ChartState = ReturnType<typeof useChartStore.getState>
 
-const visibilityOf = (s: ChartState, key: IndicatorKey): Required<IndicatorVisibility> => ({
+const visibilityOf = (s: ChartState, key: IndicatorKey): IndicatorVisibility => ({
   on: !!s.indicators[key],
   hidden: !!s.hidden[key],
   minimized: !!s.minimized[key],
@@ -27,22 +29,25 @@ const differs = (a: ChartState, b: ChartState, key: IndicatorKey) =>
 
 // Set while the account's set is shown here, so the store's change it makes is not saved back.
 let applying = false
+// The account's answer whose missing indicators were already saved.
+let filled: ChartPreferences | null = null
 
-/** The account's set into the store, and to the account what it keeps nothing for. */
+/** The account's set into the store, and to the account what its answer has nothing for. */
 function reconcile() {
-  if (!isAccountLoaded()) return
-  const kept = getPreferences().indicatorSettings
+  const answer = getAccountAnswer()
+  if (!answer) return
+  const kept = getPreferences().indicatorVisibility
   const store = useChartStore.getState()
   const next = { indicators: { ...store.indicators }, hidden: { ...store.hidden }, minimized: { ...store.minimized } }
-  const missing: Partial<Record<IndicatorKey, IndicatorVisibility>> = {}
   for (const key of INDICATOR_KEYS) {
-    const { on, hidden, minimized } = kept[key] ?? {}
-    if (on === undefined && hidden === undefined && minimized === undefined) missing[key] = visibilityOf(store, key)
-    if (on !== undefined) next.indicators[key] = on
-    if (hidden !== undefined) next.hidden[key] = hidden
-    if (minimized !== undefined) next.minimized[key] = minimized
+    const v = kept[key]
+    if (!v) continue
+    next.indicators[key] = v.on
+    next.hidden[key] = v.hidden
+    next.minimized[key] = v.minimized
   }
-  if (INDICATOR_KEYS.some((key) => differs({ ...store, ...next }, store, key))) {
+  const shown = { ...store, ...next }
+  if (INDICATOR_KEYS.some((key) => differs(shown, store, key))) {
     applying = true
     try {
       useChartStore.setState(next)
@@ -50,7 +55,11 @@ function reconcile() {
       applying = false
     }
   }
-  if (Object.keys(missing).length > 0) setIndicatorVisibility(missing)
+  if (filled === answer) return
+  filled = answer
+  // From the answer, never from this device's copy alone: an older build may have rewritten it without them.
+  const missing = INDICATOR_KEYS.filter((key) => !answer.indicatorVisibility[key])
+  if (missing.length > 0) setIndicatorVisibility(Object.fromEntries(missing.map((key) => [key, visibilityOf(shown, key)])))
 }
 
 function save(s: ChartState, prev: ChartState) {

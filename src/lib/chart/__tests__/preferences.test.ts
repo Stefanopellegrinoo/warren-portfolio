@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 const KEY = 'warren:chart-preferences'
-const ACCOUNT = { favorites: { ray: true }, toolStyles: { ray: { color: '#f23645' } }, indicatorSettings: {} }
+const ACCOUNT = { favorites: { ray: true }, toolStyles: { ray: { color: '#f23645' } }, indicatorSettings: {}, indicatorVisibility: {} }
 
 type Reply = { status: number; body?: unknown } | 'offline'
 let replies: Reply[]
@@ -75,7 +75,7 @@ describe('loading', () => {
     keep({ owner: 'u1', preferences: { favorites: { 'gann-fan': true }, toolStyles: { ray: { color: 'nope' } } }, pending: { favorites: { nope: true } } })
     const { prefs } = await openTab({ status: 500 })
     await settle()
-    expect(prefs.getPreferences()).toEqual({ favorites: {}, toolStyles: {}, indicatorSettings: {} })
+    expect(prefs.getPreferences()).toEqual({ favorites: {}, toolStyles: {}, indicatorSettings: {}, indicatorVisibility: {} })
   })
 })
 
@@ -94,6 +94,7 @@ describe('changing a preference', () => {
       favorites: { rectangle: true },
       toolStyles: { ray: { color: '#2962ff', width: 2 } },
       indicatorSettings: { rsi: { values: { rsi: 21 } } },
+      indicatorVisibility: {},
     })
     expect(seen).toHaveBeenCalledTimes(4)
     expect(patches()).toEqual([])

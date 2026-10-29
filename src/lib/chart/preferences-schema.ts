@@ -4,11 +4,15 @@ import type { IndicatorConfig, IndicatorKey } from '@/lib/store/chart-store'
 
 /**
  * The chart preferences kept in the account (odd/tasks/chart-customization.md S4, migration 051):
- * favorite drawing tools, the style last chosen per tool, and per indicator its saved settings and whether
- * it is on, hidden or minimized (odd/tasks/chart-pro-redesign.md S2, src/lib/chart/indicator-sync.ts).
- * Each section is a map by key: a change merges per key (a null removes the key), so one device's
- * change never wipes another key changed elsewhere; it replaces that key's whole entry, so a write of an
- * indicator carries the fields it does not change. Where the favorites bar sits stays on the device.
+ * favorite drawing tools, the style last chosen per tool, the indicator settings the user saved, and
+ * which indicators are on, hidden or minimized (odd/tasks/chart-pro-redesign.md S2,
+ * src/lib/chart/indicator-sync.ts). Each section is a map by key: a change merges per key (a null removes
+ * the key), so one device's change never wipes another key changed elsewhere. Where the favorites bar
+ * sits stays on the device and is not here.
+ *
+ * The visibility has no column of its own: it shares indicator_settings, each indicator's under
+ * "<key>:visibility" (no migration). So an indicator's settings keep exactly the shape an older build
+ * reads and writes, and the database's per-key merge keeps a visibility change from touching them.
  *
  * Shared by the API (the trust boundary: every write is validated here) and the client (its device
  * copy is validated on read too). Plain module: no "use client" imports, so the route can use it.
@@ -80,9 +84,9 @@ export const INDICATOR_STYLE_PARTS: Record<IndicatorKey, {
   adx: { lines: ['adx', 'plusDI', 'minusDI'] },
 }
 
-/** Whether an indicator is on, hidden or minimized (odd/tasks/chart-pro-redesign.md S2); absent: this device's. */
-export interface IndicatorVisibility { on?: boolean; hidden?: boolean; minimized?: boolean }
-export interface IndicatorSettings extends IndicatorVisibility { values?: Partial<IndicatorConfig>; style?: IndicatorStyle }
+export interface IndicatorSettings { values?: Partial<IndicatorConfig>; style?: IndicatorStyle }
+/** Whether an indicator is on, hidden or minimized (odd/tasks/chart-pro-redesign.md S2). */
+export interface IndicatorVisibility { on: boolean; hidden: boolean; minimized: boolean }
 
 export interface ChartPreferences {
   /** Starred tools; only `true` is stored. The bar shows them in TOOL_KINDS order. */
@@ -90,15 +94,18 @@ export interface ChartPreferences {
   toolStyles: Partial<Record<ToolKind, RememberedStyle>>
   /** An indicator absent here uses this device's values (the account starts empty). */
   indicatorSettings: Partial<Record<IndicatorKey, IndicatorSettings>>
+  /** An indicator absent here is shown as this device has it. */
+  indicatorVisibility: Partial<Record<IndicatorKey, IndicatorVisibility>>
 }
 /** A change: per key, the new value, or null to remove it. */
 export interface PreferencesPatch {
   favorites?: Partial<Record<ToolKind, true | null>>
   toolStyles?: Partial<Record<ToolKind, RememberedStyle | null>>
   indicatorSettings?: Partial<Record<IndicatorKey, IndicatorSettings | null>>
+  indicatorVisibility?: Partial<Record<IndicatorKey, IndicatorVisibility | null>>
 }
 
-export const EMPTY_PREFERENCES: ChartPreferences = Object.freeze({ favorites: {}, toolStyles: {}, indicatorSettings: {} })
+export const EMPTY_PREFERENCES: ChartPreferences = Object.freeze({ favorites: {}, toolStyles: {}, indicatorSettings: {}, indicatorVisibility: {} })
 
 // Size bounds: one entry ≤ 4 KB (the largest factory style, fib retracement, is ~1.3 KB), and a body
 // holding every entry at its maximum still fits MAX_BODY_BYTES, so a valid outbox is never refused.
@@ -172,8 +179,8 @@ const drawingStyle = z
   })
   .catchall(openValue)
 
-// Exactly the parts INDICATOR_STYLE_PARTS gives each indicator's style: anything else in it (enabled, hidden,
-// another indicator's line) is refused.
+// Exactly the parts INDICATOR_STYLE_PARTS gives each indicator: anything else (enabled, hidden, another
+// indicator's line) is refused.
 const lineLook = z.strictObject({ color: color.optional(), width: z.number().int().min(1).max(4).optional(), visible: flag })
 const barsLook = z.strictObject({ upColor: color.optional(), downColor: color.optional(), visible: flag })
 const fillLook = z.strictObject({ visible: flag, color: color.optional(), transparency: percent.optional() })
@@ -195,18 +202,21 @@ const indicatorSchemas = new Map<string, z.ZodType>(
     const values = z.strictObject(
       Object.fromEntries(Object.entries(INDICATOR_VALUE_BOUNDS[key]).map(([field, [min, max]]) => [field, z.number().min(min).max(max).optional()])),
     )
-    return [key, z.strictObject({ values: values.optional(), style: indicatorStyle(key).optional(), on: flag, hidden: flag, minimized: flag })]
+    return [key, z.strictObject({ values: values.optional(), style: indicatorStyle(key).optional() })]
   }),
 )
 const toolKinds = new Set<string>(TOOL_KINDS)
 const favorite = z.literal(true)
+const indicatorKeys = new Set<string>(INDICATOR_KEYS)
+const visibility = z.strictObject({ on: z.boolean(), hidden: z.boolean(), minimized: z.boolean() })
 
-const SECTIONS = ['favorites', 'toolStyles', 'indicatorSettings'] as const
+const SECTIONS = ['favorites', 'toolStyles', 'indicatorSettings', 'indicatorVisibility'] as const
 type Section = (typeof SECTIONS)[number]
 type Entries = Record<string, unknown>
 
 function entrySchema(section: Section, key: string): z.ZodType | undefined {
   if (section === 'indicatorSettings') return indicatorSchemas.get(key)
+  if (section === 'indicatorVisibility') return indicatorKeys.has(key) ? visibility : undefined
   if (!toolKinds.has(key)) return undefined
   return section === 'favorites' ? favorite : drawingStyle
 }
@@ -215,7 +225,7 @@ const isMap = (v: unknown): v is Entries => !!v && typeof v === 'object' && !Arr
 
 /** The valid entries of each section; `strict` answers null at the first unknown or invalid thing instead. */
 function read(raw: unknown, removals: boolean, strict: boolean): Record<Section, Entries> | null {
-  const out: Record<Section, Entries> = { favorites: {}, toolStyles: {}, indicatorSettings: {} }
+  const out: Record<Section, Entries> = { favorites: {}, toolStyles: {}, indicatorSettings: {}, indicatorVisibility: {} }
   if (!isMap(raw)) return strict ? null : out
   if (strict && Object.keys(raw).some((s) => !(SECTIONS as readonly string[]).includes(s))) return null
   for (const section of SECTIONS) {
@@ -281,4 +291,20 @@ export function applyPatch(prefs: ChartPreferences, patch: PreferencesPatch): Ch
     next[s] = merged
   }
   return next as unknown as ChartPreferences
+}
+
+const VISIBILITY_SUFFIX = ':visibility'
+
+/** The indicator_settings column as the two sections it holds, unchecked (parsePreferences checks them). */
+export function fromIndicatorColumn(column: unknown): { indicatorSettings: unknown; indicatorVisibility: Entries } {
+  const entries = isMap(column) ? column : {}
+  const shown = Object.entries(entries).filter(([key]) => key.endsWith(VISIBILITY_SUFFIX))
+  // parsePreferences drops the "<key>:visibility" entries from the settings, as an older build does.
+  return { indicatorSettings: column, indicatorVisibility: Object.fromEntries(shown.map(([key, v]) => [key.slice(0, -VISIBILITY_SUFFIX.length), v])) }
+}
+
+/** A change's indicator settings and visibility as one change of the indicator_settings column. */
+export function toIndicatorColumn(patch: PreferencesPatch): Entries {
+  const shown = Object.entries(patch.indicatorVisibility ?? {}).map(([key, v]) => [key + VISIBILITY_SUFFIX, v])
+  return { ...patch.indicatorSettings, ...Object.fromEntries(shown) }
 }

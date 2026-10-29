@@ -241,7 +241,7 @@ describe('TradingPage — indicators in the account', () => {
     const kept = { rsi: { on: false, hidden: false, minimized: false }, obv: { on: true, hidden: true, minimized: false } }
     vi.stubGlobal('fetch', vi.fn((url: string) => ok(
       String(url) === '/api/chart-preferences'
-        ? { userId: 'u1', preferences: { favorites: {}, toolStyles: {}, indicatorSettings: kept } }
+        ? { userId: 'u1', preferences: { favorites: {}, toolStyles: {}, indicatorSettings: {}, indicatorVisibility: kept } }
         : String(url).includes('/lists') ? { lists: [] } : [],
     )))
     const { default: Page } = await import('../page')

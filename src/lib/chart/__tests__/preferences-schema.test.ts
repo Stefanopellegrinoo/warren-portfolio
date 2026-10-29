@@ -88,30 +88,39 @@ describe('preferences schema, indicator style', () => {
   })
 })
 
-// odd/tasks/chart-pro-redesign.md S2: which indicators are on, hidden or minimized lives in the account, in each
-// indicator's entry next to its values and style.
+// odd/tasks/chart-pro-redesign.md S2: which indicators are on, hidden or minimized lives in the account, apart from
+// each indicator's settings, which keep exactly the shape the previous build reads and writes.
 describe('preferences schema, which indicators are on', () => {
-  const entry = (value: unknown) => parsePatch({ indicatorSettings: { rsi: value } })
+  const VIS = { on: true, hidden: false, minimized: true }
+  const visibility = (value: unknown, key = 'rsi') => parsePatch({ indicatorVisibility: { [key]: value } })
 
-  it('accepts on, hidden and minimized alone and next to values and style', () => {
-    expect(entry({ on: true, hidden: false, minimized: true })).toEqual({ indicatorSettings: { rsi: { on: true, hidden: false, minimized: true } } })
-    expect(entry({ on: false })).not.toBeNull()
-    const full = { values: { rsi: 21 }, style: { lines: { rsi: { color: '#f23645' } } }, on: true, hidden: true, minimized: false }
-    expect(entry(full)).toEqual({ indicatorSettings: { rsi: full } })
+  it('accepts on, hidden and minimized per indicator, in a section of their own', () => {
+    expect(visibility(VIS)).toEqual({ indicatorVisibility: { rsi: VIS } })
+    expect(parsePreferences({ indicatorVisibility: { rsi: VIS } }).indicatorVisibility).toEqual({ rsi: VIS })
   })
 
   it.each([
-    ['on that is not a boolean', { on: 'yes' }],
-    ['hidden that is a number', { hidden: 1 }],
-    ['minimized that is null', { minimized: null }],
-    ['another field next to them', { on: true, enabled: true }],
-    ['visible at the entry', { on: true, visible: false }],
-  ])('still refuses %s', (_, value) => {
-    expect(entry(value)).toBeNull()
+    ['on that is not a boolean', { ...VIS, on: 'yes' }],
+    ['one of the three missing', { on: true, hidden: false }],
+    ['another field next to them', { ...VIS, enabled: true }],
+  ])('refuses %s', (_, value) => {
+    expect(visibility(value)).toBeNull()
   })
 
-  it('keeps a stored entry with them, and drops one with a field the app does not know', () => {
-    const prefs = parsePreferences({ indicatorSettings: { rsi: { on: false, hidden: true }, obv: { on: true, pinned: true } } })
-    expect(prefs.indicatorSettings).toEqual({ rsi: { on: false, hidden: true } })
+  it('refuses an indicator it does not know, and the flags inside an indicator\'s settings (as the previous build does)', () => {
+    expect(visibility(VIS, 'sma')).toBeNull()
+    expect(parsePatch({ indicatorSettings: { rsi: { values: { rsi: 21 }, on: true } } })).toBeNull()
+    expect(parsePatch({ indicatorSettings: { 'rsi:visibility': VIS } })).toBeNull()
+  })
+
+  it('keeps them under "<indicator>:visibility" in the indicator column, next to the settings, which stay as they are', async () => {
+    const { fromIndicatorColumn, toIndicatorColumn } = await import('../preferences-schema')
+    const rsi = { values: { rsi: 21 }, style: { lines: { rsi: { color: '#f23645' } } } }
+    const column = toIndicatorColumn({ indicatorSettings: { rsi }, indicatorVisibility: { rsi: VIS, obv: null } })
+    expect(column).toEqual({ rsi, 'rsi:visibility': VIS, 'obv:visibility': null })
+
+    const prefs = parsePreferences(fromIndicatorColumn({ rsi, 'rsi:visibility': VIS, 'adx:visibility': { on: true }, 'sma:visibility': VIS }))
+    expect(prefs.indicatorSettings).toEqual({ rsi })
+    expect(prefs.indicatorVisibility).toEqual({ rsi: VIS })
   })
 })

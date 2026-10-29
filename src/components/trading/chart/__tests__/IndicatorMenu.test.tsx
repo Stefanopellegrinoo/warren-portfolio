@@ -64,8 +64,9 @@ describe('IndicatorMenu', () => {
 
     expect(useChartStore.getState().indicators.obv).toBe(true)
     expect(JSON.parse(localStorage.getItem('tv-gratis-chart-state')!).state.indicators.obv).toBe(true)
-    // The account is not reachable here (404): the entry waits in its outbox, whole.
-    expect(getPreferences().indicatorSettings.obv).toEqual({ on: true, hidden: false, minimized: false })
+    // The account is not reachable here (404): it waits in the outbox, apart from OBV's settings.
+    expect(getPreferences().indicatorVisibility.obv).toEqual({ on: true, hidden: false, minimized: false })
+    expect(getPreferences().indicatorSettings).toEqual({})
     stop()
     unmount()
   })
