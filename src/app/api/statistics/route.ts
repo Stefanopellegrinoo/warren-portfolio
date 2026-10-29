@@ -228,6 +228,8 @@ export async function GET(req: NextRequest) {
       negativeCashUntil: risk.negativeCashUntil,
       unavailableReason: risk.unavailableReason,
       degraded: derived.degraded,
+      // What was missing, per asset, for the (i) on the risk row (S11).
+      degradedReasons: derived.degradedReasons ?? [],
       // Deposit money moved to the purchases it paid, so the screen can say so (S10).
       fundedDeposits: universe === 'total' ? derived.fundedDeposits : null,
       // Retired: stddev of monthly realized P&L in dollars was not volatility.

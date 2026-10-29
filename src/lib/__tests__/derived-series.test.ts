@@ -190,10 +190,13 @@ describe('getDerivedSeries', () => {
     const stale = deps({ getBars: vi.fn(async (s: string[]) => new Map(s.map(x => [x, ok(AAA_BARS, { degraded: true })]))) })
     const bad = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, stale)
     expect(bad.degraded).toBe(true)
+    // Why, and which asset (statistics-truth S11).
+    expect(bad.degradedReasons).toEqual([{ kind: 'stale_bars', tickers: ['AAA'] }])
     expect(redisMock.eval).not.toHaveBeenCalled()
 
     const good = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, deps())
     expect(good.degraded).toBe(false)
+    expect(good.degradedReasons).toEqual([])
     expect(redisMock.eval).toHaveBeenCalledTimes(1)
   })
 
@@ -203,6 +206,7 @@ describe('getDerivedSeries', () => {
     }))
     const res = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, deps({ derive }))
     expect(res.degraded).toBe(true)
+    expect(res.degradedReasons).toEqual([{ kind: 'failure' }])
     expect(redisMock.eval).not.toHaveBeenCalled()
   })
 
@@ -214,6 +218,7 @@ describe('getDerivedSeries', () => {
 
     const stock = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, withUnpriced(['AAA']))
     expect(stock.degraded).toBe(true)
+    expect(stock.degradedReasons).toEqual([{ kind: 'today_unpriced', tickers: ['AAA'] }])
     expect(redisMock.eval).not.toHaveBeenCalled()
 
     const on = await getDerivedSeries(fakeSupabase(tables({ transactions: { data: [tx(), onTx] } })), 'u1', {}, withUnpriced(['ONX']))
@@ -223,7 +228,9 @@ describe('getDerivedSeries', () => {
 
   it('a bars source with unknown splits is degraded; a clean chart() answering [] is not', async () => {
     const unknownSplits = deps({ getBars: vi.fn(async (s: string[]) => new Map(s.map(x => [x, ok(AAA_BARS, { splitsKnown: false })]))) })
-    expect((await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, unknownSplits)).degraded).toBe(true)
+    const splits = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, unknownSplits)
+    expect(splits.degraded).toBe(true)
+    expect(splits.degradedReasons).toEqual([{ kind: 'splits_unknown', tickers: ['AAA'] }])
 
     const empty = deps({ getBars: vi.fn(async (s: string[]) => new Map(s.map(x => [x, ok([], { splitsKnown: true })]))) })
     const res = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, empty)
@@ -249,6 +256,8 @@ describe('getDerivedSeries', () => {
       expect(res.degraded).toBe(true)
       expect(res.rows.length).toBeGreaterThan(0)
     }
+    expect(prices.degradedReasons).toEqual([{ kind: 'on_prices' }])
+    expect(schedules.degradedReasons).toEqual([{ kind: 'on_schedules' }])
     expect(redisMock.eval).not.toHaveBeenCalled()
   })
 
@@ -394,7 +403,14 @@ describe('getDerivedSeries', () => {
     const d = deps({ getBars: vi.fn(async (symbols: string[]) => new Map(symbols.map(s => [s, ok([], { splitsKnown: false })]))) })
     const res = await getDerivedSeries(fakeSupabase(tables()), 'u1', {}, d)
     expect(res.degraded).toBe(true)
+    // No bars at all: the stock is at its purchase price, whatever else is unknown.
+    expect(res.degradedReasons).toEqual([{ kind: 'no_bars', tickers: ['AAA'] }])
     expect(redisMock.eval).not.toHaveBeenCalled()
+  })
+
+  it('a local share whose days have no CCL says so, with its ticker (S11)', async () => {
+    const res = await getDerivedSeries(fakeSupabase(tables({ transactions: { data: [tx({ ticker: 'BCBA:ZZZ' })] } })), 'u1', {}, deps())
+    expect(res.degradedReasons).toContainEqual({ kind: 'ccl_missing', tickers: ['BCBA:ZZZ'] })
   })
 })
 

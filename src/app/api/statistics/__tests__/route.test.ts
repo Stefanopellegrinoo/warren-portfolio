@@ -227,6 +227,18 @@ describe('GET /api/statistics — which universes need the transaction list', ()
   })
 })
 
+describe('GET /api/statistics — what a degraded series is missing (S11)', () => {
+  it('passes the reasons through, so the screen can say which price was missing', async () => {
+    mockGetDerivedSeries.mockResolvedValue({
+      rows: [{ snapshot_date: '2026-07-01', total_value: 100, total_invested: 100 }], income: [], flags: {}, externalFlows: [], fundedDeposits: null,
+      degraded: true, degradedReasons: [{ kind: 'today_unpriced', tickers: ['NVDA'] }],
+    })
+    const body = await (await GET(makeRequest('/api/statistics?universe=total'))).json()
+    expect(body.degraded).toBe(true)
+    expect(body.degradedReasons).toEqual([{ kind: 'today_unpriced', tickers: ['NVDA'] }])
+  })
+})
+
 describe('GET /api/statistics — deposits moved to the purchases they paid (S10)', () => {
   it('says how much deposit money was moved and from when', async () => {
     mockSeries([{ snapshot_date: '2026-07-01', total_value: 100, total_invested: 100 }], [], false, [], { amount: 91311.74, from: '2022-02-09' })
@@ -246,7 +258,7 @@ describe('GET /api/statistics — derived series', () => {
     const body = await (await GET(request())).json()
     expect(Object.keys(body).sort()).toEqual([
       'allPnLs', 'allocation', 'annualizedVol', 'arsExposure', 'avgHoldingDays', 'avgLoss', 'avgWin', 'benchmark',
-      'benchmarkError', 'biggestLoser', 'biggestWinner', 'cumulativePnl', 'degraded', 'drawdownIntervals', 'drawdownIntervalsSkipped', 'fundedDeposits',
+      'benchmarkError', 'biggestLoser', 'biggestWinner', 'cumulativePnl', 'degraded', 'degradedReasons', 'drawdownIntervals', 'drawdownIntervalsSkipped', 'fundedDeposits',
       'incomeReceived', 'losersCount', 'maxDrawdown', 'measuredDays', 'measuredFrom', 'negativeCashUntil', 'unavailableReason', 'maxHoldingDays', 'minHoldingDays', 'monthlyReturns', 'monthlyStdDev', 'openPnl',
       'profitFactor', 'realizedPnl', 'returnIntervals', 'sharpeRatio', 'totalPortfolioValue', 'totalTrades',
       'universe', 'unpricedPositions', 'unpricedTickers', 'usdExposure', 'winRate', 'winnersCount',

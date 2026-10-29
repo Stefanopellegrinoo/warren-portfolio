@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import RiskMetricsRow from '../RiskMetricsRow'
+import { createRoot } from 'react-dom/client'
+import { act } from 'react-dom/test-utils'
+import RiskMetricsRow, { degradedMessages } from '../RiskMetricsRow'
+
+;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 describe('RiskMetricsRow', () => {
   it('writes the metrics in Argentine format with an explicit minus sign', () => {
@@ -67,10 +71,48 @@ describe('RiskMetricsRow', () => {
     expect(html).not.toContain('Desde el')
   })
 
-  it('discloses a degraded series in one line (S5)', () => {
-    expect(renderToStaticMarkup(<RiskMetricsRow data={{ ...none, degraded: true }} />))
-      .toContain('Faltan precios de algunos días: se valuaron al costo.')
-    expect(renderToStaticMarkup(<RiskMetricsRow data={none} />)).not.toContain('Faltan precios')
+  it('a degraded series is one quiet line with an (i), not a warning (S5, S11)', () => {
+    const html = renderToStaticMarkup(<RiskMetricsRow data={{ ...none, degraded: true, degradedReasons: [{ kind: 'today_unpriced', tickers: ['NVDA'] }] }} />)
+    expect(html).toContain('Algunos precios no estuvieron disponibles')
+    expect(html).toContain('aria-label="Qué precios faltaron"')
+    expect(html).not.toContain('se valuaron al costo')
+    expect(html).not.toMatch(/text-warn[^>]*>Algunos precios/)
+    expect(renderToStaticMarkup(<RiskMetricsRow data={none} />)).not.toContain('Algunos precios')
+  })
+
+  it('says each missing price in words that match its cause, per asset (S11)', () => {
+    expect(degradedMessages([
+      { kind: 'today_unpriced', tickers: ['NVDA', 'BCBA:GGAL'] },
+      { kind: 'no_bars', tickers: ['XYZ'] },
+      { kind: 'stale_bars', tickers: ['SPY', 'QQQ', 'AAPL'] },
+      { kind: 'splits_unknown', tickers: ['NU'] },
+      { kind: 'ccl_missing', tickers: ['BCBA:YPFD', 'BCBA:PAMP'] },
+      { kind: 'on_prices' }, { kind: 'on_schedules' }, { kind: 'failure' },
+    ])).toEqual([
+      'Hoy no hay cotización en vivo de NVDA y GGAL: se usa su último cierre.',
+      'No hay historial de precios de XYZ: se valúa a su precio de compra.',
+      'Yahoo no respondió para SPY, QQQ y AAPL: se usan los últimos precios guardados.',
+      'Yahoo no informó los splits de NU: se usan los que tiene la app.',
+      'Faltan cotizaciones del CCL de algunos días: YPFD y PAMP mantienen su precio anterior esos días.',
+      'No se pudieron leer los cierres de las ONs: se valúan a su precio de compra.',
+      'No se pudo leer el cronograma de pagos de las ONs: faltan sus cupones y amortizaciones automáticos.',
+      'Un dato no se pudo leer y la historia quedó incompleta.',
+    ])
+    // An answer cached before the reasons existed still says something true.
+    expect(degradedMessages(undefined)).toEqual(['Faltó algún precio y se usó un valor de reemplazo.'])
+  })
+
+  it('pressing the (i) shows what happened: a tap on a phone, as a hover does on a computer (S11)', async () => {
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<RiskMetricsRow data={{ ...none, degraded: true, degradedReasons: [{ kind: 'today_unpriced', tickers: ['NVDA'] }] }} />) })
+    expect(document.body.textContent).not.toContain('Hoy no hay cotización en vivo')
+    const button = el.querySelector<HTMLButtonElement>('button[aria-label="Qué precios faltaron"]')!
+    await act(async () => { button.click() })
+    expect(document.body.textContent).toContain('Hoy no hay cotización en vivo de NVDA: se usa su último cierre.')
+    act(() => root.unmount())
+    el.remove()
   })
 
   it('discloses skipped intervals on volatility and Sharpe, as on the drawdown (S5)', () => {

@@ -56,9 +56,19 @@ const COVERED_WITHIN_DAYS = 7
 /** One on-demand backfill per ticker per day, whoever asks. */
 const BACKFILL_MARKER_TTL = 86_400
 
+/**
+ * Why a series is degraded, and which portfolio tickers each reason touches (odd/tasks/statistics-truth.md
+ * S11): the screen says what happened instead of one sentence for every cause.
+ */
+export type DegradedReason =
+  | { kind: 'no_bars' | 'stale_bars' | 'splits_unknown' | 'ccl_missing' | 'today_unpriced'; tickers: string[] }
+  | { kind: 'on_prices' | 'on_schedules' | 'failure' }
+
 export interface DerivedSeries {
   rows: DerivedRow[]
   degraded: boolean
+  /** Empty when not degraded; a cached series is never degraded. */
+  degradedReasons: DegradedReason[]
   flags: DeriveFlags
   /** The core's ON payments up to today (ledgerFlows turns them into risk-metric flows). */
   income: Income[]
@@ -108,7 +118,7 @@ async function readCache(userId: string, today: string) {
     // Array.isArray(income): an entry written before T4.1 has another row meaning; without
     // externalFlows its rows may rest on deposits its flows do not know about (S10) — recompute.
     return parsed?.asOf === today && Array.isArray(parsed.income) && Array.isArray(parsed.externalFlows)
-      ? (parsed as Omit<DerivedSeries, 'degraded'>)
+      ? (parsed as Omit<DerivedSeries, 'degraded' | 'degradedReasons'>)
       : null
   } catch {
     return null
@@ -125,7 +135,7 @@ async function readVersion(userId: string): Promise<string | null | undefined> {
   }
 }
 
-async function writeCache(userId: string, version: string | null, today: string, series: Omit<DerivedSeries, 'degraded'>) {
+async function writeCache(userId: string, version: string | null, today: string, series: Omit<DerivedSeries, 'degraded' | 'degradedReasons'>) {
   try {
     await getRedis()?.eval(
       SUMMARY_SETEX_LUA, 2, `derived:v2:${userId}`, `summary:version:${userId}`,
@@ -210,7 +220,7 @@ export async function getDerivedSeries(
   const today = deps.today ?? argentinaDate()
 
   const hit = await readCache(userId, today)
-  if (hit) return { ...hit, rows: inRange(hit.rows, range), degraded: false }
+  if (hit) return { ...hit, rows: inRange(hit.rows, range), degraded: false, degradedReasons: [] }
 
   const startVersion = await readVersion(userId)
 
@@ -285,7 +295,11 @@ async function buildSeries(
     }),
   ])
 
-  let degraded = false
+  const reasons: DegradedReason[] = []
+  const touch = (kind: Extract<DegradedReason, { tickers: string[] }>['kind'], ticker: string) => {
+    const r = reasons.find((x): x is Extract<DegradedReason, { tickers: string[] }> => x.kind === kind)
+    if (r) { if (!r.tickers.includes(ticker)) r.tickers.push(ticker) } else reasons.push({ kind, tickers: [ticker] })
+  }
   // The history starts at the first ledger date: a trade, or a deposit before it.
   const firstDate = [...transactions, ...movements].map(r => String(r.date).slice(0, 10)).sort()[0] ?? today
 
@@ -320,7 +334,8 @@ async function buildSeries(
         })
       : new Map(),
   ])
-  if (onCloses.degraded || schedules === null) degraded = true
+  if (onCloses.degraded) reasons.push({ kind: 'on_prices' })
+  if (schedules === null) reasons.push({ kind: 'on_schedules' })
 
   // Raw closes and holdings on the same basis each day: the bars are un-adjusted with the splits
   // the core applies (odd/tasks/split-aware-ledger.md S1): the chart's own, else the stored ones.
@@ -328,14 +343,17 @@ async function buildSeries(
   const splitsByTicker = new Map<string, SplitEvent[]>()
   for (const [ticker, symbol] of symbolOf) {
     const chart = charts.get(symbol)
-    if (!chart || chart.degraded || !chart.splitsKnown) degraded = true
+    // No bars at all: the stock sits at its purchase price, whatever else is unknown about it.
+    if (!chart || chart.missing || (chart.bars.length === 0 && (chart.degraded || !chart.splitsKnown))) touch('no_bars', ticker)
+    else if (chart.degraded) touch('stale_bars', ticker)
+    else if (!chart.splitsKnown) touch('splits_unknown', ticker)
     const splits = chart?.splitsKnown ? chart.splits : storedSplits?.get(ticker) ?? []
     splitsByTicker.set(ticker, splits)
     let bars = unadjustSplits(chart?.bars ?? [], splits)
     if (symbol.endsWith('.BA')) {
       const usd = toUsd(bars, ccl)
       bars = usd.bars
-      if (usd.degraded) degraded = true
+      if (usd.degraded) touch('ccl_missing', ticker)
     }
     barsByTicker.set(ticker, bars)
   }
@@ -344,12 +362,13 @@ async function buildSeries(
     userId, transactions, movements, schedules: schedules ?? new Map(), overrides, splits: splitsByTicker, barsByTicker,
     onPricesByTicker: onCloses.closes, today, todayQuotes,
   })
-  if (flags.failure != null) degraded = true
+  if (flags.failure != null) reasons.push({ kind: 'failure' })
   // A stock without a live quote leaves today's row at its last close: never cache it. ONs have
   // no intraday quote by design (on_price_history covers them), so they do not degrade.
-  if (flags.todayUnpriced.some(t => !onTickers.includes(norm(t)))) degraded = true
+  for (const t of flags.todayUnpriced) if (!onTickers.includes(norm(t))) touch('today_unpriced', t)
+  const degraded = reasons.length > 0
 
   if (!degraded && startVersion !== undefined) await writeCache(userId, startVersion, today, { rows, flags, income, externalFlows, fundedDeposits })
 
-  return { rows, degraded, flags, income, externalFlows, fundedDeposits }
+  return { rows, degraded, degradedReasons: reasons, flags, income, externalFlows, fundedDeposits }
 }
