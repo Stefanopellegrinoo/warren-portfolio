@@ -41,7 +41,7 @@ Routes: the parent session is past the ~150k context backstop, so implementation
 - [x] T8 · S10 · delegated · Noticias · 34 tests (RED first, 6 mutations caught); live MELI/GGAL/TSM/YPFD ok (L28)
 - [x] T9 · S11 · delegated · Resumen + tab wiring · 3535 tests green; browser 4 tickers × 4 tabs × 6 widths × 2 themes (L30)
 - [x] T10 · S1 · delegated · ETFs, crypto, ON redirect, unsupported markets, target consistency · 3564 tests green; browser 4 × 4 widths × 2 themes (L31)
-- [ ] T11 · S8 · delegated · Balances completos (Yahoo + TradingView rows)
+- [x] T11 · S8 · delegated · Balances completos (Yahoo + TradingView rows) · 40 tests (RED first, 9 mutations); browser 3 tickers × 4 widths × 2 themes × 6 views (L36)
 - [ ] T12 · S8 · delegated · SEC source for Balances completos (US 10-Q filers)
 
 ## Log
@@ -292,3 +292,15 @@ Routes: the parent session is past the ~150k context backstop, so implementation
     - `/api/asset/MELI` and `/api/asset/MELI/news` → 401.
   - Stage 3 (T11–T12) continues on `feat/asset-page-stage3`.
   - Pending with the user: the iPhone test, and whether to unify the two searches.
+- L36 (2026-10-30) T11 done.
+  - **New code:**
+    - `statements.ts`, with 37 rows, Spanish labels and "?" copy;
+    - `GET /api/asset/[ticker]/statements` (auth, 60/min), reusing the page's cached sources: 0 upstream calls on a warm cache, 13–28 KB;
+    - `Balances.tsx`, opened from "Ver balances completos" in Números (`?vista=balances`).
+  - **Shared code:**
+    - metrics.ts exports the single USD normalization (`inUsd`, `ratesReader`, `tvBook`, `yahooBook`);
+    - service.ts extracts `locate`, `ratesOf` and `identify`, shared by the page and the statements;
+    - 13 more Yahoo lines.
+  - **Row sources:** in the 8-year range, TradingView's eight lines come from TradingView for every column; the other rows stay Yahoo with "desde <año>".
+  - **Fixed in the browser check:** sr-only spans escaped the scroll box, so the box is now `relative`.
+  - **Follow-up (mine), folded into T12:** a USD quarter inside a peso series leaves the EPS row in mixed currencies. Statement EPS (per ordinary share) is converted to USD at each period end through the same `inUsd`, like amounts, and labeled "US$ por acción".

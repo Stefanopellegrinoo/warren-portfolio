@@ -116,6 +116,17 @@ describe('AssetView', () => {
     view.unmount()
   })
 
+  it('?vista=balances alone means Números, and leaving Números closes it', async () => {
+    window.history.replaceState(null, '', '/activo/MELI?vista=balances')
+    const view = await show(Response.json(PAGE))
+    expect(selected(view.el)).toBe('Números')
+
+    act(() => { tabButton(view.el, 'Comparar').click() })
+
+    expect(window.location.search).toBe('?tab=comparar')
+    view.unmount()
+  })
+
   it("a Resumen number opens its row in Números, and back returns to Resumen", async () => {
     window.history.replaceState(null, '', '/activo/MELI')
     const { el, text, unmount } = await show(Response.json(PAGE))
