@@ -35,6 +35,8 @@ Routes: the parent session is past the ~150k context backstop, so implementation
 - [x] T5 · S1 · delegated · page shell `/activo/[ticker]`, header, tabs, shell search with `/`, links from every ticker · 112 tests in touched dirs, full suite 3397 green (6 mutations caught)
 - [x] T6 · S2 S3 · delegated · Números UI (mobile + desktop), "?" copy, history panel, peers bars · 23 new tests (RED first); browser at 11 widths light/dark, no horizontal scroll
 - [x] T6e · S3 S12 · delegated · collapsed icon menu on /activo + layout and legibility pass at every width (L24) · 3448 tests green; 0 wrapped labels 820–1920
+
+  Stage 1 delivered: PR #49, squash 73ff07d, deploy run 41081377001 OK (L27).
 - [ ] T7 · S9 · delegated · Comparar tab
 - [ ] T8 · S10 · delegated · Noticias
 - [ ] T9 · S11 · delegated · Resumen
@@ -216,3 +218,13 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   - `npm run build`: OK (/activo/[ticker] 16 kB).
   - RDD assess 45e0ba7..HEAD: medium, under_budget. The high-risk slices were already reviewed and approved (L19).
   - Next: push, CI, PR, squash merge, deploy check.
+- L27 (2026-10-30) Stage 1 delivered.
+  - Branch CI run 41080835100 green.
+  - PR #49 squash-merged as 73ff07d.
+  - Master run 41081377001: test, image and deploy all success.
+  - Production checks:
+    - `/api/health` ok (redis, supabase, worker fresh);
+    - signed-out `/activo/MELI` → 307 to `/auth/login?next=%2Factivo%2FMELI`;
+    - `/api/asset/MELI` → 401.
+  - Pending: the user's test on the iPhone.
+  - Stage 2 (T7–T10) continues on `feat/asset-page-stage2` from master 73ff07d.
