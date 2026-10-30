@@ -54,6 +54,13 @@ describe('explain', () => {
     }
   })
 
+  it('says sales growth as more or less sold than the 12 months before, and market cap as the whole company in the bolsa', () => {
+    expect(plain(explain('revenueGrowth', 'MercadoLibre', 46).example)).toBe('Con 46,0 %, MercadoLibre vendió en los últimos 12 meses un 46,0 % más que en los 12 meses anteriores.')
+    expect(plain(explain('revenueGrowth', 'YPF', -3.2).example)).toBe('Con −3,2 %, YPF vendió en los últimos 12 meses un 3,2 % menos que en los 12 meses anteriores.')
+    expect(explain('revenueGrowth', 'YPF', 1).read).toContain('en dólares')
+    expect(plain(explain('marketCap', 'MercadoLibre', 84_163e6).example)).toBe('Hoy, todas las acciones de MercadoLibre juntas valen US$ 84.163 M.')
+  })
+
   it('reads the P/E as the design example does', () => {
     const e = explain('pe', 'MercadoLibre', 45.2)
     expect(e.what).toBe('Cuántos años de ganancias estás pagando.')
@@ -78,6 +85,11 @@ describe('peersLine', () => {
 describe('nullReason', () => {
   const metrics = (today: Partial<Record<MetricId, number>>) =>
     Object.fromEntries(METRICS.map((d) => [d.id, { id: d.id, today: today[d.id] ?? null, history: { quarterly: [], ttm: [], annual: [] }, since: null, source: 'tradingview' }])) as unknown as Metrics
+
+  it("says a peer's missing value from its today's values alone (Comparar has no peer history)", () => {
+    expect(nullReason('pe', { metrics: { netMargin: { today: -2 }, pe: { today: null } }, sources: {} })).toBe('No aplica: la empresa perdió plata en los últimos 12 meses')
+    expect(nullReason('marketCap', { metrics: { marketCap: { today: null } }, sources: {} })).toBe('Sin datos')
+  })
 
   it('says why a ratio over a loss is missing', () => {
     expect(nullReason('pe', { metrics: metrics({ netMargin: -2 }), sources: {} })).toBe('No aplica: la empresa perdió plata en los últimos 12 meses')

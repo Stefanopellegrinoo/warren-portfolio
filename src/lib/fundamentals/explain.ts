@@ -132,6 +132,11 @@ const COPY: Record<MetricId, Copy> = {
     say: (c) => `Con ${c.v}, ${c.name} vale en la bolsa ${c.v} veces el patrimonio que esperan los analistas.`,
     read: 'Es una estimación, no un dato.',
   },
+  marketCap: {
+    what: 'Lo que vale la empresa entera en la bolsa: el precio de hoy por todas sus acciones.',
+    say: (c) => `Hoy, todas las acciones de ${c.name} juntas valen ${c.v}.`,
+    read: 'Dice su tamaño, no si está cara: para eso, comparala con lo que gana o vende, como hacen el P/E y precio / ventas.',
+  },
   sharesOutstanding: {
     what: 'Cuántas acciones de la empresa hay en total (o certificados, si cotiza como ADR). Cada una es una parte de la empresa.',
     say: (c) => `${c.name} tiene ${c.v} acciones en total.`,
@@ -202,6 +207,14 @@ const COPY: Record<MetricId, Copy> = {
       (c) => `Con ${c.v}, ${c.name} perdió ${USD}${c.abs} por cada ${USD}100 que vendió.`,
     ),
     read: 'Más alto = más rentable. Si es negativo, perdió plata.',
+  },
+  revenueGrowth: {
+    what: 'Cuánto más (o menos) vendió en los últimos 12 meses que en los 12 meses anteriores.',
+    say: (c) =>
+      c.x < 0
+        ? `Con ${c.v}, ${c.name} vendió en los últimos 12 meses un ${c.abs} % menos que en los 12 meses anteriores.`
+        : `Con ${c.v}, ${c.name} vendió en los últimos 12 meses un ${c.n} % más que en los 12 meses anteriores.`,
+    read: 'Más alto = el negocio crece más rápido. Se mide en dólares, así la inflación no cuenta como crecimiento.',
   },
   quickRatio: {
     what: 'Lo que tiene a mano para pagar lo que vence en el próximo año, sin contar la mercadería: caja, inversiones cortas y lo que tiene para cobrar.',
@@ -356,14 +369,20 @@ const NEGATIVE_BASE: Partial<Record<MetricId, { base: MetricId[]; why: string }>
   ltDebtToEquity: { base: ['bookPerShare'], why: 'No aplica: su patrimonio es negativo' },
 }
 
+/** What nullReason reads: a whole page, or a peer's today's values alone (no history, no sources). */
+export interface Known {
+  metrics: Partial<Record<MetricId, { today: number | null; history?: Record<PeriodMode, Series> }>> | null
+  sources: AssetPage['sources']
+}
+
 /** Why a row shows "—". */
-export function nullReason(id: MetricId, page: Pick<AssetPage, 'metrics' | 'sources'>): string {
+export function nullReason(id: MetricId, page: Known): string {
   const def = defOf(id)
   if (page.sources[def.group === 'Y' ? 'yahoo' : 'tradingview'] === 'error') return 'Sin datos: la fuente no respondió'
   if (def.group !== 'snapshot' && page.sources.fx === 'error') return 'Sin datos: no pudimos pasar sus números a dólares'
   const negative = NEGATIVE_BASE[id]
-  if (negative?.base.some((b) => (page.metrics?.[b].today ?? 0) < 0)) return negative.why
-  const history = page.metrics?.[id].history
+  if (negative?.base.some((b) => (page.metrics?.[b]?.today ?? 0) < 0)) return negative.why
+  const history = page.metrics?.[id]?.history
   if (history && Object.values(history).some((s) => s.length > 0)) return 'Falta el dato del último trimestre'
   return 'Sin datos'
 }
@@ -372,7 +391,7 @@ export function nullReason(id: MetricId, page: Pick<AssetPage, 'metrics' | 'sour
 function readsFlow(def: MetricDef): boolean {
   let flow = false
   const mark = () => ((flow = true), 1)
-  if ('formula' in def) def.formula({ flow: mark, yearly: mark, bal: () => 1, avg: () => 1, mcap: 1, units: 1 })
+  if ('formula' in def) def.formula({ flow: mark, yearAgo: mark, yearly: mark, bal: () => 1, avg: () => 1, mcap: 1, units: 1 })
   return flow
 }
 

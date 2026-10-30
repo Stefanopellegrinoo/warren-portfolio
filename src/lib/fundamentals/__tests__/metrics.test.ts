@@ -80,10 +80,11 @@ describe('catalog', () => {
         'Valor de empresa', 'Valor de empresa / EBITDA', 'Valor de empresa / ventas', 'Valor de empresa / EBIT',
         'P/E esperado', 'Precio / ventas esperado', 'Valor de empresa / EBITDA esperado', 'Precio / valor libro esperado',
       ],
-      'Estadísticas clave': ['Acciones en circulación', 'Capital flotante', 'Empleados'],
+      'Estadísticas clave': ['Capitalización', 'Acciones en circulación', 'Capital flotante', 'Empleados'],
       'Rentabilidad': [
         'Rentabilidad sobre activos (ROA)', 'Rentabilidad sobre patrimonio (ROE)',
         'Rentabilidad sobre capital invertido (ROIC)', 'Margen bruto', 'Margen operativo', 'Margen EBITDA', 'Margen neto',
+        'Crecimiento de ventas (12 meses)',
       ],
       'Liquidez': ['Liquidez inmediata', 'Liquidez corriente', 'Rotación de inventario', 'Rotación de activos'],
       'Solvencia': ['Deuda / activos', 'Deuda / patrimonio', 'Deuda largo plazo / activos', 'Deuda largo plazo / patrimonio'],
@@ -101,13 +102,16 @@ describe('catalog', () => {
     // Group T: only revenue, net income, gross profit, EBITDA, total assets and EPS. Debt and free cash
     // flow are Yahoo's, so every debt and FCF figure on the page shares one definition (L21 b).
     expect(ids('T')).toEqual([
-      'pe', 'ps', 'roa', 'grossMargin', 'ebitdaMargin', 'netMargin', 'assetTurnover', 'revenuePerShare', 'ebitdaPerShare', 'eps',
+      'pe', 'ps', 'roa', 'grossMargin', 'ebitdaMargin', 'netMargin', 'revenueGrowth', 'assetTurnover', 'revenuePerShare',
+      'ebitdaPerShare', 'eps',
     ])
     expect(ids('snapshot')).toEqual([
       'peForward', 'psForward', 'evEbitdaForward', 'pbForward', 'sharesOutstanding', 'floatShares', 'employees',
       'priceTarget', 'beta',
     ])
-    expect(ids('Y')).toHaveLength(METRICS.length - 10 - 9)
+    // Today's quote × listed units, in USD: the market cap every price ratio divides.
+    expect(ids('quote')).toEqual(['marketCap'])
+    expect(ids('Y')).toHaveLength(METRICS.length - 11 - 9 - 1)
     expect(ids('Y')).toEqual(expect.arrayContaining(['debtToAssets', 'debtToEquity', 'debtPerShare', 'fcfPerShare', 'ev']))
   })
 })
@@ -134,7 +138,8 @@ describe('computeMetrics', () => {
     const m = computeMetrics(await tvInput('NASDAQ:MELI', (d) => (d === '2026-06-30' ? 2000 : 1000)))
     const unitsNow = meliSnapshotRow.total_shares_outstanding
 
-    for (const id of ids('T')) {
+    // Sales growth needs eight quarters and the fixture keeps six: covered with eight below.
+    for (const id of ids('T').filter((t) => t !== 'revenueGrowth')) {
       for (const mode of PERIOD_MODES) {
         expect(m[id].today, id).not.toBeNull()
         // A quarter of a per-share flow is not on hoy's 12-month scale: next test.
@@ -500,6 +505,50 @@ describe('computeMetrics', () => {
 
     expect(peer.netMargin.today).toBeCloseTo((msftNi / msftRev) * 100, 9)
     expect(peer.netMargin.source).toBe('tradingview')
+  })
+})
+
+describe('the two metrics Comparar adds (T7, S9)', () => {
+  it('sales growth: the 12 months against the 12 months a year earlier, in USD; the same quarter or year before in the other modes', async () => {
+    // MELI's six quarters plus its reported Q4 and Q3 2024 (as in the asOf test above).
+    const row = historyRows.find((r) => r.s === 'NASDAQ:MELI')!
+    const longer = { ...row, total_revenue_fq_h: [...row.total_revenue_fq_h, 6059e6, 5312e6], net_income_fq_h: [...row.net_income_fq_h, 639e6, 397e6] }
+    const tv = (await fetchTvHistory(['NASDAQ:MELI'], 'america', answering(longer))).get('NASDAQ:MELI')!
+    const m = computeMetrics({ ...(await tvInput('NASDAQ:MELI')), tv })
+    const at = (s: Series, end: string) => s.find((p) => p.end === end)?.value
+
+    // TTM to 2026-06-30: 35.182 M; TTM to 2025-06-30: 6.790 + 5.935 + 6.059 + 5.312 = 24.096 M.
+    expect(m.revenueGrowth.today).toBeCloseTo((35182 / 24096 - 1) * 100, 1)
+    expect(m.revenueGrowth.source).toBe('tradingview')
+    expect(m.revenueGrowth.history.ttm).toEqual([{ end: '2026-06-30', value: m.revenueGrowth.today }, { end: TODAY, value: m.revenueGrowth.today }])
+    expect(at(m.revenueGrowth.history.quarterly, '2026-06-30')).toBeCloseTo((10169 / 6790 - 1) * 100, 6)
+    expect(at(m.revenueGrowth.history.quarterly, '2025-06-30')).toBeUndefined() // no quarter a year before it
+  })
+
+  it('sales growth of a peer comes from the same function, and an ARS reporter grows in dollars, not in pesos', () => {
+    const ends = ['2024-09-30', '2024-12-31', '2025-03-31', '2025-06-30', '2025-09-30', '2025-12-31', '2026-03-31', '2026-06-30']
+    const usd = computeMetrics({ ...emptyInput(), tv: tvHistory('USD', ends, { revenue: [100, 100, 100, 100, 110, 120, 130, 140] }) })
+    expect(usd.revenueGrowth.today).toBeCloseTo(25, 9) // 500 against 400
+
+    // The same pesos every quarter while the CCL doubles: half the dollars, −50 %.
+    const ccl = new Map(ends.map((e, i) => [e, i < 4 ? 1000 : 2000]))
+    const ars = computeMetrics({ ...emptyInput(), rates: new Map([['ARS', ccl]]), tv: tvHistory('ARS', ends, { revenue: ends.map(() => 1e6) }) })
+    expect(ars.revenueGrowth.today).toBeCloseTo(-50, 9)
+    expect(ars.revenueGrowth.history.annual).toEqual([])
+  })
+
+  it('market cap: today\'s quote × listed units in USD, the one P/E divides; no history', async () => {
+    const m = computeMetrics(await tvInput('NASDAQ:MELI'))
+
+    expect(m.marketCap.today).toBeCloseTo(1660.13 * meliSnapshotRow.total_shares_outstanding, 0)
+    expect(m.marketCap.today! / 1863e6).toBeCloseTo(m.pe.today!, 9)
+    expect(m.marketCap).toMatchObject({ history: { quarterly: [], ttm: [], annual: [] }, since: null, asOf: null, source: 'snapshot' })
+
+    // A BYMA listing: pesos at today's CCL; without a rate there is no dollar figure.
+    const fields = { ...emptyInput().snapshot.fields, total_shares_outstanding: 400e6 }
+    const byma = { ...emptyInput(), snapshot: { close: 40000, marketCap: 16e12, currency: 'ARS', fields } }
+    expect(computeMetrics({ ...byma, rates: new Map([['ARS', new Map([['2026-10-29', 1500]])]]) }).marketCap.today).toBeCloseTo(16e12 / 1500, 0)
+    expect(computeMetrics(byma).marketCap.today).toBeNull()
   })
 })
 

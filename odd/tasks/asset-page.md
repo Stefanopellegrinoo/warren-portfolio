@@ -37,7 +37,7 @@ Routes: the parent session is past the ~150k context backstop, so implementation
 - [x] T6e · S3 S12 · delegated · collapsed icon menu on /activo + layout and legibility pass at every width (L24) · 3448 tests green; 0 wrapped labels 820–1920
 
   Stage 1 delivered: PR #49, squash 73ff07d, deploy run 41081377001 OK (L27).
-- [ ] T7 · S9 · delegated · Comparar tab
+- [x] T7 · S9 · delegated · Comparar tab · 15 tests (RED first); browser 6 widths × light/dark (L29)
 - [x] T8 · S10 · delegated · Noticias · 34 tests (RED first, 6 mutations caught); live MELI/GGAL/TSM/YPFD ok (L28)
 - [ ] T9 · S11 · delegated · Resumen
 - [ ] T10 · S1 · delegated · ETFs, crypto, ON redirect, unsupported markets
@@ -236,3 +236,16 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   - Cache: per-source keys `fund:v1:news:<ticker>:<lang>`, 30-min fresh window, 1-day TTL, 5-min failure marker, memory guard. service.ts now exports `cachedEach`/`eachOf`.
   - Live: 15 es + 5 en for MELI, GGAL, TSM and YPFD.
   - Open: GGAL's press says "Grupo Galicia"/"Banco Galicia", so name variants would need a per-company map.
+- L29 (2026-10-30) T7 done.
+  - New metrics:
+    - `revenueGrowth` (group T, TTM vs the TTM a year earlier; MELI 46,0 %);
+    - `marketCap` (group 'quote': close × listed units in USD, the same base as every price ratio).
+  - Forward rows carry `better: 'lower'`.
+  - `ComparaTab`:
+    - Sortable table with the "mejor" marker and the company's place, e.g. "5.º de 6".
+    - Phone: the table scrolls inside its box with a sticky first column.
+    - Peers: chips, add via search, remove, reset. Edits go to `?vs=` (max 5) with `router.replace`.
+  - Integration still to do: wire the Comparar, Noticias and Resumen tabs in AssetView. Keep the previous page while a new `?vs=` loads, so the tab doesn't jump.
+  - Follow-ups:
+    - per-peer source status, so a missing value can say "la fuente no respondió";
+    - a client-safe `parseTicker`.
