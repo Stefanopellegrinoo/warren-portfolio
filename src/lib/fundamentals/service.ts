@@ -33,6 +33,7 @@ export interface AssetPage {
   /** As asked, normalized: `MELI`, `BCBA:GGAL`. */
   ticker: string
   name: string
+  /** The badge: the asked listing's TradingView exchange (NASDAQ, BCBA), else Yahoo's name, shortened. */
   exchange: string | null
   /**
    * The asked listing's last price (an ADR keeps its own quote): TradingView's close, else the
@@ -48,6 +49,8 @@ export interface AssetPage {
   listing: AssetRef | null
   /** `listing` is the BYMA one: the page says "Datos de <name> en BYMA" (S7). */
   bymaListing: boolean
+  /** The currency of `listing`'s quote, which its price target is in: ARS for a BYMA listing, even for an ADR read there. */
+  listingCurrency?: string | null
   metrics: Metrics | null
   /** Today's values only, from the same computation as `metrics`. */
   peers: PeerToday[]
@@ -107,6 +110,9 @@ const DEFAULTS = {
 }
 export type AssetDeps = Partial<typeof DEFAULTS>
 type Deps = typeof DEFAULTS
+
+/** Yahoo's exchange names, short: NasdaqGS/GM/CM → NASDAQ, NYQ → NYSE; the rest as Yahoo says them. */
+const shortExchange = (name: string | null) => (name && /^nasdaq/i.test(name) ? 'NASDAQ' : name === 'NYQ' ? 'NYSE' : name)
 
 /** `MELI`, `bcba:ggal`, `GGAL.BA` → `MELI`, `BCBA:GGAL`, `BCBA:GGAL`; null for anything else. */
 export function parseTicker(raw: string): string | null {
@@ -263,7 +269,8 @@ export async function getAssetPage(rawTicker: string, rawVs: string[] | null = n
   if (!id.found) throw new AssetError('not_found')
   const { name, exchange, price } = id.identity
   const page: AssetPage = {
-    ticker, name, exchange, price, currency: null, dayChange: null, supported: true, listing: null, bymaListing: false, metrics: null, peers: [], sources: {},
+    ticker, name, exchange: shortExchange(exchange), price, currency: null, dayChange: null, supported: true, listing: null, bymaListing: false,
+    listingCurrency: null, metrics: null, peers: [], sources: {},
   }
 
   const asked = await refFor(ticker, d)
@@ -334,8 +341,10 @@ export async function getAssetPage(rawTicker: string, rawVs: string[] | null = n
   return {
     ...page,
     ...quote,
+    exchange: asked.value.tvSymbol.slice(0, asked.value.tvSymbol.indexOf(':')),
     listing,
     bymaListing: listing !== asked.value,
+    listingCurrency: snap.value?.currency ?? null,
     metrics: run(own, (date) => closeOnOrBefore(bars, date)),
     // Peers show today's values only, which price at today's quote, never a past close.
     peers: others.map((i) => ({

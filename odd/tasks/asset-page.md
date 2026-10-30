@@ -140,3 +140,38 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   - **`?vs=` peers.** Their keys live 2 days instead of 7.
   - **Failure marker.** `fund:v1:failed:<kind>:<id>`, TTL 300 s, is written after a failed refresh. While it exists, the stale copy is served with no upstream call.
   - Outside scope: `resolveTickerIdentity` keeps its own 7-day keys (small).
+- L21 (2026-10-30) Stage-1 UI check on a disposable `/preview-activo`: the real AppShell + AssetView with recorded live JSON for MELI, GGAL, TSM, YPFD and 7203.T, at 11 widths, light and dark.
+  - Layout passes: no horizontal scroll, sticky panel from 1024 px, phone full-screen history, tips in the viewport, `/` search. MELI matches both mockups. Net margin ▼ 3,2 puntos.
+
+  Defects to fix before showing the user:
+  1. **Blocker.** TradingView's BCBA:YPFD history is labeled ARS, but its newest quarter (2026-09-30) is in USD. Converting it at CCL shrinks it about 1.600×: Deuda per share 0,00, P/E 19,6, P/S ▲109 %.
+  2. **Medium.** The default panel (MELI P/E) joins a 9-quarter gap with a straight line. An outlier (1.925,9 in 2019) squashes four years into the bottom 5 %.
+  3. **Low.**
+     - GGAL badge says "NasdaqCM".
+     - The BYMA note appears twice.
+     - The subtitle says "Últimos 12 meses" for balance metrics.
+     - "—" in the list while the row's chart has history.
+     - "?" wraps alone; peer names are truncated.
+     - 7203.T shows its price with no currency.
+  4. **Consistency.** MELI "Deuda" per share (TradingView debt) ÷ book value = 2,34, but "Deuda / patrimonio" shows 1,68 (Yahoo debt). "Flujo de caja libre" (TradingView) ≠ OCF − CapEx (Yahoo).
+
+  Decisions (mine):
+  - (a) A point of an ARS-labeled series that is clearly already in USD is not converted. "Clearly" means: its raw value is close to its neighbours' USD-converted values while its converted value is >100× smaller.
+  - (b) Every debt-based metric (Deuda / activos, Deuda por acción) and Flujo de caja libre por acción move to group Y, so all debt figures share Yahoo's definition, like D/E and EV. They lose depth (8 → 4 years) but no longer contradict each other. EBITDA stays split (margen EBITDA T, VE/EBITDA Y) and is noted in its "?".
+  - (c) The chart breaks the line at gaps of more than one period. It clamps a far outlier to the axis edge, keeping its value on hover.
+  - (d) The default panel is Margen neto, as in the approved mockup.
+  - (e) The exchange badge uses the TradingView exchange of the asked listing. A listing-currency field goes in AssetPage.
+
+  Two parallel writers (disjoint surfaces):
+  - T6c: data, in metrics.ts, catalog.ts and service.ts.
+  - T6d: UI, in numeros/*, AssetHeader and explain.ts.
+- L22 (2026-10-30) T6c done (data fixes). 113 tests pass.
+  - **(a) Currency switch.** `toUsd` treats a period of a non-USD series as already USD when a strict majority of its lines vote so. Majority, not any line, so a near-zero net income cannot flip a period.
+    - YPFD now: P/E 8,85 (ADR 8,71), P/S 0,86, Deuda por acción 2,80, rotación 0,71, margen neto 9,75 %.
+    - TradingView's own YPFD snapshot has the same defect: P/E 21,4.
+  - **(b) Debt and FCF.** Deuda/activos, Deuda por acción and FCF por acción are now group Y.
+    - FCF = OCF − |CapEx| from Yahoo, because Yahoo's freeCashFlow line equals OCF for YPFD.BA.
+    - MELI deuda/acción ÷ libro/acción = D/E 1,6819 exactly.
+  - **(e) Exchange and currency.** `exchange` is the asked listing's TradingView prefix. New optional `listingCurrency`.
+  - **Item 4.** The "hoy" anchor is the source's latest period, so "—" appears only when that period lacks the input.
+  - Decision (mine): the BCBA badge displays as "BYMA" (sent to T6d).

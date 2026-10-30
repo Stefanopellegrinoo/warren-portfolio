@@ -98,15 +98,17 @@ describe('catalog', () => {
   })
 
   it('takes each metric from one group: TradingView history (T), Yahoo statements (Y) or the snapshot', () => {
+    // Group T: only revenue, net income, gross profit, EBITDA, total assets and EPS. Debt and free cash
+    // flow are Yahoo's, so every debt and FCF figure on the page shares one definition (L21 b).
     expect(ids('T')).toEqual([
-      'pe', 'ps', 'roa', 'grossMargin', 'ebitdaMargin', 'netMargin', 'assetTurnover', 'debtToAssets',
-      'revenuePerShare', 'fcfPerShare', 'ebitdaPerShare', 'debtPerShare', 'eps',
+      'pe', 'ps', 'roa', 'grossMargin', 'ebitdaMargin', 'netMargin', 'assetTurnover', 'revenuePerShare', 'ebitdaPerShare', 'eps',
     ])
     expect(ids('snapshot')).toEqual([
       'peForward', 'psForward', 'evEbitdaForward', 'pbForward', 'sharesOutstanding', 'floatShares', 'employees',
       'priceTarget', 'beta',
     ])
-    expect(ids('Y')).toHaveLength(METRICS.length - 13 - 9)
+    expect(ids('Y')).toHaveLength(METRICS.length - 10 - 9)
+    expect(ids('Y')).toEqual(expect.arrayContaining(['debtToAssets', 'debtToEquity', 'debtPerShare', 'fcfPerShare', 'ev']))
   })
 })
 
@@ -121,9 +123,8 @@ describe('computeMetrics', () => {
     const anchors: [MetricId, keyof typeof snapshot.fields][] = [
       ['netMargin', 'net_margin'], ['grossMargin', 'gross_margin'], ['ebitdaMargin', 'ebitda_margin_ttm'],
       ['pe', 'price_earnings_ttm'], ['ps', 'price_revenue_ttm'], ['roa', 'return_on_assets'],
-      ['assetTurnover', 'asset_turnover_current'], ['debtToAssets', 'debt_to_asset_fq'],
+      ['assetTurnover', 'asset_turnover_current'],
       ['revenuePerShare', 'revenue_per_share_ttm'], ['ebitdaPerShare', 'ebitda_per_share_ttm'],
-      ['fcfPerShare', 'free_cash_flow_per_share_ttm'], ['debtPerShare', 'total_debt_per_share_fq'],
     ]
     for (const [id, field] of anchors) expect(relative(m[id].today, snapshot.fields[field]!), id).toBeLessThan(1e-4)
     expect(m.eps.today).toBeCloseTo(1863e6 / (84163279217 / 1660.13), 6)
@@ -324,6 +325,134 @@ describe('computeMetrics', () => {
     expect(ars.roe.history.quarterly.length).toBeGreaterThan(0)
     expect(ars.netMargin.history.annual.length).toBeGreaterThan(0)
     expect(usd.roe.history.annual.length).toBeGreaterThan(0)
+  })
+
+  it('reads debt and free cash flow from Yahoo only: totalDebt, and operating cash flow minus CapEx', async () => {
+    const base = await tvInput('NASDAQ:MELI')
+    const y = yahooStatements('USD')
+    const m = computeMetrics({ ...base, yahoo: y })
+    const tvOnly = computeMetrics(base)
+    const last = (line: keyof YahooLines) => y.quarterly[line]!.at(-1)!.value
+    const ttm = (line: keyof YahooLines) => y.quarterly[line]!.slice(-4).reduce((a, p) => a + p.value, 0)
+    const units = meliSnapshotRow.total_shares_outstanding
+
+    for (const id of ['debtToAssets', 'debtPerShare', 'fcfPerShare'] as const) {
+      expect(m[id].source, id).toBe('yahoo')
+      expect(tvOnly[id].today, id).toBeNull()
+    }
+    expect(m.debtToAssets.today).toBeCloseTo(last('totalDebt') / last('totalAssets'), 9)
+    expect(m.debtPerShare.today).toBeCloseTo(last('totalDebt') / units, 9)
+    // CapEx is booked negative: FCF = OCF − |CapEx|, so the page's FCF equals its OCF row minus its CapEx row.
+    expect(m.fcfPerShare.today).toBeCloseTo((ttm('operatingCashFlow') + ttm('capitalExpenditure')) / units, 9)
+    expect(m.fcfPerShare.today).toBeCloseTo(m.ocfPerShare.today! - m.capexPerShare.today!, 9)
+  })
+
+  it("MELI: debt per share ÷ book value per share equals debt / equity, today and at every period", async () => {
+    // MercadoLibre's reported balances (Yahoo, USD): total debt and stockholders' equity, 2026-03-31 and 2026-06-30.
+    const ends = ['2026-03-31', '2026-06-30']
+    const yahoo: YahooStatements = {
+      currency: 'USD',
+      quarterly: lines(ends, { totalDebt: [12345e6, 13176e6], stockholdersEquity: [7281e6, 7834e6], ordinarySharesNumber: [50697182, 50696802], netIncome: [494e6, 523e6] }) as YahooLines,
+      annual: {},
+    }
+    const m = computeMetrics({ ...(await tvInput('NASDAQ:MELI')), yahoo })
+
+    expect(m.debtPerShare.today! / m.bookPerShare.today!).toBeCloseTo(m.debtToEquity.today!, 12)
+    expect(m.debtToEquity.today).toBeCloseTo(13176 / 7834, 9) // 1,68
+    for (const mode of PERIOD_MODES) {
+      m.debtToEquity.history[mode].forEach((p, i) => {
+        expect(m.debtPerShare.history[mode][i].value / m.bookPerShare.history[mode][i].value, `${mode} ${p.end}`).toBeCloseTo(p.value, 12)
+      })
+    }
+  })
+
+  it('keeps a period already in USD inside an ARS-labeled series (BCBA:YPFD, 2026-09-30) instead of shrinking it ~1.400×', () => {
+    // BCBA:YPFD's TradingView history (live 2026-10-30) is labeled ARS, but its newest quarter is in USD:
+    // revenue 6.557e9 after 9.284e12 ARS. Yahoo's USD statements say 6.574e9 and 6.557e9. Rates invented.
+    const ends = ['2025-09-30', '2025-12-31', '2026-03-31', '2026-06-30', '2026-09-30']
+    const tv = tvHistory('ARS', ends, {
+      revenue: [6.215e12, 6.6e12, 6.951e12, 9.284e12, 6.557e9],
+      netIncome: [-2.576e11, -8.743e11, 6.063e11, 1.696e12, 1.181e9],
+      totalAssets: [4.067e13, 4.27e13, 4.182e13, 4.786e13, 3.418e10],
+      totalDebt: [1.545e13, 1.618e13, 1.482e13, 1.602e13, 1.102e10],
+      epsDiluted: [-66.53, -226, 154.6, 438.9, 0.3],
+    })
+    const ccl = new Map([['2025-09-30', 1380], ['2025-12-31', 1450], ['2026-03-31', 1400], ['2026-06-30', 1410], ['2026-09-30', 1460], ['2026-10-29', 1500]])
+    const units = 3.9326e9
+    const fields = { ...emptyInput().snapshot.fields, total_shares_outstanding: units }
+    const m = computeMetrics({
+      ...emptyInput(), tv, rates: new Map([['ARS', ccl]]),
+      snapshot: { close: 7800, marketCap: 7800 * units, currency: 'ARS', fields },
+    })
+    const mcapUsd = (7800 * units) / 1500
+    const niTtm = -8.743e11 / 1450 + 6.063e11 / 1400 + 1.696e12 / 1410 + 1.181e9
+    const revTtm = 6.6e12 / 1450 + 6.951e12 / 1400 + 9.284e12 / 1410 + 6.557e9
+
+    expect(m.pe.today).toBeCloseTo(mcapUsd / niTtm, 9) // 9,2, not 19,6
+    expect(m.ps.today).toBeCloseTo(mcapUsd / revTtm, 9) // 0,90
+    expect(m.assetTurnover.today).toBeCloseTo(revTtm / ((3.418e10 + 4.067e13 / 1380) / 2), 9) // 0,71
+    expect(m.eps.today).toBeCloseTo(niTtm / units, 9)
+    // Every line of that period stays as is; the ARS quarters before it are converted.
+    expect(m.revenuePerShare.history.quarterly.at(-1)).toEqual({ end: '2026-09-30', value: expect.closeTo(6.557e9 / units, 9) })
+    // Units then: net income ÷ EPS (both ARS, never converted) over the listing ratio, set by the USD quarter's.
+    const unitsThen = 1.696e12 / 438.9 / (1.181e9 / 0.3 / units)
+    expect(m.revenuePerShare.history.quarterly.at(-2)).toEqual({ end: '2026-06-30', value: expect.closeTo(9.284e12 / 1410 / unitsThen, 9) })
+  })
+
+  it('reads a genuine high-inflation ARS series as ARS: a ×3 yearly jump, or one line near zero, is not a switch to USD', () => {
+    const years = ['2022-12-31', '2023-12-31', '2024-12-31', '2025-12-31']
+    const ni = [1e11, 3e11, 9e11, 2.7e12]
+    const tv: TvHistory = {
+      ...tvHistory('ARS', [], {}),
+      annual: { ...tvHistory('ARS', [], {}).annual, ...lines(years, { revenue: [1e12, 3e12, 9e12, 27e12], netIncome: ni, epsDiluted: ni.map((x) => x / 1e9) }) },
+    }
+    // A quarter whose net income (and EPS) fell to about its previous USD value, while revenue, assets and debt did not.
+    const quarters = ['2025-09-30', '2025-12-31', '2026-03-31', '2026-06-30']
+    const qNi = [1e12, 1e12, 1e12, 1e9]
+    tv.quarterly = { ...tv.quarterly, ...lines(quarters, {
+      revenue: [5e12, 5e12, 5e12, 5.1e12], netIncome: qNi, epsDiluted: qNi.map((x) => x / 1e9),
+      totalAssets: [4e13, 4e13, 4e13, 4.1e13], totalDebt: [1e13, 1e13, 1e13, 1.1e13],
+    }) } as TvHistory['quarterly']
+    const rates = new Map([['ARS', new Map([
+      ['2022-12-30', 180], ['2023-12-29', 800], ['2024-12-31', 1030], ['2025-09-30', 1400], ['2025-12-31', 1450],
+      ['2026-03-31', 1400], ['2026-06-30', 1400], ['2026-10-29', 1500],
+    ])]])
+    const fields = { ...emptyInput().snapshot.fields, total_shares_outstanding: 1e9 }
+    const m = computeMetrics({ ...emptyInput(), tv, rates, snapshot: { close: 1000, marketCap: 1e12, currency: 'ARS', fields } })
+
+    expect(m.revenuePerShare.history.annual.slice(0, 4).map((p) => p.value)).toEqual(
+      [1e12 / 180, 3e12 / 800, 9e12 / 1030, 27e12 / 1450].map((v) => expect.closeTo(v / 1e9, 9)),
+    )
+    expect(m.revenuePerShare.history.quarterly.at(-1)).toEqual({ end: '2026-06-30', value: expect.closeTo(5.1e12 / 1400 / 1e9, 9) })
+
+    // A currency near the dollar is always converted: no point of it shrinks >100× when converted.
+    const brl = computeMetrics({
+      ...emptyInput(), rates: new Map([['BRL', new Map([['2025-01-01', 4]])]]),
+      tv: tvHistory('BRL', quarters, { revenue: [5e9, 5e9, 5e9, 5e9], netIncome: [1e9, 1e9, 1e9, 1e9], epsDiluted: [1, 1, 1, 1] }),
+      snapshot: { close: 10, marketCap: 1e10, currency: 'USD', fields },
+    })
+    expect(brl.revenuePerShare.today).toBeCloseTo(20e9 / 4 / 1e9, 9)
+  })
+
+  it('shows "—" in the list only when the latest period lacks the input; asOf names that period either way', () => {
+    // Net income for the last three quarters only (no 12 months of it); CapEx missing in the latest quarter.
+    const yahoo: YahooStatements = {
+      currency: 'USD',
+      quarterly: lines(Q5, {
+        netIncome: [null, null, 50, 50, 50],
+        currentAssets: [150, 150, 150, 150, 180], currentLiabilities: [100, 100, 100, 100, 100],
+        operatingCashFlow: [12, 12, 12, 12, 12], capitalExpenditure: [-3, -3, -3, -3, null],
+        ordinarySharesNumber: [50, 50, 50, 50, 50],
+      }) as YahooLines,
+      annual: {},
+    }
+    const m = computeMetrics({ ...emptyInput(), yahoo })
+
+    expect(m.currentRatio).toMatchObject({ today: 1.8, asOf: '2026-06-30' })
+    expect(m.ocfPerShare.today).not.toBeNull()
+    expect(m.capexPerShare).toMatchObject({ today: null, asOf: '2026-06-30' })
+    expect(m.capexPerShare.history.ttm.at(-1)!.end).toBe('2026-03-31')
+    expect(m.roe).toMatchObject({ today: null, asOf: '2026-06-30' })
   })
 
   it('gives null when an input is missing, and never invents a rate', async () => {

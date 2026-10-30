@@ -43,7 +43,10 @@ export interface MetricValue {
   history: Record<PeriodMode, Series>
   /** First year with data in any mode, for "historia desde". */
   since: string | null
-  /** The latest statements' period end the list value is built on: the anchor of its change in a year. */
+  /**
+   * The latest statements' period end the list value is built on: the anchor of its change in a year.
+   * Set also when `today` is null: that period lacks an input.
+   */
   asOf: string | null
   source: 'tradingview' | 'yahoo' | 'snapshot'
 }
@@ -90,6 +93,40 @@ function endsOf<L extends string>(lines: Lines<L>): string[] {
   return [...new Set(Object.values<Series | undefined>(lines).flatMap((s) => s?.map((p) => p.end) ?? []))].sort()
 }
 
+// A line's plausible move from one period to the next, and how much smaller a converted point must get.
+const SAME_SIZE = { min: 0.2, max: 5 }
+const SHRINK = 100
+
+/**
+ * Each amount at its period end's rate; a point with no rate is dropped, never converted at an invented one.
+ * A period already in USD inside a non-USD series is kept as is: BCBA:YPFD's TradingView history is labeled
+ * ARS, but its 2026-09-30 quarter is in USD (L21 a). A line votes USD when its raw value is within
+ * ×0.2–×5 of its previous point in USD while converting it would make it >100× smaller; most of the
+ * period's lines with a previous point must vote so, then every line of that period stays as is.
+ * ponytail: a heuristic over the previous point only. A series that starts in USD is converted, and a real
+ * fall of >100× in most lines of a high-rate currency would read as USD. Read the period's currency from
+ * the source if it ever gives one.
+ */
+function toUsd<L extends string>(lines: Lines<L>, rateOn: (end: string) => N): Lines<L> {
+  const out: Record<string, Point[]> = Object.fromEntries(Object.keys(lines).map((line) => [line, []]))
+  for (const end of endsOf(lines)) {
+    const rate = rateOn(end)
+    if (rate === null) continue
+    const here = Object.entries<Series | undefined>(lines).flatMap(([line, s]) => {
+      const p = s?.find((q) => q.end === end)
+      return p ? [{ line, value: p.value, before: out[line].at(-1)?.value }] : []
+    })
+    const compared = here.filter((h) => h.before)
+    const usd = compared.filter(({ value, before }) => {
+      const r = value / before!
+      return r >= SAME_SIZE.min && r <= SAME_SIZE.max && rate > SHRINK * r
+    })
+    const already = usd.length * 2 > compared.length
+    for (const { line, value } of here) out[line].push({ end, value: already ? value : value / rate })
+  }
+  return out as Lines<L>
+}
+
 function tvBook(tv: TvHistory): Book<TvHistoryLine> {
   return {
     currency: tv.currency,
@@ -119,18 +156,8 @@ function yahooBook(y: YahooStatements): Book<YahooLine> {
 
 /** Evaluates formulas over one source: every period of every mode, and today. */
 function evaluator<L extends string>(book: Book<L>, ctx: Ctx) {
-  // Each amount at its period end's rate; a point with no rate is dropped, never converted at an invented one.
-  const toUsd = (lines: Lines<L>): Lines<L> =>
-    Object.fromEntries(
-      Object.entries<Series | undefined>(lines).map(([line, s = []]) => [
-        line,
-        s.flatMap((p) => {
-          const rate = ctx.rateOn(book.currency, p.end)
-          return rate === null ? [] : [{ end: p.end, value: p.value / rate }]
-        }),
-      ]),
-    ) as Lines<L>
-  const usd = { quarterly: toUsd(book.quarterly), annual: toUsd(book.annual) }
+  const rateOn = (end: string) => ctx.rateOn(book.currency, end)
+  const usd = { quarterly: toUsd(book.quarterly, rateOn), annual: toUsd(book.annual, rateOn) }
   const ends = { quarterly: endsOf(book.quarterly), ttm: endsOf(book.quarterly), annual: endsOf(book.annual) }
 
   // Listing ratio (L11 #4): ordinary shares now ÷ listed units now. Units then = ordinary shares then ÷ ratio.
@@ -176,8 +203,8 @@ function evaluator<L extends string>(book: Book<L>, ctx: Ctx) {
     PERIOD_MODES.map((mode) => [mode, ends[mode].filter((end) => end < ctx.today).map((end) => ({ end, f: frame(mode, end) }))]),
   ) as Record<PeriodMode, { end: string; f: Frame<L> }[]>
 
-  // "Hoy" is the latest period with a full TTM, priced today. Both sources name net income `netIncome`.
-  const latest = frames.ttm.findLast(({ f }) => f.flow('netIncome' as L) !== null)
+  // "Hoy" is the latest period, its 12 months, priced today: a value is "—" only when that period lacks an input.
+  const latest = frames.ttm.at(-1)
   const todayFrame = latest ? frame('ttm', latest.end, ctx.now) : null
 
   return (formula: (f: Frame<L>) => N, periodFlow = false) => {
@@ -194,7 +221,7 @@ function evaluator<L extends string>(book: Book<L>, ctx: Ctx) {
       }),
     ) as Record<PeriodMode, Series>
     const first = PERIOD_MODES.map((mode) => history[mode][0]?.end).filter(Boolean).sort()[0]
-    return { today, history, since: first ? first.slice(0, 4) : null, asOf: today === null ? null : latest!.end }
+    return { today, history, since: first ? first.slice(0, 4) : null, asOf: latest?.end ?? null }
   }
 }
 

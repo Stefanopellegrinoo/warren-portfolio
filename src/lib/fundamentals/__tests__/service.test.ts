@@ -172,6 +172,49 @@ describe('getAssetPage: header price', () => {
   })
 })
 
+describe('getAssetPage: header fields', () => {
+  const ggalAdr = (s: string) => (s === 'NASDAQ:GGAL'
+    ? snapshot(s, { logoid: 'gpo-fin-galicia', type: 'dr', country: 'Argentina', close: 41 })
+    : s.startsWith('BCBA:') ? snapshot(s, { currency: 'ARS', close: 7000 }) : snapshot(s))
+
+  it("badges the asked listing's TradingView exchange, and Yahoo's name, shortened, only without one", async () => {
+    const { deps } = fakes()
+    deps.fetchTvSnapshots.mockImplementation(async (symbols: string[]) => new Map(symbols.map((s) => [s, ggalAdr(s)])))
+    deps.findBymaListing.mockResolvedValue('BCBA:GGAL')
+    deps.resolveIdentity.mockImplementation(async (t: string) => ({
+      found: true as const,
+      identity: { ticker: t, yahooSymbol: t, name: t, price: 1, exchange: { GGAL: 'NasdaqCM', SE: 'NasdaqGS', '7203.T': 'Tokyo', 'BCBA:GGAL': 'Buenos Aires' }[t] ?? 'NYQ' },
+    }))
+
+    // GGAL reads its BYMA listing, but the badge is the asked one's: NASDAQ, not Yahoo's "NasdaqCM".
+    expect((await getAssetPage('GGAL', null, deps)).exchange).toBe('NASDAQ')
+    expect((await getAssetPage('SE', null, deps)).exchange).toBe('NYSE')
+    expect((await getAssetPage('BCBA:GGAL', null, deps)).exchange).toBe('BCBA')
+    expect((await getAssetPage('7203.T', null, deps)).exchange).toBe('Tokyo')
+
+    const { deps: down } = fakes()
+    down.resolveTvSymbol.mockRejectedValue(new Error('HTTP 503'))
+    expect(await getAssetPage('MELI', null, down)).toMatchObject({ exchange: 'NASDAQ', sources: { tradingview: 'error' } })
+    down.resolveIdentity.mockResolvedValue({ found: true, identity: { ticker: 'KO', yahooSymbol: 'KO', name: 'Coca-Cola', price: 60, exchange: 'NYQ' } })
+    expect((await getAssetPage('KO', null, down)).exchange).toBe('NYSE')
+  })
+
+  it('names the currency of the listing whose numbers are shown: ARS for a BYMA listing, also for an ADR read there', async () => {
+    const { deps } = fakes()
+    deps.fetchTvSnapshots.mockImplementation(async (symbols: string[]) => new Map(symbols.map((s) => [s, ggalAdr(s)])))
+    deps.findBymaListing.mockResolvedValue('BCBA:GGAL')
+    deps.resolveIdentity.mockImplementation(async (t: string) => ({
+      found: true as const, identity: { ticker: t, yahooSymbol: t, name: t, price: 1, exchange: 'NasdaqGS' },
+    }))
+
+    expect(await getAssetPage('BCBA:GGAL', null, deps)).toMatchObject({ currency: 'ARS', listingCurrency: 'ARS' })
+    // The header keeps the ADR's own USD quote; its price target and numbers are BYMA's, in pesos.
+    expect(await getAssetPage('GGAL', null, deps)).toMatchObject({ currency: 'USD', listingCurrency: 'ARS' })
+    expect(await getAssetPage('MELI', null, deps)).toMatchObject({ currency: 'USD', listingCurrency: 'USD' })
+    expect(await getAssetPage('7203.T', null, deps)).toMatchObject({ supported: false, listingCurrency: null })
+  })
+})
+
 describe('getAssetPage: sources', () => {
   it("uses an Argentine ADR's BYMA listing for Números and says so", async () => {
     const { deps } = fakes()

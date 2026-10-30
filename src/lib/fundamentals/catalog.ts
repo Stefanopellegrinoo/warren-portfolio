@@ -84,6 +84,16 @@ function capex(f: Frame<YahooLine>): N {
   return div(c === null ? null : Math.abs(c), f.units)
 }
 
+/**
+ * Operating cash flow − CapEx, from the two lines the page also shows, not Yahoo's freeCashFlow: that line
+ * equals OCF where YPFD.BA's CapEx is missing (2026-09-30) and even where it is not (2025-09-30).
+ */
+function fcf(f: Frame<YahooLine>): N {
+  const ocf = f.flow('operatingCashFlow')
+  const c = f.flow('capitalExpenditure')
+  return div(ocf === null || c === null ? null : ocf - Math.abs(c), f.units)
+}
+
 const VAL = 'Valoración'
 const PROF = 'Rentabilidad'
 const LIQ = 'Liquidez'
@@ -125,7 +135,8 @@ export const METRICS = [
   // Only TradingView lines, so group T by the design's rule (8 years of history), though it sits in Liquidez.
   { id: 'assetTurnover', section: LIQ, label: 'Rotación de activos', unit: 'ratio', group: 'T', better: 'higher', formula: (f) => div(f.yearly('revenue'), f.avg('totalAssets')) },
 
-  { id: 'debtToAssets', section: SOLV, label: 'Deuda / activos', unit: 'ratio', group: 'T', better: 'lower', formula: (f) => div(f.bal('totalDebt'), f.bal('totalAssets')) },
+  // Every debt and free cash flow figure is Yahoo's (totalDebt; OCF − CapEx), like D/E and EV: one definition each (L21 b).
+  { id: 'debtToAssets', section: SOLV, label: 'Deuda / activos', unit: 'ratio', group: 'Y', better: 'lower', formula: (f) => div(f.bal('totalDebt'), f.bal('totalAssets')) },
   { id: 'debtToEquity', section: SOLV, label: 'Deuda / patrimonio', unit: 'ratio', group: 'Y', better: 'lower', formula: (f) => div(f.bal('totalDebt'), f.bal('stockholdersEquity')) },
   { id: 'ltDebtToAssets', section: SOLV, label: 'Deuda largo plazo / activos', unit: 'ratio', group: 'Y', better: 'lower', formula: (f) => div(f.bal('longTermDebt'), f.bal('totalAssets')) },
   { id: 'ltDebtToEquity', section: SOLV, label: 'Deuda largo plazo / patrimonio', unit: 'ratio', group: 'Y', better: 'lower', formula: (f) => div(f.bal('longTermDebt'), f.bal('stockholdersEquity')) },
@@ -133,13 +144,13 @@ export const METRICS = [
   // Per listed unit, in USD: the amount converted at the period end over the units then.
   { id: 'revenuePerShare', section: PS, periodFlow: true, label: 'Ventas', unit: 'usdPerShare', group: 'T', better: 'higher', formula: (f) => div(f.flow('revenue'), f.units) },
   { id: 'ocfPerShare', section: PS, periodFlow: true, label: 'Flujo de caja operativo', unit: 'usdPerShare', group: 'Y', better: 'higher', formula: (f) => div(f.flow('operatingCashFlow'), f.units) },
-  { id: 'fcfPerShare', section: PS, periodFlow: true, label: 'Flujo de caja libre', unit: 'usdPerShare', group: 'T', better: 'higher', formula: (f) => div(f.flow('freeCashFlow'), f.units) },
+  { id: 'fcfPerShare', section: PS, periodFlow: true, label: 'Flujo de caja libre', unit: 'usdPerShare', group: 'Y', better: 'higher', formula: fcf },
   { id: 'ebitPerShare', section: PS, periodFlow: true, label: 'EBIT', unit: 'usdPerShare', group: 'Y', better: 'higher', formula: (f) => div(f.flow('ebit'), f.units) },
   { id: 'ebitdaPerShare', section: PS, periodFlow: true, label: 'EBITDA', unit: 'usdPerShare', group: 'T', better: 'higher', formula: (f) => div(f.flow('ebitda'), f.units) },
   { id: 'bookPerShare', section: PS, label: 'Valor libro', unit: 'usdPerShare', group: 'Y', better: 'higher', formula: (f) => div(f.bal('stockholdersEquity'), f.units) },
   { id: 'tangibleBookPerShare', section: PS, label: 'Valor libro tangible', unit: 'usdPerShare', group: 'Y', better: 'higher', formula: (f) => div(f.bal('tangibleBookValue'), f.units) },
   { id: 'cashPerShare', section: PS, label: 'Caja', unit: 'usdPerShare', group: 'Y', better: 'higher', formula: (f) => div(f.bal('cashAndShortTermInvestments'), f.units) },
-  { id: 'debtPerShare', section: PS, label: 'Deuda', unit: 'usdPerShare', group: 'T', better: 'lower', formula: (f) => div(f.bal('totalDebt'), f.units) },
+  { id: 'debtPerShare', section: PS, label: 'Deuda', unit: 'usdPerShare', group: 'Y', better: 'lower', formula: (f) => div(f.bal('totalDebt'), f.units) },
   { id: 'workingCapitalPerShare', section: PS, label: 'Capital de trabajo', unit: 'usdPerShare', group: 'Y', better: 'higher', formula: (f) => div(f.bal('workingCapital'), f.units) },
   { id: 'capexPerShare', section: PS, periodFlow: true, label: 'Inversión (CapEx)', unit: 'usdPerShare', group: 'Y', better: 'higher', formula: capex },
   // Net income in USD per listed unit: TradingView's EPS line is per ordinary share in the statements' currency.
