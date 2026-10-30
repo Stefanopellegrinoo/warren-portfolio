@@ -283,3 +283,12 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   - Fix: fixed Spanish month names, `MONTHS` exported from explain.ts, built from the Argentine date string, instead of `Intl` short months.
   - A local RED on Node 22 was not possible: downloading node@22 via npx was denied. The CI diff is the evidence.
   - Long month names (Resumen dates) are stable across ICU versions and passed in CI.
+- L35 (2026-10-30) Stage 2 delivered.
+  - The branch CI first failed on an ICU month name (L34); after the fix it was green.
+  - PR #50 was squash-merged as 0f2a61c. The master deploy succeeded.
+  - Production checks:
+    - `/api/health` ok;
+    - signed-out `/activo/SPY` → 307 to login;
+    - `/api/asset/MELI` and `/api/asset/MELI/news` → 401.
+  - Stage 3 (T11–T12) continues on `feat/asset-page-stage3`.
+  - Pending with the user: the iPhone test, and whether to unify the two searches.
