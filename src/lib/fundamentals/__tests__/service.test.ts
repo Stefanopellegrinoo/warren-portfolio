@@ -1,10 +1,11 @@
 // @vitest-environment node
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { getAssetPage, AssetError, type AssetDeps } from '../service'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { getAssetPage, getAssetStatements, AssetError, type AssetDeps } from '../service'
 import { computeMetrics, type Metrics } from '../metrics'
 import { TV_SNAPSHOT_FIELDS, type TvHistory, type TvSnapshot, type TvPeer } from '../tradingview'
 import type { YahooProfile, YahooStatements } from '../yahoo'
-import type { Market, Series } from '../types'
+import type { SecStatements } from '../sec'
+import { FundamentalsSourceError, type Market, type Series } from '../types'
 
 // Public company names only; every number is invented.
 const TODAY = '2026-10-30'
@@ -53,6 +54,12 @@ const COMPACT = {
   fiftyTwoWeekLow: 40, fiftyTwoWeekHigh: 80, targetMeanPrice: 70, numberOfAnalystOpinions: 12, nextEarningsDate: '2026-11-05',
   earnings: [{ quarterEnd: '2026-06-30', epsEstimate: 1.1, epsActual: 1.2 }],
   kind: 'company', marketCap: 5000, regularMarketPrice: 50, dayChange: null, circulatingSupply: null, volume24h: null, fund: null,
+}
+
+/** The SEC's compact copy of a 10-Q filer: two lines on the shared quarter ends, one year. */
+const SEC: SecStatements = {
+  quarterly: { ends: ENDS, lines: { revenue: ENDS.map((_, i) => 1e9 + i * 1e8), totalAssets: ENDS.map(() => 5e9) } },
+  annual: { ends: ['2025-12-31'], lines: { revenue: [4.6e9] } },
 }
 
 /** An in-memory Redis: every write is recorded with its TTL. */
@@ -108,6 +115,10 @@ function fakes() {
     getBars: vi.fn(async (symbols: string[], _from: Date) =>
       new Map(symbols.map((s) => [s, { bars: [{ date: '2020-01-02', close: 40 }], splits: [], splitsKnown: true, degraded: false, missing: false }])),
     ),
+    // The SEC is off unless a test turns it on.
+    secUserAgent: vi.fn((): string | null => null),
+    fetchSecTickers: vi.fn(async (_ua: string): Promise<Record<string, number>> => ({ MELI: 1099590, AMZN: 1018724 })),
+    fetchSecStatements: vi.fn(async (_cik: number, _ua: string): Promise<SecStatements | null> => SEC),
     cache: { get: cache.get, set: cache.set },
     memoryShare: vi.fn(async (): Promise<number | null> => 0.1),
     today: () => TODAY,
@@ -118,7 +129,7 @@ function fakes() {
 
 type Fakes = ReturnType<typeof fakes>['deps']
 const sourceCalls = (d: Fakes) =>
-  [d.resolveTvSymbol, d.fetchTvSnapshots, d.fetchTvHistory, d.fetchTvPeers, d.findBymaListing, d.fetchYahooStatements, d.fetchUsdRates]
+  [d.resolveTvSymbol, d.fetchTvSnapshots, d.fetchTvHistory, d.fetchTvPeers, d.findBymaListing, d.fetchYahooStatements, d.fetchUsdRates, d.fetchSecTickers, d.fetchSecStatements]
     .reduce((n, f) => n + f.mock.calls.length, 0)
 const todayOf = (m: Metrics) => Object.fromEntries(Object.values(m).map((v) => [v.id, v.today]))
 
@@ -648,5 +659,252 @@ describe('getAssetPage: price target (T10, S5)', () => {
     const { deps } = fakes()
     deps.fetchYahooProfile.mockResolvedValue({ ...PROFILE, numberOfAnalystOpinions: 0 })
     expect((await getAssetPage('MELI', null, deps)).metrics!.priceTarget.today).toBeNull()
+  })
+})
+
+describe('getAssetStatements (T11, Balances completos)', () => {
+  const ggalAdr = (s: string) => (s === 'NASDAQ:GGAL'
+    ? snapshot(s, { logoid: 'gpo-fin-galicia', type: 'dr', country: 'Argentina', close: 41 })
+    : s.startsWith('BCBA:') ? snapshot(s, { currency: 'ARS', close: 7000 }) : snapshot(s))
+
+  it('validates like the page: a bad ticker never reaches a source or the cache; an unknown one is not_found', async () => {
+    const { deps, cache } = fakes()
+    await expect(getAssetStatements('MELI; DROP', deps)).rejects.toMatchObject({ code: 'invalid' })
+    expect(deps.resolveIdentity).not.toHaveBeenCalled()
+    expect(cache.get).not.toHaveBeenCalled()
+    await expect(getAssetStatements('ZZZZQ', deps)).rejects.toMatchObject({ code: 'not_found' })
+    expect(sourceCalls(deps)).toBe(0)
+  })
+
+  it("right after the page, reads the listing's cached copies: no source call at all", async () => {
+    const { deps, cache } = fakes()
+    await getAssetPage('MELI', null, deps)
+    const calls = sourceCalls(deps)
+    const writes = cache.writes.length
+
+    const st = await getAssetStatements('MELI', deps)
+
+    expect(sourceCalls(deps)).toBe(calls)
+    expect(deps.fetchYahooProfile).toHaveBeenCalledTimes(1)
+    expect(cache.writes).toHaveLength(writes)
+    expect(st.sources).toEqual({ tradingview: 'ok', yahoo: 'ok', fx: 'ok' })
+    // The page's own MELI history (k = 1): USD, in whole dollars.
+    const whole = grow(100).map((p) => ({ end: p.end, value: Math.round(p.value) }))
+    expect(st.tradingview!.quarterly.revenue).toEqual(whole)
+    expect(st.yahoo!.quarterly.revenue).toEqual(whole)
+  })
+
+  it("an Argentine ADR reads its BYMA listing, as Números does, in dollars at each period's rate; no extra call after the page", async () => {
+    const { deps } = fakes()
+    deps.fetchTvSnapshots.mockImplementation(async (symbols: string[]) => new Map(symbols.map((s) => [s, ggalAdr(s)])))
+    deps.findBymaListing.mockResolvedValue('BCBA:GGAL')
+    deps.fetchTvHistory.mockImplementation(async (symbols: string[]) => new Map(symbols.map((s) => [s, tvHistory(s.startsWith('BCBA:') ? 'ARS' : 'USD')])))
+    deps.fetchYahooStatements.mockImplementation(async (s: string) => yahoo(s.endsWith('.BA') ? 'ARS' : 'USD'))
+    await getAssetPage('GGAL', null, deps)
+    const calls = sourceCalls(deps)
+
+    const st = await getAssetStatements('GGAL', deps)
+
+    expect(sourceCalls(deps)).toBe(calls)
+    expect(deps.fetchYahooStatements.mock.calls.map(([s]) => s)).toContain('GGAL.BA')
+    expect(st.tradingview!.currency).toBe('ARS')
+    // The fake CCL is 4 pesos per dollar at every date.
+    expect(st.tradingview!.quarterly.revenue).toEqual(grow(100).map((p) => ({ end: p.end, value: Math.round(p.value / 4) })))
+    expect(st.yahoo).toMatchObject({ currency: 'ARS', annual: {} })
+  })
+
+  it("cold, asks only the listing's history, statements and rates, into the page's own keys", async () => {
+    const { deps, cache } = fakes()
+    deps.fetchTvHistory.mockImplementation(async (symbols: string[]) => new Map(symbols.map((s) => [s, tvHistory('EUR')])))
+
+    const st = await getAssetStatements('MELI', deps)
+
+    expect(deps.fetchTvHistory).toHaveBeenCalledWith(['NASDAQ:MELI'], 'america')
+    expect(deps.fetchYahooStatements.mock.calls).toEqual([['MELI']])
+    expect(deps.fetchTvPeers).not.toHaveBeenCalled()
+    expect(deps.getBars).not.toHaveBeenCalled()
+    expect(cache.writes.map((w) => w.key).sort()).toEqual([
+      'fund:v1:fx:EUR', 'fund:v1:profile:MELI', 'fund:v1:snap:NASDAQ:MELI', 'fund:v1:tvh:NASDAQ:MELI', 'fund:v1:tvsym:MELI', 'fund:v1:yahoo:MELI',
+    ])
+    expect(st.tradingview!.quarterly.revenue![0]).toEqual({ end: ENDS[0], value: 25 })
+  })
+
+  it('a failed source is named and its tables stay empty; the other source still answers', async () => {
+    const { deps } = fakes()
+    deps.fetchYahooStatements.mockRejectedValue(new Error('HTTP 503'))
+
+    const st = await getAssetStatements('MELI', deps)
+
+    expect(st).toMatchObject({ yahoo: null, sources: { yahoo: 'error', tradingview: 'ok' } })
+    expect(st.tradingview!.quarterly.revenue).toHaveLength(ENDS.length)
+  })
+
+  it('a fund, a coin or a listing outside the supported markets has no statements and asks for none', async () => {
+    const none = { yahoo: null, tradingview: null, sources: {} }
+    const { deps } = fakes()
+    expect(await getAssetStatements('7203.T', deps)).toEqual(none)
+
+    deps.resolveIdentity.mockImplementation(async (t: string) => ({ found: true as const, identity: { ticker: t, yahooSymbol: t, name: t, exchange: 'CCC', price: 1 } }))
+    expect(await getAssetStatements('BTC-USD', deps)).toEqual(none)
+
+    const { deps: fund } = fakes()
+    fund.resolveTvSymbol.mockResolvedValue('AMEX:SPY')
+    fund.resolveIdentity.mockImplementation(async (t: string) => ({ found: true as const, identity: { ticker: t, yahooSymbol: t, name: t, exchange: 'NYSEArca', price: 1 } }))
+    fund.fetchYahooProfile.mockResolvedValue({ ...PROFILE, kind: 'etf' })
+    expect(await getAssetStatements('SPY', fund)).toEqual(none)
+
+    for (const d of [deps, fund]) for (const f of [d.fetchTvHistory, d.fetchYahooStatements, d.fetchUsdRates]) expect(f).not.toHaveBeenCalled()
+  })
+})
+
+describe('getAssetStatements: SEC (T12)', () => {
+  const UA = 'WarrenPortfolio research contact@example.com'
+  const secOn = () => {
+    const f = fakes()
+    f.deps.secUserAgent.mockReturnValue(UA)
+    return f
+  }
+  const secRevenue = ENDS.map((end, i) => ({ end, value: 1e9 + i * 1e8 }))
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('with SEC_USER_AGENT unset, asks the SEC nothing and answers exactly as before', async () => {
+    vi.stubEnv('SEC_USER_AGENT', '')
+    const { deps, cache } = fakes()
+    const { secUserAgent: _, ...fromEnv } = deps
+
+    const st = await getAssetStatements('MELI', fromEnv)
+
+    expect(deps.fetchSecTickers).not.toHaveBeenCalled()
+    expect(deps.fetchSecStatements).not.toHaveBeenCalled()
+    expect(st).not.toHaveProperty('sec')
+    expect(st.sources).toEqual({ tradingview: 'ok', yahoo: 'ok', fx: 'ok' })
+    expect(cache.get.mock.calls.flat().filter((k) => String(k).includes(':sec'))).toEqual([])
+  })
+
+  it("a US 10-Q filer's SEC lines come in USD with their status; cached compact, the ticker map apart", async () => {
+    const { deps, cache } = secOn()
+
+    const st = await getAssetStatements('MELI', deps)
+
+    expect(deps.fetchSecTickers).toHaveBeenCalledWith(UA)
+    expect(deps.fetchSecStatements).toHaveBeenCalledWith(1099590, UA)
+    expect(st.sec).toMatchObject({ currency: 'USD', quarterly: { revenue: secRevenue }, annual: { revenue: [{ end: '2025-12-31', value: 4.6e9 }] } })
+    expect(st.sources.sec).toBe('ok')
+    const writes = Object.fromEntries(cache.writes.map((w) => [w.key, w]))
+    expect(writes['fund:v1:sec:MELI']).toMatchObject({ ttl: 7 * 86400 })
+    expect(writes['fund:v1:sec:MELI'].bytes).toBeLessThan(40_000)
+    expect(writes['fund:v1:secmap:tickers']).toMatchObject({ ttl: 30 * 86400 })
+  })
+
+  it('warm, the next view asks the SEC nothing and does not even read the ticker map', async () => {
+    const { deps, cache } = secOn()
+    const first = await getAssetStatements('MELI', deps)
+    cache.get.mockClear()
+
+    const second = await getAssetStatements('MELI', deps)
+
+    expect(deps.fetchSecTickers).toHaveBeenCalledTimes(1)
+    expect(deps.fetchSecStatements).toHaveBeenCalledTimes(1)
+    expect(cache.get.mock.calls.flat()).not.toContain('fund:v1:secmap:tickers')
+    expect(second).toEqual(first)
+  })
+
+  it('cold, the SEC is asked alongside TradingView and Yahoo, not after them', async () => {
+    const { deps } = secOn()
+    let secAsked!: () => void
+    const asked = new Promise<void>((r) => { secAsked = r })
+    deps.fetchSecStatements.mockImplementation(async () => { secAsked(); return SEC })
+    const history = deps.fetchTvHistory.getMockImplementation()!
+    // TradingView answers only once the SEC was asked: run one after the other, this would hang.
+    deps.fetchTvHistory.mockImplementation(async (symbols, market) => {
+      await Promise.race([asked, new Promise((_, reject) => setTimeout(() => reject(new Error('SEC not asked in parallel')), 500))])
+      return history(symbols, market)
+    })
+
+    const st = await getAssetStatements('MELI', deps)
+
+    expect(st.sources).toMatchObject({ tradingview: 'ok', sec: 'ok' })
+  })
+
+  it("a 20-F filer is null and stays cached, so its ~4 MB is not asked again; its rows stay Yahoo's and TradingView's", async () => {
+    const { deps } = secOn()
+    deps.fetchSecStatements.mockResolvedValue(null)
+
+    const st = await getAssetStatements('MELI', deps)
+    await getAssetStatements('MELI', deps)
+
+    expect(st.sec).toBeNull()
+    expect(st.sources.sec).toBe('ok')
+    expect(st.yahoo!.quarterly.revenue).toHaveLength(ENDS.length)
+    expect(deps.fetchSecStatements).toHaveBeenCalledTimes(1)
+  })
+
+  it('a ticker the SEC does not list asks for no companyfacts', async () => {
+    const { deps } = secOn()
+    deps.fetchSecTickers.mockResolvedValue({ AMZN: 1018724 })
+
+    const st = await getAssetStatements('MELI', deps)
+
+    expect(deps.fetchSecStatements).not.toHaveBeenCalled()
+    expect(st).toMatchObject({ sec: null, sources: { sec: 'ok' } })
+  })
+
+  it('when the SEC fails or times out, the view comes without SEC rows and says so; a failure mark spares it for 5 minutes', async () => {
+    const { deps, cache } = secOn()
+    deps.fetchSecStatements.mockRejectedValue(new FundamentalsSourceError('sec', 'unavailable', 'The operation was aborted due to timeout'))
+
+    const st = await getAssetStatements('MELI', deps)
+    await getAssetStatements('MELI', deps)
+
+    expect(st).toMatchObject({ sec: null, sources: { tradingview: 'ok', yahoo: 'ok', sec: 'error' } })
+    expect(st.yahoo!.quarterly.revenue).toHaveLength(ENDS.length)
+    expect(cache.writes.find((w) => w.key === 'fund:v1:failed:sec:MELI')).toMatchObject({ ttl: 300 })
+    expect(deps.fetchSecStatements).toHaveBeenCalledTimes(1)
+  })
+
+  it('a failed ticker map is a failed SEC too, never a throw', async () => {
+    const { deps } = secOn()
+    deps.fetchSecTickers.mockRejectedValue(new FundamentalsSourceError('sec', 'unavailable', 'HTTP 403'))
+
+    const st = await getAssetStatements('MELI', deps)
+
+    expect(st).toMatchObject({ sec: null, sources: { sec: 'error', yahoo: 'ok' } })
+    expect(deps.fetchSecStatements).not.toHaveBeenCalled()
+  })
+
+  it('past its 24 h, a failed refresh serves the last good copy as stale', async () => {
+    const { deps } = secOn()
+    const first = await getAssetStatements('MELI', deps)
+    deps.now.mockReturnValue(NOW + 25 * HOUR_MS)
+    deps.fetchSecStatements.mockRejectedValue(new Error('HTTP 503'))
+
+    const st = await getAssetStatements('MELI', deps)
+
+    expect(deps.fetchSecStatements).toHaveBeenCalledTimes(2)
+    expect(st.sources.sec).toBe('stale')
+    expect(st.sec).toEqual(first.sec)
+  })
+
+  it('over half of Redis, no SEC copy is written, and the view still has its rows', async () => {
+    const { deps, cache } = secOn()
+    deps.memoryShare.mockResolvedValue(0.6)
+
+    const st = await getAssetStatements('MELI', deps)
+
+    expect(cache.writes.filter((w) => w.key.includes(':sec'))).toEqual([])
+    expect(st.sec!.quarterly.revenue).toEqual(secRevenue)
+  })
+
+  it("an Argentine ADR reads its BYMA listing, which never asks the SEC", async () => {
+    const { deps } = secOn()
+    deps.fetchTvSnapshots.mockImplementation(async (symbols: string[]) => new Map(symbols.map((s) => [s, s === 'NASDAQ:GGAL'
+      ? snapshot(s, { logoid: 'gpo-fin-galicia', type: 'dr', country: 'Argentina' })
+      : snapshot(s, { currency: 'ARS' })])))
+    deps.findBymaListing.mockResolvedValue('BCBA:GGAL')
+
+    const st = await getAssetStatements('GGAL', deps)
+
+    expect(deps.fetchSecTickers).not.toHaveBeenCalled()
+    expect(st).not.toHaveProperty('sec')
   })
 })

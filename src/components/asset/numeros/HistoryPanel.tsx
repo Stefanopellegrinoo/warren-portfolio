@@ -114,7 +114,7 @@ export function HistoryPanel({ page, id, full, onBack, className }: {
       </div>
 
       <div className="mt-4">
-        <LineChart key={`${id}-${shown}-${range}`} series={series} unit={def.unit} better={better} mode={shown} today={today} label={def.label} />
+        <LineChart key={`${id}-${shown}-${range}`} series={series} unit={def.unit} better={better} mode={shown} today={today} label={def.label} clamp={def.unit === 'ratio'} />
         {since && <p className="mt-1 text-sm text-ink-3">Historia desde {since}.</p>}
       </div>
 

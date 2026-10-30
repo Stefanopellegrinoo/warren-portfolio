@@ -94,6 +94,11 @@ cp .env.local.example .env.local
 
 Fill in your Supabase URL and keys, and your Redis connection string.
 
+Optional: `SEC_USER_AGENT` turns on the SEC's official statements (since about 2009, US companies that file 10-Q)
+in an asset's "Balances completos". The SEC requires an app name and a contact email, for example
+`SEC_USER_AGENT="WarrenPortfolio research contact@example.com"`. Unset, the app never calls the SEC and the
+view uses Yahoo Finance and TradingView.
+
 ### 3. Apply migrations
 
 Run the SQL files in `supabase/migrations/` in order, through the Supabase SQL editor

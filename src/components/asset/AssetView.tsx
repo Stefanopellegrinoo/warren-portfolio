@@ -19,10 +19,10 @@ import AssetHeader from './AssetHeader'
 type OpenTab = (id: string, dato?: string) => void
 export interface AssetTab { id: string; label: string; content: React.ReactNode | ((open: OpenTab) => React.ReactNode) }
 
-/** ?tab= names the open tab, the first one when absent; ?dato= alone (Números' own links) means Números. */
+/** ?tab= names the open tab, the first one when absent; ?dato= or ?vista= alone (Números' own links) means Números. */
 function urlTab(ids: string[]): string {
   const q = new URLSearchParams(window.location.search)
-  const t = q.get('tab') ?? (q.has('dato') ? 'numeros' : null)
+  const t = q.get('tab') ?? (q.has('dato') || q.has('vista') ? 'numeros' : null)
   return t !== null && ids.includes(t) ? t : ids[0]
 }
 
@@ -43,7 +43,8 @@ export function AssetTabs({ tabs }: { tabs: AssetTab[] }) {
     const url = new URL(window.location.href)
     if (id === ids[0]) url.searchParams.delete('tab')
     else url.searchParams.set('tab', id)
-    // A metric belongs to Números: leaving it closes the metric.
+    // A metric and Balances completos belong to Números: leaving it, or opening a metric, closes them.
+    url.searchParams.delete('vista')
     if (dato) url.searchParams.set('dato', dato)
     else url.searchParams.delete('dato')
     if (dato) window.history.pushState(null, '', url)

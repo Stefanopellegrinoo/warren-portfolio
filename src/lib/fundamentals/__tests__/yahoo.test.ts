@@ -61,6 +61,25 @@ describe('fetchYahooStatements', () => {
     expect(types).toEqual(expect.arrayContaining([['MELI', 'quarterly', 'all', false], ['MELI', 'annual', 'all', false]]))
   })
 
+  // Balances completos (T11) shows the statements' usual lines too, each from one Yahoo field.
+  it('keeps the statement lines Balances completos shows', async () => {
+    const row = {
+      date: new Date('2026-06-30T00:00:00Z'), periodType: '3M', researchAndDevelopment: 1, sellingGeneralAndAdministration: 2, interestExpense: 3,
+      pretaxIncome: 4, taxProvision: 5, accountsReceivable: 6, netPPE: 7, goodwill: 8, accountsPayable: 9, investingCashFlow: -10,
+      financingCashFlow: -11, repurchaseOfCapitalStock: -12, cashDividendsPaid: -13, operatingExpense: 14,
+    }
+    const { getYahoo } = fakeYahoo({ fts: () => [row], qs: () => ({ financialData: { financialCurrency: 'USD' } }) })
+
+    const { quarterly } = await fetchYahooStatements('MELI', { getYahoo })
+
+    const at = (value: number) => [{ end: '2026-06-30', value }]
+    expect(quarterly).toEqual({
+      researchAndDevelopment: at(1), sellingGeneralAndAdministration: at(2), interestExpense: at(3), pretaxIncome: at(4),
+      taxProvision: at(5), accountsReceivable: at(6), netPPE: at(7), goodwill: at(8), accountsPayable: at(9), investingCashFlow: at(-10),
+      financingCashFlow: at(-11), repurchaseOfCapitalStock: at(-12), cashDividendsPaid: at(-13),
+    })
+  })
+
   it("returns the statements' currency from financialData, which can differ from the price's", async () => {
     const { yf, getYahoo } = fakeYahoo({
       fts: () => ANNUAL,

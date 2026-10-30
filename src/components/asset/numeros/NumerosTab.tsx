@@ -8,6 +8,7 @@ import { explain, formatMetric, nullReason, peersLine, shortName } from '@/lib/f
 import { PERIOD_MODES, type MetricValue } from '@/lib/fundamentals/metrics'
 import { cn } from '@/lib/utils'
 import { HistoryPanel, peerName } from './HistoryPanel'
+import { Balances } from './Balances'
 
 /** Where the history becomes a panel beside the list instead of a screen of its own. */
 const WIDE = '(min-width: 1024px)'
@@ -27,21 +28,33 @@ const isMetricId = (v: string | null): v is MetricId => METRICS.some((d) => d.id
 /**
  * The "Números" tab (odd/tasks/asset-page.md T6, S2 S3): every catalog metric by section, each
  * with its "?" and, when it has history, a click into it. The open metric lives in `?dato=`, so
- * the phone's back button closes its screen.
+ * the phone's back button closes its screen; Balances completos (T11, S8) in `?vista=balances`.
  */
 export function NumerosTab({ page }: { page: AssetPage }) {
   const [dato, setDato] = useState<MetricId | null>(null)
+  const [balances, setBalances] = useState(false)
   const pushed = useRef(false)
+  const pushedBalances = useRef(false)
+  const link = useRef<HTMLButtonElement>(null)
+  const wasBalances = useRef(false)
 
   useEffect(() => {
     const read = () => {
-      const v = new URLSearchParams(window.location.search).get('dato')
+      const q = new URLSearchParams(window.location.search)
+      const v = q.get('dato')
       setDato(isMetricId(v) ? v : null)
+      setBalances(q.get('vista') === 'balances')
     }
     read()
     window.addEventListener('popstate', read)
     return () => window.removeEventListener('popstate', read)
   }, [])
+
+  // Back from Balances completos lands on its link, where the reader left the list.
+  useEffect(() => {
+    if (wasBalances.current && !balances) link.current?.focus()
+    wasBalances.current = balances
+  }, [balances])
 
   const metrics = page.metrics
   if (!page.supported) return <p className="py-6 text-sm text-ink-2">Todavía no tenemos datos financieros de este mercado.</p>
@@ -65,6 +78,28 @@ export function NumerosTab({ page }: { page: AssetPage }) {
     }
     setDato(id)
   }
+
+  function openBalances() {
+    const url = new URL(window.location.href)
+    url.searchParams.set('vista', 'balances')
+    window.history.pushState(null, '', url)
+    pushedBalances.current = true
+    setBalances(true)
+  }
+
+  function closeBalances() {
+    if (pushedBalances.current) {
+      pushedBalances.current = false
+      window.history.back()
+      return
+    }
+    const url = new URL(window.location.href)
+    url.searchParams.delete('vista')
+    window.history.replaceState(null, '', url)
+    setBalances(false)
+  }
+
+  if (balances) return <Balances page={page} onBack={closeBalances} />
 
   function back() {
     if (pushed.current) {
@@ -108,6 +143,15 @@ export function NumerosTab({ page }: { page: AssetPage }) {
           {stale && ' Algunos datos son de la última vez que pudimos traerlos.'}
         </p>
         <div className="flex flex-col gap-6">{ORDER.map(section)}</div>
+        <button
+          ref={link}
+          type="button"
+          onClick={openBalances}
+          className="mt-5 inline-flex min-h-11 items-center gap-1 text-[15px] font-medium text-accent-ink underline-offset-2 hover:underline"
+        >
+          Ver balances completos
+          <ChevronRight className="h-4 w-4" aria-hidden="true" />
+        </button>
       </div>
       {selected && (
         <HistoryPanel

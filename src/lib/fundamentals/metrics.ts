@@ -60,7 +60,7 @@ type N = number | null
 type Lines<L extends string> = Partial<Record<L, Series>>
 
 /** One source's statements, and how to read its ordinary share count over a period. */
-interface Book<L extends string> {
+export interface Book<L extends string> {
   currency: string | null
   quarterly: Lines<L>
   annual: Lines<L>
@@ -130,7 +130,7 @@ function toUsd<L extends string>(lines: Lines<L>, rateOn: (end: string) => N): L
   return out as Lines<L>
 }
 
-function tvBook(tv: TvHistory): Book<TvHistoryLine> {
+export function tvBook(tv: TvHistory): Book<TvHistoryLine> {
   return {
     currency: tv.currency,
     quarterly: tv.quarterly,
@@ -145,7 +145,7 @@ function tvBook(tv: TvHistory): Book<TvHistoryLine> {
   }
 }
 
-function yahooBook(y: YahooStatements): Book<YahooLine> {
+export function yahooBook(y: YahooStatements): Book<YahooLine> {
   // One share line per company, never a per-period fallback.
   const line = y.quarterly.ordinarySharesNumber || y.annual.ordinarySharesNumber ? 'ordinarySharesNumber' : 'dilutedAverageShares'
   return {
@@ -157,10 +157,27 @@ function yahooBook(y: YahooStatements): Book<YahooLine> {
   }
 }
 
+/** Units of a currency per dollar on or before a date, from fetchUsdRates' maps: 1 for USD, null without a rate. */
+export function ratesReader(rates: Map<string, Map<string, number>>): (currency: string | null, date: string) => N {
+  const bars = new Map<string, DailyBar[]>()
+  return (currency, date) => {
+    if (currency === 'USD') return 1
+    const byDate = currency === null ? undefined : rates.get(currency)
+    if (!currency || !byDate) return null
+    if (!bars.has(currency)) bars.set(currency, Array.from(byDate, ([d, close]) => ({ date: d, close })))
+    return positive(closeOnOrBefore(bars.get(currency)!, date))
+  }
+}
+
+/** A source's statements in USD at each period end, as every metric and Balances completos read them. */
+export function inUsd<L extends string>(book: Book<L>, rateOn: (currency: string | null, date: string) => N) {
+  const at = (end: string) => rateOn(book.currency, end)
+  return { quarterly: toUsd(book.quarterly, at), annual: toUsd(book.annual, at) }
+}
+
 /** Evaluates formulas over one source: every period of every mode, and today. */
 function evaluator<L extends string>(book: Book<L>, ctx: Ctx) {
-  const rateOn = (end: string) => ctx.rateOn(book.currency, end)
-  const usd = { quarterly: toUsd(book.quarterly, rateOn), annual: toUsd(book.annual, rateOn) }
+  const usd = inUsd(book, ctx.rateOn)
   const ends = { quarterly: endsOf(book.quarterly), ttm: endsOf(book.quarterly), annual: endsOf(book.annual) }
 
   // Listing ratio (L11 #4): ordinary shares now ÷ listed units now. Units then = ordinary shares then ÷ ratio.
@@ -233,14 +250,7 @@ function evaluator<L extends string>(book: Book<L>, ctx: Ctx) {
 
 /** Every catalog metric for one company. Peers go through this same function with their own inputs. */
 export function computeMetrics(input: MetricsInput): Metrics {
-  const bars = new Map<string, DailyBar[]>()
-  const rateOn = (currency: string | null, date: string): N => {
-    if (currency === 'USD') return 1
-    const rates = currency === null ? undefined : input.rates.get(currency)
-    if (!currency || !rates) return null
-    if (!bars.has(currency)) bars.set(currency, Array.from(rates, ([d, close]) => ({ date: d, close })))
-    return positive(closeOnOrBefore(bars.get(currency)!, date))
-  }
+  const rateOn = ratesReader(input.rates)
   const { close, marketCap, currency } = input.snapshot
   const usdAt = (value: N, date: string): N => {
     const rate = rateOn(currency, date)
@@ -282,11 +292,14 @@ export function computeMetrics(input: MetricsInput): Metrics {
 export function changeVsYearAgo(series: Series, unit: MetricUnit, asOf: string | null = null): N {
   const last = series.at(-1)
   if (!last) return null
-  const then = near(series, asOf !== null && last.end > asOf ? asOf : last.end, YEAR_DAYS)
+  const then = yearEarlier(series, asOf !== null && last.end > asOf ? asOf : last.end)
   if (then === null) return null
   if (unit === 'percent') return last.value - then
   return then > 0 ? (last.value / then - 1) * 100 : null
 }
+
+/** The value of the same period a year before `end`: the same quarter, or the fiscal year before. */
+export const yearEarlier = (series: Series, end: string): N => near(series, end, YEAR_DAYS)
 
 /** The point the chart marks: the highest, or the lowest for metrics where lower is better. */
 export function bestPoint(series: Series, better: 'higher' | 'lower'): Point | null {

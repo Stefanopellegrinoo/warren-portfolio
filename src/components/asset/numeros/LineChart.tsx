@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import type { MetricUnit } from '@/lib/fundamentals/catalog'
 import { formatMetric, periodLabel } from '@/lib/fundamentals/explain'
 import { formatNumber } from '@/lib/utils'
@@ -10,10 +10,12 @@ import type { Series } from '@/lib/fundamentals/types'
 const DAY_MS = 86_400_000
 /** More than 1,5 periods apart is a gap: the line breaks there instead of joining across it. */
 const GAP_DAYS: Record<PeriodMode, number> = { quarterly: 137, ttm: 137, annual: 548 }
+/** A year label ("2026", 11 px mono, ~27 px) and its space: closer, they overlap. */
+const YEAR_PX = 36
 
 /**
- * The range the axis shows: every value but the far ones, past the quartiles by more than twice the
- * interquartile range (MELI's P/E of 1.925,9 next to years of 45–80). Those are pinned to the edge.
+ * With `clamp`, the range the axis shows: every value but the far ones, past the quartiles by more than twice
+ * the interquartile range (MELI's P/E of 1.925,9 next to years of 45–80). Those are pinned to the edge.
  */
 function shownRange(values: number[]): [number, number] {
   const s = [...values].sort((a, b) => a - b)
@@ -40,23 +42,39 @@ function niceStep(span: number): number {
  * period and value under the pointer. The SVG stretches to its box; dots and labels are HTML, so
  * they keep their shape at any width.
  */
-export function LineChart({ series, unit, better, mode, today, label }: {
+export function LineChart({ series, unit, better, mode, today, label, clamp = false }: {
   series: Series
   unit: MetricUnit
   better: 'higher' | 'lower'
   mode: PeriodMode
   today: string | null
   label: string
+  /** Pin far values to the edge: valuation ratios only (L38 D3). An amount's fast growth is its real shape. */
+  clamp?: boolean
 }) {
   const [hover, setHover] = useState<number | null>(null)
-  if (series.length === 0) return <p className="py-10 text-center text-sm text-ink-3">Sin datos en este período.</p>
+  const axis = useRef<HTMLDivElement>(null)
+  // The year row's width, so its labels never overlap (L38 D4); 0 until measured.
+  const [width, setWidth] = useState(0)
+  const drawn = series.length > 0
+  useLayoutEffect(() => {
+    const box = axis.current
+    if (!box) return
+    setWidth(box.clientWidth)
+    if (typeof ResizeObserver === 'undefined') return
+    const watch = new ResizeObserver(() => setWidth(box.clientWidth))
+    watch.observe(box)
+    return () => watch.disconnect()
+  }, [drawn])
+  if (!drawn) return <p className="py-10 text-center text-sm text-ink-3">Sin datos en este período.</p>
 
   const fmt = (v: number) => formatMetric(v, unit)
   const name = (end: string) => periodLabel(end, mode, today)
   const times = series.map((p) => Date.parse(p.end))
   const t0 = times[0]
   const span = times[times.length - 1] - t0 || 1
-  const [low, high] = shownRange(series.map((p) => p.value))
+  const values = series.map((p) => p.value)
+  const [low, high] = clamp ? shownRange(values) : [Math.min(...values), Math.max(...values)]
   const pad = (high - low) * 0.12 || Math.abs(high) * 0.12 || 1
   const lo = low - pad
   const hi = high + pad
@@ -77,7 +95,10 @@ export function LineChart({ series, unit, better, mode, today, label }: {
   const step = niceStep(hi - lo)
   const ticks = Array.from({ length: Math.floor(hi / step) - Math.ceil(lo / step) + 1 }, (_, k) => (Math.ceil(lo / step) + k) * step)
   const firstYear = new Date(t0).getUTCFullYear() + 1
-  const years = Array.from({ length: new Date(t0 + span).getUTCFullYear() - firstYear + 1 }, (_, k) => firstYear + k)
+  const allYears = Array.from({ length: new Date(t0 + span).getUTCFullYear() - firstYear + 1 }, (_, k) => firstYear + k)
+  // Every 1, 2, 5 or 10 years, the first that leaves YEAR_PX per label; all while unmeasured.
+  const every = [1, 2, 5].find((k) => !width || (width * k) / allYears.length >= YEAR_PX) ?? 10
+  const years = allYears.filter((yr) => yr % every === 0)
   const dec = [0, 1, 2].find((d) => Math.abs(Math.round(step * 10 ** d) - step * 10 ** d) < 1e-9) ?? 2
   // Axis labels are short: millions without "US$ … M" (the header carries the unit), percent with "%".
   const tick = (t: number) =>
@@ -146,7 +167,7 @@ export function LineChart({ series, unit, better, mode, today, label }: {
           </span>
         )}
       </div>
-      <div aria-hidden="true" className="relative mt-1 h-4 font-mono text-[11px] text-ink-3">
+      <div ref={axis} data-slot="years" aria-hidden="true" className="relative mt-1 h-4 font-mono text-[11px] text-ink-3">
         {years.map((yr) => {
           const at = ((Date.UTC(yr, 0, 1) - t0) / span) * 100
           return <span key={yr} className="absolute -translate-x-1/2" style={{ left: `${at}%` }}>{yr}</span>

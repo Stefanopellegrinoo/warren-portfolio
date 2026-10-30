@@ -44,6 +44,20 @@ const LINES = {
   operatingCashFlow: 'operatingCashFlow',
   capitalExpenditure: 'capitalExpenditure',
   freeCashFlow: 'freeCashFlow',
+  // Balances completos only (T11): the statements' usual lines. Outflows come negative.
+  researchAndDevelopment: 'researchAndDevelopment',
+  sellingGeneralAndAdministration: 'sellingGeneralAndAdministration',
+  interestExpense: 'interestExpense',
+  pretaxIncome: 'pretaxIncome',
+  taxProvision: 'taxProvision',
+  accountsReceivable: 'accountsReceivable',
+  netPPE: 'netPPE',
+  goodwill: 'goodwill',
+  accountsPayable: 'accountsPayable',
+  investingCashFlow: 'investingCashFlow',
+  financingCashFlow: 'financingCashFlow',
+  repurchaseOfCapitalStock: 'repurchaseOfCapitalStock',
+  cashDividendsPaid: 'cashDividendsPaid',
 } as const
 
 export type YahooLine = keyof typeof LINES

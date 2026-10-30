@@ -20,6 +20,8 @@ import {
   type TvHistory, type TvSnapshot,
 } from './tradingview'
 import { fetchYahooProfile, fetchYahooStatements, type AssetKind, type YahooProfile, type YahooStatements } from './yahoo'
+import { fetchSecStatements, fetchSecTickers, secSeries, secUserAgent, type SecStatements } from './sec'
+import { toStatements, type AssetStatements } from './statements'
 import type { AssetRef, Market } from './types'
 import { parseTicker } from './ticker'
 
@@ -100,12 +102,16 @@ const FRESH = {
   snap: 15 * MINUTE, tvh: DAY, yahoo: DAY, fx: DAY, peers: DAY, tvsym: 7 * DAY, byma: 7 * DAY, news: 30 * MINUTE, profile: 6 * HOUR,
   // A coin's profile carries its quote, which moves around the clock: as fresh as a listing's snapshot.
   crypto: 15 * MINUTE,
+  // The SEC's statements change quarterly; its ticker → CIK map (~155 KB, one key) changes with new listings.
+  sec: DAY, secmap: 7 * DAY,
 }
 type Kind = keyof typeof FRESH
 /** One key per copy, fresh or last good: Redis runs noeviction, so this is every key's TTL. */
 const KEY_TTL = 7 * DAY
 /** A ?vs= peer is a user's pick, not TradingView's: its copies keep one day of last good past the 24 h fresh, not six. */
 const PEER_TTL = 2 * DAY
+/** The SEC's ticker map is one key read only on a SEC miss: it keeps its last good copy past its week. */
+const SECMAP_TTL = 30 * DAY
 /** After a failed refresh, views serve the last good copy without asking that source again for this long. */
 const FAILED_TTL = 5 * MINUTE
 /**
@@ -132,6 +138,9 @@ const DEFAULTS = {
   fetchYahooProfile,
   fetchUsdRates,
   getBars,
+  secUserAgent,
+  fetchSecTickers,
+  fetchSecStatements,
   cache: { get: getCachedRoute, set: cacheRoute } as {
     get: <T>(key: string) => Promise<T | null>
     set: (key: string, value: unknown, ttlSeconds: number) => Promise<void>
@@ -297,15 +306,122 @@ function earliestEnd(tv: TvHistory | null, yahoo: YahooStatements | null): strin
     .sort()[0]
 }
 
-export async function getAssetPage(rawTicker: string, rawVs: string[] | null = null, deps: AssetDeps = {}): Promise<AssetPage> {
-  const d: Deps = { ...DEFAULTS, ...deps }
+interface Located {
+  asked: AssetRef
+  askedSnap: Got<TvSnapshot>
+  own: Got<AssetProfile>
+  kind: AssetKind
+  /** The listing Números reads: the asked one, or an Argentine ADR's BYMA one. */
+  listing: AssetRef
+  snap: Got<TvSnapshot>
+}
+
+/**
+ * The asked listing, its quote and profile, and the listing Números reads, through the same keys for the page and
+ * its statements. Outside america/argentina it answers the status alone: ok when unsupported, else error.
+ */
+async function locate(ticker: string, d: Deps): Promise<Located | SourceStatus> {
+  const asked = await refFor(ticker, d)
+  if (!asked.value) return asked.status === 'ok' ? 'ok' : 'error'
+  const ref = asked.value
+  // The profile alongside the first snapshot: its kind decides what else to read.
+  const [firstSnap, profile] = await Promise.all([
+    tvEach('snap', [ref], d.fetchTvSnapshots, d),
+    cachedEach('profile', [ref.yahooSymbol], profileOf(d), d),
+  ])
+  const askedSnap = firstSnap.get(ref.tvSymbol)!
+  const own = profile.get(ref.yahooSymbol)!
+  // Without its profile, TradingView's own type still tells a fund.
+  const kind = own.value?.kind ?? (askedSnap.value?.type === 'fund' ? 'etf' : 'company')
+  let listing = ref
+  let snap = askedSnap
+  // An Argentine ADR (GGAL, YPF…) reads its BYMA listing: ARS price over ARS statements, amounts in CCL (S7). A fund has none.
+  const { country, logoid } = askedSnap.value ?? {}
+  if (kind !== 'etf' && ref.market === 'america' && country === 'Argentina' && logoid) {
+    const byma = (await cachedEach('byma', [logoid], eachOf('byma', (l) => d.findBymaListing(l)), d)).get(logoid)!
+    if (byma.value) {
+      listing = refOf(byma.value, 'argentina')
+      snap = (await tvEach('snap', [listing], d.fetchTvSnapshots, d)).get(listing.tvSymbol)!
+    }
+  }
+  return { asked: ref, askedSnap, own, kind, listing, snap }
+}
+
+/** Month-end rates per dollar for each currency, through the `fx` copies. */
+async function ratesOf(currencies: string[], d: Deps) {
+  const today = d.today()
+  const fxFrom = `${Number(today.slice(0, 4)) - FX_YEARS}${today.slice(4)}`
+  const fx = await cachedEach('fx', [...new Set(currencies)], eachOf('fx', async (c) => monthEnds(await d.fetchUsdRates(c, fxFrom))), d)
+  const rates = new Map([...fx].flatMap(([c, g]) => (g.value ? [[c, new Map(g.value)] as const] : [])))
+  return { fx, rates }
+}
+
+const foreign = (...currencies: (string | null | undefined)[]) => currencies.filter((c): c is string => !!c && c !== 'USD' && CURRENCY.test(c))
+
+/** Validates and resolves a ticker as both routes do: `invalid` before any lookup, `not_found` when no such instrument. */
+async function identify(rawTicker: string, rawVs: string[] | null, d: Deps) {
   const ticker = parseTicker(rawTicker)
   const vs = rawVs?.map(parseTicker)
   if (!ticker || vs?.includes(null)) throw new AssetError('invalid')
-
   const id = await d.resolveIdentity(ticker)
   if (!id.found) throw new AssetError('not_found')
-  const { name, exchange, price } = id.identity
+  return { ticker, vs: vs as string[] | undefined, identity: id.identity }
+}
+
+const NO_STATEMENTS: AssetStatements = { yahoo: null, tradingview: null, sources: {} }
+
+/**
+ * A US listing's SEC statements (T12), by its Yahoo symbol (the SEC's own form, BRK-B). The ticker map is read
+ * only here, on a miss. A 20-F filer's null is kept too ({ facts: null }), so its ~4 MB is not asked again daily.
+ */
+const secOf = (d: Deps, userAgent: string) =>
+  eachOf('sec', async (symbol): Promise<{ facts: SecStatements | null }> => {
+    const map = (await cachedEach('secmap', ['tickers'], eachOf('secmap', () => d.fetchSecTickers(userAgent)), d, () => SECMAP_TTL)).get('tickers')!
+    if (!map.value) throw new Error('no SEC ticker map')
+    const cik = map.value[symbol]
+    return { facts: cik ? await d.fetchSecStatements(cik, userAgent) : null }
+  })
+
+/**
+ * Balances completos (T11, S8): the statements of the listing Números reads, in USD at each period end. Reads
+ * the page's own copies (keys, fresh windows, memory guard, failure marks), so right after the page it asks no
+ * source; cold, it asks only this listing's history, statements and rates.
+ */
+export async function getAssetStatements(rawTicker: string, deps: AssetDeps = {}): Promise<AssetStatements> {
+  const d: Deps = { ...DEFAULTS, ...deps }
+  const { ticker, identity } = await identify(rawTicker, null, d)
+  if (identity.exchange === CRYPTO_EXCHANGE) return NO_STATEMENTS
+  const at = await locate(ticker, d)
+  if (typeof at === 'string') return at === 'ok' ? NO_STATEMENTS : { ...NO_STATEMENTS, sources: { tradingview: 'error' } }
+  if (at.kind === 'etf') return NO_STATEMENTS
+  const { listing } = at
+  // Only US listings file with the SEC; without SEC_USER_AGENT it is never asked, and the payload is as before.
+  const userAgent = listing.market === 'america' ? d.secUserAgent() : null
+  const [histories, statements, secs] = await Promise.all([
+    tvEach('tvh', [listing], d.fetchTvHistory, d),
+    cachedEach('yahoo', [listing.yahooSymbol], eachOf('yahoo', (s) => d.fetchYahooStatements(s)), d),
+    // Alongside the rest when cold; warm, one Redis read. A failure or timeout leaves only the SEC rows out.
+    userAgent ? cachedEach('sec', [listing.yahooSymbol], secOf(d, userAgent), d) : null,
+  ])
+  const tv = histories.get(listing.tvSymbol)!
+  const yahoo = statements.get(listing.yahooSymbol)!
+  const sec = secs?.get(listing.yahooSymbol)
+  const facts = sec?.value?.facts
+  const currencies = foreign(tv.value?.currency, yahoo.value?.currency)
+  const { fx, rates } = await ratesOf(currencies, d)
+  return {
+    ...toStatements(tv.value, yahoo.value, rates, sec && (facts ? secSeries(facts) : null)),
+    sources: {
+      tradingview: tv.status, yahoo: yahoo.status, fx: worst(...currencies.map((c) => fx.get(c)!.status)), ...(sec && { sec: sec.status }),
+    },
+  }
+}
+
+export async function getAssetPage(rawTicker: string, rawVs: string[] | null = null, deps: AssetDeps = {}): Promise<AssetPage> {
+  const d: Deps = { ...DEFAULTS, ...deps }
+  const { ticker, vs, identity } = await identify(rawTicker, rawVs, d)
+
+  const { name, exchange, price } = identity
   const page: AssetPage = {
     ticker, name, exchange: shortExchange(exchange), price, currency: null, dayChange: null, supported: true, listing: null, bymaListing: false,
     listingCurrency: null, metrics: null, peers: [], sources: {}, profile: null,
@@ -313,7 +429,7 @@ export async function getAssetPage(rawTicker: string, rawVs: string[] | null = n
 
   // A coin (T10): outside TradingView's markets; its profile is its page, quote included.
   if (exchange === CRYPTO_EXCHANGE) {
-    const sym = id.identity.yahooSymbol
+    const sym = identity.yahooSymbol
     const { value: p, status } = (await cachedEach('crypto', [sym], profileOf(d), d)).get(sym)!
     return {
       ...page, kind: p?.kind ?? 'crypto', supported: false, price: p?.regularMarketPrice ?? price, currency: p?.currency ?? null,
@@ -322,48 +438,28 @@ export async function getAssetPage(rawTicker: string, rawVs: string[] | null = n
     }
   }
 
-  const asked = await refFor(ticker, d)
-  if (!asked.value) return asked.status === 'ok' ? { ...page, supported: false } : { ...page, sources: { tradingview: 'error' } }
-
-  let listing = asked.value
-  const askedYahoo = listing.yahooSymbol
-  // The profile alongside the first snapshot: its kind decides what else to read.
-  const [firstSnap, profile] = await Promise.all([
-    tvEach('snap', [listing], d.fetchTvSnapshots, d),
-    cachedEach('profile', [askedYahoo], profileOf(d), d),
-  ])
-  let snap = firstSnap.get(listing.tvSymbol)!
-  const { value: own, status: profileStatus } = profile.get(askedYahoo)!
+  const at = await locate(ticker, d)
+  if (typeof at === 'string') return at === 'ok' ? { ...page, supported: false } : { ...page, sources: { tradingview: 'error' } }
+  const { asked, askedSnap, own: { value: own, status: profileStatus }, kind, listing, snap } = at
   // A stale copy's change is not today's. Copies cached before T5b have no change fields.
-  const { close, currency = null, changePct, changeAbs, type } = snap.value ?? {}
+  const { close, currency = null, changePct, changeAbs } = askedSnap.value ?? {}
   const quote = {
     price: close ?? price,
     currency,
-    dayChange: snap.status === 'ok' && changePct != null && changeAbs != null ? { abs: changeAbs, pct: changePct / 100 } : null,
+    dayChange: askedSnap.status === 'ok' && changePct != null && changeAbs != null ? { abs: changeAbs, pct: changePct / 100 } : null,
   }
-  // Without its profile, TradingView's own type still tells a fund.
-  const kind = own?.kind ?? (type === 'fund' ? 'etf' : 'company')
-  const askedExchange = listing.tvSymbol.slice(0, listing.tvSymbol.indexOf(':'))
+  const askedExchange = asked.tvSymbol.slice(0, asked.tvSymbol.indexOf(':'))
   // An ETF has no statements: its fund is in the profile; no Números, peers or rates (T10).
   if (kind === 'etf') {
     return {
       ...page, ...quote, kind, exchange: askedExchange, listing, listingCurrency: currency,
-      sources: { tradingview: snap.status, yahoo: profileStatus }, profile: own,
-    }
-  }
-  // An Argentine ADR (GGAL, YPF…) reads its BYMA listing: ARS price over ARS statements, amounts in CCL (S7).
-  const { country, logoid } = snap.value ?? {}
-  if (listing.market === 'america' && country === 'Argentina' && logoid) {
-    const byma = (await cachedEach('byma', [logoid], eachOf('byma', (l) => d.findBymaListing(l)), d)).get(logoid)!
-    if (byma.value) {
-      listing = refOf(byma.value, 'argentina')
-      snap = (await tvEach('snap', [listing], d.fetchTvSnapshots, d)).get(listing.tvSymbol)!
+      sources: { tradingview: askedSnap.status, yahoo: profileStatus }, profile: own,
     }
   }
 
   let peerStatus: SourceStatus = 'ok'
   let peerRefs: AssetRef[]
-  if (vs) peerRefs = await vsPeers(vs as string[], ticker, listing, d)
+  if (vs) peerRefs = await vsPeers(vs, ticker, listing, d)
   else {
     const got = (await cachedEach('peers', [listing.tvSymbol], eachOf('peers', (s) => d.fetchTvPeers(s, listing.market)), d)).get(listing.tvSymbol)!
     peerStatus = got.status
@@ -385,18 +481,10 @@ export async function getAssetPage(rawTicker: string, rawVs: string[] | null = n
     tv: histories.get(ref.tvSymbol)?.value ?? null,
     yahoo: statements.get(ref.yahooSymbol)?.value ?? null,
   }))
-  const currenciesOf = (i: (typeof inputs)[number]) =>
-    [i.snap?.currency, i.tv?.currency, i.yahoo?.currency].filter((c): c is string => !!c && c !== 'USD' && CURRENCY.test(c))
+  const currenciesOf = (i: (typeof inputs)[number]) => foreign(i.snap?.currency, i.tv?.currency, i.yahoo?.currency)
 
   const today = d.today()
-  const fxFrom = `${Number(today.slice(0, 4)) - FX_YEARS}${today.slice(4)}`
-  const fx = await cachedEach(
-    'fx',
-    [...new Set(inputs.flatMap(currenciesOf))],
-    eachOf('fx', async (c) => monthEnds(await d.fetchUsdRates(c, fxFrom))),
-    d,
-  )
-  const rates = new Map([...fx].flatMap(([c, g]) => (g.value ? [[c, new Map(g.value)] as const] : [])))
+  const { fx, rates } = await ratesOf(inputs.flatMap(currenciesOf), d)
 
   const [self, ...others] = inputs
   const from = earliestEnd(self.tv, self.yahoo)
@@ -416,7 +504,7 @@ export async function getAssetPage(rawTicker: string, rawVs: string[] | null = n
     kind,
     exchange: askedExchange,
     listing,
-    bymaListing: listing !== asked.value,
+    bymaListing: listing !== asked,
     listingCurrency: snap.value?.currency ?? null,
     // Números' target is Resumen's, analysts included (S5): the asked listing's, in its quote's currency.
     metrics: run(self, (date) => closeOnOrBefore(bars, date), own?.numberOfAnalystOpinions ? own.targetMeanPrice : null),

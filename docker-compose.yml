@@ -44,6 +44,9 @@ services:
       - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
       - VAPID_SUBJECT=${VAPID_SUBJECT}
+      # SEC history in Balances completos (odd/tasks/asset-page.md T12): "App Name contact@domain".
+      # Empty or unset keeps the SEC off; the page works the same without it.
+      - SEC_USER_AGENT=${SEC_USER_AGENT:-}
       - PORT=3000
     healthcheck:
       # 127.0.0.1, not localhost: inside the container localhost resolves to ::1 only,

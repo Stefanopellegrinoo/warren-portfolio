@@ -41,8 +41,8 @@ Routes: the parent session is past the ~150k context backstop, so implementation
 - [x] T8 · S10 · delegated · Noticias · 34 tests (RED first, 6 mutations caught); live MELI/GGAL/TSM/YPFD ok (L28)
 - [x] T9 · S11 · delegated · Resumen + tab wiring · 3535 tests green; browser 4 tickers × 4 tabs × 6 widths × 2 themes (L30)
 - [x] T10 · S1 · delegated · ETFs, crypto, ON redirect, unsupported markets, target consistency · 3564 tests green; browser 4 × 4 widths × 2 themes (L31)
-- [ ] T11 · S8 · delegated · Balances completos (Yahoo + TradingView rows)
-- [ ] T12 · S8 · delegated · SEC source for Balances completos (US 10-Q filers)
+- [x] T11 · S8 · delegated · Balances completos (Yahoo + TradingView rows) · 40 tests (RED first, 9 mutations); browser 3 tickers × 4 widths × 2 themes × 6 views (L36)
+- [x] T12 · S8 · delegated · SEC source for Balances completos (US 10-Q filers) + EPS in US$ · 41 tests (RED first, 8 mutations); live MELI/NVDA/TSM (L37)
 
 ## Log
 
@@ -283,3 +283,71 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   - Fix: fixed Spanish month names, `MONTHS` exported from explain.ts, built from the Argentine date string, instead of `Intl` short months.
   - A local RED on Node 22 was not possible: downloading node@22 via npx was denied. The CI diff is the evidence.
   - Long month names (Resumen dates) are stable across ICU versions and passed in CI.
+- L35 (2026-10-30) Stage 2 delivered.
+  - The branch CI first failed on an ICU month name (L34); after the fix it was green.
+  - PR #50 was squash-merged as 0f2a61c. The master deploy succeeded.
+  - Production checks:
+    - `/api/health` ok;
+    - signed-out `/activo/SPY` → 307 to login;
+    - `/api/asset/MELI` and `/api/asset/MELI/news` → 401.
+  - Stage 3 (T11–T12) continues on `feat/asset-page-stage3`.
+  - Pending with the user: the iPhone test, and whether to unify the two searches.
+- L36 (2026-10-30) T11 done.
+  - **New code:**
+    - `statements.ts`, with 37 rows, Spanish labels and "?" copy;
+    - `GET /api/asset/[ticker]/statements` (auth, 60/min), reusing the page's cached sources: 0 upstream calls on a warm cache, 13–28 KB;
+    - `Balances.tsx`, opened from "Ver balances completos" in Números (`?vista=balances`).
+  - **Shared code:**
+    - metrics.ts exports the single USD normalization (`inUsd`, `ratesReader`, `tvBook`, `yahooBook`);
+    - service.ts extracts `locate`, `ratesOf` and `identify`, shared by the page and the statements;
+    - 13 more Yahoo lines.
+  - **Row sources:** in the 8-year range, TradingView's eight lines come from TradingView for every column; the other rows stay Yahoo with "desde <año>".
+  - **Fixed in the browser check:** sr-only spans escaped the scroll box, so the box is now `relative`.
+  - **Follow-up (mine), folded into T12:** a USD quarter inside a peso series leaves the EPS row in mixed currencies. Statement EPS (per ordinary share) is converted to USD at each period end through the same `inUsd`, like amounts, and labeled "US$ por acción".
+- L37 (2026-10-30) T12 done.
+  - **sec.ts.** Maps ticker → CIK, cached as `fund:v1:secmap:tickers`. Normalizes companyfacts to compact USD series, cached as `fund:v1:sec:<sym>` (20–29 KB), 24 h fresh, through `cachedEach`.
+    - One us-gaap concept per company per line, chosen from a definition-ordered list. Not by period count: MELI's contract revenue leaves out fintech income.
+    - Quarters come from same-start YTD differences (Q4 = FY − 9M). Only 10-K and 10-Q facts are used.
+    - 20-F and IFRS filers → null.
+    - EPS and share counts are never read from the SEC (pre-split mix).
+  - **Table.** SEC rows win across all columns; "Todo" appears when SEC rows exist; the note names the source.
+  - **EPS fix (L36).** "Ganancia por acción (US$)" goes through `inUsd`.
+  - **Config.** SEC is gated on env `SEC_USER_AGENT` (absent → no request). Documented in the README.
+  - **Live.**
+    - MELI and NVDA quarters back to 2008/09; revenue Q1–Q4 sum to the year (MELI 2025: 28.893 M; NVDA FY2026: 215.938 M). Restatements make MELI 2022 differ.
+    - TSM → null.
+    - Warm loader: 2 ms.
+  - **Risk item 5.** The env var must be passed through `docker-compose.yml` (own commit). The production `.env` value is the user's decision.
+- L38 (2026-10-30) Verification of stage 3.
+  - **Compose verifier (e5336f7): PASS.** Docker Compose config renders `SEC_USER_AGENT: ""` when the variable is unset; nothing else changes; the worker never imports fundamentals.
+  - **SEC UI check** (live MELI, NVDA, GGAL; 4 widths × 2 themes): layout passes. No page scroll; the sticky column holds; "Todo" only appears with SEC; the note, EPS label and ▲▼ are right; row → chart works; 0 console errors.
+  - **Defects found:**
+    - D1: SEC keeps fiscal period ends (NVDA 2021-05-02), so one quarter splits into two columns and is mislabeled.
+    - D2: "SEC wins" even when its row is shorter or has holes. MELI Ventas loses 2019–2020; FCF starts in 2024 instead of 2018.
+    - D3: LineChart's IQR outlier rule pins the fast growth of amounts to the edge (NVDA Ventas in Todo: 12 of 73 points).
+    - D4: chart year labels overlap at 390.
+    - D5: missing periods vanish with no marker.
+    - Advisory: in 8 años and Todo, the label column squeezes and wraps at 1440.
+  - **Decisions (mine), fixed as T12b:**
+    - (1) Snap SEC period ends to the nearest month end, as TradingView does (day ≤ 7 → the previous month's end).
+    - (2) Per row and range, the source is the one with the longest contiguous run ending at the latest period. Ties go to the SEC. Still one source per row.
+    - (3) Outlier clamping only for valuation ratios (unit ratio), never for amounts, balances or flows.
+    - (4) Thin the year labels to fit the width.
+    - (5) Mark gaps of more than one period with a thin "…" column.
+    - (6) Give the label column a minimum width on desktop.
+- L39 (2026-10-30) T12b done; 3,656 tests pass.
+  - **D1.** SEC ends snap to month ends after period lengths are computed. NVDA feb–abr 2021 now fills.
+  - **D2.** The per-row source is the longest unbroken run ending at the latest period (ties: SEC, TradingView, Yahoo). MELI Ventas 8 años 32/32; FCF back to 2018.
+    - Consequence: in Todo, MELI and NVDA Ventas come from TradingView (2018→), because both SEC revenue rows have a hole (MELI 2019–20, NVDA FY2019).
+  - **D3.** LineChart `clamp` only for unit ratio. Amounts are never pinned; P/E still is.
+  - **D4.** Year labels are thinned to 36 px each.
+  - **D5.** "…" gap columns with "Sin datos entre …".
+  - **Label column.** ≥ 14rem on desktop.
+  - Browser re-check (MELI, NVDA, GGAL × 4 widths × 2 themes): no defects left.
+- L40 (2026-10-30) Stage-3 final check on cb7cb26:
+  - 3,656 tests pass (writer run); type-check and lint have 0 errors; `npm run build` OK.
+  - RDD assess 0f2a61c..HEAD: medium, under_budget, not due.
+  - The compose change (item 5) had its independent verifier pass (L38).
+  - Asked the user for the stage-3 merge OK.
+  - The SEC stays off in production until `SEC_USER_AGENT` is set in the server's .env (the user's decision).
+- L41 (2026-10-30) User: "ok" → stage 3: push, CI, PR, squash merge, deploy check.
