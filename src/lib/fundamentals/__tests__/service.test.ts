@@ -92,6 +92,7 @@ function fakes() {
       new Map(symbols.map((s) => [s, { bars: [{ date: '2020-01-02', close: 40 }], splits: [], splitsKnown: true, degraded: false, missing: false }])),
     ),
     cache: { get: cache.get, set: cache.set },
+    memoryShare: vi.fn(async (): Promise<number | null> => 0.1),
     today: () => TODAY,
     now: vi.fn(() => NOW),
   } satisfies AssetDeps
@@ -314,6 +315,77 @@ describe('getAssetPage: cache', () => {
     expect(page.sources).toEqual({ tradingview: 'ok', yahoo: 'stale', fx: 'ok' })
     expect(page.metrics!.roe).toEqual(first.metrics!.roe)
     expect(page.metrics!.roe.today).not.toBeNull()
+  })
+
+  it("a ?vs= peer's copies live two days, the listing's own seven", async () => {
+    const { deps, cache } = fakes()
+
+    await getAssetPage('MELI', ['AMZN', 'SE'], deps)
+
+    expect(Object.fromEntries(cache.writes.map((w) => [w.key, w.ttl / 86400]))).toEqual({
+      'fund:v1:tvsym:MELI': 7, 'fund:v1:snap:NASDAQ:MELI': 7, 'fund:v1:tvh:NASDAQ:MELI': 7, 'fund:v1:yahoo:MELI': 7,
+      'fund:v1:tvsym:AMZN': 2, 'fund:v1:tvsym:SE': 2,
+      'fund:v1:snap:NASDAQ:AMZN': 2, 'fund:v1:snap:NYSE:SE': 2,
+      'fund:v1:tvh:NASDAQ:AMZN': 2, 'fund:v1:tvh:NYSE:SE': 2,
+      'fund:v1:yahoo:AMZN': 2, 'fund:v1:yahoo:SE': 2,
+    })
+  })
+
+  it('at half of maxmemory or more writes no copy and still serves the same page', async () => {
+    const { deps: roomy } = fakes()
+    const expected = await getAssetPage('MELI', null, roomy)
+    const { deps, cache } = fakes()
+    deps.memoryShare.mockResolvedValue(0.5)
+
+    const page = await getAssetPage('MELI', null, deps)
+
+    expect(page).toEqual(expected)
+    expect(cache.set).not.toHaveBeenCalled()
+  })
+
+  it('below half, or when Redis cannot say, writes its copies', async () => {
+    for (const share of [0.49, null]) {
+      const { deps, cache } = fakes()
+      deps.memoryShare.mockResolvedValue(share)
+      await getAssetPage('MELI', null, deps)
+      expect(cache.writes).toHaveLength(11)
+    }
+  })
+
+  /** A first view, then a failed refresh of every company's statements past their 24 h. */
+  async function failedRefresh() {
+    const { deps, cache } = fakes()
+    const first = await getAssetPage('MELI', null, deps)
+    deps.now.mockReturnValue(NOW + 25 * HOUR_MS)
+    deps.fetchYahooStatements.mockRejectedValue(new Error('HTTP 503'))
+    await getAssetPage('MELI', null, deps)
+    return { deps, cache, first, calls: deps.fetchYahooStatements.mock.calls.length }
+  }
+  const marks = (writes: { key: string; ttl: number }[]) =>
+    writes.filter((w) => w.key.startsWith('fund:v1:failed:')).map(({ key, ttl }) => [key, ttl]).sort()
+
+  it('a failed refresh marks each failed copy for 5 minutes, and meanwhile views serve it stale without asking', async () => {
+    const { deps, cache, first, calls } = await failedRefresh()
+    expect(marks(cache.writes)).toEqual([
+      ['fund:v1:failed:yahoo:AMZN', 300], ['fund:v1:failed:yahoo:MELI', 300], ['fund:v1:failed:yahoo:SE', 300],
+    ])
+
+    const page = await getAssetPage('MELI', null, deps)
+
+    expect(deps.fetchYahooStatements).toHaveBeenCalledTimes(calls)
+    expect(page.sources).toEqual({ tradingview: 'ok', yahoo: 'stale', fx: 'ok' })
+    expect(page.metrics!.roe).toEqual(first.metrics!.roe)
+  })
+
+  it('once Redis drops the mark, the next view asks the source again', async () => {
+    const { deps, cache, calls } = await failedRefresh()
+    for (const [key] of marks(cache.writes)) cache.store.delete(key as string)
+    deps.fetchYahooStatements.mockResolvedValue(yahoo())
+
+    const page = await getAssetPage('MELI', null, deps)
+
+    expect(deps.fetchYahooStatements).toHaveBeenCalledTimes(calls + 3)
+    expect(page.sources.yahoo).toBe('ok')
   })
 
   it('without a last good copy, that source alone comes back null and is named', async () => {

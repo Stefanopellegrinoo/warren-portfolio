@@ -127,3 +127,16 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   - Quarterly per-share flows (catalog `periodFlow`) no longer get the hoy point. TTM and annual keep it, so S5 holds for TTM.
   - The UI workaround was removed. Tests pinning the old behavior were rewritten.
   - 117 tests pass in fundamentals + asset.
+- L19 (2026-10-30) Native review (RDD on, the user granted).
+  - The whole stage-1 candidate exceeded the native context budget (`lens_context_budget_exceeded`), so it was split into the two high-risk slices, reviewed in temporary worktrees:
+    - service + API, 12a66b4..5dbd7ba, lenses risk and resilience (lineage review-658ebef33404ef70);
+    - auth guard, 21c43aa..b745db6, lens risk (lineage review-9fad45d43c1ed8ba).
+  - Both were approved and acknowledged (`gentle-ai.review-acknowledged/v1`). The worktrees were removed.
+  - Non-blocking resilience advisories, fixed as T4b:
+    1. `?vs=` lets one user write about 360 tickers' keys per minute with a 7-day TTL into a noeviction Redis, with no global cap.
+    2. No failure marker: during an outage every view calls the failing upstream again for the company and up to 5 peers, then waits before serving stale.
+- L20 (2026-10-30) T4b fixes both review advisories, test-first (RED seen). 104 + 20 tests pass.
+  - **Memory guard.** `cachedEach`, the single write path for `fund:v1:` keys, skips writes when Redis `used_memory ÷ maxmemory ≥ 0.5`; the page is still served. The share comes from the new `redisMemoryShare()` in `redis.ts`, read via INFO at most every 10 s, null if unknown.
+  - **`?vs=` peers.** Their keys live 2 days instead of 7.
+  - **Failure marker.** `fund:v1:failed:<kind>:<id>`, TTL 300 s, is written after a failed refresh. While it exists, the stale copy is served with no upstream call.
+  - Outside scope: `resolveTickerIdentity` keeps its own 7-day keys (small).

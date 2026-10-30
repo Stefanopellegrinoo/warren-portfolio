@@ -7,7 +7,7 @@
  * sources' own answers about it), never from free text.
  */
 import { resolveTickerIdentity } from '../ticker-identity'
-import { cacheRoute, getCachedRoute } from '../redis'
+import { cacheRoute, getCachedRoute, redisMemoryShare } from '../redis'
 import { getBars } from '../bars-cache'
 import { closeOnOrBefore } from '../daily-bars'
 import { argentinaDate } from '../utils'
@@ -70,6 +70,16 @@ const FRESH = { snap: 15 * MINUTE, tvh: DAY, yahoo: DAY, fx: DAY, peers: DAY, tv
 type Kind = keyof typeof FRESH
 /** One key per copy, fresh or last good: Redis runs noeviction, so this is every key's TTL. */
 const KEY_TTL = 7 * DAY
+/** A ?vs= peer is a user's pick, not TradingView's: its copies keep one day of last good past the 24 h fresh, not six. */
+const PEER_TTL = 2 * DAY
+/** After a failed refresh, views serve the last good copy without asking that source again for this long. */
+const FAILED_TTL = 5 * MINUTE
+/**
+ * Copies are written only while Redis uses less than this share of its maxmemory; above it the page is
+ * served uncached. Redis also holds the alerts and the rate limiter, and noeviction fails every write once full.
+ * ponytail: a fixed share; set it from production's INFO memory if the rest of Redis ever sits near it.
+ */
+const MAX_MEMORY_SHARE = 0.5
 const MAX_PEERS = 5
 // TradingView keeps 20 fiscal years; the rates must reach the oldest one's end.
 const FX_YEARS = 21
@@ -91,6 +101,7 @@ const DEFAULTS = {
     get: <T>(key: string) => Promise<T | null>
     set: (key: string, value: unknown, ttlSeconds: number) => Promise<void>
   },
+  memoryShare: redisMemoryShare,
   today: () => argentinaDate(),
   now: () => Date.now(),
 }
@@ -114,20 +125,29 @@ interface Entry<T> {
 
 /**
  * Per id, the cached copy while fresh; the rest fetched in one call. An id the fetch fails or
- * leaves out gets its old copy as stale, else null as error. A null answer ("no such thing") is
- * returned as ok and never cached.
+ * leaves out gets its old copy as stale, else null as error, and a failure mark: until it expires
+ * that id is answered the same way without a fetch. A null answer ("no such thing") is returned
+ * as ok and never cached.
  */
 async function cachedEach<T>(
   kind: Kind,
   ids: string[],
   fetchMany: (ids: string[]) => Promise<Map<string, T | null>>,
   d: Deps,
+  ttl: (id: string) => number = () => KEY_TTL,
 ): Promise<Map<string, Got<T>>> {
   const key = (id: string) => `fund:v1:${kind}:${id}`
+  const failedKey = (id: string) => `fund:v1:failed:${kind}:${id}`
   const now = d.now()
   const stored = new Map(await Promise.all(ids.map(async (id) => [id, await d.cache.get<Entry<T>>(key(id))] as const)))
+  const lastGood = (id: string): Got<T> => {
+    const old = stored.get(id)
+    return old ? { value: old.value, status: 'stale' } : { value: null, status: 'error' }
+  }
   const out = new Map<string, Got<T>>()
   for (const [id, e] of stored) if (e && now - e.at < FRESH[kind] * 1000) out.set(id, { value: e.value, status: 'ok' })
+  const failed = await Promise.all(ids.filter((id) => !out.has(id)).map(async (id) => [id, await d.cache.get(failedKey(id))] as const))
+  for (const [id, mark] of failed) if (mark) out.set(id, lastGood(id))
   const missing = ids.filter((id) => !out.has(id))
   if (missing.length === 0) return out
 
@@ -135,12 +155,17 @@ async function cachedEach<T>(
     console.warn(`[asset] ${kind} ${missing.join(',')}:`, err instanceof Error ? err.message : err)
     return new Map<string, T | null>()
   })
+  const roomy = ((await d.memoryShare()) ?? 0) < MAX_MEMORY_SHARE
   for (const id of missing) {
     const value = got.get(id)
-    const old = stored.get(id)
-    if (value !== undefined) out.set(id, { value, status: 'ok' })
-    else out.set(id, old ? { value: old.value, status: 'stale' } : { value: null, status: 'error' })
-    if (value) await d.cache.set(key(id), { at: now, value }, KEY_TTL)
+    if (value === undefined) {
+      out.set(id, lastGood(id))
+      // Tiny and short-lived, so written even when Redis is not roomy: a failing source is not asked again meanwhile.
+      await d.cache.set(failedKey(id), 1, FAILED_TTL)
+    } else {
+      out.set(id, { value, status: 'ok' })
+      if (value && roomy) await d.cache.set(key(id), { at: now, value }, ttl(id))
+    }
   }
   return out
 }
@@ -166,11 +191,12 @@ async function tvEach<T>(
   refs: AssetRef[],
   fetch: (symbols: string[], market: Market) => Promise<Map<string, T>>,
   d: Deps,
+  ttl?: (id: string) => number,
 ): Promise<Map<string, Got<T>>> {
   const maps = await Promise.all(
     (['america', 'argentina'] as const).map((m) => {
       const symbols = [...new Set(refs.filter((r) => r.market === m).map((r) => r.tvSymbol))]
-      return symbols.length ? cachedEach(kind, symbols, (missing) => fetch(missing, m), d) : new Map<string, Got<T>>()
+      return symbols.length ? cachedEach(kind, symbols, (missing) => fetch(missing, m), d, ttl) : new Map<string, Got<T>>()
     }),
   )
   return new Map(maps.flatMap((m) => [...m]))
@@ -185,9 +211,9 @@ function refOf(tvSymbol: string, market: Market): AssetRef {
 }
 
 /** The listing of a valid ticker; value null with status ok means outside america/argentina. */
-async function refFor(ticker: string, d: Deps): Promise<Got<AssetRef>> {
+async function refFor(ticker: string, d: Deps, ttl = KEY_TTL): Promise<Got<AssetRef>> {
   if (ticker.startsWith('BCBA:')) return { value: refOf(ticker, 'argentina'), status: 'ok' }
-  const got = (await cachedEach('tvsym', [ticker], eachOf('tvsym', (t) => d.resolveTvSymbol(t, 'america')), d)).get(ticker)!
+  const got = (await cachedEach('tvsym', [ticker], eachOf('tvsym', (t) => d.resolveTvSymbol(t, 'america')), d, () => ttl)).get(ticker)!
   return { status: got.status, value: got.value ? refOf(got.value, 'america') : null }
 }
 
@@ -197,7 +223,7 @@ async function vsPeers(vs: string[], asked: string, listing: AssetRef, d: Deps):
   const refs = await Promise.all(
     picked.map(async (t) => {
       const id = await d.resolveIdentity(t).catch((err) => console.warn(`[asset] vs ${t}:`, err instanceof Error ? err.message : err))
-      return id?.found ? (await refFor(t, d)).value : null
+      return id?.found ? (await refFor(t, d, PEER_TTL)).value : null
     }),
   )
   return refs.filter((r): r is AssetRef => r !== null && r.tvSymbol !== listing.tvSymbol)
@@ -272,10 +298,12 @@ export async function getAssetPage(rawTicker: string, rawVs: string[] | null = n
   }
 
   const all = [listing, ...peerRefs]
+  const listingIds = [listing.tvSymbol, listing.yahooSymbol]
+  const ttl = (id: string) => (vs && !listingIds.includes(id) ? PEER_TTL : KEY_TTL)
   const [snaps, histories, statements] = await Promise.all([
-    tvEach('snap', peerRefs, d.fetchTvSnapshots, d),
-    tvEach('tvh', all, d.fetchTvHistory, d),
-    cachedEach('yahoo', [...new Set(all.map((r) => r.yahooSymbol))], eachOf('yahoo', (s) => d.fetchYahooStatements(s)), d),
+    tvEach('snap', peerRefs, d.fetchTvSnapshots, d, ttl),
+    tvEach('tvh', all, d.fetchTvHistory, d, ttl),
+    cachedEach('yahoo', [...new Set(all.map((r) => r.yahooSymbol))], eachOf('yahoo', (s) => d.fetchYahooStatements(s)), d, ttl),
   ])
   snaps.set(listing.tvSymbol, snap)
   const inputs = all.map((ref) => ({

@@ -148,6 +148,32 @@ export async function bumpAlertsVersion(): Promise<void> {
   }
 }
 
+const MEMORY_READ_MS = 10_000
+let memoryRead: { at: number; share: Promise<number | null> } | null = null
+
+/**
+ * used_memory ÷ maxmemory, from INFO at most every 10 s; null when Redis cannot say or has no maxmemory.
+ * Redis runs noeviction: a cache checks this before writing so it never fills the Redis that alerts and rate limits need.
+ */
+export function redisMemoryShare(): Promise<number | null> {
+  const now = Date.now()
+  if (!memoryRead || now - memoryRead.at >= MEMORY_READ_MS) memoryRead = { at: now, share: readMemoryShare() }
+  return memoryRead.share
+}
+
+async function readMemoryShare(): Promise<number | null> {
+  const redis = isRedisReady() ? redisClient : null
+  if (!redis) return null
+  try {
+    const info = await redis.info('memory')
+    const used = Number(/^used_memory:(\d+)/m.exec(info)?.[1])
+    const max = Number(/^maxmemory:(\d+)/m.exec(info)?.[1])
+    return max > 0 && Number.isFinite(used) ? used / max : null
+  } catch {
+    return null
+  }
+}
+
 /**
  * Get Redis connection options (for BullMQ).
  * Returns the URL string for BullMQ Queue/Worker connection.
