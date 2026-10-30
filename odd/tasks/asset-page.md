@@ -278,3 +278,4 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   - RDD assess 73ff07d..HEAD: medium, under_budget, not due.
   - Risk (mine): none. `parseTicker` accepting *USDT is an added input form, not a change to an existing one (item 3 excludes additions). The news route reuses requireUser + rateLimit unchanged.
   - Asked the user for the stage-2 merge OK.
+- L33 (2026-10-30) User: "si, mergeá todo a prod" → push, CI, PR, squash merge and deploy check for stage 2.
