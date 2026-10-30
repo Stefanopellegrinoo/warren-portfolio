@@ -30,7 +30,7 @@ Routes: the parent session is past the ~150k context backstop, so implementation
 - [x] T0 · S5 · inline · shared contract `src/lib/fundamentals/types.ts` (Series, Market, AssetRef)
 - [x] T1 · S4 S5 S6 S9 · delegated (parallel with T2) · TradingView source: today's catalog values, `_fq_h`/`_fy_h` history with period ends, peers by industry · 19 tests (RED first, 7 mutations caught)
 - [x] T2 · S4 S5 S7 · delegated (parallel with T1) · Yahoo source: normalized statements (quarterly/annual), profile, currency; FX at period ends (Yahoo FX for foreign, app CCL for ARS) · 18 tests (RED first); IAS 29 probe in L11
-- [ ] T3 · S3 S4 S5 S6 · delegated · pure metrics module: catalog definitions, today + history per metric, peers, group T/Y source rule
+- [x] T3 · S3 S4 S5 S6 · delegated · pure metrics module: catalog definitions, today + history per metric, peers, group T/Y source rule · 20 tests (RED first, 15 mutations caught) + ADR units fix inline (L12)
 - [ ] T4 · S1 S12 · delegated · service + API route: ticker validation and market check, Redis cache with TTLs and last-good fallback, rate limit, per-section errors
 - [ ] T5 · S1 · delegated · page shell `/activo/[ticker]`, header, tabs, shell search with `/`, links from every ticker
 - [ ] T6 · S2 S3 · delegated · Números UI (mobile + desktop), "?" copy, history panel, peers bars
@@ -67,3 +67,13 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   3. Share counts and EPS are never converted. Per-share values are USD amount ÷ listed units.
   4. Historical market cap = listing price at that date (USD) × listed units at that date. Listed units = ordinary shares then ÷ listing ratio, where listing ratio = ordinary shares now ÷ (market cap now ÷ price now).
   5. Added `'fx'` to `FundamentalsSource`.
+- L12 (2026-10-30) T3 done: catalog.ts (44 metrics in 7 sections) and metrics.ts (computeMetrics, changeVsYearAgo, bestPoint, peersMedian).
+  - MELI's 12 group-T values today match TradingView within 1e-4.
+  - Rotación de activos moved to group T: it needs only revenue and assets, which TradingView has. That gives it 8 years of history.
+  - EV = market cap + Yahoo totalDebt − cash and short-term investments.
+  - Returns use average balances, as TradingView does.
+
+  Parent spot check (live, NYSE:TSM): market_cap_basic ÷ close = 4.454e9, but total_shares_outstanding = 5.186e9. The market cap follows the Taiwan price, and the ADR trades about 16 % above it.
+  Fix, inline and test-first (RED seen): listed units now = TradingView's total_shares_outstanding (per listed unit), with market cap ÷ close only as a fallback; today's market cap = close × units.
+  - Two tests now read the fixture's share count.
+  - Per-share values no longer need a price.
