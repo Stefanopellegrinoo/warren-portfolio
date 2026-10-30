@@ -6,9 +6,11 @@ import { requestErrorMessage } from '@/lib/request-errors'
 import { apiData } from '@/components/ons/portfolios/api'
 import { Loading, LoadError } from '@/components/ons/ui'
 import type { AssetNews } from '@/lib/fundamentals/news'
+import { MONTHS } from '@/lib/fundamentals/explain'
 
 const DAY_MS = 86_400_000
-const dayMonth = new Intl.DateTimeFormat('es-AR', { day: 'numeric', month: 'short', timeZone: 'America/Argentina/Buenos_Aires' })
+/** "2026-10-12" → "12 oct", with fixed month names (ICU writes "sept" in some runtimes). */
+const dayMonth = (day: string) => `${Number(day.slice(8, 10))} ${MONTHS[Number(day.slice(5, 7)) - 1]}`
 const FAILED = { es: 'No pudimos traer las noticias en español.', en: 'No pudimos traer las noticias en inglés.' }
 const ALL_FAILED = 'No pudimos traer las noticias.'
 
@@ -20,7 +22,7 @@ function age(iso: string, now: Date): string {
   if (min < 24 * 60) return `hace ${Math.floor(min / 60)} h`
   const day = argentinaDate(t)
   if (day === argentinaDate(new Date(now.getTime() - DAY_MS))) return 'ayer'
-  return day.slice(0, 4) === argentinaDate(now).slice(0, 4) ? dayMonth.format(t) : `${dayMonth.format(t)} ${day.slice(0, 4)}`
+  return day.slice(0, 4) === argentinaDate(now).slice(0, 4) ? dayMonth(day) : `${dayMonth(day)} ${day.slice(0, 4)}`
 }
 
 /** The asset page's Noticias (odd/tasks/asset-page.md S10): one request to /api/asset/<ticker>/news, remembered in this tab. */

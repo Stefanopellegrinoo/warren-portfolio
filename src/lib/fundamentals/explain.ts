@@ -404,7 +404,8 @@ export function basisLabel(id: MetricId, asOf: string | null): string {
   return when ? `Al cierre de ${when}` : 'Al cierre del último balance'
 }
 
-const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+// Fixed, not Intl: ICU versions disagree ("sep" vs "sept"), so Node 22, Node 26 and browsers would differ.
+export const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
 
 /** A point's period: "abr–jun 2026" (the three months ending at `end`), "2025" in annual mode, "hoy". */
 export function periodLabel(end: string, mode: PeriodMode, today?: string | null): string {

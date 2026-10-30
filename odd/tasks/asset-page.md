@@ -279,3 +279,7 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   - Risk (mine): none. `parseTicker` accepting *USDT is an added input form, not a change to an existing one (item 3 excludes additions). The news route reuses requireUser + rateLimit unchanged.
   - Asked the user for the stage-2 merge OK.
 - L33 (2026-10-30) User: "si, mergeá todo a prod" → push, CI, PR, squash merge and deploy check for stage 2.
+- L34 (2026-10-30) The branch CI failed on NoticiasTab. The CI log shows Node 22's ICU writes "2 sept 2025" where Node 26 writes "2 sep 2025"; browsers vary too.
+  - Fix: fixed Spanish month names, `MONTHS` exported from explain.ts, built from the Argentine date string, instead of `Intl` short months.
+  - A local RED on Node 22 was not possible: downloading node@22 via npx was denied. The CI diff is the evidence.
+  - Long month names (Resumen dates) are stable across ICU versions and passed in CI.
