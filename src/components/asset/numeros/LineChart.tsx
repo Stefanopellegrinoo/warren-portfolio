@@ -110,7 +110,7 @@ export function LineChart({ series, unit, better, mode, today, label }: {
         className="relative h-44 touch-pan-y select-none lg:h-48"
       >
         {ticks.map((t) => (
-          <span key={t} aria-hidden="true" className="absolute -left-11 w-10 -translate-y-1/2 text-right font-mono text-[10px] text-ink-3" style={{ top: `${y(t)}%` }}>
+          <span key={t} aria-hidden="true" className="absolute -left-11 w-10 -translate-y-1/2 text-right font-mono text-[11px] text-ink-3" style={{ top: `${y(t)}%` }}>
             {tick(t)}
           </span>
         ))}
@@ -128,7 +128,7 @@ export function LineChart({ series, unit, better, mode, today, label }: {
             key={i}
             data-slot="clipped"
             aria-hidden="true"
-            className={`absolute -translate-x-1/2 text-[9px] leading-none text-accent-ink ${series[i].value > high ? '' : '-translate-y-full'}`}
+            className={`absolute -translate-x-1/2 text-[11px] leading-none text-accent-ink ${series[i].value > high ? '' : '-translate-y-full'}`}
             style={{ left: `${x(i)}%`, top: series[i].value > high ? '0%' : '100%' }}
           >
             {series[i].value > high ? '▲' : '▼'}
@@ -138,7 +138,7 @@ export function LineChart({ series, unit, better, mode, today, label }: {
         {dot(last, 'h-2.5 w-2.5 ring-2 ring-surface bg-accent')}
         {shown !== null && (
           <span
-            className="pointer-events-none absolute top-0 z-10 whitespace-nowrap rounded bg-ink px-2 py-1 text-[11px] leading-tight text-canvas"
+            className="pointer-events-none absolute top-0 z-10 whitespace-nowrap rounded bg-ink px-2 py-1 text-[13px] leading-tight text-canvas"
             style={{ left: `${x(shown)}%`, transform: `translateX(${x(shown) > 60 ? '-105%' : '5%'})` }}
           >
             {name(series[shown].end)}
@@ -146,7 +146,7 @@ export function LineChart({ series, unit, better, mode, today, label }: {
           </span>
         )}
       </div>
-      <div aria-hidden="true" className="relative mt-1 h-4 font-mono text-[10px] text-ink-3">
+      <div aria-hidden="true" className="relative mt-1 h-4 font-mono text-[11px] text-ink-3">
         {years.map((yr) => {
           const at = ((Date.UTC(yr, 0, 1) - t0) / span) * 100
           return <span key={yr} className="absolute -translate-x-1/2" style={{ left: `${at}%` }}>{yr}</span>

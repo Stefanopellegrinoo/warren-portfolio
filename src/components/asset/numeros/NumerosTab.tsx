@@ -15,6 +15,12 @@ const WIDE = '(min-width: 1024px)'
 /** The panel desktop opens on, as in the approved mockup; else the first row with history. */
 const FIRST: MetricId = 'netMargin'
 
+/**
+ * One column of sections at every width, as the phone reads them (odd/tasks/asset-page.md L24): the
+ * longest row needs about 400 px at 15 px, so two columns plus a 360 px panel never fit the page.
+ */
+const ORDER: readonly Section[] = ['Estadísticas clave', 'Valoración', 'Rentabilidad', 'Liquidez', 'Solvencia', 'Por acción (US$)', 'Analistas y riesgo']
+
 const hasHistory = (m: MetricValue) => PERIOD_MODES.some((k) => m.history[k].length > 0)
 const isMetricId = (v: string | null): v is MetricId => METRICS.some((d) => d.id === v)
 
@@ -72,16 +78,16 @@ export function NumerosTab({ page }: { page: AssetPage }) {
     setDato(null)
   }
 
-  const section = (s: Section, className?: string) => {
+  const section = (s: Section) => {
     const defs: readonly MetricDef[] = METRICS.filter((d) => d.section === s)
     return (
-      <section key={s} aria-labelledby={`numeros-${s}`} className={cn('rounded-lg border border-line bg-surface px-4 pb-1 pt-3', className)}>
-        <h3 id={`numeros-${s}`} className="text-[15px] font-semibold">{s}</h3>
-        <ul className={cn('mt-1', s === 'Por acción (US$)' && 'cq-wide:grid cq-wide:grid-cols-2 cq-wide:gap-x-6 cq-wide:[&>li:nth-child(2)]:border-t-0')}>
+      <section key={s} aria-labelledby={`numeros-${s}`} className="rounded-lg border border-line bg-surface px-4 pb-1 pt-4">
+        <h3 id={`numeros-${s}`} className="text-[17px] font-semibold leading-tight">{s}</h3>
+        <ul className={cn('mt-2', s === 'Por acción (US$)' && 'cq-wide:grid cq-wide:grid-cols-2 cq-wide:gap-x-6 cq-wide:[&>li:nth-child(2)]:border-t-0')}>
           {defs.map((d, i) => (
             <Fragment key={d.id}>
               {d.subsection && d.subsection !== defs[i - 1]?.subsection && (
-                <li className="border-t border-line pb-1 pt-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-3">{d.subsection}</li>
+                <li className="border-t border-line pb-1 pt-4 text-xs font-semibold uppercase tracking-[0.06em] text-ink-2">{d.subsection}</li>
               )}
               <Row page={page} def={d} name={name} currency={currency} selected={d.id === selected} onOpen={show} />
             </Fragment>
@@ -92,27 +98,16 @@ export function NumerosTab({ page }: { page: AssetPage }) {
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem] xl:grid-cols-[minmax(0,1fr)_26rem] 2xl:grid-cols-[minmax(0,1fr)_28rem] lg:items-start lg:gap-5">
-      <div className="min-w-0 [container-type:inline-size]">
-        <p className="mb-3 text-[13px] text-ink-3">
+    // The list stops at 40rem, so a value stays near its label; the panel takes the rest, never under 22.5rem.
+    <div className="grid gap-5 lg:grid-cols-[minmax(0,40rem)_minmax(22.5rem,1fr)] lg:items-start lg:gap-6">
+      <div className="min-w-0 max-w-[40rem] [container-type:inline-size]">
+        <p className="mb-4 max-w-prose text-sm leading-relaxed text-ink-2">
           Datos de hoy, montos en dólares{page.listing?.market === 'argentina' ? ' CCL' : ''}.{' '}
           <span className="lg:hidden">Tocá el &quot;?&quot; para ver qué significa cada uno, y el dato para ver su historia.</span>
           <span className="max-lg:hidden">Pasá el mouse por el &quot;?&quot; para ver qué significa; hacé click en cualquier dato para ver su historia a la derecha.</span>
           {stale && ' Algunos datos son de la última vez que pudimos traerlos.'}
         </p>
-        <div className="flex flex-col gap-4 cq-wide:grid cq-wide:grid-cols-2 cq-wide:items-start">
-          <div className="contents cq-wide:flex cq-wide:flex-col cq-wide:gap-4">
-            {section('Valoración')}
-            {section('Estadísticas clave', 'order-first cq-wide:order-none')}
-          </div>
-          <div className="contents cq-wide:flex cq-wide:flex-col cq-wide:gap-4">
-            {section('Rentabilidad')}
-            {section('Liquidez')}
-            {section('Solvencia')}
-            {section('Analistas y riesgo', 'order-last cq-wide:order-none')}
-          </div>
-          {section('Por acción (US$)', 'cq-wide:col-span-2')}
-        </div>
+        <div className="flex flex-col gap-6">{ORDER.map(section)}</div>
       </div>
       {selected && (
         <HistoryPanel
@@ -184,7 +179,7 @@ function Row({ page, def, name, currency, selected, onOpen }: {
 
   return (
     <li ref={item} className="relative border-t border-line first:border-t-0" onPointerLeave={(ev) => ev.pointerType === 'mouse' && setPeek(false)}>
-      <div className={cn('relative -mx-4 flex min-h-9 items-center gap-2 px-4 py-1.5 max-[819px]:min-h-11', history && 'hover:bg-hover', selected && 'lg:bg-accent-soft lg:shadow-[inset_3px_0_0_var(--accent)]')}>
+      <div className={cn('relative -mx-4 flex min-h-11 items-center gap-3 px-4 py-2', history && 'hover:bg-hover', selected && 'lg:bg-accent-soft lg:shadow-[inset_3px_0_0_var(--accent)]')}>
         {history && (
           <button
             type="button"
@@ -194,7 +189,7 @@ function Row({ page, def, name, currency, selected, onOpen }: {
             className="absolute inset-0 cursor-pointer focus-visible:outline-offset-[-2px]"
           />
         )}
-        <span className="min-w-0 flex-1 text-sm leading-snug">
+        <span className="min-w-0 flex-1 text-[15px] leading-snug">
           {label.slice(0, cut)}
           <span className="whitespace-nowrap">
             {label.slice(cut)}
@@ -209,25 +204,26 @@ function Row({ page, def, name, currency, selected, onOpen }: {
                 setPinned(!pinned)
               }}
               onPointerEnter={(ev) => ev.pointerType === 'mouse' && setPeek(true)}
-              className="relative z-10 ml-1.5 inline-grid h-4 w-4 place-items-center rounded-full bg-surface-2 align-[1px] font-mono text-[10px] font-semibold leading-none text-ink-3 before:absolute before:-inset-3 before:content-[''] hover:bg-hover hover:text-ink aria-expanded:bg-ink aria-expanded:text-canvas"
+              // 18 px drawn, 44 px to tap.
+              className="relative z-10 ml-1.5 inline-grid h-[18px] w-[18px] place-items-center rounded-full bg-surface-2 align-[1px] font-mono text-[11px] font-semibold leading-none text-ink-2 before:absolute before:-inset-[13px] before:content-[''] hover:bg-hover hover:text-ink aria-expanded:bg-ink aria-expanded:text-canvas"
             >
               ?
             </button>
           </span>
         </span>
-        <span className="shrink-0 font-mono text-sm font-medium">{value}</span>
+        <span className="shrink-0 font-mono text-[15px] font-medium">{value}</span>
         {history
           ? <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-3" aria-hidden="true" />
           : <span className="w-3.5 shrink-0" aria-hidden="true" />}
       </div>
       {open && (
-        <div id={tip} className="mb-2 rounded-md bg-ink p-3 text-[13px] leading-snug text-canvas shadow-pop lg:absolute lg:inset-x-0 lg:top-[calc(100%-4px)] lg:z-30">
+        <div id={tip} className="mb-2 max-w-prose rounded-md bg-ink p-3 text-[15px] leading-normal text-canvas shadow-pop lg:absolute lg:inset-x-0 lg:top-[calc(100%-4px)] lg:z-30">
           <p>
             <b>¿Qué es?</b> {e.what} {e.example ?? `${nullReason(id, page)}.`} <b>{e.read}</b>
           </p>
           {peers && <p className="mt-2 opacity-75">{peers}</p>}
           {history && (
-            <button type="button" onClick={() => { setPinned(false); setPeek(false); onOpen(id) }} className="mt-1.5 min-h-8 font-medium text-accent-soft underline-offset-2 hover:underline">
+            <button type="button" onClick={() => { setPinned(false); setPeek(false); onOpen(id) }} className="mt-1.5 min-h-8 font-medium text-accent-soft underline-offset-2 hover:underline max-[819px]:min-h-11">
               Ver su historia →
             </button>
           )}

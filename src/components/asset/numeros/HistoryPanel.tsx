@@ -83,20 +83,20 @@ export function HistoryPanel({ page, id, full, onBack, className }: {
       className={cn('rounded-lg border border-line bg-surface p-4 max-lg:rounded-none max-lg:border-0 lg:p-5', className)}
     >
       {full && (
-        <button ref={back} type="button" onClick={onBack} className="-ml-2 mb-2 inline-flex min-h-11 items-center gap-0.5 rounded-md px-2 text-sm font-medium text-accent-ink hover:underline lg:hidden">
+        <button ref={back} type="button" onClick={onBack} className="-ml-2 mb-2 inline-flex min-h-11 items-center gap-0.5 rounded-md px-2 text-[15px] font-medium text-accent-ink hover:underline lg:hidden">
           <ChevronLeft className="h-4 w-4" aria-hidden="true" />
           Números
         </button>
       )}
       <div className="lg:flex lg:items-start lg:justify-between lg:gap-4">
         <div className="min-w-0">
-          <h2 className="text-lg font-semibold leading-tight">{def.label}</h2>
-          <p className="mt-0.5 text-[13px] text-ink-3">{basisLabel(id, basis?.end ?? null)}</p>
+          <h2 className="text-xl font-semibold leading-tight">{def.label}</h2>
+          <p className="mt-1 text-sm text-ink-2">{basisLabel(id, basis?.end ?? null)}</p>
         </div>
         <div className="max-lg:mt-2 lg:shrink-0 lg:text-right">
           <p className="font-mono text-2xl font-semibold leading-tight">{formatMetric(m.today, def.unit)}</p>
           {change !== null && (
-            <p className={cn('font-mono text-xs font-medium', change < 0 ? 'text-danger' : change > 0 ? 'text-ok' : 'text-ink-3')}>
+            <p className={cn('mt-0.5 font-mono text-sm font-medium', change < 0 ? 'text-danger' : change > 0 ? 'text-ok' : 'text-ink-3')}>
               <span aria-hidden="true">{change < 0 ? '▼ ' : change > 0 ? '▲ ' : ''}</span>
               {change < 0 ? <span className="sr-only">bajó </span> : change > 0 ? <span className="sr-only">subió </span> : null}
               {formatNumber(Math.abs(change), { decimals: 1 })}
@@ -115,23 +115,24 @@ export function HistoryPanel({ page, id, full, onBack, className }: {
 
       <div className="mt-4">
         <LineChart key={`${id}-${shown}-${range}`} series={series} unit={def.unit} better={better} mode={shown} today={today} label={def.label} />
-        {since && <p className="mt-1 text-xs text-ink-3">Historia desde {since}.</p>}
+        {since && <p className="mt-1 text-sm text-ink-3">Historia desde {since}.</p>}
       </div>
 
-      <div className="mt-4 grid gap-3 min-[480px]:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-        <div className="rounded-md border border-line p-3 text-[13px] leading-relaxed text-ink-2">
+      {/* Side by side only where each still holds a comfortable line; never wider than about 65 characters. */}
+      <div className="mt-5 grid gap-3 md:grid-cols-2 lg:grid-cols-1">
+        <div className="max-w-prose rounded-md border border-line p-3 text-[15px] leading-relaxed text-ink-2">
           <b className="text-ink">¿Qué es?</b> {e.what} {e.read}
         </div>
-        <div className="rounded-md border border-line p-3 text-[13px] leading-relaxed text-ink-2">
+        <div className="max-w-prose rounded-md border border-line p-3 text-[15px] leading-relaxed text-ink-2">
           <b className="text-ink">¿Cómo viene?</b> {howItGoes(id, series, shown, today, m.asOf).join(' ')}
         </div>
       </div>
 
-      <h3 className="mt-5 text-[15px] font-semibold">Contra sus parecidas</h3>
+      <h3 className="mt-6 text-[17px] font-semibold">Contra sus parecidas</h3>
       {rows.length > 1 ? (
-        <ol className="mt-2 grid gap-1.5">
+        <ol className="mt-3 grid gap-2.5">
           {rows.map((r, i) => (
-            <li key={`${r.name}-${i}`} data-slot="peer-bar" data-self={r.self || undefined} className={cn('grid grid-cols-[minmax(0,7rem)_minmax(0,1fr)_auto] items-center gap-3 text-[13px]', r.self && 'font-semibold')}>
+            <li key={`${r.name}-${i}`} data-slot="peer-bar" data-self={r.self || undefined} className={cn('grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)_auto] items-center gap-3 text-[15px]', r.self && 'font-semibold')}>
               <span className="break-words leading-tight">{r.name}</span>
               <span aria-hidden="true" className="h-2 overflow-hidden rounded-full bg-surface-2">
                 <span
@@ -144,7 +145,7 @@ export function HistoryPanel({ page, id, full, onBack, className }: {
           ))}
         </ol>
       ) : (
-        <p className="mt-2 text-[13px] text-ink-3">Sin datos de sus parecidas para este número.</p>
+        <p className="mt-2 text-[15px] text-ink-2">Sin datos de sus parecidas para este número.</p>
       )}
     </section>
   )

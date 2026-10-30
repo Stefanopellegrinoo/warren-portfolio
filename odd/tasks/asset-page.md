@@ -34,7 +34,7 @@ Routes: the parent session is past the ~150k context backstop, so implementation
 - [x] T4 · S1 S12 · delegated · service + API route: ticker validation and market check, Redis cache with TTLs and last-good fallback, rate limit, per-section errors · 23 tests (RED first, 9 mutations caught), live smoke MELI/GGAL/TSM
 - [x] T5 · S1 · delegated · page shell `/activo/[ticker]`, header, tabs, shell search with `/`, links from every ticker · 112 tests in touched dirs, full suite 3397 green (6 mutations caught)
 - [x] T6 · S2 S3 · delegated · Números UI (mobile + desktop), "?" copy, history panel, peers bars · 23 new tests (RED first); browser at 11 widths light/dark, no horizontal scroll
-- [ ] T6e · S3 S12 · delegated · collapsed icon menu on /activo + layout and legibility pass at every width (L24)
+- [x] T6e · S3 S12 · delegated · collapsed icon menu on /activo + layout and legibility pass at every width (L24) · 3448 tests green; 0 wrapped labels 820–1920
 - [ ] T7 · S9 · delegated · Comparar tab
 - [ ] T8 · S10 · delegated · Noticias
 - [ ] T9 · S11 · delegated · Resumen
@@ -194,3 +194,18 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   1. **Reuse the Gráficos icon menu.** On /activo, from 820 px, the menu shows only its icons. Its » pin and the remembered preference are shared with Gráficos (`ICON_MENU`, `warren-menu-pinned` in AppShell).
   2. **Layout chosen by measured width.** Labels must not wrap into 2+ lines on desktop, and the list and the history panel must never feel cramped. Below a width where two list columns plus the panel fit with readable labels, use one list column beside the panel, or the full-screen history.
   3. **Legibility pass.** Body text ≥ 15 px on the list and the cards. Important text uses ink/ink-2, never ink-3. Explanations are at most about 65ch per line. Tap targets ≥ 44 px on phone. Comfortable row spacing.
+- L25 (2026-10-30) T6e done.
+  - **Menu.** `AppShell` takes an `iconMenu` prop; `/activo/layout` passes it. The menu is icon-only from 820 px with the shared » pin; Gráficos is unchanged.
+  - **List.** One column of sections at every width, in reading order: two columns cannot fit beside a 360 px panel within PAGE's 1,160 px.
+  - **Panel.** Beside the list from 1024 px (≥ 360 px wide, up to 496 px). Full screen below that.
+  - **Legibility.**
+    - Text: 15 px rows and cards, 17 px section headings, 44 px rows and tap targets, ink/ink-2 for text, explanations ≤ 65ch.
+    - Contrast: AA in light and dark (ink-2 ≥ 7.4:1).
+  - **Measured.**
+    - 0 wrapped labels at 820–1920 (before: 7 at 1024, 5 at 1440).
+    - No horizontal scroll at any of the 17 widths.
+
+  Open, minor:
+  - The panel scrolls inside itself on screens under about 1000 px tall.
+  - With the menu pinned open, 1024–1100 px cramps again.
+  - PAGE's max-width leaves margins at 1600 px and up.

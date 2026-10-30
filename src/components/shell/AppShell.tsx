@@ -31,7 +31,8 @@ const ShellMenu = createContext<{ open: boolean; openMenu: (from: HTMLElement) =
 export const useShellMenu = () => useContext(ShellMenu)
 
 // From 820 px Gráficos keeps only the menu's icons, named by tooltips (odd/tasks/chart-pro-redesign.md S4);
-// » pins the full menu open and this device remembers it. The phone drawer is the same everywhere.
+// a layout may ask for the same menu (`iconMenu`: the asset page, odd/tasks/asset-page.md L24).
+// » pins the full menu open and this device remembers it, for every such page. The phone drawer is the same everywhere.
 // PIN_KEY is also read by the root layout's MENU_BOOT_SCRIPT.
 const ICON_MENU = ['/trading']
 const PIN_KEY = 'warren-menu-pinned'
@@ -73,7 +74,11 @@ function NavLink({ item, active, iconMenu, mini }: { item: NavItem; active: bool
   )
 }
 
-export default function AppShell({ children, pathnameForTest }: { children: React.ReactNode; pathnameForTest?: string }) {
+export default function AppShell({ children, pathnameForTest, iconMenu: asked = false }: {
+  children: React.ReactNode
+  pathnameForTest?: string
+  iconMenu?: boolean
+}) {
   const routerPath = usePathname()
   const pathname = pathnameForTest ?? routerPath ?? ''
   const current = activeHref(pathname)
@@ -92,7 +97,7 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
   // The portfolio this tab already has; changing section never asks for it again.
   const known = cachedValue<Portfolio>(POSITIONS_KEY)
   const pinned = useSyncExternalStore(subscribePinned, readPinned, () => false)
-  const iconMenu = ICON_MENU.includes(current ?? '')
+  const iconMenu = asked || ICON_MENU.includes(current ?? '')
   const mini = iconMenu && !pinned
   // One tooltip for the icon-only menu, drawn outside it: the menu scrolls (and would clip it)
   // and the chart's pane separators sit at z-index 50.

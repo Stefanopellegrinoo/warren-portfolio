@@ -282,6 +282,14 @@ describe('AppShell — the icon-only menu on Gráficos', () => {
     expect(el.querySelector('#sidebar')!.textContent).toContain('W')
   })
 
+  // The asset page's layout asks for this menu (odd/tasks/asset-page.md L24); Gráficos needs no asking.
+  it('comes from Gráficos’ own path: the same markup, no phone bar, whether a layout asks for it or not', () => {
+    const asked = renderToStaticMarkup(<AppShell pathnameForTest="/trading" iconMenu><p>contenido</p></AppShell>)
+    expect(render('/trading')).toBe(asked)
+    expect(asked).toContain('grid-cols-[64px_minmax(0,1fr)]')
+    expect(asked).not.toContain('Abrir menú')
+  })
+
   it('keeps aria-current on the active entry', () => {
     const { el } = mount('/trading/GGAL')
     const current = el.querySelectorAll('a[aria-current="page"]')

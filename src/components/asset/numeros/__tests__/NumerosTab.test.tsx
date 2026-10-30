@@ -108,6 +108,17 @@ describe('NumerosTab list', () => {
     expect(q.getAttribute('aria-expanded')).toBe('false')
   })
 
+  // odd/tasks/asset-page.md L24: two columns of sections crowded the labels; one column, read as shown.
+  it('stacks the sections in one column, in the order they are read', () => {
+    const sections = [...el.querySelectorAll('section[aria-labelledby^="numeros-"]')]
+    expect(sections.map((s) => s.querySelector('h3')!.textContent)).toEqual([
+      'Estadísticas clave', 'Valoración', 'Rentabilidad', 'Liquidez', 'Solvencia', 'Por acción (US$)', 'Analistas y riesgo',
+    ])
+    const column = sections[0].parentElement!
+    expect(sections.every((s) => s.parentElement === column && !/(^|[\s:])(order|col-span)-/.test(s.className))).toBe(true)
+    expect(column.className).not.toMatch(/grid-cols/)
+  })
+
   it('says why a row has no value', () => {
     const q = button(/^Qué es Beta/)!
     click(q)
