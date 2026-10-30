@@ -33,6 +33,17 @@ describe('HoldingsList', () => {
     expect(html).toContain('href="/trading?symbol=DUK"')
   })
 
+  // odd/tasks/asset-page.md S1: a separate link opens the asset page; the ticker keeps opening the chart.
+  it('adds a link to each stock and CEDEAR asset page, keeping the ticker on the chart', () => {
+    expect(html).toMatch(/<a[^>]*href="\/trading\?symbol=DUK"[^>]*>DUK<\/a>/)
+    expect(html).toMatch(/<a(?=[^>]*aria-label="Ficha de DUK")(?=[^>]*href="\/activo\/DUK")[^>]*>Ficha<\/a>/)
+    expect(html).toMatch(/href="\/activo\/AAL"/)
+    const withOn = renderToStaticMarkup(
+      <HoldingsList rows={[row({ ticker: 'YMCJO', name: null, kind: 'on', quantityLabel: 'VN 1.500', href: '/ons/mi-cartera' })]} cash={0} cashWeightPct={0} onAdjustCash={noop} sort={DEFAULT_SORT} onSort={noop} />,
+    )
+    expect(withOn).not.toContain('/activo/')
+  })
+
   it('shows signed results and the day change in es-AR', () => {
     expect(html).toContain('−37,1 %')
     expect(html).toContain('−0,5 %<span class="sr-only"> hoy</span>')

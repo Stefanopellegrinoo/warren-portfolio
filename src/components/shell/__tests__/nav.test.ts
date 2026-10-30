@@ -36,5 +36,7 @@ describe('activeHref', () => {
   it('returns null outside the menu and for lookalike prefixes', () => {
     expect(activeHref('/auth/login')).toBeNull()
     expect(activeHref('/onsx')).toBeNull()
+    // odd/tasks/asset-page.md S1: the asset page is reached by search and links, not by the menu.
+    expect(activeHref('/activo/MELI')).toBeNull()
   })
 })

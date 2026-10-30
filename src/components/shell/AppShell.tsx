@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { flushSync } from 'react-dom'
 import { usePathname } from 'next/navigation'
 import { Menu, X, LogOut, Search, ChevronsLeft, ChevronsRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -11,6 +12,7 @@ import { getPortfolio, POSITIONS_KEY } from '@/lib/warren/positions'
 import { NAV_ITEMS, PERSONAL_ITEMS, activeHref, type NavItem } from './nav'
 import ThemeSwitch from './ThemeSwitch'
 import AssetSearch from './AssetSearch'
+import ShellSearch from './ShellSearch'
 
 const linkBase =
   'relative flex min-h-8 items-center gap-2 rounded-md px-2 text-ink-2 hover:bg-hover hover:text-ink max-[819px]:min-h-11'
@@ -80,6 +82,10 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
   const open = openOn === pathname
   const [askedHeld, setAskedHeld] = useState<string[]>([])
   const [searchOpen, setSearchOpen] = useState(false)
+  // The phone's asset search bar, like the menu, belongs to the page it was opened on.
+  const [findOn, setFindOn] = useState<string | null>(null)
+  const findInput = useRef<HTMLInputElement>(null)
+  const ownPhoneBar = OWN_PHONE_BAR.includes(current ?? '')
   // The button that opened the menu takes the focus back when it closes.
   const opener = useRef<HTMLElement | null>(null)
   const closeBtn = useRef<HTMLButtonElement>(null)
@@ -147,7 +153,7 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
         Saltar al contenido
       </a>
 
-      {!OWN_PHONE_BAR.includes(current ?? '') && <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-line bg-canvas px-2 min-[820px]:hidden">
+      {!ownPhoneBar && <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-line bg-canvas px-2 min-[820px]:hidden">
         <button
           type="button"
           onClick={e => openMenu(e.currentTarget)}
@@ -159,6 +165,16 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
           <span className="sr-only">Abrir menú</span>
         </button>
         <span className="font-serif text-xl font-medium leading-none">Warren</span>
+        <button
+          type="button"
+          // Rendered and focused within the tap, so the phone opens its keyboard.
+          onClick={() => { flushSync(() => setFindOn(pathname)); findInput.current?.focus() }}
+          aria-label="Buscar cualquier activo"
+          aria-expanded={findOn === pathname}
+          className="ml-auto grid h-11 w-11 place-items-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+        >
+          <Search className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />
+        </button>
       </header>}
 
       <div
@@ -277,6 +293,7 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
       <AssetSearch open={searchOpen} onClose={() => setSearchOpen(false)} held={known ? heldOf(known) : askedHeld} />
 
       <main id="main" className="min-w-0">
+        {!ownPhoneBar && <ShellSearch inputRef={findInput} expanded={findOn === pathname} onCollapse={() => setFindOn(null)} />}
         <ShellMenu.Provider value={{ open, openMenu }}>{children}</ShellMenu.Provider>
       </main>
     </div>

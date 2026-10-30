@@ -149,3 +149,31 @@ describe('SymbolSelector — picking for someone else', () => {
     act(() => root.unmount())
   })
 })
+
+// odd/tasks/asset-page.md S1: the chart header links to the asset page; the symbol button keeps opening the search.
+describe('SymbolSelector — the asset page link', () => {
+  async function header(symbol: string) {
+    stubFetch({})
+    useChartStore.setState({ symbolDialogOpen: false, symbol })
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    await act(async () => { root.render(<SymbolSelector />) })
+    return { el, unmount: () => act(() => root.unmount()) }
+  }
+
+  it('links a stock to its asset page, next to the symbol button', async () => {
+    const { el, unmount } = await header('AAPL')
+    const link = el.querySelector<HTMLAnchorElement>('a[aria-label="Ficha de AAPL"]')!
+    expect(link.getAttribute('href')).toBe('/activo/AAPL')
+    act(() => el.querySelector<HTMLButtonElement>('button[aria-label^="Cambiar símbolo"]')!.click())
+    expect(useChartStore.getState().symbolDialogOpen).toBe(true)
+    unmount()
+  })
+
+  it('has no link for crypto, which has no asset page yet', async () => {
+    const { el, unmount } = await header('BTCUSDT')
+    expect(el.querySelector('a[href^="/activo/"]')).toBeNull()
+    unmount()
+  })
+})

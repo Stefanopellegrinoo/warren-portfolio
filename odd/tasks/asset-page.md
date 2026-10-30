@@ -32,7 +32,7 @@ Routes: the parent session is past the ~150k context backstop, so implementation
 - [x] T2 · S4 S5 S7 · delegated (parallel with T1) · Yahoo source: normalized statements (quarterly/annual), profile, currency; FX at period ends (Yahoo FX for foreign, app CCL for ARS) · 18 tests (RED first); IAS 29 probe in L11
 - [x] T3 · S3 S4 S5 S6 · delegated · pure metrics module: catalog definitions, today + history per metric, peers, group T/Y source rule · 20 tests (RED first, 15 mutations caught) + ADR units fix inline (L12)
 - [x] T4 · S1 S12 · delegated · service + API route: ticker validation and market check, Redis cache with TTLs and last-good fallback, rate limit, per-section errors · 23 tests (RED first, 9 mutations caught), live smoke MELI/GGAL/TSM
-- [ ] T5 · S1 · delegated · page shell `/activo/[ticker]`, header, tabs, shell search with `/`, links from every ticker
+- [x] T5 · S1 · delegated · page shell `/activo/[ticker]`, header, tabs, shell search with `/`, links from every ticker · 112 tests in touched dirs, full suite 3397 green (6 mutations caught)
 - [ ] T6 · S2 S3 · delegated · Números UI (mobile + desktop), "?" copy, history panel, peers bars
 - [ ] T7 · S9 · delegated · Comparar tab
 - [ ] T8 · S10 · delegated · Noticias
@@ -88,3 +88,13 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   2. Default peers' keys come from TradingView's own answers, not free text, so they skip `resolveTickerIdentity`. S12 is amended to say so.
 
   Open for T10: Yahoo `not_found` (ETFs) shows as `error`. A price status is not exposed; bars-cache serves its own last good copy.
+- L14 (2026-10-30) T5 done. New: `/activo/[ticker]` (AssetView, AssetHeader, AssetTabs hidden while there is one tab), ShellSearch, and "Ficha" links in the chart header and in Resumen holdings.
+  - ShellSearch searches holdings, the catalog, Yahoo and ONs. ONs go to `/ons/<isin>`, read from `/api/ons`, because `/api/ons/search` has no ISIN. `/` focuses it on desktop; on the phone a top-bar button opens it.
+  - Existing taps keep their destinations. Watchlist and Operaciones got no links (a single-button row; Operaciones mixes asset types).
+  - Committed with the NumerosTab contract stub; T6 replaces it.
+
+  Open: two searches now exist. Sidebar "Buscar activo" and Ctrl K open the chart; the new box opens the ficha. Ask the user at the stage-1 review.
+
+  Follow-ups (T5b):
+  1. `/activo` is missing from `src/middleware.ts` protectedPaths/matcher. Risk item 2: it gets its own commit and a verifier.
+  2. The header price comes from the identity cache, up to 7 days old, and there is no day change. Use the TradingView snapshot close and change instead.
