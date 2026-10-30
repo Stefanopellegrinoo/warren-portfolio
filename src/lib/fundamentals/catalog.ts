@@ -58,6 +58,8 @@ export type MetricDef = Row &
     | { group: 'snapshot'; field: TvSnapshotField; better?: Better }
     // Today's quote × listed units in USD, the market cap every price ratio divides (S5).
     | { group: 'quote' }
+    // The asked listing's analysts' average target, as Resumen shows it: its Yahoo profile, in its quote's currency (T10, S5).
+    | { group: 'profile' }
   )
 
 type N = number | null
@@ -168,7 +170,7 @@ export const METRICS = [
   // Net income in USD per listed unit: TradingView's EPS line is per ordinary share in the statements' currency.
   { id: 'eps', section: PS, periodFlow: true, label: 'Ganancia (EPS)', unit: 'usdPerShare', group: 'T', better: 'higher', formula: (f) => div(f.flow('netIncome'), f.units) },
 
-  { id: 'priceTarget', section: 'Analistas y riesgo', label: 'Precio objetivo promedio', unit: 'price', group: 'snapshot', field: 'price_target_average' },
+  { id: 'priceTarget', section: 'Analistas y riesgo', label: 'Precio objetivo promedio', unit: 'price', group: 'profile' },
   { id: 'beta', section: 'Analistas y riesgo', label: 'Beta (cuánto se mueve contra el mercado)', unit: 'ratio', group: 'snapshot', field: 'beta_1_year' },
 ] as const satisfies readonly MetricDef[]
 

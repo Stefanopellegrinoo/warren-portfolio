@@ -40,7 +40,7 @@ Routes: the parent session is past the ~150k context backstop, so implementation
 - [x] T7 · S9 · delegated · Comparar tab · 15 tests (RED first); browser 6 widths × light/dark (L29)
 - [x] T8 · S10 · delegated · Noticias · 34 tests (RED first, 6 mutations caught); live MELI/GGAL/TSM/YPFD ok (L28)
 - [x] T9 · S11 · delegated · Resumen + tab wiring · 3535 tests green; browser 4 tickers × 4 tabs × 6 widths × 2 themes (L30)
-- [ ] T10 · S1 · delegated · ETFs, crypto, ON redirect, unsupported markets
+- [x] T10 · S1 · delegated · ETFs, crypto, ON redirect, unsupported markets, target consistency · 3564 tests green; browser 4 × 4 widths × 2 themes (L31)
 - [ ] T11 · S8 · delegated · Balances completos (Yahoo + TradingView rows)
 - [ ] T12 · S8 · delegated · SEC source for Balances completos (US 10-Q filers)
 
@@ -262,3 +262,12 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   - **AssetView:** tabs Resumen (default), Números, Comparar, Noticias, kept in `?tab=`. The previous page is kept during a `?vs=` refetch.
   - Parent looked at MELI at 1440 and 390: clear and legible.
   - **Open:** S5 — the analyst target in Resumen (Yahoo, asked listing) can differ from Números' "Precio objetivo" (TradingView, numbers listing). It goes to T10.
+- L31 (2026-10-30) T10 done.
+  - **AssetPage additions.** `kind` (company/etf/crypto/other) from Yahoo quoteType; `AssetProfile` gains fund, crypto and price fields.
+  - **ETF.** Holdings, sectors, expense ratio and returns ride in the profile key. Tabs: Resumen, Composición, Noticias. Holdings link to `/activo/<symbol>`.
+  - **Crypto.** Detected from the identity's exchange CCC, with no TradingView. Cached as `fund:v1:crypto:<sym>`, 15-minute fresh window. `parseTicker` maps BTCUSDT → BTC-USD. The day change counts from 0 h UTC, and the card says so.
+  - **ONs.** `/activo/<ON ticker or ISIN>` redirects server-side to `/ons/<isin>`, reading the ON catalog only for tickers Yahoo doesn't know.
+  - **Unsupported markets.** Message plus Noticias.
+  - **S5 target.** Números' "Precio objetivo promedio (N analistas)" now equals Resumen's: Yahoo, asked listing, profile group.
+  - **Fix.** Resumen scrolled 19 px sideways at 320 px; cards now get `min-w-0`.
+  - **Risk.** Writer named item 3: shared `parseTicker` now maps *USDT, a production API input. It is additive. Native review at stage end will cover it.

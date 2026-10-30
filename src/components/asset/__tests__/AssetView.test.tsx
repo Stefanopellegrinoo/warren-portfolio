@@ -16,6 +16,11 @@ vi.mock('@/components/asset/comparar/ComparaTab', () => ({
   ComparaTab: ({ page }: { page: AssetPage }) => <p>Pestaña Comparar con {page.peers.map((p) => p.tvSymbol).join(',') || 'nadie'}</p>,
 }))
 vi.mock('@/components/asset/noticias/NoticiasTab', () => ({ NoticiasTab: ({ ticker }: { ticker: string }) => <p>Pestaña Noticias de {ticker}</p> }))
+vi.mock('@/components/asset/resumen/OtherResumen', () => ({
+  FundResumen: () => <p>Resumen del fondo</p>,
+  CryptoResumen: () => <p>Resumen de la cripto</p>,
+}))
+vi.mock('@/components/asset/composicion/ComposicionTab', () => ({ ComposicionTab: () => <p>Pestaña Composición</p> }))
 
 import AssetView, { AssetTabs } from '../AssetView'
 
@@ -178,6 +183,49 @@ describe('AssetView', () => {
     const { text, unmount } = await show(Response.json(page), 'SPY')
     expect(text()).toContain('Todavía no tenemos datos financieros de este activo')
     expect(text()).not.toContain('Pestaña Números')
+    unmount()
+  })
+
+  it('a market without fundamentals adds Noticias when its name is known (T10)', async () => {
+    const page = { ...PAGE, ticker: '7203.T', name: 'Toyota Motor Corporation', exchange: 'Tokyo', price: 2900, currency: null, supported: false, listing: null, metrics: null, sources: {} }
+    const view = await show(Response.json(page), '7203.T')
+    expect(tabNames(view.el)).toEqual(['Resumen', 'Noticias'])
+    expect(view.text()).toContain('Todavía no tenemos datos financieros de este mercado')
+    act(() => { tabButton(view.el, 'Noticias').click() })
+    expect(view.text()).toContain('Pestaña Noticias de 7203.T')
+    view.unmount()
+
+    // Yahoo had no name for it: nothing to search the news by.
+    const nameless = await show(Response.json({ ...page, name: '7203.T' }), '7203.T')
+    expect(nameless.el.querySelector('[role="tablist"]')).toBeNull()
+    expect(nameless.text()).toContain('Todavía no tenemos datos financieros de este mercado')
+    nameless.unmount()
+  })
+
+  it('an ETF shows Resumen · Composición · Noticias (T10)', async () => {
+    const page = { ...PAGE, ticker: 'SPY', name: 'SPDR S&P 500 ETF Trust', kind: 'etf', metrics: null } as AssetPage
+    const { el, text, unmount } = await show(Response.json(page), 'SPY')
+    expect(tabNames(el)).toEqual(['Resumen', 'Composición', 'Noticias'])
+    expect(text()).toContain('Resumen del fondo')
+    act(() => { tabButton(el, 'Composición').click() })
+    expect(text()).toContain('Pestaña Composición')
+    expect(window.location.search).toBe('?tab=composicion')
+    unmount()
+  })
+
+  it('a coin shows Resumen · Noticias (T10)', async () => {
+    const page = { ...PAGE, ticker: 'BTC-USD', name: 'Bitcoin USD', kind: 'crypto', supported: false, listing: null, metrics: null } as AssetPage
+    const { el, text, unmount } = await show(Response.json(page), 'BTC-USD')
+    expect(tabNames(el)).toEqual(['Resumen', 'Noticias'])
+    expect(text()).toContain('Resumen de la cripto')
+    expect(text()).not.toContain('Todavía no tenemos datos financieros')
+    unmount()
+  })
+
+  it("an analysts' target alone is not financial data", async () => {
+    const target = { priceTarget: { id: 'priceTarget', today: 70, history: { quarterly: [], ttm: [], annual: [] }, since: null, source: 'profile' } } as unknown as Metrics
+    const { text, unmount } = await show(Response.json({ ...PAGE, metrics: { ...onlySnapshot, ...target } }))
+    expect(text()).toContain('Todavía no tenemos datos financieros de este activo')
     unmount()
   })
 

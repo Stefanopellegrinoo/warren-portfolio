@@ -5,11 +5,13 @@ import { useCached } from '@/lib/client-cache'
 import { cn } from '@/lib/utils'
 import { requestErrorMessage } from '@/lib/request-errors'
 import { apiData, ApiFailure } from '@/components/ons/portfolios/api'
-import { Loading, LoadError, Notice } from '@/components/ons/ui'
+import { Loading, LoadError, Notice, notice as noticeBox } from '@/components/ons/ui'
 import { NumerosTab } from '@/components/asset/numeros/NumerosTab'
 import { ResumenTab } from '@/components/asset/resumen/ResumenTab'
 import { ComparaTab } from '@/components/asset/comparar/ComparaTab'
 import { NoticiasTab } from '@/components/asset/noticias/NoticiasTab'
+import { CryptoResumen, FundResumen } from '@/components/asset/resumen/OtherResumen'
+import { ComposicionTab } from '@/components/asset/composicion/ComposicionTab'
 import type { AssetPage } from '@/lib/fundamentals/service'
 import AssetHeader from './AssetHeader'
 
@@ -88,12 +90,31 @@ export function AssetTabs({ tabs }: { tabs: AssetTab[] }) {
   )
 }
 
-/** Financial data means statements: an ETF today has a snapshot value or two (beta, shares) and none. */
+/** Financial data means statements: a snapshot value or two (beta, shares) or the analysts' target alone is none. */
 const hasNumbers = (page: AssetPage) =>
-  !!page.metrics && Object.values(page.metrics).some((m) => m.source !== 'snapshot' && m.today !== null)
+  !!page.metrics && Object.values(page.metrics).some((m) => (m.source === 'tradingview' || m.source === 'yahoo') && m.today !== null)
 
 function Body({ page, onRetry }: { page: AssetPage; onRetry: () => void }) {
-  if (!page.supported) return <Notice tone="info">Todavía no tenemos datos financieros de este mercado.</Notice>
+  const news = { id: 'noticias', label: 'Noticias', content: <NoticiasTab ticker={page.ticker} name={page.name} /> }
+  // Assets without a balance sheet get their own page (T10, design goal 9).
+  if (page.kind === 'etf') {
+    return (
+      <AssetTabs
+        tabs={[
+          { id: 'resumen', label: 'Resumen', content: <FundResumen page={page} /> },
+          { id: 'composicion', label: 'Composición', content: <ComposicionTab page={page} /> },
+          news,
+        ]}
+      />
+    )
+  }
+  if (page.kind === 'crypto') return <AssetTabs tabs={[{ id: 'resumen', label: 'Resumen', content: <CryptoResumen page={page} /> }, news]} />
+  if (!page.supported) {
+    // The shared Notice is 14 px; this one stands alone as a tab's content (L25: 15 px).
+    const message = <div role="status" className={cn(noticeBox('info'), 'text-[15px]')}>Todavía no tenemos datos financieros de este mercado.</div>
+    // Its news need a name to search by: Yahoo names an asset it has no name for by its symbol.
+    return page.name === page.ticker ? message : <AssetTabs tabs={[{ id: 'resumen', label: 'Resumen', content: message }, news]} />
+  }
   if (hasNumbers(page)) {
     return (
       <AssetTabs
@@ -101,7 +122,7 @@ function Body({ page, onRetry }: { page: AssetPage; onRetry: () => void }) {
           { id: 'resumen', label: 'Resumen', content: (open) => <ResumenTab page={page} onOpen={(id) => open('numeros', id)} /> },
           { id: 'numeros', label: 'Números', content: <NumerosTab page={page} /> },
           { id: 'comparar', label: 'Comparar', content: <ComparaTab page={page} /> },
-          { id: 'noticias', label: 'Noticias', content: <NoticiasTab ticker={page.ticker} name={page.name} /> },
+          news,
         ]}
       />
     )

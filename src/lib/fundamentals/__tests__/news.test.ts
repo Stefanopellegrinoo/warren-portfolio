@@ -138,6 +138,7 @@ const IDENTITY: Record<string, { yahooSymbol: string; name: string }> = {
   TSM: { yahooSymbol: 'TSM', name: 'Taiwan Semiconductor Manufacturing Company Limited' },
   'BCBA:YPEF': { yahooSymbol: 'YPEF.BA', name: 'Ypefe Sociedad Anónima' },
   'BCBA:ALUM': { yahooSymbol: 'ALUM.BA', name: 'Alumi Argentino S.A.I.C.' },
+  'BTC-USD': { yahooSymbol: 'BTC-USD', name: 'Bitcoin USD' },
 }
 const YAHOO_NEWS = [{ title: 'Acme beats estimates', publisher: 'Wire Daily', link: 'https://finance.yahoo.com/a', providerPublishTime: new Date('2026-10-30T14:00:00Z') }]
 
@@ -192,6 +193,16 @@ describe('getAssetNews', () => {
     await run('BCBA:ALUM', deps)
     expect(deps.fetch.mock.calls.map(([u]) => new URL(u).searchParams.get('q'))).toEqual(['"Ypefe"', '"Alumi Argentino"'])
     expect(search.mock.calls.map(([q]) => q)).toEqual(['Ypefe', 'Alumi Argentino'])
+  })
+
+  it('searches a coin by its own name, without the quote currency Yahoo appends (T10)', async () => {
+    const { deps, search } = fakes()
+    deps.fetch.mockResolvedValue(new Response(rss(rssItem('Sube el USD en Rosario - Diario Uno'), rssItem('Cae el bitcoin - Diario Uno')), { status: 200 }))
+    const got = await run('BTCUSDT', deps)
+    expect(new URL(deps.fetch.mock.calls[0][0]).searchParams.get('q')).toBe('"Bitcoin"')
+    expect(search.mock.calls[0][0]).toBe('BTC-USD')
+    // "USD" alone does not name the coin.
+    expect(got.items.filter((i) => i.lang === 'es').map((i) => i.title)).toEqual(['Cae el bitcoin'])
   })
 
   it('keeps only headlines that name the company: a word of its name, spaces and accents aside, or a word starting with its symbol', async () => {

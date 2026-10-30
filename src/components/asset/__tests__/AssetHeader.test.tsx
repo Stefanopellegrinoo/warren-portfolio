@@ -78,3 +78,15 @@ describe('AssetHeader: market badge', () => {
     expect(badge({ exchange: null, listing: null, supported: false })).toBeNull()
   })
 })
+
+describe('AssetHeader: a coin (T10)', () => {
+  const BTC = { ticker: 'BTC-USD', name: 'Bitcoin USD', exchange: 'CCC', price: 77319.46, currency: 'USD', supported: false, listing: null, kind: 'crypto' as const }
+
+  it("badges it Cripto, not Yahoo's feed name, and opens the chart on the app's Binance pair", () => {
+    const el = document.createElement('div')
+    el.innerHTML = renderToStaticMarkup(<AssetHeader page={{ ...PAGE, ...BTC }} />)
+    expect(el.querySelector('h1 + span')?.textContent).toBe('Cripto')
+    expect(el.querySelector('a')!.getAttribute('href')).toBe('/trading?symbol=BTCUSDT')
+    expect(el.textContent!.replace(/[\u00a0\u202f]/g, ' ')).toContain('US$ 77.319,46')
+  })
+})

@@ -106,12 +106,13 @@ describe('catalog', () => {
       'ebitdaPerShare', 'eps',
     ])
     expect(ids('snapshot')).toEqual([
-      'peForward', 'psForward', 'evEbitdaForward', 'pbForward', 'sharesOutstanding', 'floatShares', 'employees',
-      'priceTarget', 'beta',
+      'peForward', 'psForward', 'evEbitdaForward', 'pbForward', 'sharesOutstanding', 'floatShares', 'employees', 'beta',
     ])
     // Today's quote × listed units, in USD: the market cap every price ratio divides.
     expect(ids('quote')).toEqual(['marketCap'])
-    expect(ids('Y')).toHaveLength(METRICS.length - 11 - 9 - 1)
+    // The analysts' target is Resumen's: the asked listing's Yahoo profile (T10, S5).
+    expect(ids('profile')).toEqual(['priceTarget'])
+    expect(ids('Y')).toHaveLength(METRICS.length - 11 - 8 - 1 - 1)
     expect(ids('Y')).toEqual(expect.arrayContaining(['debtToAssets', 'debtToEquity', 'debtPerShare', 'fcfPerShare', 'ev']))
   })
 })
@@ -482,13 +483,23 @@ describe('computeMetrics', () => {
     expect(m.netMargin.today).toBe(-10)
   })
 
-  it("takes forward metrics, target, shares, float, employees and beta from TradingView's snapshot, with no history", async () => {
+  it("takes forward metrics, shares, float, employees and beta from TradingView's snapshot, with no history", async () => {
     const m = computeMetrics(await tvInput('NASDAQ:MELI'))
 
     expect(m.peForward).toEqual({ id: 'peForward', today: meliSnapshotRow.price_earnings_fwd, history: { quarterly: [], ttm: [], annual: [] }, since: null, asOf: null, source: 'snapshot' })
-    expect(m.priceTarget.today).toBe(meliSnapshotRow.price_target_average)
     expect(m.sharesOutstanding.today).toBe(meliSnapshotRow.total_shares_outstanding)
     expect(m.beta.today).toBe(meliSnapshotRow.beta_1_year)
+  })
+
+  it("takes the price target as given, Resumen's (the asked listing's Yahoo profile), never TradingView's (T10, S5)", async () => {
+    const input = await tvInput('NASDAQ:MELI')
+    expect(meliSnapshotRow.price_target_average).not.toBeNull()
+
+    expect(computeMetrics({ ...input, target: 2400 }).priceTarget).toEqual({
+      id: 'priceTarget', today: 2400, history: { quarterly: [], ttm: [], annual: [] }, since: null, asOf: null, source: 'profile',
+    })
+    // A peer has no profile: no target, even when TradingView has one.
+    expect(computeMetrics(input).priceTarget.today).toBeNull()
   })
 
   it('says since when the history starts', async () => {

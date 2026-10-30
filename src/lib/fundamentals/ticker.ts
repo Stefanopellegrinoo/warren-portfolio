@@ -5,8 +5,11 @@
  */
 const TICKER = /^(BCBA:)?[A-Z0-9][A-Z0-9.-]{0,14}$/
 
-/** `MELI`, `bcba:ggal`, `GGAL.BA` → `MELI`, `BCBA:GGAL`, `BCBA:GGAL`; null for anything else. */
+/**
+ * `MELI`, `bcba:ggal`, `GGAL.BA` → `MELI`, `BCBA:GGAL`, `BCBA:GGAL`; the app's Binance pairs as Yahoo
+ * names them, `BTCUSDT` → `BTC-USD` (T10); null for anything else.
+ */
 export function parseTicker(raw: string): string | null {
-  const t = raw.trim().toUpperCase().replace(/^([A-Z0-9-]+)\.BA$/, 'BCBA:$1')
+  const t = raw.trim().toUpperCase().replace(/^([A-Z0-9-]+)\.BA$/, 'BCBA:$1').replace(/^([A-Z0-9]+)USDT$/, '$1-USD')
   return TICKER.test(t) ? t : null
 }

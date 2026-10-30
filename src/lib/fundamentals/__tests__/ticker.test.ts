@@ -14,6 +14,12 @@ describe('parseTicker', () => {
     for (const bad of ['', 'MELI; DROP', 'A'.repeat(16), 'NASDAQ:MELI', '-MELI', 'b@d']) expect(parseTicker(bad)).toBeNull()
   })
 
+  it("reads the app's Binance pairs as Yahoo's crypto (T10): BTCUSDT is BTC-USD", () => {
+    expect(parseTicker('btcusdt')).toBe('BTC-USD')
+    expect(parseTicker('BTC-USD')).toBe('BTC-USD')
+    expect(parseTicker('USDT')).toBe('USDT')
+  })
+
   it('is client-safe: its module imports nothing, and the service serves the same function', () => {
     const source = readFileSync(join(__dirname, '..', 'ticker.ts'), 'utf8')
     expect(source).not.toMatch(/^\s*import\s/m)

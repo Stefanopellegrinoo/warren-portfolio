@@ -108,7 +108,7 @@ describe('fetchYahooStatements', () => {
 
 const SUMMARY = {
   assetProfile: { sector: 'Consumer Cyclical', industry: 'Internet Retail', country: 'Uruguay', website: 'https://www.mercadolibre.com', fullTimeEmployees: 123670 },
-  price: { longName: 'MercadoLibre, Inc.', shortName: 'MercadoLibre', currency: 'USD', marketCap: 84163280896, regularMarketPrice: 1660.13 },
+  price: { quoteType: 'EQUITY', longName: 'MercadoLibre, Inc.', shortName: 'MercadoLibre', currency: 'USD', marketCap: 84163280896, regularMarketPrice: 1660.13 },
   summaryDetail: { fiftyTwoWeekLow: 1495, fiftyTwoWeekHigh: 2419.78, beta: 1.308 },
   financialData: { targetMeanPrice: 2271.932, numberOfAnalystOpinions: 26, recommendationKey: 'strong_buy', financialCurrency: 'USD' },
   defaultKeyStatistics: { sharesOutstanding: 50696802, floatShares: 50585269 },
@@ -157,11 +157,16 @@ describe('fetchYahooProfile', () => {
         { quarterEnd: '2026-03-31', epsEstimate: null, epsActual: 8.23 },
         { quarterEnd: '2026-06-30', epsEstimate: 8.88879, epsActual: 9.19 },
       ],
+      kind: 'company', dayChange: null, circulatingSupply: null, volume24h: null, fund: null,
     })
     expect(yf.quoteSummary).toHaveBeenCalledTimes(1)
     expect(yf.quoteSummary).toHaveBeenCalledWith(
       'MELI',
-      { modules: ['assetProfile', 'price', 'summaryDetail', 'financialData', 'defaultKeyStatistics', 'calendarEvents', 'earningsHistory'] },
+      {
+        modules: [
+          'assetProfile', 'price', 'summaryDetail', 'financialData', 'defaultKeyStatistics', 'calendarEvents', 'earningsHistory', 'topHoldings', 'fundProfile',
+        ],
+      },
       { validateResult: false },
     )
   })
@@ -181,6 +186,67 @@ describe('fetchYahooProfile', () => {
       targetMeanPrice: null, numberOfAnalystOpinions: null, recommendationKey: null,
       sharesOutstanding: null, floatShares: null, beta: null,
       nextEarningsDate: null, earnings: [],
+      kind: 'other', dayChange: null, circulatingSupply: null, volume24h: null, fund: null,
+    })
+  })
+
+  it("names the asset's kind from Yahoo's quoteType (T10)", async () => {
+    const cases = [['EQUITY', 'company'], ['ETF', 'etf'], ['MUTUALFUND', 'etf'], ['CRYPTOCURRENCY', 'crypto'], ['INDEX', 'other'], [undefined, 'other']]
+    for (const [quoteType, kind] of cases) {
+      const { getYahoo } = fakeYahoo({ qs: () => ({ price: { quoteType } }) })
+      expect((await fetchYahooProfile('X', { getYahoo })).kind).toBe(kind)
+    }
+  })
+
+  it("keeps an ETF's facts and composition, compact: 15 holdings at most, sectors by Yahoo's names, largest first", async () => {
+    const holdings = Array.from({ length: 20 }, (_, i) => ({ symbol: `H${i}`, holdingName: `Holding ${i}`, holdingPercent: (20 - i) / 1000 }))
+    const { getYahoo } = fakeYahoo({
+      qs: () => ({
+        price: { quoteType: 'ETF', longName: 'SPDR S&P 500 ETF Trust', currency: 'USD', regularMarketPrice: 757.32 },
+        summaryDetail: { fiftyTwoWeekLow: 629.28, fiftyTwoWeekHigh: 781.62, yield: 0.0099, totalAssets: 1 },
+        fundProfile: { family: 'State Street', categoryName: 'Large Blend', feesExpensesInvestment: { annualReportExpenseRatio: 0.000945 } },
+        defaultKeyStatistics: {
+          ytdReturn: 0.1414, threeYearAverageReturn: 0.2493, fiveYearAverageReturn: 0.125, totalAssets: 809216114688, yield: 0.0099,
+          fundInceptionDate: new Date('1993-01-22T00:00:00Z'),
+        },
+        topHoldings: {
+          holdings: [{ symbol: 'BAD', holdingPercent: 'n/a' }, { symbol: '', holdingName: 'Cash', holdingPercent: 0.05 }, ...holdings],
+          sectorWeightings: [{ realestate: 0.017 }, { technology: 0.4045 }, { consumer_cyclical: 0.0874 }, { utilities: 0 }],
+        },
+      }),
+    })
+
+    const profile = await fetchYahooProfile('SPY', { getYahoo })
+
+    expect(profile.kind).toBe('etf')
+    expect(profile.fund).toEqual({
+      category: 'Large Blend', family: 'State Street', inceptionDate: '1993-01-22', expenseRatio: 0.000945,
+      totalAssets: 809216114688, yield: 0.0099, ytdReturn: 0.1414, threeYearReturn: 0.2493, fiveYearReturn: 0.125,
+      holdings: [
+        { symbol: null, name: 'Cash', weight: 0.05 },
+        ...holdings.slice(0, 14).map((h) => ({ symbol: h.symbol, name: h.holdingName, weight: h.holdingPercent })),
+      ],
+      sectors: [{ sector: 'Technology', weight: 0.4045 }, { sector: 'Consumer Cyclical', weight: 0.0874 }, { sector: 'Real Estate', weight: 0.017 }],
+    })
+    expect(JSON.stringify(profile).length).toBeLessThan(3_000)
+  })
+
+  it("keeps a crypto's day change, circulating supply and 24 h volume; no fund", async () => {
+    const { getYahoo } = fakeYahoo({
+      qs: () => ({
+        price: {
+          quoteType: 'CRYPTOCURRENCY', longName: 'Bitcoin USD', currency: 'USD', regularMarketPrice: 77319.46,
+          regularMarketChange: -3853.5703, regularMarketChangePercent: -0.04747353, marketCap: 1555248578560,
+        },
+        summaryDetail: { fiftyTwoWeekLow: 57747.766, fiftyTwoWeekHigh: 111167.31, circulatingSupply: 20105364, volume24Hr: 59247714304 },
+      }),
+    })
+
+    const profile = await fetchYahooProfile('BTC-USD', { getYahoo })
+
+    expect(profile).toMatchObject({
+      kind: 'crypto', regularMarketPrice: 77319.46, marketCap: 1555248578560, dayChange: { abs: -3853.5703, pct: -0.04747353 },
+      circulatingSupply: 20105364, volume24h: 59247714304, fiftyTwoWeekLow: 57747.766, fiftyTwoWeekHigh: 111167.31, fund: null,
     })
   })
 

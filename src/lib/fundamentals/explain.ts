@@ -317,7 +317,7 @@ const COPY: Record<MetricId, Copy> = {
     read: 'Más alto = mejor. Lo que más importa es si crece año a año. Si es negativo, perdió plata.',
   },
   priceTarget: {
-    what: 'El precio que, en promedio, los analistas que siguen la empresa creen que va a tener la acción en unos 12 meses.',
+    what: 'El precio que, en promedio, los analistas que siguen la empresa creen que va a tener esta cotización en unos 12 meses, en su misma moneda. Es el mismo dato que ves en Resumen.',
     say: (c) => `Para ${c.name}, el promedio de los analistas es ${c.v}.`,
     read: 'Es una opinión, no un dato: los analistas se equivocan seguido.',
   },
@@ -378,6 +378,8 @@ export interface Known {
 /** Why a row shows "—". */
 export function nullReason(id: MetricId, page: Known): string {
   const def = defOf(id)
+  // The analysts' target has its own source, the profile: Resumen says when it failed.
+  if (def.group === 'profile') return 'Sin datos'
   if (page.sources[def.group === 'Y' ? 'yahoo' : 'tradingview'] === 'error') return 'Sin datos: la fuente no respondió'
   if (def.group !== 'snapshot' && page.sources.fx === 'error') return 'Sin datos: no pudimos pasar sus números a dólares'
   const negative = NEGATIVE_BASE[id]

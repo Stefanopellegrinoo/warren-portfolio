@@ -157,7 +157,8 @@ export async function getAssetNews(rawTicker: string, deps: NewsDeps = {}): Prom
   if (!id.found) throw new AssetError('not_found')
 
   // shortName drops a final "S.A.", not "Sociedad Anónima" or "S.A.I.C.": with them Google finds quote pages, not the press.
-  const name = shortName(id.identity.name).split(/\s+(?:sociedad an[oó]nima|s\.\s?a\.)/i)[0]
+  // A coin is "Bitcoin USD" on Yahoo; the press says "Bitcoin".
+  const name = shortName(id.identity.name).split(/\s+(?:sociedad an[oó]nima|s\.\s?a\.)/i)[0].replace(/\s+USD$/, '')
   // Yahoo files no news under BYMA symbols (GGAL.BA); the company's name finds them, but not with accents.
   const yahooQuery = ticker.startsWith('BCBA:') ? plain(name) : id.identity.yahooSymbol
   const about = namesCompany(name, ticker)

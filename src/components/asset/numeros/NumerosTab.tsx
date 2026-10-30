@@ -50,8 +50,8 @@ export function NumerosTab({ page }: { page: AssetPage }) {
   const open = dato && hasHistory(metrics[dato]) ? dato : null
   const selected = open ?? [FIRST, ...METRICS.map((d) => d.id)].find((id) => hasHistory(metrics[id])) ?? null
   const name = shortName(page.name)
-  // The price target is in the currency of the listing Números reads: a BYMA listing quotes in pesos.
-  const currency = page.listingCurrency ?? (page.bymaListing ? 'ARS' : page.currency)
+  // The price target is Resumen's, the asked listing's analysts': in its quote's currency (T10, S5).
+  const currency = page.profile?.currency ?? page.currency
   const stale = Object.values(page.sources).includes('stale')
 
   function show(id: MetricId) {
@@ -169,8 +169,9 @@ function Row({ page, def, name, currency, selected, onOpen }: {
   }, [open])
 
   const history = hasHistory(m)
-  // An ADR's Números read its BYMA listing: so does the target, in pesos.
-  const label = id === 'priceTarget' && page.bymaListing ? `${def.label} (en\u00a0BYMA)` : def.label
+  // The target says how many analysts it averages, as Resumen does.
+  const count = page.profile?.numberOfAnalystOpinions
+  const label = id === 'priceTarget' && m.today !== null && count ? `${def.label} (${count} ${count === 1 ? 'analista' : 'analistas'})` : def.label
   // The "?" stays on the line of the label's last word.
   const cut = label.lastIndexOf(' ') + 1
   const value = formatMetric(m.today, def.unit, currency)
