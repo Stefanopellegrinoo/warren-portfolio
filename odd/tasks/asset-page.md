@@ -209,3 +209,10 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   - The panel scrolls inside itself on screens under about 1000 px tall.
   - With the menu pinned open, 1024–1100 px cramps again.
   - PAGE's max-width leaves margins at 1600 px and up.
+- L26 (2026-10-30) User: "si apruebo, merge todo de una, mientras que este bien vaqlidado y verifiaco todo". Pre-merge validation on a clean tree, with the preview and its server removed:
+  - `npm test`: 3,448 tests pass.
+  - `npm run type-check`: 0 errors.
+  - `npm run lint`: 0 errors.
+  - `npm run build`: OK (/activo/[ticker] 16 kB).
+  - RDD assess 45e0ba7..HEAD: medium, under_budget. The high-risk slices were already reviewed and approved (L19).
+  - Next: push, CI, PR, squash merge, deploy check.
