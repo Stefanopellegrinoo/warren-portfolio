@@ -13,7 +13,7 @@ export interface Point {
 /** Oldest first, no gaps filled in: a missing period is simply absent. */
 export type Series = Point[]
 
-export type FundamentalsSource = 'tradingview' | 'yahoo' | 'sec' | 'news'
+export type FundamentalsSource = 'tradingview' | 'yahoo' | 'sec' | 'news' | 'fx'
 
 /**
  * What a source throws. `not_found`: the source answered and has no such asset or data.

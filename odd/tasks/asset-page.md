@@ -29,7 +29,7 @@ Routes: the parent session is past the ~150k context backstop, so implementation
 
 - [x] T0 · S5 · inline · shared contract `src/lib/fundamentals/types.ts` (Series, Market, AssetRef)
 - [x] T1 · S4 S5 S6 S9 · delegated (parallel with T2) · TradingView source: today's catalog values, `_fq_h`/`_fy_h` history with period ends, peers by industry · 19 tests (RED first, 7 mutations caught)
-- [ ] T2 · S4 S5 S7 · delegated (parallel with T1) · Yahoo source: normalized statements (quarterly/annual), profile, currency; FX at period ends (Yahoo FX for foreign, app CCL for ARS)
+- [x] T2 · S4 S5 S7 · delegated (parallel with T1) · Yahoo source: normalized statements (quarterly/annual), profile, currency; FX at period ends (Yahoo FX for foreign, app CCL for ARS) · 18 tests (RED first); IAS 29 probe in L11
 - [ ] T3 · S3 S4 S5 S6 · delegated · pure metrics module: catalog definitions, today + history per metric, peers, group T/Y source rule
 - [ ] T4 · S1 S12 · delegated · service + API route: ticker validation and market check, Redis cache with TTLs and last-good fallback, rate limit, per-section errors
 - [ ] T5 · S1 · delegated · page shell `/activo/[ticker]`, header, tabs, shell search with `/`, links from every ticker
@@ -53,3 +53,17 @@ Routes: the parent session is past the ~150k context backstop, so implementation
 - L8 (2026-10-30) User: "me gusta hacelo". Design written, builder check run (four questions: sources per metric, foreign/ARS currency, peer edits, search scope); three settled as my calls in the design, one asked.
 - L9 (2026-10-30) User chose "Dólares CCL" for Argentine amounts. Design committed d58d871. User: "si, hacerlo con odd no?" → ODD; writing-plans skipped, this document is the plan.
 - L10 (2026-10-30) Delivery asked (forecast ~4,000 lines). The user chose "Por etapas a prod": stacked-to-main, three stages (see header). T0 written inline. T1 and T2 were launched as parallel writers.
+- L11 (2026-10-30) T1 committed in 10ad6e0. T2 done (18 tests, writer verified live on MELI, GGAL.BA, JPM and TSM).
+  Findings that shape T3:
+  - Yahoo has data for 4 years and 5 quarters (not 5 and 6).
+  - Banks lack gross/operating/EBIT/EBITDA/current lines.
+  - Yahoo ARS annual mixes as-reported years with IAS 29 restated comparatives: GGAL.BA 2022 ≈ TradingView ×3.10, 2024 ×1.31. Yahoo ARS quarterly and TradingView ARS history are as reported.
+  - YPFD.BA statements are in USD on Yahoo, but ARS on TradingView.
+  - `XXX=X` is units per USD, like CCL.
+
+  Decisions (mine):
+  1. Everything is normalized to USD at each date before any ratio. Statements use the statement currency's rate at the period end. Market cap uses the price currency's rate at the same date. So statement and price currencies may differ per source.
+  2. ARS reporters use Yahoo **quarterly** only for group Y (annual dropped). TradingView ARS history converts at CCL as is.
+  3. Share counts and EPS are never converted. Per-share values are USD amount ÷ listed units.
+  4. Historical market cap = listing price at that date (USD) × listed units at that date. Listed units = ordinary shares then ÷ listing ratio, where listing ratio = ordinary shares now ÷ (market cap now ÷ price now).
+  5. Added `'fx'` to `FundamentalsSource`.
