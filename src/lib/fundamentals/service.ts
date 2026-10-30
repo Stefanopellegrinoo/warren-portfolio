@@ -34,9 +34,14 @@ export interface AssetPage {
   ticker: string
   name: string
   exchange: string | null
-  /** The asked listing's last price, in `currency` (null when TradingView could not say). */
+  /**
+   * The asked listing's last price (an ADR keeps its own quote): TradingView's close, else the
+   * identity's price. `currency` is null when TradingView could not say.
+   */
   price: number
   currency: string | null
+  /** Today's change of `price`, `pct` as a fraction (−0.0216); null unless TradingView's snapshot is fresh. */
+  dayChange?: { abs: number; pct: number } | null
   /** False outside TradingView's america/argentina markets: header and price only, no fundamentals. */
   supported: boolean
   /** The listing Números reads: the asked one, or the company's BYMA listing for an Argentine ADR. */
@@ -232,7 +237,7 @@ export async function getAssetPage(rawTicker: string, rawVs: string[] | null = n
   if (!id.found) throw new AssetError('not_found')
   const { name, exchange, price } = id.identity
   const page: AssetPage = {
-    ticker, name, exchange, price, currency: null, supported: true, listing: null, bymaListing: false, metrics: null, peers: [], sources: {},
+    ticker, name, exchange, price, currency: null, dayChange: null, supported: true, listing: null, bymaListing: false, metrics: null, peers: [], sources: {},
   }
 
   const asked = await refFor(ticker, d)
@@ -240,7 +245,13 @@ export async function getAssetPage(rawTicker: string, rawVs: string[] | null = n
 
   let listing = asked.value
   let snap = (await tvEach('snap', [listing], d.fetchTvSnapshots, d)).get(listing.tvSymbol)!
-  const currency = snap.value?.currency ?? null
+  // A stale copy's change is not today's. Copies cached before T5b have no change fields.
+  const { close, currency = null, changePct, changeAbs } = snap.value ?? {}
+  const quote = {
+    price: close ?? price,
+    currency,
+    dayChange: snap.status === 'ok' && changePct != null && changeAbs != null ? { abs: changeAbs, pct: changePct / 100 } : null,
+  }
   // An Argentine ADR (GGAL, YPF…) reads its BYMA listing: ARS price over ARS statements, amounts in CCL (S7).
   const { country, logoid } = snap.value ?? {}
   if (listing.market === 'america' && country === 'Argentina' && logoid) {
@@ -294,7 +305,7 @@ export async function getAssetPage(rawTicker: string, rawVs: string[] | null = n
 
   return {
     ...page,
-    currency,
+    ...quote,
     listing,
     bymaListing: listing !== asked.value,
     metrics: run(own, (date) => closeOnOrBefore(bars, date)),

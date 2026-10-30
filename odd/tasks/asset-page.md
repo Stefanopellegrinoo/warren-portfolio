@@ -117,3 +117,8 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   → T6b fixes both in `metrics.ts` and removes the UI workaround.
 
   Still open for later stages (service): a field for the listing currency (BYMA price target in pesos) and the analyst count. Both are needed by T9.
+- L17 (2026-10-30) T5b done (follow-up 2 from L14): the header price comes from the asked listing's TradingView snapshot close (15-minute cache), with the day change below it as "−36,09 (−2,16 %) hoy". TradingView columns: `change` is the percent, `change_abs` the amount.
+  - A plain ADR keeps its own quote.
+  - Unsupported markets keep the identity price and show no change.
+  - A stale snapshot shows the price but no "hoy" change.
+  - 52 tests in the touched dirs (RED first, 2 mutations caught).

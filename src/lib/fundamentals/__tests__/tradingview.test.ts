@@ -79,14 +79,14 @@ describe('resolveTvSymbol', () => {
 
 describe('fetchTvSnapshot', () => {
   it("reads today's catalog values for one symbol, unreadable values as null", async () => {
-    const f = scanner([{ ...meliSnapshot, beta_5_year: 'n/a', price_target_average: null }])
+    const f = scanner([{ ...meliSnapshot, beta_5_year: 'n/a', price_target_average: null, change: -0.7746, change_abs: -12.96 }])
 
     const snap = await fetchTvSnapshot('NASDAQ:MELI', 'america', f)
 
     const { url, body } = sent(f)
     expect(url).toBe('https://scanner.tradingview.com/america/scan')
     expect(body.symbols).toEqual({ tickers: ['NASDAQ:MELI'] })
-    expect(body.columns).toEqual(expect.arrayContaining([...TV_SNAPSHOT_FIELDS, 'description', 'close']))
+    expect(body.columns).toEqual(expect.arrayContaining([...TV_SNAPSHOT_FIELDS, 'description', 'close', 'change', 'change_abs']))
     expect(snap).toMatchObject({
       tvSymbol: 'NASDAQ:MELI',
       name: 'MercadoLibre, Inc.',
@@ -95,6 +95,9 @@ describe('fetchTvSnapshot', () => {
       currency: 'USD',
       fundamentalCurrency: 'USD',
       close: 1660.13,
+      // Verified live 2026-10-30: `change` is the day's percent, `change_abs` the amount.
+      changePct: -0.7746,
+      changeAbs: -12.96,
       marketCap: 84163279217.00002,
     })
     expect(Object.keys(snap.fields).sort()).toEqual([...TV_SNAPSHOT_FIELDS].sort())

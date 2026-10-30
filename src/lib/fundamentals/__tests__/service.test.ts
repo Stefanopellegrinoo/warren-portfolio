@@ -17,7 +17,7 @@ function snapshot(tvSymbol: string, over: Partial<TvSnapshot> = {}): TvSnapshot 
   const fields = Object.fromEntries(TV_SNAPSHOT_FIELDS.map((f) => [f, null])) as TvSnapshot['fields']
   return {
     tvSymbol, name: `${tvSymbol} Inc.`, sector: null, industry: 'Internet Retail', currency: 'USD', fundamentalCurrency: 'USD',
-    close: 50, marketCap: 5000, logoid: tvSymbol.toLowerCase(), type: 'stock', country: 'United States',
+    close: 50, changePct: null, changeAbs: null, marketCap: 5000, logoid: tvSymbol.toLowerCase(), type: 'stock', country: 'United States',
     ...over,
     fields: { ...fields, total_shares_outstanding: 100, price_earnings_fwd: 20, ...over.fields },
   }
@@ -137,10 +137,37 @@ describe('getAssetPage: the ticker', () => {
 
     const page = await getAssetPage('7203.T', null, deps)
 
-    expect(page).toMatchObject({ ticker: '7203.T', name: 'Toyota Motor Corporation', price: 2900, supported: false, metrics: null, peers: [] })
+    expect(page).toMatchObject({ ticker: '7203.T', name: 'Toyota Motor Corporation', price: 2900, dayChange: null, supported: false, metrics: null, peers: [] })
     expect(deps.resolveTvSymbol).toHaveBeenCalledWith('7203.T', 'america')
     expect(cache.set).not.toHaveBeenCalled()
     expect(sourceCalls(deps)).toBe(1)
+  })
+})
+
+describe('getAssetPage: header price', () => {
+  const moved = (s: string) => snapshot(s, s === 'NASDAQ:MELI' ? { close: 1700, changePct: -2.16, changeAbs: -36.09 } : {})
+
+  it("takes the asked listing's TradingView close and day change over the identity price", async () => {
+    const { deps } = fakes()
+    deps.fetchTvSnapshots.mockImplementation(async (symbols: string[]) => new Map(symbols.map((s) => [s, moved(s)])))
+
+    const page = await getAssetPage('MELI', null, deps)
+
+    expect(page).toMatchObject({ price: 1700, currency: 'USD', dayChange: { abs: -36.09, pct: expect.closeTo(-0.0216) } })
+  })
+
+  it('a stale snapshot keeps its close but no day change; no snapshot at all keeps the identity price', async () => {
+    const { deps } = fakes()
+    deps.fetchTvSnapshots.mockImplementation(async (symbols: string[]) => new Map(symbols.map((s) => [s, moved(s)])))
+    await getAssetPage('MELI', null, deps)
+    deps.now.mockReturnValue(NOW + HOUR_MS) // past the snapshot's 15 min
+    deps.fetchTvSnapshots.mockRejectedValue(new Error('HTTP 503'))
+
+    expect(await getAssetPage('MELI', null, deps)).toMatchObject({ price: 1700, currency: 'USD', dayChange: null })
+
+    const { deps: never } = fakes()
+    never.fetchTvSnapshots.mockRejectedValue(new Error('HTTP 503'))
+    expect(await getAssetPage('MELI', null, never)).toMatchObject({ price: 1660, currency: null, dayChange: null })
   })
 })
 
@@ -149,8 +176,8 @@ describe('getAssetPage: sources', () => {
     const { deps } = fakes()
     deps.fetchTvSnapshots.mockImplementation(async (symbols: string[]) =>
       new Map(symbols.map((s) => [s, s === 'NASDAQ:GGAL'
-        ? snapshot(s, { logoid: 'gpo-fin-galicia', type: 'dr', country: 'Argentina' })
-        : snapshot(s, { currency: 'ARS' })])),
+        ? snapshot(s, { logoid: 'gpo-fin-galicia', type: 'dr', country: 'Argentina', close: 41, changePct: 1, changeAbs: 0.41 })
+        : snapshot(s, { currency: 'ARS', close: 7000, changePct: -1, changeAbs: -70 })])),
     )
     deps.findBymaListing.mockResolvedValue('BCBA:GGAL')
 
@@ -158,7 +185,8 @@ describe('getAssetPage: sources', () => {
 
     expect(deps.findBymaListing).toHaveBeenCalledWith('gpo-fin-galicia')
     expect(page).toMatchObject({
-      ticker: 'GGAL', price: 40, currency: 'USD', bymaListing: true,
+      // The header keeps the ADR's own quote, not the BYMA one.
+      ticker: 'GGAL', price: 41, currency: 'USD', dayChange: { abs: 0.41, pct: expect.closeTo(0.01) }, bymaListing: true,
       listing: { ticker: 'BCBA:GGAL', market: 'argentina', tvSymbol: 'BCBA:GGAL', yahooSymbol: 'GGAL.BA' },
     })
     expect(deps.fetchTvSnapshots).toHaveBeenCalledWith(['BCBA:GGAL'], 'argentina')

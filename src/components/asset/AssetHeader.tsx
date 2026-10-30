@@ -1,13 +1,15 @@
 import Link from 'next/link'
 import { LineChart } from 'lucide-react'
 import { priceText } from '@/components/trading/ui'
+import { signTone } from '@/components/ons/ui'
+import { formatNumber, formatPct } from '@/lib/utils'
 import type { AssetPage } from '@/lib/fundamentals/service'
 
 const CURRENCY: Record<string, string> = { USD: 'US$', ARS: '$' }
 
 /** Ticker, market, name and price, as in the approved mockup (odd/tasks/asset-page.md S1, S7). */
 export default function AssetHeader({ page }: { page: AssetPage }) {
-  const { ticker, exchange, listing, name, price, currency, bymaListing } = page
+  const { ticker, exchange, listing, name, price, currency, bymaListing, dayChange } = page
   // TradingView's market (NASDAQ, BCBA) when it is the asked listing, else Yahoo's name for it.
   const market = listing && !bymaListing ? listing.tvSymbol.slice(0, listing.tvSymbol.indexOf(':')) : exchange
   // Non-breaking space: the currency never wraps away from its amount.
@@ -24,6 +26,11 @@ export default function AssetHeader({ page }: { page: AssetPage }) {
       </div>
       <div className="flex flex-none flex-col items-end gap-1 max-[819px]:items-start">
         <p className="font-mono text-[2rem] font-semibold leading-tight tabular-nums max-[819px]:text-2xl">{shownPrice}</p>
+        {dayChange && (
+          <p className={`font-mono text-[13px] tabular-nums ${signTone(dayChange.abs)}`}>
+            {`${formatNumber(dayChange.abs, { decimals: Math.abs(price) < 1 ? 4 : 2, sign: true })} (${formatPct(dayChange.pct)}) hoy`}
+          </p>
+        )}
         <Link
           href={`/trading?symbol=${encodeURIComponent(ticker)}`}
           className="inline-flex min-h-6 items-center gap-1.5 text-[13px] font-medium text-accent-ink hover:underline hover:underline-offset-2 max-[819px]:min-h-11"

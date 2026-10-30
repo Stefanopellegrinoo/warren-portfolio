@@ -55,6 +55,9 @@ export interface TvSnapshot {
   /** Currency of the statements behind the fields. */
   fundamentalCurrency: string | null
   close: number | null
+  /** The day's change of `close`: percent (−2.16 for −2,16 %) and amount. Verified live 2026-10-30. */
+  changePct: number | null
+  changeAbs: number | null
   marketCap: number | null
   /** The company: shared by its listings (NYSE:YPF and BCBA:YPFD are both `ypf`). */
   logoid: string | null
@@ -155,8 +158,8 @@ export async function fetchTvSnapshots(
   // An empty ticker list would make the scanner answer the whole market.
   if (tvSymbols.length === 0) return new Map()
   const meta = [
-    'description', 'sector', 'industry', 'currency', 'fundamental_currency_code', 'close', 'market_cap_basic',
-    'logoid', 'type', 'country',
+    'description', 'sector', 'industry', 'currency', 'fundamental_currency_code', 'close', 'change', 'change_abs',
+    'market_cap_basic', 'logoid', 'type', 'country',
   ]
   const rows = await scan(market, [...meta, ...TV_SNAPSHOT_FIELDS], { symbols: { tickers: tvSymbols } }, fetchImpl)
   return new Map(
@@ -172,6 +175,8 @@ export async function fetchTvSnapshots(
           currency: str(v.currency),
           fundamentalCurrency: str(v.fundamental_currency_code),
           close: num(v.close),
+          changePct: num(v.change),
+          changeAbs: num(v.change_abs),
           marketCap: num(v.market_cap_basic),
           logoid: str(v.logoid),
           type: str(v.type),
