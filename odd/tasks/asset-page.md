@@ -38,7 +38,7 @@ Routes: the parent session is past the ~150k context backstop, so implementation
 
   Stage 1 delivered: PR #49, squash 73ff07d, deploy run 41081377001 OK (L27).
 - [ ] T7 · S9 · delegated · Comparar tab
-- [ ] T8 · S10 · delegated · Noticias
+- [x] T8 · S10 · delegated · Noticias · 34 tests (RED first, 6 mutations caught); live MELI/GGAL/TSM/YPFD ok (L28)
 - [ ] T9 · S11 · delegated · Resumen
 - [ ] T10 · S1 · delegated · ETFs, crypto, ON redirect, unsupported markets
 - [ ] T11 · S8 · delegated · Balances completos (Yahoo + TradingView rows)
@@ -228,3 +228,11 @@ Routes: the parent session is past the ~150k context backstop, so implementation
     - `/api/asset/MELI` → 401.
   - Pending: the user's test on the iPhone.
   - Stage 2 (T7–T10) continues on `feat/asset-page-stage2` from master 73ff07d.
+- L28 (2026-10-30) T8 done.
+  - New: `news.ts`, `GET /api/asset/[ticker]/news` (auth, 30/min), and `NoticiasTab` (not wired yet).
+  - Sources: Google News RSS es-419/AR, queried by the quoted short name cut at its legal form; Yahoo `search` with the US symbol, or the unaccented name for BYMA.
+  - Merge: Spanish first, at most 5 English, 20 in all, deduplicated by title.
+  - Filters: drops stock-quote pages and headlines that don't name the company.
+  - Cache: per-source keys `fund:v1:news:<ticker>:<lang>`, 30-min fresh window, 1-day TTL, 5-min failure marker, memory guard. service.ts now exports `cachedEach`/`eachOf`.
+  - Live: 15 es + 5 en for MELI, GGAL, TSM and YPFD.
+  - Open: GGAL's press says "Grupo Galicia"/"Banco Galicia", so name variants would need a per-company map.

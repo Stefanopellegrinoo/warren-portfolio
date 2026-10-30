@@ -69,7 +69,7 @@ export class AssetError extends Error {
 const MINUTE = 60
 const DAY = 86_400
 /** How long each copy is fresh. Every copy then lives on as its source's last good answer. */
-const FRESH = { snap: 15 * MINUTE, tvh: DAY, yahoo: DAY, fx: DAY, peers: DAY, tvsym: 7 * DAY, byma: 7 * DAY }
+const FRESH = { snap: 15 * MINUTE, tvh: DAY, yahoo: DAY, fx: DAY, peers: DAY, tvsym: 7 * DAY, byma: 7 * DAY, news: 30 * MINUTE }
 type Kind = keyof typeof FRESH
 /** One key per copy, fresh or last good: Redis runs noeviction, so this is every key's TTL. */
 const KEY_TTL = 7 * DAY
@@ -133,13 +133,13 @@ interface Entry<T> {
  * Per id, the cached copy while fresh; the rest fetched in one call. An id the fetch fails or
  * leaves out gets its old copy as stale, else null as error, and a failure mark: until it expires
  * that id is answered the same way without a fetch. A null answer ("no such thing") is returned
- * as ok and never cached.
+ * as ok and never cached. Also news.ts's single cache path.
  */
-async function cachedEach<T>(
+export async function cachedEach<T>(
   kind: Kind,
   ids: string[],
   fetchMany: (ids: string[]) => Promise<Map<string, T | null>>,
-  d: Deps,
+  d: Pick<Deps, 'cache' | 'now' | 'memoryShare'>,
   ttl: (id: string) => number = () => KEY_TTL,
 ): Promise<Map<string, Got<T>>> {
   const key = (id: string) => `fund:v1:${kind}:${id}`
@@ -177,7 +177,7 @@ async function cachedEach<T>(
 }
 
 /** A one-id fetch as a batch: a failure leaves only that id out. */
-const eachOf =
+export const eachOf =
   <T>(kind: Kind, fetchOne: (id: string) => Promise<T | null>) =>
   async (ids: string[]): Promise<Map<string, T | null>> => {
     const got = await Promise.allSettled(ids.map((id) => fetchOne(id)))
