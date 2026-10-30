@@ -318,3 +318,20 @@ Routes: the parent session is past the ~150k context backstop, so implementation
     - TSM → null.
     - Warm loader: 2 ms.
   - **Risk item 5.** The env var must be passed through `docker-compose.yml` (own commit). The production `.env` value is the user's decision.
+- L38 (2026-10-30) Verification of stage 3.
+  - **Compose verifier (e5336f7): PASS.** Docker Compose config renders `SEC_USER_AGENT: ""` when the variable is unset; nothing else changes; the worker never imports fundamentals.
+  - **SEC UI check** (live MELI, NVDA, GGAL; 4 widths × 2 themes): layout passes. No page scroll; the sticky column holds; "Todo" only appears with SEC; the note, EPS label and ▲▼ are right; row → chart works; 0 console errors.
+  - **Defects found:**
+    - D1: SEC keeps fiscal period ends (NVDA 2021-05-02), so one quarter splits into two columns and is mislabeled.
+    - D2: "SEC wins" even when its row is shorter or has holes. MELI Ventas loses 2019–2020; FCF starts in 2024 instead of 2018.
+    - D3: LineChart's IQR outlier rule pins the fast growth of amounts to the edge (NVDA Ventas in Todo: 12 of 73 points).
+    - D4: chart year labels overlap at 390.
+    - D5: missing periods vanish with no marker.
+    - Advisory: in 8 años and Todo, the label column squeezes and wraps at 1440.
+  - **Decisions (mine), fixed as T12b:**
+    - (1) Snap SEC period ends to the nearest month end, as TradingView does (day ≤ 7 → the previous month's end).
+    - (2) Per row and range, the source is the one with the longest contiguous run ending at the latest period. Ties go to the SEC. Still one source per row.
+    - (3) Outlier clamping only for valuation ratios (unit ratio), never for amounts, balances or flows.
+    - (4) Thin the year labels to fit the width.
+    - (5) Mark gaps of more than one period with a thin "…" column.
+    - (6) Give the label column a minimum width on desktop.
