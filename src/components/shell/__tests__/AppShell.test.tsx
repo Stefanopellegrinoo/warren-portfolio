@@ -282,6 +282,14 @@ describe('AppShell — the icon-only menu on Gráficos', () => {
     expect(el.querySelector('#sidebar')!.textContent).toContain('W')
   })
 
+  // The asset page's layout asks for this menu (odd/tasks/asset-page.md L24); Gráficos needs no asking.
+  it('comes from Gráficos’ own path: the same markup, no phone bar, whether a layout asks for it or not', () => {
+    const asked = renderToStaticMarkup(<AppShell pathnameForTest="/trading" iconMenu><p>contenido</p></AppShell>)
+    expect(render('/trading')).toBe(asked)
+    expect(asked).toContain('grid-cols-[64px_minmax(0,1fr)]')
+    expect(asked).not.toContain('Abrir menú')
+  })
+
   it('keeps aria-current on the active entry', () => {
     const { el } = mount('/trading/GGAL')
     const current = el.querySelectorAll('a[aria-current="page"]')
@@ -403,5 +411,39 @@ describe('AppShell — the icon-only menu on Gráficos', () => {
     act(() => toggle().click())
     expect(toggle().getAttribute('aria-expanded')).toBe('true')
     expect(document.documentElement.dataset.menu).toBe('pinned')
+  })
+})
+
+// odd/tasks/asset-page.md S1: the asset search on every page but Gráficos; on a phone, behind the bar's button.
+describe('AppShell — the asset search', () => {
+  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  afterEach(() => { vi.unstubAllGlobals(); forgetCached(); document.body.innerHTML = '' })
+
+  function mount(path: string) {
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    act(() => root.render(<AppShell pathnameForTest={path}><p>contenido</p></AppShell>))
+    return { el, unmount: () => act(() => root.unmount()) }
+  }
+  const input = (el: HTMLElement) => el.querySelector<HTMLInputElement>('input[aria-label="Buscar cualquier activo"]')
+
+  it('the phone bar button opens the search with the keyboard in it', () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })))
+    const { el, unmount } = mount('/dashboard')
+    const open = el.querySelector<HTMLButtonElement>('header button[aria-label="Buscar cualquier activo"]')!
+    expect(open.getAttribute('aria-expanded')).toBe('false')
+    act(() => open.click())
+    expect(open.getAttribute('aria-expanded')).toBe('true')
+    expect(document.activeElement).toBe(input(el))
+    act(() => el.querySelector<HTMLButtonElement>('button[aria-label="Cerrar búsqueda"]')!.click())
+    expect(open.getAttribute('aria-expanded')).toBe('false')
+    unmount()
+  })
+
+  it('is not on Gráficos, which has its own symbol search', () => {
+    const { el, unmount } = mount('/trading')
+    expect(input(el)).toBeNull()
+    unmount()
   })
 })

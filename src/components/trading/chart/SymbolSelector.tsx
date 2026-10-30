@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, useMemo, useRef } from "react";
-import { Search, ChevronDown, Loader2 } from "lucide-react";
+import Link from "next/link";
+import { Search, ChevronDown, Loader2, FileText } from "lucide-react";
 import { Dialog, DialogTrigger } from "@/components/ui/dialog";
 import { TradingDialog, field } from "@/components/trading/ui";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -11,33 +12,22 @@ import { cachedValue } from "@/lib/client-cache";
 import { useChartStore } from "@/lib/store/chart-store";
 import { seriesLabel } from "@/lib/compare-series";
 import { cn } from "@/lib/utils";
+import { getProviderForSymbol } from "@/lib/market-data/resolver";
+import { assetHref } from "@/components/shell/nav";
 import { NO_CONNECTION, requestErrorMessage } from "@/lib/request-errors";
 import { LoadError } from "@/components/ons/ui";
 import { AddToWatchlistButton } from "@/components/trading/watchlist/AddToWatchlistButton";
 import type { SymbolInfo } from "@/lib/binance/types";
 import type { SearchResult } from "@/lib/market-data/types";
+import { fetchTickerSearch, shouldFetchSearch } from "./ticker-search";
 
 // ── Pure utility exports (exported for unit testing) ─────────────────────────
 
-export function buildSearchUrl(q: string): string {
-  return `/api/ticker/search?q=${encodeURIComponent(q)}`
-}
-
-/** Rejects when the search failed, with the server's message when it sent one: a failure is not "no results". */
-export async function fetchTickerSearch(q: string): Promise<SearchResult[]> {
-  const res = await fetch(buildSearchUrl(q))
-  const data = await res.json().catch(() => null)
-  if (!res.ok || !data) throw new Error(data?.error ?? '')
-  return data.results ?? []
-}
+export { buildSearchUrl, fetchTickerSearch, shouldFetchSearch } from "./ticker-search";
 
 const SEARCH_FAILED = "No se pudo buscar. Probá de nuevo."
 // Binance's and /api/positions' own errors are English ("exchangeInfo 451"): only a dropped connection says more.
 const loadMessage = (e: unknown, fallback: string) => (e instanceof TypeError ? NO_CONNECTION : fallback)
-
-export function shouldFetchSearch(query: string): boolean {
-  return query.length >= 2
-}
 
 export function debounce<T extends (...args: any[]) => void>(
   fn: T,
@@ -163,6 +153,7 @@ export function SymbolSelector({ onSymbolSelect, children }: SymbolSelectorProps
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={(v) => setOpen(v)}>
       <DialogTrigger
         aria-label={`Cambiar símbolo, ahora ${seriesLabel(symbol)}`}
@@ -239,6 +230,18 @@ export function SymbolSelector({ onSymbolSelect, children }: SymbolSelectorProps
         </ScrollArea>
       </TradingDialog>
     </Dialog>
+    {/* The asset page (odd/tasks/asset-page.md S1); crypto and Mi cartera have none yet. */}
+    {getProviderForSymbol(symbol) === "yahoo" && (
+      <Link
+        href={assetHref(symbol)}
+        aria-label={`Ficha de ${seriesLabel(symbol)}`}
+        className="inline-flex min-h-9 flex-none items-center gap-1.5 rounded-md px-2 text-[13px] font-medium text-ink-2 hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring max-[819px]:min-h-11 max-[819px]:min-w-11 max-[819px]:justify-center max-[819px]:px-0"
+      >
+        <FileText className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+        <span className="max-[819px]:hidden">Ficha</span>
+      </Link>
+    )}
+    </>
   );
 }
 

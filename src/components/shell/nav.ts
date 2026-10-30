@@ -23,3 +23,6 @@ export function activeHref(pathname: string): string | null {
   const matches = ALL_ITEMS.filter(({ href, section = href }) => pathname === section || pathname.startsWith(section + '/'))
   return matches.sort((a, b) => (b.section ?? b.href).length - (a.section ?? a.href).length)[0]?.href ?? null
 }
+
+/** The asset page of a ticker as the app stores it (`MELI`, `BCBA:GGAL`) or as Yahoo names it (`GGAL.BA`). */
+export const assetHref = (ticker: string) => `/activo/${encodeURIComponent(ticker)}`

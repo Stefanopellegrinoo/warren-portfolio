@@ -10,6 +10,7 @@ let capturedExpire: ReturnType<typeof vi.fn>
 let capturedGet: ReturnType<typeof vi.fn>
 let capturedSadd: ReturnType<typeof vi.fn>
 let capturedMulti: ReturnType<typeof vi.fn>
+let capturedInfo: ReturnType<typeof vi.fn>
 
 vi.mock('ioredis', () => {
   // Must be a class so `new Redis(...)` works
@@ -24,6 +25,7 @@ vi.mock('ioredis', () => {
     sadd: ReturnType<typeof vi.fn>
     multi: ReturnType<typeof vi.fn>
     expire: ReturnType<typeof vi.fn>
+    info: ReturnType<typeof vi.fn>
 
     constructor() {
       this.del = vi.fn().mockResolvedValue(1)
@@ -52,6 +54,7 @@ vi.mock('ioredis', () => {
         return tx
       })
       this.expire = vi.fn().mockResolvedValue(1)
+      this.info = vi.fn().mockResolvedValue('')
       // `on` captures event handlers so tests can fire 'connect'
       const handlers: Record<string, () => void> = {}
       this.on = vi.fn((event: string, handler: () => void) => {
@@ -67,6 +70,7 @@ vi.mock('ioredis', () => {
       capturedGet = this.get
       capturedSadd = this.sadd
       capturedMulti = this.multi
+      capturedInfo = this.info
       // Automatically fire the 'connect' event once connect() resolves
       this.connect = vi.fn(async () => {
         if (handlers['connect']) handlers['connect']()
@@ -295,5 +299,34 @@ describe('users who wrote (odd/tasks/supabase-efficiency.md S7)', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
     capturedMulti.mockImplementationOnce(() => ({ smembers() { return this }, del() { return this }, exec: async () => { throw new Error('down') } }))
     expect(await redisModule.takeDirtyUsers()).toBeNull()
+  })
+})
+
+describe('redisMemoryShare (odd/tasks/asset-page.md T4b)', () => {
+  beforeEach(() => {
+    vi.resetModules()
+  })
+
+  it('is used_memory over maxmemory from INFO, read at most every 10 s; null without a maxmemory or on error', async () => {
+    const redisModule = await import('../redis')
+    redisModule.getRedis()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
+    capturedInfo.mockResolvedValue('# Memory\r\nused_memory:32000000\r\nused_memory_human:30.52M\r\nmaxmemory:128000000\r\nmaxmemory_policy:noeviction\r\n')
+
+    expect(await redisModule.redisMemoryShare()).toBe(0.25)
+    now.mockReturnValue(1_009_999)
+    expect(await redisModule.redisMemoryShare()).toBe(0.25)
+    expect(capturedInfo).toHaveBeenCalledTimes(1)
+    expect(capturedInfo).toHaveBeenCalledWith('memory')
+
+    capturedInfo.mockResolvedValue('used_memory:1000\r\nmaxmemory:0\r\n')
+    now.mockReturnValue(1_010_000)
+    expect(await redisModule.redisMemoryShare()).toBeNull()
+
+    capturedInfo.mockRejectedValue(new Error('down'))
+    now.mockReturnValue(1_020_000)
+    expect(await redisModule.redisMemoryShare()).toBeNull()
+    now.mockRestore()
   })
 })

@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { ArrowUpDown } from 'lucide-react'
 import { groupRows, nextSort, sortRows, type HoldingRow, type Sort, type SortKey } from '@/lib/resumen/holdings'
 import { formatNumber, formatPct } from '@/lib/utils'
+import { assetHref } from '@/components/shell/nav'
 import { Chip, GroupHead, linkButton, toneOf } from './ui'
 
 // Narrow: ticker | name over day chip | value over result.
@@ -57,9 +58,17 @@ function Holding({ r }: { r: HoldingRow }) {
   const wideMeta = r.name ? r.quantityLabel : (r.value === null ? 'Sin cotización' : null)
   return (
     <li className={rowGrid}>
-      <Link href={r.href} className="row-span-2 self-start pt-0.5 font-semibold text-ink hover:text-accent-ink cq-wide:row-span-1 cq-wide:self-center cq-wide:pt-0" aria-label={`${r.ticker}${r.name ? `, ${r.name}` : ''}, ver detalle`}>
-        {r.ticker}
-      </Link>
+      <span className="row-span-2 flex flex-col items-start self-start pt-0.5 cq-wide:row-span-1 cq-wide:self-center cq-wide:pt-0">
+        <Link href={r.href} className="font-semibold text-ink hover:text-accent-ink" aria-label={`${r.ticker}${r.name ? `, ${r.name}` : ''}, ver detalle`}>
+          {r.ticker}
+        </Link>
+        {/* The asset page (odd/tasks/asset-page.md S1); ONs already open their own. */}
+        {r.kind !== 'on' && (
+          <Link href={assetHref(r.ticker)} aria-label={`Ficha de ${r.ticker}`} className="inline-flex min-h-6 items-center text-xs text-accent-ink hover:underline hover:underline-offset-2">
+            Ficha
+          </Link>
+        )}
+      </span>
       <span className="col-start-2 row-start-1 min-w-0">
         <span className="block truncate font-medium">{title}</span>
         <span className="block text-[13px] text-ink-3 cq-wide:hidden">{meta}</span>

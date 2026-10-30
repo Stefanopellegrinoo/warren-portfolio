@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { flushSync } from 'react-dom'
 import { usePathname } from 'next/navigation'
 import { Menu, X, LogOut, Search, ChevronsLeft, ChevronsRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -11,6 +12,7 @@ import { getPortfolio, POSITIONS_KEY } from '@/lib/warren/positions'
 import { NAV_ITEMS, PERSONAL_ITEMS, activeHref, type NavItem } from './nav'
 import ThemeSwitch from './ThemeSwitch'
 import AssetSearch from './AssetSearch'
+import ShellSearch from './ShellSearch'
 
 const linkBase =
   'relative flex min-h-8 items-center gap-2 rounded-md px-2 text-ink-2 hover:bg-hover hover:text-ink max-[819px]:min-h-11'
@@ -29,7 +31,8 @@ const ShellMenu = createContext<{ open: boolean; openMenu: (from: HTMLElement) =
 export const useShellMenu = () => useContext(ShellMenu)
 
 // From 820 px Gráficos keeps only the menu's icons, named by tooltips (odd/tasks/chart-pro-redesign.md S4);
-// » pins the full menu open and this device remembers it. The phone drawer is the same everywhere.
+// a layout may ask for the same menu (`iconMenu`: the asset page, odd/tasks/asset-page.md L24).
+// » pins the full menu open and this device remembers it, for every such page. The phone drawer is the same everywhere.
 // PIN_KEY is also read by the root layout's MENU_BOOT_SCRIPT.
 const ICON_MENU = ['/trading']
 const PIN_KEY = 'warren-menu-pinned'
@@ -71,7 +74,11 @@ function NavLink({ item, active, iconMenu, mini }: { item: NavItem; active: bool
   )
 }
 
-export default function AppShell({ children, pathnameForTest }: { children: React.ReactNode; pathnameForTest?: string }) {
+export default function AppShell({ children, pathnameForTest, iconMenu: asked = false }: {
+  children: React.ReactNode
+  pathnameForTest?: string
+  iconMenu?: boolean
+}) {
   const routerPath = usePathname()
   const pathname = pathnameForTest ?? routerPath ?? ''
   const current = activeHref(pathname)
@@ -80,13 +87,17 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
   const open = openOn === pathname
   const [askedHeld, setAskedHeld] = useState<string[]>([])
   const [searchOpen, setSearchOpen] = useState(false)
+  // The phone's asset search bar, like the menu, belongs to the page it was opened on.
+  const [findOn, setFindOn] = useState<string | null>(null)
+  const findInput = useRef<HTMLInputElement>(null)
+  const ownPhoneBar = OWN_PHONE_BAR.includes(current ?? '')
   // The button that opened the menu takes the focus back when it closes.
   const opener = useRef<HTMLElement | null>(null)
   const closeBtn = useRef<HTMLButtonElement>(null)
   // The portfolio this tab already has; changing section never asks for it again.
   const known = cachedValue<Portfolio>(POSITIONS_KEY)
   const pinned = useSyncExternalStore(subscribePinned, readPinned, () => false)
-  const iconMenu = ICON_MENU.includes(current ?? '')
+  const iconMenu = asked || ICON_MENU.includes(current ?? '')
   const mini = iconMenu && !pinned
   // One tooltip for the icon-only menu, drawn outside it: the menu scrolls (and would clip it)
   // and the chart's pane separators sit at z-index 50.
@@ -147,7 +158,7 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
         Saltar al contenido
       </a>
 
-      {!OWN_PHONE_BAR.includes(current ?? '') && <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-line bg-canvas px-2 min-[820px]:hidden">
+      {!ownPhoneBar && <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-line bg-canvas px-2 min-[820px]:hidden">
         <button
           type="button"
           onClick={e => openMenu(e.currentTarget)}
@@ -159,6 +170,16 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
           <span className="sr-only">Abrir menú</span>
         </button>
         <span className="font-serif text-xl font-medium leading-none">Warren</span>
+        <button
+          type="button"
+          // Rendered and focused within the tap, so the phone opens its keyboard.
+          onClick={() => { flushSync(() => setFindOn(pathname)); findInput.current?.focus() }}
+          aria-label="Buscar cualquier activo"
+          aria-expanded={findOn === pathname}
+          className="ml-auto grid h-11 w-11 place-items-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+        >
+          <Search className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />
+        </button>
       </header>}
 
       <div
@@ -277,6 +298,7 @@ export default function AppShell({ children, pathnameForTest }: { children: Reac
       <AssetSearch open={searchOpen} onClose={() => setSearchOpen(false)} held={known ? heldOf(known) : askedHeld} />
 
       <main id="main" className="min-w-0">
+        {!ownPhoneBar && <ShellSearch inputRef={findInput} expanded={findOn === pathname} onCollapse={() => setFindOn(null)} />}
         <ShellMenu.Provider value={{ open, openMenu }}>{children}</ShellMenu.Provider>
       </main>
     </div>
