@@ -35,10 +35,16 @@ export interface MetricValue {
   id: MetricId
   /** The list value: the latest TTM flows and latest balances with today's market cap and price. */
   today: number | null
-  /** Oldest first. Each series with periods ends with the "hoy" point, `{ end: today, value: today }`. */
+  /**
+   * Oldest first. Each series with periods ends with the "hoy" point, `{ end: today, value: today }`,
+   * except the quarterly series of a period flow (catalog `periodFlow`): a quarter's flow is about a
+   * fourth of hoy's 12 months, so that chart ends at its last quarter. The TTM series always has hoy.
+   */
   history: Record<PeriodMode, Series>
   /** First year with data in any mode, for "historia desde". */
   since: string | null
+  /** The latest statements' period end the list value is built on: the anchor of its change in a year. */
+  asOf: string | null
   source: 'tradingview' | 'yahoo' | 'snapshot'
 }
 
@@ -174,7 +180,7 @@ function evaluator<L extends string>(book: Book<L>, ctx: Ctx) {
   const latest = frames.ttm.findLast(({ f }) => f.flow('netIncome' as L) !== null)
   const todayFrame = latest ? frame('ttm', latest.end, ctx.now) : null
 
-  return (formula: (f: Frame<L>) => N) => {
+  return (formula: (f: Frame<L>) => N, periodFlow = false) => {
     const today = finite(todayFrame && formula(todayFrame))
     const history = Object.fromEntries(
       PERIOD_MODES.map((mode) => {
@@ -182,12 +188,13 @@ function evaluator<L extends string>(book: Book<L>, ctx: Ctx) {
           const value = finite(formula(f))
           return value === null ? [] : [{ end, value }]
         })
-        if (points.length > 0 && today !== null) points.push({ end: ctx.today, value: today })
+        const sameScale = !(periodFlow && mode === 'quarterly')
+        if (points.length > 0 && today !== null && sameScale) points.push({ end: ctx.today, value: today })
         return [mode, points]
       }),
     ) as Record<PeriodMode, Series>
     const first = PERIOD_MODES.map((mode) => history[mode][0]?.end).filter(Boolean).sort()[0]
-    return { today, history, since: first ? first.slice(0, 4) : null }
+    return { today, history, since: first ? first.slice(0, 4) : null, asOf: today === null ? null : latest!.end }
   }
 }
 
@@ -217,32 +224,33 @@ export function computeMetrics(input: MetricsInput): Metrics {
   }
   const t = input.tv && evaluator(tvBook(input.tv), ctx)
   const y = input.yahoo && evaluator(yahooBook(input.yahoo), ctx)
-  const none = { today: null, history: EMPTY, since: null }
+  const none = { today: null, history: EMPTY, since: null, asOf: null }
 
   return Object.fromEntries(
     METRICS.map((def): [MetricId, MetricValue] => {
       if (def.group === 'snapshot') {
         return [def.id, { id: def.id, ...none, today: input.snapshot.fields[def.field] ?? null, source: 'snapshot' }]
       }
-      const value = def.group === 'T' ? t?.(def.formula) : y?.(def.formula)
+      const periodFlow = 'periodFlow' in def
+      const value = def.group === 'T' ? t?.(def.formula, periodFlow) : y?.(def.formula, periodFlow)
       return [def.id, { id: def.id, ...(value ?? none), source: def.group === 'T' ? 'tradingview' : 'yahoo' }]
     }),
   ) as Metrics
 }
 
 /**
- * The last point against the latest one at least a year before it (and no more than a quarter
- * older than that): percentage points for percent metrics, % change for the rest. Null without
- * one, or over a base ≤ 0. Pass the TTM series to compare the list value.
+ * The last point against the same period a year before the one it is built on: its own end, or
+ * `asOf` for the "hoy" point (dated after every period). Percentage points for percent metrics,
+ * % change for the rest; null without that period, or over a base ≤ 0. Pass the TTM series and the
+ * metric's `asOf` to compare the list value.
  */
-export function changeVsYearAgo(series: Series, unit: MetricUnit): N {
+export function changeVsYearAgo(series: Series, unit: MetricUnit, asOf: string | null = null): N {
   const last = series.at(-1)
   if (!last) return null
-  const yearAgo = dayOf(last.end) - YEAR_DAYS
-  const then = series.findLast((p) => dayOf(p.end) <= yearAgo)
-  if (!then || dayOf(then.end) < yearAgo - QUARTER_DAYS - TOLERANCE_DAYS) return null
-  if (unit === 'percent') return last.value - then.value
-  return then.value > 0 ? (last.value / then.value - 1) * 100 : null
+  const then = near(series, asOf !== null && last.end > asOf ? asOf : last.end, YEAR_DAYS)
+  if (then === null) return null
+  if (unit === 'percent') return last.value - then
+  return then > 0 ? (last.value / then - 1) * 100 : null
 }
 
 /** The point the chart marks: the highest, or the lowest for metrics where lower is better. */

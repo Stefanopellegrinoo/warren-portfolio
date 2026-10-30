@@ -66,6 +66,8 @@ function yahooStatements(currency: string): YahooStatements {
 }
 
 const ids = (group: string) => METRICS.filter((m) => m.group === group).map((m) => m.id)
+/** Per-share flows: a quarter holds a quarter's worth, about a fourth of the 12 months. */
+const QUARTER_FLOWS: MetricId[] = ['revenuePerShare', 'ocfPerShare', 'fcfPerShare', 'ebitPerShare', 'ebitdaPerShare', 'capexPerShare', 'eps']
 const relative = (a: number | null, b: number) => Math.abs((a as number) / b - 1)
 
 describe('catalog', () => {
@@ -134,12 +136,46 @@ describe('computeMetrics', () => {
     for (const id of ids('T')) {
       for (const mode of PERIOD_MODES) {
         expect(m[id].today, id).not.toBeNull()
+        // A quarter of a per-share flow is not on hoy's 12-month scale: next test.
+        if (mode === 'quarterly' && QUARTER_FLOWS.includes(id)) continue
         expect(m[id].history[mode].at(-1), `${id} ${mode}`).toEqual({ end: TODAY, value: m[id].today })
       }
     }
     const [lastPeriod] = m.pe.history.ttm.slice(-2)
     expect(lastPeriod.end).toBe('2026-06-30')
     expect(lastPeriod.value).toBeCloseTo((2000 * unitsNow) / 1863e6, 6)
+  })
+
+  it("ends a quarterly per-share flow at its last quarter: a quarter's flow is not on hoy's 12-month scale", async () => {
+    const m = computeMetrics({ ...(await tvInput('NASDAQ:MELI')), yahoo: yahooStatements('USD') })
+
+    for (const id of QUARTER_FLOWS) {
+      expect(m[id].history.quarterly.at(-1)?.end, id).toBe('2026-06-30')
+      expect(m[id].history.ttm.at(-1), id).toEqual({ end: TODAY, value: m[id].today })
+      expect(m[id].history.annual.at(-1), id).toEqual({ end: TODAY, value: m[id].today })
+    }
+    // Annualized ratios, balances per share and margins are on hoy's scale: they keep it.
+    for (const id of ['pe', 'pcf', 'debtPerShare', 'bookPerShare', 'netMargin', 'operatingMargin'] as const) {
+      expect(m[id].history.quarterly.at(-1), id).toEqual({ end: TODAY, value: m[id].today })
+    }
+  })
+
+  it('compares the list value with the same period a year before the statements it is built on (MELI)', async () => {
+    // The fixture keeps six quarters; MercadoLibre's reported Q4 and Q3 2024 complete the TTM to 2025-06-30.
+    const row = historyRows.find((r) => r.s === 'NASDAQ:MELI')!
+    const longer = { ...row, total_revenue_fq_h: [...row.total_revenue_fq_h, 6059e6, 5312e6], net_income_fq_h: [...row.net_income_fq_h, 639e6, 397e6] }
+    const tv = (await fetchTvHistory(['NASDAQ:MELI'], 'america', answering(longer))).get('NASDAQ:MELI')!
+    const m = computeMetrics({ ...(await tvInput('NASDAQ:MELI', (d) => (d === '2025-06-30' ? 2000 : 1000))), tv })
+    const at = (s: Series, end: string) => s.find((p) => p.end === end)!.value
+
+    // Hoy is the TTM to 2026-06-30 (5,3 %); a year before it is the TTM to 2025-06-30 (8,5 %), not 2025-09-30.
+    expect(m.netMargin.asOf).toBe('2026-06-30')
+    expect(at(m.netMargin.history.ttm, '2025-06-30')).toBeCloseTo(8.5, 1)
+    expect(changeVsYearAgo(m.netMargin.history.ttm, 'percent', m.netMargin.asOf)).toBeCloseTo(-3.2, 1)
+    expect(changeVsYearAgo(m.netMargin.history.ttm, 'percent', m.netMargin.asOf)).toBeCloseTo(m.netMargin.today! - at(m.netMargin.history.ttm, '2025-06-30'), 9)
+    // A price metric: hoy at today's price against that period at its own day's price.
+    expect(changeVsYearAgo(m.pe.history.ttm, 'ratio', m.pe.asOf)).toBeCloseTo((m.pe.today! / at(m.pe.history.ttm, '2025-06-30') - 1) * 100, 9)
+    expect(m.peForward.asOf).toBeNull()
   })
 
   it('builds TTM only where 4 consecutive quarters exist', () => {
@@ -301,7 +337,7 @@ describe('computeMetrics', () => {
     expect(noPrice.revenuePerShare.today).toBeCloseTo(694, 0)
     expect(noPrice.netMargin.today).toBeCloseTo(5.295, 3)
     expect(noRates.netMargin).toMatchObject({ today: null, history: { quarterly: [], ttm: [], annual: [] }, since: null })
-    expect(computeMetrics(meli).roe).toEqual({ id: 'roe', today: null, history: { quarterly: [], ttm: [], annual: [] }, since: null, source: 'yahoo' })
+    expect(computeMetrics(meli).roe).toEqual({ id: 'roe', today: null, history: { quarterly: [], ttm: [], annual: [] }, since: null, asOf: null, source: 'yahoo' })
   })
 
   it('gives null over a denominator ≤ 0 (P/E of a loss), but keeps a negative margin', () => {
@@ -315,7 +351,7 @@ describe('computeMetrics', () => {
   it("takes forward metrics, target, shares, float, employees and beta from TradingView's snapshot, with no history", async () => {
     const m = computeMetrics(await tvInput('NASDAQ:MELI'))
 
-    expect(m.peForward).toEqual({ id: 'peForward', today: meliSnapshotRow.price_earnings_fwd, history: { quarterly: [], ttm: [], annual: [] }, since: null, source: 'snapshot' })
+    expect(m.peForward).toEqual({ id: 'peForward', today: meliSnapshotRow.price_earnings_fwd, history: { quarterly: [], ttm: [], annual: [] }, since: null, asOf: null, source: 'snapshot' })
     expect(m.priceTarget.today).toBe(meliSnapshotRow.price_target_average)
     expect(m.sharesOutstanding.today).toBe(meliSnapshotRow.total_shares_outstanding)
     expect(m.beta.today).toBe(meliSnapshotRow.beta_1_year)
@@ -341,14 +377,16 @@ describe('computeMetrics', () => {
 describe('helpers', () => {
   const s = (pairs: [string, number][]): Series => pairs.map(([end, value]) => ({ end, value }))
 
-  it('changeVsYearAgo: points for percent metrics, percent change for the rest, against the point a year earlier', () => {
-    const history = s([['2025-06-30', 8], ['2025-09-30', 7.9], ['2026-06-30', 5.3], [TODAY, 5.3]])
+  it('changeVsYearAgo: the last point against the same period a year before the one it is built on; points for percent, % for the rest', () => {
+    const ttm = s([['2025-06-30', 8.5], ['2025-09-30', 7.9], ['2026-06-30', 5.3], [TODAY, 5.3]])
 
-    expect(changeVsYearAgo(history, 'percent')).toBeCloseTo(-2.6, 9) // vs 2025-09-30
-    expect(changeVsYearAgo(s([['2025-09-30', 40], [TODAY, 45]]), 'ratio')).toBeCloseTo(12.5, 9)
-    expect(changeVsYearAgo(s([['2026-03-31', 40], [TODAY, 45]]), 'ratio')).toBeNull()
-    expect(changeVsYearAgo(s([['2023-09-30', 40], [TODAY, 45]]), 'ratio')).toBeNull() // two years is not one
-    expect(changeVsYearAgo(s([['2025-09-30', -5], [TODAY, 45]]), 'ratio')).toBeNull()
+    expect(changeVsYearAgo(ttm, 'percent', '2026-06-30')).toBeCloseTo(-3.2, 9) // hoy is built on 2026-06-30: vs 2025-06-30
+    expect(changeVsYearAgo(ttm.slice(0, 3), 'percent')).toBeCloseTo(-3.2, 9) // a period point is its own anchor
+    expect(changeVsYearAgo(s([['2025-06-30', 40], [TODAY, 45]]), 'ratio', '2026-06-30')).toBeCloseTo(12.5, 9)
+    expect(changeVsYearAgo(s([['2025-09-30', 40], [TODAY, 45]]), 'ratio', '2026-06-30')).toBeNull() // not the same period
+    expect(changeVsYearAgo(s([['2024-06-30', 40], [TODAY, 45]]), 'ratio', '2026-06-30')).toBeNull() // two years is not one
+    expect(changeVsYearAgo(s([['2025-06-30', -5], [TODAY, 45]]), 'ratio', '2026-06-30')).toBeNull()
+    expect(changeVsYearAgo(s([['2024-12-28', 3], ['2025-12-31', 4]]), 'ratio')).toBeCloseTo(100 / 3, 9) // 52/53-week years drift
   })
 
   it("bestPoint: the highest or lowest point, by the metric's direction", () => {

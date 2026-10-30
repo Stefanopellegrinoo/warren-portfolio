@@ -43,6 +43,11 @@ interface Row {
   subsection?: typeof FORWARD
   label: string
   unit: MetricUnit
+  /**
+   * The value is the period's own flow, not a ratio of flows nor annualized: a quarter holds about a
+   * fourth of a year, so its quarterly series has no "hoy" point (hoy is on the 12-month scale).
+   */
+  periodFlow?: true
 }
 export type MetricDef = Row &
   (
@@ -126,19 +131,19 @@ export const METRICS = [
   { id: 'ltDebtToEquity', section: SOLV, label: 'Deuda largo plazo / patrimonio', unit: 'ratio', group: 'Y', better: 'lower', formula: (f) => div(f.bal('longTermDebt'), f.bal('stockholdersEquity')) },
 
   // Per listed unit, in USD: the amount converted at the period end over the units then.
-  { id: 'revenuePerShare', section: PS, label: 'Ventas', unit: 'usdPerShare', group: 'T', better: 'higher', formula: (f) => div(f.flow('revenue'), f.units) },
-  { id: 'ocfPerShare', section: PS, label: 'Flujo de caja operativo', unit: 'usdPerShare', group: 'Y', better: 'higher', formula: (f) => div(f.flow('operatingCashFlow'), f.units) },
-  { id: 'fcfPerShare', section: PS, label: 'Flujo de caja libre', unit: 'usdPerShare', group: 'T', better: 'higher', formula: (f) => div(f.flow('freeCashFlow'), f.units) },
-  { id: 'ebitPerShare', section: PS, label: 'EBIT', unit: 'usdPerShare', group: 'Y', better: 'higher', formula: (f) => div(f.flow('ebit'), f.units) },
-  { id: 'ebitdaPerShare', section: PS, label: 'EBITDA', unit: 'usdPerShare', group: 'T', better: 'higher', formula: (f) => div(f.flow('ebitda'), f.units) },
+  { id: 'revenuePerShare', section: PS, periodFlow: true, label: 'Ventas', unit: 'usdPerShare', group: 'T', better: 'higher', formula: (f) => div(f.flow('revenue'), f.units) },
+  { id: 'ocfPerShare', section: PS, periodFlow: true, label: 'Flujo de caja operativo', unit: 'usdPerShare', group: 'Y', better: 'higher', formula: (f) => div(f.flow('operatingCashFlow'), f.units) },
+  { id: 'fcfPerShare', section: PS, periodFlow: true, label: 'Flujo de caja libre', unit: 'usdPerShare', group: 'T', better: 'higher', formula: (f) => div(f.flow('freeCashFlow'), f.units) },
+  { id: 'ebitPerShare', section: PS, periodFlow: true, label: 'EBIT', unit: 'usdPerShare', group: 'Y', better: 'higher', formula: (f) => div(f.flow('ebit'), f.units) },
+  { id: 'ebitdaPerShare', section: PS, periodFlow: true, label: 'EBITDA', unit: 'usdPerShare', group: 'T', better: 'higher', formula: (f) => div(f.flow('ebitda'), f.units) },
   { id: 'bookPerShare', section: PS, label: 'Valor libro', unit: 'usdPerShare', group: 'Y', better: 'higher', formula: (f) => div(f.bal('stockholdersEquity'), f.units) },
   { id: 'tangibleBookPerShare', section: PS, label: 'Valor libro tangible', unit: 'usdPerShare', group: 'Y', better: 'higher', formula: (f) => div(f.bal('tangibleBookValue'), f.units) },
   { id: 'cashPerShare', section: PS, label: 'Caja', unit: 'usdPerShare', group: 'Y', better: 'higher', formula: (f) => div(f.bal('cashAndShortTermInvestments'), f.units) },
   { id: 'debtPerShare', section: PS, label: 'Deuda', unit: 'usdPerShare', group: 'T', better: 'lower', formula: (f) => div(f.bal('totalDebt'), f.units) },
   { id: 'workingCapitalPerShare', section: PS, label: 'Capital de trabajo', unit: 'usdPerShare', group: 'Y', better: 'higher', formula: (f) => div(f.bal('workingCapital'), f.units) },
-  { id: 'capexPerShare', section: PS, label: 'Inversión (CapEx)', unit: 'usdPerShare', group: 'Y', better: 'higher', formula: capex },
+  { id: 'capexPerShare', section: PS, periodFlow: true, label: 'Inversión (CapEx)', unit: 'usdPerShare', group: 'Y', better: 'higher', formula: capex },
   // Net income in USD per listed unit: TradingView's EPS line is per ordinary share in the statements' currency.
-  { id: 'eps', section: PS, label: 'Ganancia (EPS)', unit: 'usdPerShare', group: 'T', better: 'higher', formula: (f) => div(f.flow('netIncome'), f.units) },
+  { id: 'eps', section: PS, periodFlow: true, label: 'Ganancia (EPS)', unit: 'usdPerShare', group: 'T', better: 'higher', formula: (f) => div(f.flow('netIncome'), f.units) },
 
   { id: 'priceTarget', section: 'Analistas y riesgo', label: 'Precio objetivo promedio', unit: 'price', group: 'snapshot', field: 'price_target_average' },
   { id: 'beta', section: 'Analistas y riesgo', label: 'Beta (cuánto se mueve contra el mercado)', unit: 'ratio', group: 'snapshot', field: 'beta_1_year' },

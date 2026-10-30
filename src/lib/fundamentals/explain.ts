@@ -396,9 +396,9 @@ const WORDS = ['cero', 'uno', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete',
 /**
  * "¿Cómo viene?": where the series started and ended, the years it was negative, its best point,
  * the streak it ends on and the change against a year before. Facts from the numbers only.
- * `today` is the end of the "hoy" point, when the series has one.
+ * `today` is the end of the "hoy" point, when the series has one; `asOf` the period hoy is built on.
  */
-export function howItGoes(id: MetricId, series: Series, mode: PeriodMode, today: string | null): string[] {
+export function howItGoes(id: MetricId, series: Series, mode: PeriodMode, today: string | null, asOf: string | null = null): string[] {
   const last = series[series.length - 1]
   const periods = last?.end === today ? series.slice(0, -1) : series
   if (periods.length < 2) return ['Todavía no hay historia suficiente para ver cómo viene.']
@@ -434,7 +434,8 @@ export function howItGoes(id: MetricId, series: Series, mode: PeriodMode, today:
     out.push(`${dir > 0 ? 'Subió' : 'Bajó'} ${WORDS[streak] ?? streak} ${mode === 'annual' ? 'años' : 'trimestres'} seguidos, hasta ${label(periods[periods.length - 1].end)}.`)
   }
 
-  const change = changeVsYearAgo(series, def.unit)
+  // Últimos 12 meses compares hoy, like the list; a quarter or a year compares its last period.
+  const change = changeVsYearAgo(mode === 'ttm' ? series : periods, def.unit, asOf)
   if (change !== null) {
     const size = `${formatNumber(Math.abs(change), { decimals: 1 })}${def.unit === 'percent' ? ' puntos' : ' %'}`
     const then = mode === 'quarterly' ? 'el mismo trimestre de un año antes' : 'un año antes'

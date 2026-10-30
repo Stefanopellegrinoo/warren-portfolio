@@ -122,3 +122,8 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   - Unsupported markets keep the identity price and show no change.
   - A stale snapshot shows the price but no "hoy" change.
   - 52 tests in the touched dirs (RED first, 2 mutations caught).
+- L18 (2026-10-30) T6b done. `MetricValue.asOf` holds the latest statement period end the hoy value is built on.
+  - `changeVsYearAgo` now compares with the same period a year earlier: MELI net margin ▼ 3,2 puntos, against 2025-06-30.
+  - Quarterly per-share flows (catalog `periodFlow`) no longer get the hoy point. TTM and annual keep it, so S5 holds for TTM.
+  - The UI workaround was removed. Tests pinning the old behavior were rewritten.
+  - 117 tests pass in fundamentals + asset.

@@ -104,8 +104,8 @@ describe('howItGoes', () => {
   const s = (pairs: [string, number][]) => pairs.map(([end, value]) => ({ end, value }))
 
   it('states losses, when it turned, its best point and how it compares with a year before', () => {
-    const series = s([['2019-12-31', -2], ['2020-06-30', -1], ['2021-03-31', 3], ['2022-03-31', 9.2], ['2025-09-30', 6], ['2026-10-30', 5.3]])
-    const text = howItGoes('netMargin', series, 'ttm', '2026-10-30').join(' ')
+    const series = s([['2019-12-31', -2], ['2020-06-30', -1], ['2021-03-31', 3], ['2022-03-31', 9.2], ['2025-06-30', 6], ['2026-06-30', 5.3], ['2026-10-30', 5.3]])
+    const text = howItGoes('netMargin', series, 'ttm', '2026-10-30', '2026-06-30').join(' ')
     expect(text).toContain('Perdió plata en 2019–2020')
     expect(text).toContain('gana desde ene–mar 2021')
     expect(text).toContain('Su máximo fue 9,2 % en ene–mar 2022.')
@@ -134,6 +134,13 @@ describe('howItGoes', () => {
     const none = ['Todavía no hay historia suficiente para ver cómo viene.']
     expect(howItGoes('pe', s([['2026-10-30', 20]]), 'ttm', '2026-10-30')).toEqual(none)
     expect(howItGoes('roe', s([['2026-06-30', 27.5], ['2026-10-30', 27.5]]), 'ttm', '2026-10-30')).toEqual(none)
+  })
+
+  it('compares the last quarter or year, not hoy, with the same period a year before', () => {
+    const q = s([['2025-03-31', 30], ['2025-06-30', 25], ['2025-09-30', 22], ['2025-12-31', 20], ['2026-03-31', 18], ['2026-06-30', 20], ['2026-10-30', 19]])
+    expect(howItGoes('pe', q, 'quarterly', '2026-10-30', '2026-06-30').join(' ')).toContain('Contra el mismo trimestre de un año antes, bajó 20,0 %.')
+    const y = s([['2023-12-31', 2], ['2024-12-31', 3], ['2025-12-31', 4], ['2026-10-30', 5]])
+    expect(howItGoes('revenuePerShare', y, 'annual', '2026-10-30', '2026-06-30').join(' ')).toContain('Contra un año antes, subió 33,3 %.')
   })
 
   it('compares a quarter with the same quarter a year before', () => {

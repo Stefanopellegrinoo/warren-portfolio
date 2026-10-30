@@ -26,12 +26,13 @@ const TODAYS: Partial<Record<MetricId, number | null>> = {
 function metric(id: MetricId, snapshot: boolean): MetricValue {
   const today = id in TODAYS ? TODAYS[id]! : 10
   const empty = { quarterly: [], ttm: [], annual: [] }
-  if (snapshot || today === null) return { id, today, history: empty, since: null, source: snapshot ? 'snapshot' : 'yahoo' }
+  if (snapshot || today === null) return { id, today, history: empty, since: null, asOf: null, source: snapshot ? 'snapshot' : 'yahoo' }
   return {
     id,
     today,
     history: { quarterly: withToday(quarters((i) => i - 3), today), ttm: withToday(quarters((i) => i - 6).slice(3), today), annual: [] },
     since: '2018',
+    asOf: '2026-06-30',
     source: 'tradingview',
   }
 }
@@ -151,7 +152,7 @@ describe('NumerosTab history', () => {
   it('opens on the mode with history when the last 12 months have a single period', async () => {
     const p = page()
     p.metrics!.roe = {
-      id: 'roe', today: 27.5, since: '2022', source: 'yahoo',
+      id: 'roe', today: 27.5, since: '2022', asOf: '2026-06-30', source: 'yahoo',
       history: {
         quarterly: withToday(quarters((i) => i).slice(-5), 27.5),
         ttm: withToday([{ end: '2026-06-30', value: 27.5 }], 27.5),
@@ -162,6 +163,28 @@ describe('NumerosTab history', () => {
     click(button(/^Rentabilidad sobre patrimonio \(ROE\): 27,5 %/))
     const checked = panel()!.querySelector('input[type="radio"]:checked')
     expect(checked?.parentElement?.textContent).toBe('Trimestral')
+  })
+
+  it('states the change in a year against the same 12 months a year before the latest statements', async () => {
+    const p = page()
+    p.metrics!.netMargin = {
+      id: 'netMargin', today: 5.3, since: '2025', asOf: '2026-06-30', source: 'tradingview',
+      history: { quarterly: [], ttm: withToday([['2025-06-30', 8.5], ['2025-09-30', 7.9], ['2025-12-31', 6.6], ['2026-03-31', 5.9], ['2026-06-30', 5.3]].map(([end, value]) => ({ end: end as string, value: value as number })), 5.3), annual: [] },
+    }
+    await act(async () => root.render(<NumerosTab page={p} />))
+    click(button(/^Margen neto: 5,3 %/))
+    expect(text(panel())).toContain('▼ bajó 3,2 puntos en un año')
+  })
+
+  it('charts every quarter of a per-share flow, which has no hoy point in quarterly mode', async () => {
+    const p = page()
+    p.metrics!.revenuePerShare = { ...p.metrics!.revenuePerShare, history: { ...p.metrics!.revenuePerShare.history, quarterly: quarters((i) => 10 + i) } }
+    await act(async () => root.render(<NumerosTab page={p} />))
+    click(button(/^Ventas:/))
+    click([...panel()!.querySelectorAll('input[type="radio"]')].find((i) => i.parentElement?.textContent === 'Trimestral'))
+    // 8 años from the last quarter, 2026-06-30: the quarters from 2018-09-30, the last one included.
+    expect(Number(panel()!.querySelector('[data-points]')!.getAttribute('data-points'))).toBe(QUARTER_ENDS.length)
+    expect(text(panel())).toContain('a 41,0 en abr–jun 2026')
   })
 
   it('ranks the company among its peers by value, highlights it and leaves out peers with no value', () => {

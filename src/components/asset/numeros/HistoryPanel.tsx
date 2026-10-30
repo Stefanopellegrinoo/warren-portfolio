@@ -17,9 +17,9 @@ const DAY_MS = 86_400_000
 // A series that starts within about a quarter of the range's start covers it.
 const COVERS_DAYS = 111
 
-/** The "hoy" point's date: the end of every series of a metric that has a value today. */
+/** The "hoy" point's date: the only end after `asOf`, the latest period's (a quarterly flow has none). */
 export const todayOf = (m: MetricValue): string | null =>
-  m.today === null ? null : PERIOD_MODES.map((k) => m.history[k].at(-1)?.end).find(Boolean) ?? null
+  m.asOf === null ? null : PERIOD_MODES.map((k) => m.history[k].at(-1)?.end).find((end) => end !== undefined && end > m.asOf!) ?? null
 
 /** A peer's name as a reader says it. */
 export const peerName = (p: AssetPage['peers'][number]) => shortName(p.name ?? p.tvSymbol.split(':').pop()!)
@@ -60,15 +60,12 @@ export function HistoryPanel({ page, id, full, onBack, className }: {
   const longest = [...modes].sort((a, b) => periods(b) - periods(a))[0]
   const shown = mode && modes.includes(mode) ? mode : periods('ttm') >= 2 ? 'ttm' : longest
   let series = m.history[shown] ?? []
-  // ponytail: metrics.ts ends the quarterly series with today's TTM value; a per-share flow then jumps ×4.
-  // Dropped here for per-share rows until metrics.ts ends quarterly series with a quarter.
-  if (shown === 'quarterly' && def.unit === 'usdPerShare' && today) series = series.filter((p) => p.end !== today)
   const ref = series.at(-1)?.end
   const start = ref ? `${Number(ref.slice(0, 4)) - Number(range)}${ref.slice(4)}` : ''
   series = series.filter((p) => p.end >= start)
   const since = series[0] && (Date.parse(series[0].end) - Date.parse(start)) / DAY_MS > COVERS_DAYS ? series[0].end.slice(0, 4) : null
 
-  const change = changeVsYearAgo(m.history.ttm.length ? m.history.ttm : m.history[shown] ?? [], def.unit)
+  const change = changeVsYearAgo(m.history.ttm.length ? m.history.ttm : m.history[shown] ?? [], def.unit, m.asOf)
   const basis = m.history.ttm.filter((p) => p.end !== today).at(-1)
   const e = explain(id, name, m.today)
 
@@ -128,7 +125,7 @@ export function HistoryPanel({ page, id, full, onBack, className }: {
           <b className="text-ink">¿Qué es?</b> {e.what} {e.read}
         </div>
         <div className="rounded-md border border-line p-3 text-[13px] leading-relaxed text-ink-2">
-          <b className="text-ink">¿Cómo viene?</b> {howItGoes(id, series, shown, today).join(' ')}
+          <b className="text-ink">¿Cómo viene?</b> {howItGoes(id, series, shown, today, m.asOf).join(' ')}
         </div>
       </div>
 
