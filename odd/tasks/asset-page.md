@@ -271,3 +271,10 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   - **S5 target.** Números' "Precio objetivo promedio (N analistas)" now equals Resumen's: Yahoo, asked listing, profile group.
   - **Fix.** Resumen scrolled 19 px sideways at 320 px; cards now get `min-w-0`.
   - **Risk.** Writer named item 3: shared `parseTicker` now maps *USDT, a production API input. It is additive. Native review at stage end will cover it.
+- L32 (2026-10-30) Stage-2 seam check on ad20401:
+  - `npm test`: 3,564 tests pass.
+  - type-check and lint: 0 errors.
+  - `npm run build`: OK (/activo 26 kB, plus /api/asset/[ticker]/news).
+  - RDD assess 73ff07d..HEAD: medium, under_budget, not due.
+  - Risk (mine): none. `parseTicker` accepting *USDT is an added input form, not a change to an existing one (item 3 excludes additions). The news route reuses requireUser + rateLimit unchanged.
+  - Asked the user for the stage-2 merge OK.
