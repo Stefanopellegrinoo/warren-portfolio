@@ -63,6 +63,29 @@ export interface YahooEarnings {
   epsActual: number | null
 }
 
+/** What the page is about, from Yahoo's quoteType (T10): a company's statements, a fund's holdings, a coin's market. */
+export type AssetKind = 'company' | 'etf' | 'crypto' | 'other'
+const KINDS: Record<string, AssetKind> = { EQUITY: 'company', ETF: 'etf', MUTUALFUND: 'etf', CRYPTOCURRENCY: 'crypto' }
+
+/** An ETF's facts and composition. Shares and returns are fractions (0.0945 = 9,45 %); amounts in the fund's currency. */
+export interface YahooFund {
+  category: string | null
+  family: string | null
+  /** YYYY-MM-DD */
+  inceptionDate: string | null
+  expenseRatio: number | null
+  totalAssets: number | null
+  yield: number | null
+  ytdReturn: number | null
+  /** Average per year. */
+  threeYearReturn: number | null
+  fiveYearReturn: number | null
+  /** The largest first, at most MAX_HOLDINGS. `symbol` is Yahoo's, null for cash and the like. */
+  holdings: { symbol: string | null; name: string; weight: number }[]
+  /** Yahoo's sector names (`Technology`, `Real Estate`), the largest first; empty ones left out. */
+  sectors: { sector: string; weight: number }[]
+}
+
 export interface YahooProfile {
   longName: string | null
   sector: string | null
@@ -88,6 +111,14 @@ export interface YahooProfile {
   nextEarningsDate: string | null
   /** The last four reported quarters, oldest first. */
   earnings: YahooEarnings[]
+  kind: AssetKind
+  /** The day's change of `regularMarketPrice`, `pct` as a fraction; a coin's day starts at 0 h UTC. */
+  dayChange: { abs: number; pct: number } | null
+  /** A coin's units in circulation, and its traded value over 24 hours in `currency`. */
+  circulatingSupply: number | null
+  volume24h: number | null
+  /** An ETF's; null for anything else. */
+  fund: YahooFund | null
 }
 
 interface Deps {
@@ -97,11 +128,42 @@ interface Deps {
 const HISTORY_YEARS = 6
 const NO_VALIDATION = { validateResult: false }
 const PROFILE_MODULES = [
-  'assetProfile', 'price', 'summaryDetail', 'financialData', 'defaultKeyStatistics', 'calendarEvents', 'earningsHistory',
+  'assetProfile', 'price', 'summaryDetail', 'financialData', 'defaultKeyStatistics', 'calendarEvents', 'earningsHistory', 'topHoldings', 'fundProfile',
 ]
+/** Yahoo sends an ETF's top 10; a few more keep the cached copy small (~2 KB) if it ever sends more. */
+const MAX_HOLDINGS = 15
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
 const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null)
+
+/** `consumer_cyclical`, `realestate` → `Consumer Cyclical`, `Real Estate`: the sector names profiles use. */
+const sectorOf = (key: string) => key.replace(/^realestate$/, 'real_estate').split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+
+function fundOf(ks: any, sd: any, fp: any, top: any): YahooFund {
+  const holdings: unknown[] = Array.isArray(top?.holdings) ? top.holdings : []
+  const sectors: unknown[] = Array.isArray(top?.sectorWeightings) ? top.sectorWeightings : []
+  return {
+    category: str(fp?.categoryName) ?? str(ks.category),
+    family: str(fp?.family) ?? str(ks.fundFamily),
+    inceptionDate: isoDate(ks.fundInceptionDate),
+    expenseRatio: num(fp?.feesExpensesInvestment?.annualReportExpenseRatio),
+    totalAssets: num(ks.totalAssets) ?? num(sd.totalAssets),
+    yield: num(ks.yield) ?? num(sd.yield),
+    ytdReturn: num(ks.ytdReturn),
+    threeYearReturn: num(ks.threeYearAverageReturn),
+    fiveYearReturn: num(ks.fiveYearAverageReturn),
+    holdings: holdings
+      .flatMap((h: any) => {
+        const weight = num(h?.holdingPercent)
+        const name = str(h?.holdingName) ?? str(h?.symbol)
+        return weight === null || name === null ? [] : [{ symbol: str(h.symbol), name, weight }]
+      })
+      .slice(0, MAX_HOLDINGS),
+    sectors: sectors
+      .flatMap((w) => Object.entries(w ?? {}).flatMap(([k, v]) => ((num(v) ?? 0) > 0 ? [{ sector: sectorOf(k), weight: v as number }] : [])))
+      .sort((a, b) => b.weight - a.weight),
+  }
+}
 
 function isoDate(v: unknown): string | null {
   if (!(v instanceof Date) && typeof v !== 'string') return null
@@ -167,6 +229,10 @@ export async function fetchYahooProfile(symbol: string, deps: Deps = {}): Promis
     if (!r || typeof r !== 'object') throw new FundamentalsSourceError('yahoo', 'bad_shape', `profile of ${symbol} is not an object`)
     const [ap, price, sd, fd, ks] = ['assetProfile', 'price', 'summaryDetail', 'financialData', 'defaultKeyStatistics']
       .map(module => r[module] ?? {})
+    // Own keys only: a quoteType like "toString" must not read Object's prototype.
+    const kind = typeof price.quoteType === 'string' && Object.hasOwn(KINDS, price.quoteType) ? KINDS[price.quoteType] : 'other'
+    const change = num(price.regularMarketChange)
+    const changePct = num(price.regularMarketChangePercent)
     const today = new Date().toISOString().slice(0, 10)
     const earningsDates: unknown[] = r.calendarEvents?.earnings?.earningsDate ?? []
     const history: any[] = r.earningsHistory?.history ?? []
@@ -196,6 +262,11 @@ export async function fetchYahooProfile(symbol: string, deps: Deps = {}): Promis
         .filter((e): e is YahooEarnings => e.quarterEnd !== null)
         .sort((a, b) => (a.quarterEnd < b.quarterEnd ? -1 : 1))
         .slice(-4),
+      kind,
+      dayChange: change === null || changePct === null ? null : { abs: change, pct: changePct },
+      circulatingSupply: num(sd.circulatingSupply) ?? num(price.circulatingSupply),
+      volume24h: num(sd.volume24Hr) ?? num(price.volume24Hr),
+      fund: kind === 'etf' ? fundOf(ks, sd, r.fundProfile, r.topHoldings) : null,
     }
   } catch (err) {
     throw toSourceError(err)

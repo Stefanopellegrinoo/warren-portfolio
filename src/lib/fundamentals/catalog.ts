@@ -24,6 +24,8 @@ export type MetricUnit = 'ratio' | 'percent' | 'usd' | 'usdPerShare' | 'count' |
 export interface Frame<L extends string> {
   /** The period's flow: the quarter, the last four quarters, or the fiscal year. */
   flow(line: L): number | null
+  /** The same flow a year earlier: the same quarter, the 12 months, or the fiscal year before. */
+  yearAgo(line: L): number | null
   /** A flow over a year, to set against a balance or a price: the quarter ×4 in quarterly mode. */
   yearly(line: L): number | null
   /** The balance at the period end. */
@@ -53,7 +55,11 @@ export type MetricDef = Row &
   (
     | { group: 'T'; better: Better; formula: (f: Frame<TvHistoryLine>) => number | null }
     | { group: 'Y'; better: Better; formula: (f: Frame<YahooLine>) => number | null }
-    | { group: 'snapshot'; field: TvSnapshotField }
+    | { group: 'snapshot'; field: TvSnapshotField; better?: Better }
+    // Today's quote × listed units in USD, the market cap every price ratio divides (S5).
+    | { group: 'quote' }
+    // The asked listing's analysts' average target, as Resumen shows it: its Yahoo profile, in its quote's currency (T10, S5).
+    | { group: 'profile' }
   )
 
 type N = number | null
@@ -63,6 +69,11 @@ const div = (a: N, b: N): N => (a === null || b === null || !(b > 0) ? null : a 
 const pct = (a: N, b: N): N => {
   const r = div(a, b)
   return r === null ? null : r * 100
+}
+/** % change from `then` to `now`; null over a base ≤ 0. */
+const growth = (now: N, then: N): N => {
+  const r = div(now, then)
+  return r === null ? null : (r - 1) * 100
 }
 
 /** Enterprise value = market cap + total debt − cash and short-term investments. */
@@ -110,11 +121,13 @@ export const METRICS = [
   { id: 'evEbitda', section: VAL, label: 'Valor de empresa / EBITDA', unit: 'ratio', group: 'Y', better: 'lower', formula: (f) => div(ev(f), f.yearly('ebitda')) },
   { id: 'evSales', section: VAL, label: 'Valor de empresa / ventas', unit: 'ratio', group: 'Y', better: 'lower', formula: (f) => div(ev(f), f.yearly('revenue')) },
   { id: 'evEbit', section: VAL, label: 'Valor de empresa / EBIT', unit: 'ratio', group: 'Y', better: 'lower', formula: (f) => div(ev(f), f.yearly('ebit')) },
-  { id: 'peForward', section: VAL, subsection: FORWARD, label: 'P/E esperado', unit: 'ratio', group: 'snapshot', field: 'price_earnings_fwd' },
-  { id: 'psForward', section: VAL, subsection: FORWARD, label: 'Precio / ventas esperado', unit: 'ratio', group: 'snapshot', field: 'price_sales_fwd' },
-  { id: 'evEbitdaForward', section: VAL, subsection: FORWARD, label: 'Valor de empresa / EBITDA esperado', unit: 'ratio', group: 'snapshot', field: 'enterprise_value_ebitda_fwd' },
-  { id: 'pbForward', section: VAL, subsection: FORWARD, label: 'Precio / valor libro esperado', unit: 'ratio', group: 'snapshot', field: 'price_book_fwd' },
+  { id: 'peForward', section: VAL, subsection: FORWARD, label: 'P/E esperado', unit: 'ratio', group: 'snapshot', field: 'price_earnings_fwd', better: 'lower' },
+  { id: 'psForward', section: VAL, subsection: FORWARD, label: 'Precio / ventas esperado', unit: 'ratio', group: 'snapshot', field: 'price_sales_fwd', better: 'lower' },
+  { id: 'evEbitdaForward', section: VAL, subsection: FORWARD, label: 'Valor de empresa / EBITDA esperado', unit: 'ratio', group: 'snapshot', field: 'enterprise_value_ebitda_fwd', better: 'lower' },
+  { id: 'pbForward', section: VAL, subsection: FORWARD, label: 'Precio / valor libro esperado', unit: 'ratio', group: 'snapshot', field: 'price_book_fwd', better: 'lower' },
 
+  // A size, not a quality: no better side.
+  { id: 'marketCap', section: 'Estadísticas clave', label: 'Capitalización', unit: 'usd', group: 'quote' },
   { id: 'sharesOutstanding', section: 'Estadísticas clave', label: 'Acciones en circulación', unit: 'count', group: 'snapshot', field: 'total_shares_outstanding' },
   { id: 'floatShares', section: 'Estadísticas clave', label: 'Capital flotante', unit: 'count', group: 'snapshot', field: 'float_shares_outstanding' },
   { id: 'employees', section: 'Estadísticas clave', label: 'Empleados', unit: 'count', group: 'snapshot', field: 'number_of_employees' },
@@ -128,6 +141,7 @@ export const METRICS = [
   { id: 'operatingMargin', section: PROF, label: 'Margen operativo', unit: 'percent', group: 'Y', better: 'higher', formula: (f) => pct(f.flow('operatingIncome'), f.flow('revenue')) },
   { id: 'ebitdaMargin', section: PROF, label: 'Margen EBITDA', unit: 'percent', group: 'T', better: 'higher', formula: (f) => pct(f.flow('ebitda'), f.flow('revenue')) },
   { id: 'netMargin', section: PROF, label: 'Margen neto', unit: 'percent', group: 'T', better: 'higher', formula: (f) => pct(f.flow('netIncome'), f.flow('revenue')) },
+  { id: 'revenueGrowth', section: PROF, label: 'Crecimiento de ventas (12 meses)', unit: 'percent', group: 'T', better: 'higher', formula: (f) => growth(f.flow('revenue'), f.yearAgo('revenue')) },
 
   { id: 'quickRatio', section: LIQ, label: 'Liquidez inmediata', unit: 'ratio', group: 'Y', better: 'higher', formula: quick },
   { id: 'currentRatio', section: LIQ, label: 'Liquidez corriente', unit: 'ratio', group: 'Y', better: 'higher', formula: (f) => div(f.bal('currentAssets'), f.bal('currentLiabilities')) },
@@ -156,7 +170,7 @@ export const METRICS = [
   // Net income in USD per listed unit: TradingView's EPS line is per ordinary share in the statements' currency.
   { id: 'eps', section: PS, periodFlow: true, label: 'Ganancia (EPS)', unit: 'usdPerShare', group: 'T', better: 'higher', formula: (f) => div(f.flow('netIncome'), f.units) },
 
-  { id: 'priceTarget', section: 'Analistas y riesgo', label: 'Precio objetivo promedio', unit: 'price', group: 'snapshot', field: 'price_target_average' },
+  { id: 'priceTarget', section: 'Analistas y riesgo', label: 'Precio objetivo promedio', unit: 'price', group: 'profile' },
   { id: 'beta', section: 'Analistas y riesgo', label: 'Beta (cuánto se mueve contra el mercado)', unit: 'ratio', group: 'snapshot', field: 'beta_1_year' },
 ] as const satisfies readonly MetricDef[]
 

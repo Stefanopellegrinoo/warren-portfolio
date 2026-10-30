@@ -9,9 +9,11 @@ const CURRENCY: Record<string, string> = { USD: 'US$', ARS: '$' }
 
 /** Ticker, market, name and price, as in the approved mockup (odd/tasks/asset-page.md S1, S7). */
 export default function AssetHeader({ page }: { page: AssetPage }) {
-  const { ticker, exchange, name, price, currency, bymaListing, dayChange } = page
-  // The asked listing's market; people know Buenos Aires' as BYMA.
-  const market = exchange === 'BCBA' ? 'BYMA' : exchange
+  const { ticker, exchange, name, price, currency, bymaListing, dayChange, kind } = page
+  // The asked listing's market; people know Buenos Aires' as BYMA, and Yahoo's crypto feed ("CCC") as nothing.
+  const market = kind === 'crypto' ? 'Cripto' : exchange === 'BCBA' ? 'BYMA' : exchange
+  // The chart reads coins from Binance, as the app names them: BTC-USD is BTCUSDT there.
+  const chart = kind === 'crypto' ? ticker.replace(/-USD$/, 'USDT') : ticker
   // Non-breaking space: the currency never wraps away from its amount.
   const shownPrice = currency ? `${CURRENCY[currency] ?? currency} ${priceText(price)}` : priceText(price)
   return (
@@ -34,7 +36,7 @@ export default function AssetHeader({ page }: { page: AssetPage }) {
           </p>
         )}
         <Link
-          href={`/trading?symbol=${encodeURIComponent(ticker)}`}
+          href={`/trading?symbol=${encodeURIComponent(chart)}`}
           className="inline-flex min-h-6 items-center gap-1.5 text-sm font-medium text-accent-ink hover:underline hover:underline-offset-2 max-[819px]:min-h-11"
         >
           <LineChart className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />

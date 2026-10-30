@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { getAssetPage, AssetError, type AssetDeps } from '../service'
 import { computeMetrics, type Metrics } from '../metrics'
 import { TV_SNAPSHOT_FIELDS, type TvHistory, type TvSnapshot, type TvPeer } from '../tradingview'
-import type { YahooStatements } from '../yahoo'
+import type { YahooProfile, YahooStatements } from '../yahoo'
 import type { Market, Series } from '../types'
 
 // Public company names only; every number is invented.
@@ -38,6 +38,22 @@ const yahoo = (currency = 'USD', k = 1): YahooStatements => ({
   quarterly: { netIncome: grow(10 * k), revenue: grow(100 * k), operatingIncome: grow(15 * k), stockholdersEquity: grow(400 * k), ordinarySharesNumber: grow(100) },
   annual: {},
 })
+
+const PROFILE: YahooProfile = {
+  longName: 'MercadoLibre, Inc.', sector: 'Consumer Cyclical', industry: 'Internet Retail', country: 'Uruguay', website: 'https://example.com',
+  fullTimeEmployees: 1000, currency: 'USD', financialCurrency: 'USD', marketCap: 5000, fiftyTwoWeekLow: 40, fiftyTwoWeekHigh: 80,
+  regularMarketPrice: 50, targetMeanPrice: 70, numberOfAnalystOpinions: 12, recommendationKey: 'buy', sharesOutstanding: 100,
+  floatShares: 90, beta: 1.2, nextEarningsDate: '2026-11-05',
+  earnings: [{ quarterEnd: '2026-06-30', epsEstimate: 1.1, epsActual: 1.2 }],
+  kind: 'company', dayChange: null, circulatingSupply: null, volume24h: null, fund: null,
+}
+/** What the page keeps of it: Resumen's facts, no recommendation. */
+const COMPACT = {
+  sector: 'Consumer Cyclical', industry: 'Internet Retail', country: 'Uruguay', fullTimeEmployees: 1000, currency: 'USD',
+  fiftyTwoWeekLow: 40, fiftyTwoWeekHigh: 80, targetMeanPrice: 70, numberOfAnalystOpinions: 12, nextEarningsDate: '2026-11-05',
+  earnings: [{ quarterEnd: '2026-06-30', epsEstimate: 1.1, epsActual: 1.2 }],
+  kind: 'company', marketCap: 5000, regularMarketPrice: 50, dayChange: null, circulatingSupply: null, volume24h: null, fund: null,
+}
 
 /** An in-memory Redis: every write is recorded with its TTL. */
 function fakeCache() {
@@ -87,6 +103,7 @@ function fakes() {
     ]),
     findBymaListing: vi.fn(async (_logoid: string): Promise<string | null> => null),
     fetchYahooStatements: vi.fn(async (_symbol: string) => yahoo()),
+    fetchYahooProfile: vi.fn(async (_symbol: string) => PROFILE),
     fetchUsdRates: vi.fn(async (currency: string, _from: string) => (currency === 'USD' ? null : new Map([['2000-01-03', 4]]))),
     getBars: vi.fn(async (symbols: string[], _from: Date) =>
       new Map(symbols.map((s) => [s, { bars: [{ date: '2020-01-02', close: 40 }], splits: [], splitsKnown: true, degraded: false, missing: false }])),
@@ -263,7 +280,7 @@ describe('getAssetPage: sources', () => {
     const expected = computeMetrics({
       today: TODAY, snapshot: snapshot('NASDAQ:MELI', { currency: 'EUR' }), tv: tvHistory('TWD'), yahoo: yahoo('JPY'),
       rates: new Map(Object.entries(rates).map(([c, r]) => [c, new Map([['2000-01-03', r]])])),
-      priceOn: (date) => (date >= '2020-01-02' ? 40 : null),
+      priceOn: (date) => (date >= '2020-01-02' ? 40 : null), target: PROFILE.targetMeanPrice,
     })
     expect(page.metrics).toEqual(expected)
     expect(page.metrics!.pe.today).not.toBeNull()
@@ -278,10 +295,10 @@ describe('getAssetPage: sources', () => {
     expect(deps.fetchTvHistory).toHaveBeenCalledTimes(1)
     expect(deps.fetchTvHistory).toHaveBeenCalledWith(['NASDAQ:MELI', 'NASDAQ:AMZN', 'NYSE:SE'], 'america')
     expect(deps.fetchTvSnapshots).toHaveBeenCalledWith(['NASDAQ:AMZN', 'NYSE:SE'], 'america')
-    expect(page.peers.map((p) => Object.keys(p).sort())).toEqual([['name', 'today', 'tvSymbol'], ['name', 'today', 'tvSymbol']])
+    expect(page.peers.map((p) => Object.keys(p).sort())).toEqual([['name', 'sources', 'today', 'tvSymbol'], ['name', 'sources', 'today', 'tvSymbol']])
     ;['NASDAQ:AMZN', 'NYSE:SE'].forEach((s, i) => {
       const own = computeMetrics({ today: TODAY, snapshot: snapshot(s), tv: tvHistory('USD', i + 2), yahoo: yahoo(), rates: new Map(), priceOn: () => null })
-      expect(page.peers[i]).toEqual({ tvSymbol: s, name: `${s} Inc.`, today: todayOf(own) })
+      expect(page.peers[i]).toEqual({ tvSymbol: s, name: `${s} Inc.`, today: todayOf(own), sources: { tradingview: 'ok', yahoo: 'ok', fx: 'ok' } })
     })
     expect(page.peers[0].today.netMargin).not.toBeNull()
   })
@@ -295,6 +312,82 @@ describe('getAssetPage: sources', () => {
     // MELI is the page itself; the first five others are asked, JD and BABA never are.
     expect(deps.resolveIdentity.mock.calls.map(([t]) => t)).toEqual(['MELI', 'AMZN', 'SE', 'EBAY', '7203.T', 'ZZZZQ'])
     expect(page.peers.map((p) => p.tvSymbol)).toEqual(['NASDAQ:AMZN', 'NYSE:SE', 'NASDAQ:EBAY'])
+  })
+})
+
+describe('getAssetPage: profile (Resumen)', () => {
+  it("carries the asked listing's Yahoo profile, compact: Resumen's facts only", async () => {
+    const { deps } = fakes()
+
+    const page = await getAssetPage('MELI', null, deps)
+
+    expect(deps.fetchYahooProfile).toHaveBeenCalledTimes(1)
+    expect(deps.fetchYahooProfile).toHaveBeenCalledWith('MELI')
+    expect(page.profile).toEqual(COMPACT)
+  })
+
+  it("an Argentine ADR's profile is its own listing's, like the header price, not BYMA's", async () => {
+    const { deps } = fakes()
+    deps.fetchTvSnapshots.mockImplementation(async (symbols: string[]) =>
+      new Map(symbols.map((s) => [s, s === 'NASDAQ:GGAL' ? snapshot(s, { logoid: 'gpo-fin-galicia', type: 'dr', country: 'Argentina' }) : snapshot(s, { currency: 'ARS' })])),
+    )
+    deps.findBymaListing.mockResolvedValue('BCBA:GGAL')
+
+    await getAssetPage('GGAL', null, deps)
+
+    expect(deps.fetchYahooProfile.mock.calls).toEqual([['GGAL']])
+  })
+
+  it('is fresh for 6 hours, then asked again; its copy lives 7 days', async () => {
+    const { deps, cache } = fakes()
+    await getAssetPage('MELI', null, deps)
+    deps.now.mockReturnValue(NOW + 5 * HOUR_MS)
+    await getAssetPage('MELI', null, deps)
+    expect(deps.fetchYahooProfile).toHaveBeenCalledTimes(1)
+
+    deps.now.mockReturnValue(NOW + 7 * HOUR_MS)
+    await getAssetPage('MELI', null, deps)
+
+    expect(deps.fetchYahooProfile).toHaveBeenCalledTimes(2)
+    expect(cache.writes.filter((w) => w.key === 'fund:v1:profile:MELI').map((w) => w.ttl)).toEqual([7 * 86400, 7 * 86400])
+  })
+
+  it('fails on its own: no profile, the rest of the page unchanged, a failure mark; then its last good copy', async () => {
+    const { deps: fine } = fakes()
+    const expected = await getAssetPage('MELI', null, fine)
+    const { deps, cache } = fakes()
+    deps.fetchYahooProfile.mockRejectedValue(new Error('HTTP 503'))
+
+    const page = await getAssetPage('MELI', null, deps)
+
+    // Números' target is the profile's (T10, S5): without it, none.
+    const metrics = { ...expected.metrics!, priceTarget: { ...expected.metrics!.priceTarget, today: null } }
+    expect(page).toEqual({ ...expected, metrics, profile: null })
+    expect(cache.writes.find((w) => w.key === 'fund:v1:failed:profile:MELI')?.ttl).toBe(300)
+
+    const { deps: later } = fakes()
+    await getAssetPage('MELI', null, later)
+    later.now.mockReturnValue(NOW + 7 * HOUR_MS)
+    later.fetchYahooProfile.mockRejectedValue(new Error('HTTP 503'))
+    expect((await getAssetPage('MELI', null, later)).profile).toEqual(COMPACT)
+  })
+})
+
+describe('getAssetPage: peers sources', () => {
+  it("names each peer's own sources: one peer's failed statements leave the others ok", async () => {
+    const { deps } = fakes()
+    deps.fetchYahooStatements.mockImplementation(async (s: string) => {
+      if (s === 'SE') throw new Error('HTTP 503')
+      return yahoo()
+    })
+
+    const page = await getAssetPage('MELI', null, deps)
+
+    expect(page.sources).toEqual({ tradingview: 'ok', yahoo: 'ok', fx: 'ok' })
+    expect(page.peers.map((p) => [p.tvSymbol, p.sources])).toEqual([
+      ['NASDAQ:AMZN', { tradingview: 'ok', yahoo: 'ok', fx: 'ok' }],
+      ['NYSE:SE', { tradingview: 'ok', yahoo: 'error', fx: 'ok' }],
+    ])
   })
 })
 
@@ -319,6 +412,7 @@ describe('getAssetPage: cache', () => {
     expect(cache.writes.map((w) => w.key).sort()).toEqual([
       'fund:v1:fx:EUR',
       'fund:v1:peers:NASDAQ:MELI',
+      'fund:v1:profile:MELI',
       'fund:v1:snap:NASDAQ:AMZN', 'fund:v1:snap:NASDAQ:MELI', 'fund:v1:snap:NYSE:SE',
       'fund:v1:tvh:NASDAQ:AMZN', 'fund:v1:tvh:NASDAQ:MELI', 'fund:v1:tvh:NYSE:SE',
       'fund:v1:tvsym:MELI',
@@ -341,7 +435,7 @@ describe('getAssetPage: cache', () => {
     expect(JSON.parse(cache.store.get('fund:v1:fx:EUR')!).value).toEqual([['2026-05-29', 0.92], ['2026-06-30', 0.94], ['2026-10-29', 0.95]])
     const full = computeMetrics({
       today: TODAY, snapshot: snapshot('NASDAQ:MELI', { currency: 'EUR' }), tv: tvHistory(), yahoo: yahoo(),
-      rates: new Map([['EUR', new Map(daily)]]), priceOn: (date) => (date >= '2020-01-02' ? 40 : null),
+      rates: new Map([['EUR', new Map(daily)]]), priceOn: (date) => (date >= '2020-01-02' ? 40 : null), target: PROFILE.targetMeanPrice,
     })
     expect(page.metrics).toEqual(full)
   })
@@ -366,7 +460,7 @@ describe('getAssetPage: cache', () => {
     await getAssetPage('MELI', ['AMZN', 'SE'], deps)
 
     expect(Object.fromEntries(cache.writes.map((w) => [w.key, w.ttl / 86400]))).toEqual({
-      'fund:v1:tvsym:MELI': 7, 'fund:v1:snap:NASDAQ:MELI': 7, 'fund:v1:tvh:NASDAQ:MELI': 7, 'fund:v1:yahoo:MELI': 7,
+      'fund:v1:tvsym:MELI': 7, 'fund:v1:snap:NASDAQ:MELI': 7, 'fund:v1:tvh:NASDAQ:MELI': 7, 'fund:v1:yahoo:MELI': 7, 'fund:v1:profile:MELI': 7,
       'fund:v1:tvsym:AMZN': 2, 'fund:v1:tvsym:SE': 2,
       'fund:v1:snap:NASDAQ:AMZN': 2, 'fund:v1:snap:NYSE:SE': 2,
       'fund:v1:tvh:NASDAQ:AMZN': 2, 'fund:v1:tvh:NYSE:SE': 2,
@@ -391,7 +485,7 @@ describe('getAssetPage: cache', () => {
       const { deps, cache } = fakes()
       deps.memoryShare.mockResolvedValue(share)
       await getAssetPage('MELI', null, deps)
-      expect(cache.writes).toHaveLength(11)
+      expect(cache.writes).toHaveLength(12)
     }
   })
 
@@ -440,5 +534,119 @@ describe('getAssetPage: cache', () => {
     expect(page.sources).toEqual({ tradingview: 'ok', yahoo: 'error', fx: 'ok' })
     expect(page.metrics!.roe.today).toBeNull() // group Y: Yahoo
     expect(page.metrics!.netMargin.today).not.toBeNull() // group T: TradingView
+  })
+})
+
+describe('getAssetPage: kinds (T10)', () => {
+  const FUND = {
+    category: 'Large Blend', family: 'State Street', inceptionDate: '1993-01-22', expenseRatio: 0.000945, totalAssets: 8e11,
+    yield: 0.0099, ytdReturn: 0.14, threeYearReturn: 0.25, fiveYearReturn: 0.12,
+    holdings: [{ symbol: 'NVDA', name: 'NVIDIA Corp', weight: 0.08 }], sectors: [{ sector: 'Technology', weight: 0.4 }],
+  }
+  const ETF: YahooProfile = { ...PROFILE, longName: 'SPDR S&P 500 ETF Trust', sector: null, industry: null, kind: 'etf', fund: FUND }
+  const BTC: YahooProfile = {
+    ...PROFILE, longName: 'Bitcoin USD', sector: null, industry: null, kind: 'crypto', regularMarketPrice: 77319.46, marketCap: 1.55e12,
+    dayChange: { abs: -3853.57, pct: -0.0475 }, circulatingSupply: 20105364, volume24h: 5.9e10, fiftyTwoWeekLow: 57747, fiftyTwoWeekHigh: 111167,
+  }
+  const identity = (deps: Fakes, ticker: string, exchange: string, price: number) =>
+    deps.resolveIdentity.mockImplementation(async (t: string) => (t === ticker
+      ? { found: true as const, identity: { ticker: t, yahooSymbol: t, name: t === 'SPY' ? 'SPDR S&P 500 ETF Trust' : 'Bitcoin USD', exchange, price } }
+      : { found: false as const, reason: 'not-found' as const }))
+
+  function etf() {
+    const f = fakes()
+    identity(f.deps, 'SPY', 'NYSEArca', 700)
+    f.deps.resolveTvSymbol.mockResolvedValue('AMEX:SPY')
+    f.deps.fetchTvSnapshots.mockImplementation(async (symbols: string[]) =>
+      new Map(symbols.map((s) => [s, snapshot(s, { type: 'fund', close: 757.32, changePct: -1.56, changeAbs: -12.04, marketCap: null })])))
+    f.deps.fetchYahooProfile.mockResolvedValue(ETF)
+    return f
+  }
+
+  it("names a company's kind from its profile", async () => {
+    const { deps } = fakes()
+    expect((await getAssetPage('MELI', null, deps)).kind).toBe('company')
+  })
+
+  it('an ETF: its quote, facts and composition from the profile; no statements, history, peers or rates asked', async () => {
+    const { deps, cache } = etf()
+
+    const page = await getAssetPage('SPY', null, deps)
+
+    expect(page).toMatchObject({
+      ticker: 'SPY', kind: 'etf', supported: true, exchange: 'AMEX', price: 757.32, currency: 'USD', dayChange: { abs: -12.04, pct: expect.closeTo(-0.0156) },
+      metrics: null, peers: [], sources: { tradingview: 'ok', yahoo: 'ok' }, profile: { kind: 'etf', fund: FUND },
+    })
+    for (const f of [deps.fetchTvHistory, deps.fetchTvPeers, deps.fetchYahooStatements, deps.fetchUsdRates, deps.getBars]) expect(f).not.toHaveBeenCalled()
+    expect(cache.writes.map((w) => w.key).sort()).toEqual(['fund:v1:profile:SPY', 'fund:v1:snap:AMEX:SPY', 'fund:v1:tvsym:SPY'])
+    for (const w of cache.writes) expect([w.ttl, w.bytes < 30_000]).toEqual([7 * 86400, true])
+  })
+
+  it("an ETF's copies follow the memory guard; without its profile, TradingView's type still says ETF", async () => {
+    const { deps, cache } = etf()
+    deps.memoryShare.mockResolvedValue(0.5)
+    expect((await getAssetPage('SPY', null, deps)).profile).toMatchObject({ fund: FUND })
+    expect(cache.set).not.toHaveBeenCalled()
+
+    const { deps: down } = etf()
+    down.fetchYahooProfile.mockRejectedValue(new Error('HTTP 503'))
+    expect(await getAssetPage('SPY', null, down)).toMatchObject({ kind: 'etf', profile: null, sources: { yahoo: 'error' } })
+    expect(down.fetchYahooStatements).not.toHaveBeenCalled()
+  })
+
+  it("a crypto (Yahoo's CCC): price and day change from its profile, fresh 15 minutes, and no TradingView", async () => {
+    const { deps, cache } = fakes()
+    identity(deps, 'BTC-USD', 'CCC', 70000)
+    deps.fetchYahooProfile.mockResolvedValue(BTC)
+
+    const page = await getAssetPage('btcusdt', null, deps)
+
+    expect(deps.resolveIdentity).toHaveBeenCalledWith('BTC-USD')
+    expect(page).toMatchObject({
+      ticker: 'BTC-USD', kind: 'crypto', supported: false, price: 77319.46, currency: 'USD', dayChange: { abs: -3853.57, pct: -0.0475 },
+      listing: null, metrics: null, sources: { yahoo: 'ok' }, profile: { circulatingSupply: 20105364, volume24h: 5.9e10, marketCap: 1.55e12 },
+    })
+    expect(sourceCalls(deps)).toBe(0)
+    expect(cache.writes.map((w) => [w.key, w.ttl])).toEqual([['fund:v1:crypto:BTC-USD', 7 * 86400]])
+
+    deps.now.mockReturnValue(NOW + 10 * 60_000)
+    await getAssetPage('BTC-USD', null, deps)
+    expect(deps.fetchYahooProfile).toHaveBeenCalledTimes(1)
+    deps.now.mockReturnValue(NOW + 20 * 60_000)
+    deps.fetchYahooProfile.mockRejectedValue(new Error('HTTP 503'))
+    // A stale quote keeps its price, but its change is not today's.
+    expect(await getAssetPage('BTC-USD', null, deps)).toMatchObject({ price: 77319.46, dayChange: null, sources: { yahoo: 'stale' } })
+  })
+
+  it("a crypto Yahoo cannot describe keeps the identity's price and says so", async () => {
+    const { deps } = fakes()
+    identity(deps, 'BTC-USD', 'CCC', 70000)
+    deps.fetchYahooProfile.mockRejectedValue(new Error('HTTP 503'))
+
+    expect(await getAssetPage('BTC-USD', null, deps)).toMatchObject({ kind: 'crypto', price: 70000, dayChange: null, profile: null, sources: { yahoo: 'error' } })
+  })
+})
+
+describe('getAssetPage: price target (T10, S5)', () => {
+  it("Números' target is Resumen's: the asked listing's profile, never TradingView's, also for an ADR read in BYMA", async () => {
+    const { deps } = fakes()
+    deps.fetchTvSnapshots.mockImplementation(async (symbols: string[]) => new Map(symbols.map((s) => [s, s === 'NASDAQ:GGAL'
+      ? snapshot(s, { logoid: 'gpo-fin-galicia', type: 'dr', country: 'Argentina', fields: { price_target_average: 99 } as TvSnapshot['fields'] })
+      : snapshot(s, { currency: s.startsWith('BCBA:') ? 'ARS' : 'USD', fields: { price_target_average: 9000 } as TvSnapshot['fields'] })])))
+    deps.findBymaListing.mockResolvedValue('BCBA:GGAL')
+
+    for (const ticker of ['MELI', 'GGAL']) {
+      const page = await getAssetPage(ticker, null, deps)
+      expect(page.metrics!.priceTarget.today).toBe(page.profile!.targetMeanPrice)
+      expect(page.metrics!.priceTarget.today).toBe(70)
+      expect(page.peers.every((p) => p.today.priceTarget === null)).toBe(true)
+    }
+    expect((await getAssetPage('GGAL', null, deps)).bymaListing).toBe(true)
+  })
+
+  it('without analysts, none: as Resumen, a target needs at least one', async () => {
+    const { deps } = fakes()
+    deps.fetchYahooProfile.mockResolvedValue({ ...PROFILE, numberOfAnalystOpinions: 0 })
+    expect((await getAssetPage('MELI', null, deps)).metrics!.priceTarget.today).toBeNull()
   })
 })

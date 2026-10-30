@@ -35,10 +35,12 @@ Routes: the parent session is past the ~150k context backstop, so implementation
 - [x] T5 · S1 · delegated · page shell `/activo/[ticker]`, header, tabs, shell search with `/`, links from every ticker · 112 tests in touched dirs, full suite 3397 green (6 mutations caught)
 - [x] T6 · S2 S3 · delegated · Números UI (mobile + desktop), "?" copy, history panel, peers bars · 23 new tests (RED first); browser at 11 widths light/dark, no horizontal scroll
 - [x] T6e · S3 S12 · delegated · collapsed icon menu on /activo + layout and legibility pass at every width (L24) · 3448 tests green; 0 wrapped labels 820–1920
-- [ ] T7 · S9 · delegated · Comparar tab
-- [ ] T8 · S10 · delegated · Noticias
-- [ ] T9 · S11 · delegated · Resumen
-- [ ] T10 · S1 · delegated · ETFs, crypto, ON redirect, unsupported markets
+
+  Stage 1 delivered: PR #49, squash 73ff07d, deploy run 41081377001 OK (L27).
+- [x] T7 · S9 · delegated · Comparar tab · 15 tests (RED first); browser 6 widths × light/dark (L29)
+- [x] T8 · S10 · delegated · Noticias · 34 tests (RED first, 6 mutations caught); live MELI/GGAL/TSM/YPFD ok (L28)
+- [x] T9 · S11 · delegated · Resumen + tab wiring · 3535 tests green; browser 4 tickers × 4 tabs × 6 widths × 2 themes (L30)
+- [x] T10 · S1 · delegated · ETFs, crypto, ON redirect, unsupported markets, target consistency · 3564 tests green; browser 4 × 4 widths × 2 themes (L31)
 - [ ] T11 · S8 · delegated · Balances completos (Yahoo + TradingView rows)
 - [ ] T12 · S8 · delegated · SEC source for Balances completos (US 10-Q filers)
 
@@ -216,3 +218,68 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   - `npm run build`: OK (/activo/[ticker] 16 kB).
   - RDD assess 45e0ba7..HEAD: medium, under_budget. The high-risk slices were already reviewed and approved (L19).
   - Next: push, CI, PR, squash merge, deploy check.
+- L27 (2026-10-30) Stage 1 delivered.
+  - Branch CI run 41080835100 green.
+  - PR #49 squash-merged as 73ff07d.
+  - Master run 41081377001: test, image and deploy all success.
+  - Production checks:
+    - `/api/health` ok (redis, supabase, worker fresh);
+    - signed-out `/activo/MELI` → 307 to `/auth/login?next=%2Factivo%2FMELI`;
+    - `/api/asset/MELI` → 401.
+  - Pending: the user's test on the iPhone.
+  - Stage 2 (T7–T10) continues on `feat/asset-page-stage2` from master 73ff07d.
+- L28 (2026-10-30) T8 done.
+  - New: `news.ts`, `GET /api/asset/[ticker]/news` (auth, 30/min), and `NoticiasTab` (not wired yet).
+  - Sources: Google News RSS es-419/AR, queried by the quoted short name cut at its legal form; Yahoo `search` with the US symbol, or the unaccented name for BYMA.
+  - Merge: Spanish first, at most 5 English, 20 in all, deduplicated by title.
+  - Filters: drops stock-quote pages and headlines that don't name the company.
+  - Cache: per-source keys `fund:v1:news:<ticker>:<lang>`, 30-min fresh window, 1-day TTL, 5-min failure marker, memory guard. service.ts now exports `cachedEach`/`eachOf`.
+  - Live: 15 es + 5 en for MELI, GGAL, TSM and YPFD.
+  - Open: GGAL's press says "Grupo Galicia"/"Banco Galicia", so name variants would need a per-company map.
+- L29 (2026-10-30) T7 done.
+  - New metrics:
+    - `revenueGrowth` (group T, TTM vs the TTM a year earlier; MELI 46,0 %);
+    - `marketCap` (group 'quote': close × listed units in USD, the same base as every price ratio).
+  - Forward rows carry `better: 'lower'`.
+  - `ComparaTab`:
+    - Sortable table with the "mejor" marker and the company's place, e.g. "5.º de 6".
+    - Phone: the table scrolls inside its box with a sticky first column.
+    - Peers: chips, add via search, remove, reset. Edits go to `?vs=` (max 5) with `router.replace`.
+  - Integration still to do: wire the Comparar, Noticias and Resumen tabs in AssetView. Keep the previous page while a new `?vs=` loads, so the tab doesn't jump.
+  - Follow-ups:
+    - per-peer source status, so a missing value can say "la fuente no respondió";
+    - a client-safe `parseTicker`.
+- L30 (2026-10-30) T9 done.
+  - **AssetPage additions:**
+    - `profile` (Yahoo, asked listing). Cached as `fund:v1:profile:<sym>`, 6 h fresh.
+    - `PeerToday.sources`, so a missing value can say "la fuente no respondió".
+    - A client-safe `parseTicker` in `ticker.ts`, re-exported by service.
+  - **summary.ts thresholds:**
+    - Growth labels: "Crece fuerte" ≥ 15 %, "Crece" ≥ 3 %, "Vende menos" ≤ −3 %.
+    - P/E vs the peers' median and vs its own 5-year median: ±15 % counts as "más cara/más barata". With a loss, P/S replaces P/E.
+    - Advice words are banned by test except in the footnote.
+  - **ResumenTab:** answer cards (mockup A), 52-week bar, analysts with footnote, results with estimate vs actual, company facts.
+  - **AssetView:** tabs Resumen (default), Números, Comparar, Noticias, kept in `?tab=`. The previous page is kept during a `?vs=` refetch.
+  - Parent looked at MELI at 1440 and 390: clear and legible.
+  - **Open:** S5 — the analyst target in Resumen (Yahoo, asked listing) can differ from Números' "Precio objetivo" (TradingView, numbers listing). It goes to T10.
+- L31 (2026-10-30) T10 done.
+  - **AssetPage additions.** `kind` (company/etf/crypto/other) from Yahoo quoteType; `AssetProfile` gains fund, crypto and price fields.
+  - **ETF.** Holdings, sectors, expense ratio and returns ride in the profile key. Tabs: Resumen, Composición, Noticias. Holdings link to `/activo/<symbol>`.
+  - **Crypto.** Detected from the identity's exchange CCC, with no TradingView. Cached as `fund:v1:crypto:<sym>`, 15-minute fresh window. `parseTicker` maps BTCUSDT → BTC-USD. The day change counts from 0 h UTC, and the card says so.
+  - **ONs.** `/activo/<ON ticker or ISIN>` redirects server-side to `/ons/<isin>`, reading the ON catalog only for tickers Yahoo doesn't know.
+  - **Unsupported markets.** Message plus Noticias.
+  - **S5 target.** Números' "Precio objetivo promedio (N analistas)" now equals Resumen's: Yahoo, asked listing, profile group.
+  - **Fix.** Resumen scrolled 19 px sideways at 320 px; cards now get `min-w-0`.
+  - **Risk.** Writer named item 3: shared `parseTicker` now maps *USDT, a production API input. It is additive. Native review at stage end will cover it.
+- L32 (2026-10-30) Stage-2 seam check on ad20401:
+  - `npm test`: 3,564 tests pass.
+  - type-check and lint: 0 errors.
+  - `npm run build`: OK (/activo 26 kB, plus /api/asset/[ticker]/news).
+  - RDD assess 73ff07d..HEAD: medium, under_budget, not due.
+  - Risk (mine): none. `parseTicker` accepting *USDT is an added input form, not a change to an existing one (item 3 excludes additions). The news route reuses requireUser + rateLimit unchanged.
+  - Asked the user for the stage-2 merge OK.
+- L33 (2026-10-30) User: "si, mergeá todo a prod" → push, CI, PR, squash merge and deploy check for stage 2.
+- L34 (2026-10-30) The branch CI failed on NoticiasTab. The CI log shows Node 22's ICU writes "2 sept 2025" where Node 26 writes "2 sep 2025"; browsers vary too.
+  - Fix: fixed Spanish month names, `MONTHS` exported from explain.ts, built from the Argentine date string, instead of `Intl` short months.
+  - A local RED on Node 22 was not possible: downloading node@22 via npx was denied. The CI diff is the evidence.
+  - Long month names (Resumen dates) are stable across ICU versions and passed in CI.

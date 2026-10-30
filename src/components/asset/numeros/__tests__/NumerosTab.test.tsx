@@ -2,10 +2,11 @@ import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { METRICS, SECTIONS, type MetricId } from '@/lib/fundamentals/catalog'
-import type { AssetPage, PeerToday } from '@/lib/fundamentals/service'
+import type { AssetPage, AssetProfile, PeerToday } from '@/lib/fundamentals/service'
 import type { MetricValue, Metrics } from '@/lib/fundamentals/metrics'
 import type { Series } from '@/lib/fundamentals/types'
 import { NumerosTab } from '../NumerosTab'
+import { ResumenTab } from '@/components/asset/resumen/ResumenTab'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -35,6 +36,11 @@ function metric(id: MetricId, snapshot: boolean): MetricValue {
     asOf: '2026-06-30',
     source: 'tradingview',
   }
+}
+
+const PROFILE: AssetProfile = {
+  sector: null, industry: null, country: null, fullTimeEmployees: null, currency: 'USD', fiftyTwoWeekLow: null, fiftyTwoWeekHigh: null,
+  targetMeanPrice: null, numberOfAnalystOpinions: null, nextEarningsDate: null, earnings: [],
 }
 
 const peer = (tvSymbol: string, name: string, values: Partial<Record<MetricId, number>>): PeerToday => ({
@@ -136,26 +142,43 @@ describe('NumerosTab list', () => {
     expect(text(el)).not.toContain('Datos de MercadoLibre en BYMA')
   })
 
-  it('shows an ADR\'s price target as its BYMA listing\'s, in pesos', async () => {
-    const p = { ...page(), ticker: 'GGAL', name: 'Grupo Financiero Galicia S.A.', currency: 'USD', bymaListing: true }
-    p.metrics!.priceTarget = { ...p.metrics!.priceTarget, today: 9581.1 }
-    await act(async () => root.render(<NumerosTab page={p} />))
-    const row = [...el.querySelectorAll('li')].find((li) => li.textContent?.startsWith('Precio objetivo'))
-    expect(text(row)).toContain('Precio objetivo promedio (en BYMA)')
-    // "(en BYMA)" and its "?" never split across lines.
-    expect(text(button(/^Qué es Precio objetivo/)!.parentElement)).toBe('(en BYMA)?')
-    expect(text(row)).toContain('$ 9.581')
-    expect(text(row)).not.toContain('US$')
+  // T10, S5: the target is Resumen's, the asked listing's (its Yahoo profile), never another listing's in another currency.
+  it("shows Resumen's analysts' target: the same value, with its analyst count, in the asked listing's currency", async () => {
+    const meli = { ...page(), profile: { ...PROFILE, currency: 'USD', targetMeanPrice: 2400, numberOfAnalystOpinions: 30 } }
+    meli.metrics!.priceTarget = { ...meli.metrics!.priceTarget, today: 2400, source: 'profile' }
+    // An ADR whose numbers are BYMA's: its target is still its own, in dollars.
+    const ggal = {
+      ...page(), ticker: 'GGAL', name: 'Grupo Financiero Galicia S.A.', currency: 'USD', bymaListing: true, listingCurrency: 'ARS',
+      profile: { ...PROFILE, currency: 'USD', targetMeanPrice: 60.5, numberOfAnalystOpinions: 1 },
+    }
+    ggal.metrics!.priceTarget = { ...ggal.metrics!.priceTarget, today: 60.5, source: 'profile' }
+
+    for (const [p, label, shown] of [[meli, 'Precio objetivo promedio (30 analistas)', 'US$ 2.400'], [ggal, 'Precio objetivo promedio (1 analista)', 'US$ 60,50']] as const) {
+      await act(async () => root.render(<NumerosTab page={p} />))
+      const row = [...el.querySelectorAll('li')].find((li) => li.textContent?.startsWith('Precio objetivo'))!
+      expect(text(row)).toContain(label)
+      expect(text(row)).not.toContain('en BYMA')
+      // The "?" stays with the last word.
+      expect(text(button(/^Qué es Precio objetivo/)!.parentElement)).toMatch(/^analistas?\)\?$/)
+      const value = text(row.querySelector('span.shrink-0.font-mono'))
+      expect(value).toBe(shown)
+
+      const resumen = document.createElement('div')
+      document.body.appendChild(resumen)
+      await act(async () => createRoot(resumen).render(<ResumenTab page={p} onOpen={() => {}} />))
+      const analysts = [...resumen.querySelectorAll('section')].find((sec) => sec.querySelector('h3')?.textContent === 'Analistas')!
+      expect(text(analysts.querySelector('.font-mono'))).toBe(value)
+    }
   })
 
-  it('formats the price target in the listing currency the page names', async () => {
-    const p = { ...page(), listingCurrency: 'EUR' } as AssetPage
-    p.metrics!.priceTarget = { ...p.metrics!.priceTarget, today: 12.5 }
+  it('says only "Sin datos" when there is no target: Resumen tells why', async () => {
+    const p = page()
+    p.metrics!.priceTarget = { ...p.metrics!.priceTarget, today: null, source: 'profile' }
     await act(async () => root.render(<NumerosTab page={p} />))
-    const row = [...el.querySelectorAll('li')].find((li) => li.textContent?.startsWith('Precio objetivo'))
-    expect(text(row)).toContain('Precio objetivo promedio')
-    expect(text(row)).not.toContain('en BYMA')
-    expect(text(row)).toContain('EUR 12,50')
+    const row = [...el.querySelectorAll('li')].find((li) => li.textContent?.startsWith('Precio objetivo'))!
+    expect(text(row)).toContain('Precio objetivo promedio?—')
+    click(button(/^Qué es Precio objetivo/))
+    expect(text(row)).toContain('Sin datos.')
   })
 })
 

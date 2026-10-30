@@ -26,6 +26,8 @@ export interface MetricsInput {
   rates: Map<string, Map<string, number>>
   /** The listing's close on or before a date, in the price's currency. */
   priceOn: (date: string) => number | null
+  /** The asked listing's analysts' average target, Resumen's; peers have none. */
+  target?: number | null
 }
 
 export const PERIOD_MODES = ['quarterly', 'ttm', 'annual'] as const
@@ -48,7 +50,8 @@ export interface MetricValue {
    * Set also when `today` is null: that period lacks an input.
    */
   asOf: string | null
-  source: 'tradingview' | 'yahoo' | 'snapshot'
+  /** `tradingview` and `yahoo` are statements; `snapshot` and `profile` (the analysts' target) are today's values only. */
+  source: 'tradingview' | 'yahoo' | 'snapshot' | 'profile'
 }
 
 export type Metrics = Record<MetricId, MetricValue>
@@ -168,11 +171,13 @@ function evaluator<L extends string>(book: Book<L>, ctx: Ctx) {
 
   function frame(mode: PeriodMode, end: string, quote?: Ctx['now']): Frame<L> {
     const lines = mode === 'annual' ? usd.annual : usd.quarterly
-    const flow = (line: L): N => {
-      if (mode !== 'ttm') return near(lines[line], end)
-      const quarters = [0, 1, 2, 3].map((k) => near(lines[line], end, k * QUARTER_DAYS))
+    // The period's flow ending `back` days before `end`.
+    const flowAt = (line: L, back: number): N => {
+      if (mode !== 'ttm') return near(lines[line], end, back)
+      const quarters = [0, 1, 2, 3].map((k) => near(lines[line], end, back + k * QUARTER_DAYS))
       return quarters.includes(null) ? null : (quarters as number[]).reduce((a, b) => a + b, 0)
     }
+    const flow = (line: L) => flowAt(line, 0)
     const bal = (line: L) => near(lines[line], end)
     let units = quote?.units ?? null
     let mcap = quote?.mcap ?? null
@@ -184,6 +189,7 @@ function evaluator<L extends string>(book: Book<L>, ctx: Ctx) {
     }
     return {
       flow,
+      yearAgo: (line) => flowAt(line, YEAR_DAYS),
       yearly: (line) => {
         const v = flow(line)
         return v !== null && mode === 'quarterly' ? v * 4 : v
@@ -258,6 +264,8 @@ export function computeMetrics(input: MetricsInput): Metrics {
       if (def.group === 'snapshot') {
         return [def.id, { id: def.id, ...none, today: input.snapshot.fields[def.field] ?? null, source: 'snapshot' }]
       }
+      if (def.group === 'quote') return [def.id, { id: def.id, ...none, today: ctx.now.mcap, source: 'snapshot' }]
+      if (def.group === 'profile') return [def.id, { id: def.id, ...none, today: input.target ?? null, source: 'profile' }]
       const periodFlow = 'periodFlow' in def
       const value = def.group === 'T' ? t?.(def.formula, periodFlow) : y?.(def.formula, periodFlow)
       return [def.id, { id: def.id, ...(value ?? none), source: def.group === 'T' ? 'tradingview' : 'yahoo' }]

@@ -4,7 +4,8 @@
  * Validates and resolves the ticker, reads each source through Redis, and runs the company and
  * each peer through the same computeMetrics. Nothing is written outside Redis; every key has a TTL
  * and derives from a ticker resolveTickerIdentity found in a supported market (or from the
- * sources' own answers about it), never from free text.
+ * sources' own answers about it), never from free text. Since T10 Yahoo's crypto feed is one of
+ * them (design "Which assets get a page"); an ETF reads only its quote and profile.
  */
 import { resolveTickerIdentity } from '../ticker-identity'
 import { cacheRoute, getCachedRoute, redisMemoryShare } from '../redis'
@@ -18,8 +19,11 @@ import {
   fetchTvHistory, fetchTvPeers, fetchTvSnapshots, findBymaListing, resolveTvSymbol,
   type TvHistory, type TvSnapshot,
 } from './tradingview'
-import { fetchYahooStatements, type YahooStatements } from './yahoo'
+import { fetchYahooProfile, fetchYahooStatements, type AssetKind, type YahooProfile, type YahooStatements } from './yahoo'
 import type { AssetRef, Market } from './types'
+import { parseTicker } from './ticker'
+
+export { parseTicker }
 
 export type SourceStatus = 'ok' | 'stale' | 'error'
 
@@ -27,7 +31,19 @@ export interface PeerToday {
   tvSymbol: string
   name: string | null
   today: Record<MetricId, number | null>
+  /** Per source of this peer, as the page's own: Comparar says which "—" is a source that did not answer. */
+  sources?: AssetPage['sources']
 }
+
+/**
+ * Resumen's facts about the asked listing (S11), from Yahoo; prices in `currency`, the listing's quote's. No recommendation.
+ * Since T10 also its kind, an ETF's fund and a coin's market (optional: copies cached before lack them).
+ */
+export type AssetProfile = Pick<
+  YahooProfile,
+  | 'sector' | 'industry' | 'country' | 'fullTimeEmployees' | 'currency' | 'fiftyTwoWeekLow' | 'fiftyTwoWeekHigh'
+  | 'targetMeanPrice' | 'numberOfAnalystOpinions' | 'nextEarningsDate' | 'earnings'
+> & Partial<Pick<YahooProfile, 'kind' | 'marketCap' | 'regularMarketPrice' | 'dayChange' | 'circulatingSupply' | 'volume24h' | 'fund'>>
 
 export interface AssetPage {
   /** As asked, normalized: `MELI`, `BCBA:GGAL`. */
@@ -43,19 +59,29 @@ export interface AssetPage {
   currency: string | null
   /** Today's change of `price`, `pct` as a fraction (−0.0216); null unless TradingView's snapshot is fresh. */
   dayChange?: { abs: number; pct: number } | null
-  /** False outside TradingView's america/argentina markets: header and price only, no fundamentals. */
+  /**
+   * From the asked listing's Yahoo profile (T10): an ETF reads its fund, a coin its market, the rest Números. Absent
+   * outside the supported markets, where nothing is asked.
+   */
+  kind?: AssetKind
+  /** False outside TradingView's america/argentina markets: header and price only, no fundamentals (a coin: its own page, by `kind`). */
   supported: boolean
   /** The listing Números reads: the asked one, or the company's BYMA listing for an Argentine ADR. */
   listing: AssetRef | null
   /** `listing` is the BYMA one: the page says "Datos de <name> en BYMA" (S7). */
   bymaListing: boolean
-  /** The currency of `listing`'s quote, which its price target is in: ARS for a BYMA listing, even for an ADR read there. */
+  /**
+   * The currency of `listing`'s quote: ARS for a BYMA listing, even for an ADR read there. The price target is no longer
+   * in it: since T10 it is the asked listing's, in `profile.currency`.
+   */
   listingCurrency?: string | null
   metrics: Metrics | null
   /** Today's values only, from the same computation as `metrics`. */
   peers: PeerToday[]
   /** Per source of `listing`: `stale` serves its last good copy, `error` leaves its metrics null. */
   sources: Partial<Record<'tradingview' | 'yahoo' | 'fx', SourceStatus>>
+  /** The asked listing's (an ADR's own, like `price`), its last good copy when Yahoo fails; null when it never answered. */
+  profile?: AssetProfile | null
 }
 
 /** `invalid`: not a ticker (400). `not_found`: no such instrument (404). */
@@ -67,9 +93,14 @@ export class AssetError extends Error {
 }
 
 const MINUTE = 60
+const HOUR = 3_600
 const DAY = 86_400
 /** How long each copy is fresh. Every copy then lives on as its source's last good answer. */
-const FRESH = { snap: 15 * MINUTE, tvh: DAY, yahoo: DAY, fx: DAY, peers: DAY, tvsym: 7 * DAY, byma: 7 * DAY }
+const FRESH = {
+  snap: 15 * MINUTE, tvh: DAY, yahoo: DAY, fx: DAY, peers: DAY, tvsym: 7 * DAY, byma: 7 * DAY, news: 30 * MINUTE, profile: 6 * HOUR,
+  // A coin's profile carries its quote, which moves around the clock: as fresh as a listing's snapshot.
+  crypto: 15 * MINUTE,
+}
 type Kind = keyof typeof FRESH
 /** One key per copy, fresh or last good: Redis runs noeviction, so this is every key's TTL. */
 const KEY_TTL = 7 * DAY
@@ -84,10 +115,10 @@ const FAILED_TTL = 5 * MINUTE
  */
 const MAX_MEMORY_SHARE = 0.5
 const MAX_PEERS = 5
+/** Yahoo's name for its crypto feed (BTC-USD, ETH-USD…): known from the identity, before any key is written. */
+const CRYPTO_EXCHANGE = 'CCC'
 // TradingView keeps 20 fiscal years; the rates must reach the oldest one's end.
 const FX_YEARS = 21
-// Like the search route's cap, but strict: these become Redis keys and source requests.
-const TICKER = /^(BCBA:)?[A-Z0-9][A-Z0-9.-]{0,14}$/
 const CURRENCY = /^[A-Z]{3}$/
 
 const DEFAULTS = {
@@ -98,6 +129,7 @@ const DEFAULTS = {
   fetchTvPeers,
   findBymaListing,
   fetchYahooStatements,
+  fetchYahooProfile,
   fetchUsdRates,
   getBars,
   cache: { get: getCachedRoute, set: cacheRoute } as {
@@ -114,12 +146,6 @@ type Deps = typeof DEFAULTS
 /** Yahoo's exchange names, short: NasdaqGS/GM/CM → NASDAQ, NYQ → NYSE; the rest as Yahoo says them. */
 const shortExchange = (name: string | null) => (name && /^nasdaq/i.test(name) ? 'NASDAQ' : name === 'NYQ' ? 'NYSE' : name)
 
-/** `MELI`, `bcba:ggal`, `GGAL.BA` → `MELI`, `BCBA:GGAL`, `BCBA:GGAL`; null for anything else. */
-export function parseTicker(raw: string): string | null {
-  const t = raw.trim().toUpperCase().replace(/^([A-Z0-9-]+)\.BA$/, 'BCBA:$1')
-  return TICKER.test(t) ? t : null
-}
-
 interface Got<T> {
   value: T | null
   status: SourceStatus
@@ -133,13 +159,13 @@ interface Entry<T> {
  * Per id, the cached copy while fresh; the rest fetched in one call. An id the fetch fails or
  * leaves out gets its old copy as stale, else null as error, and a failure mark: until it expires
  * that id is answered the same way without a fetch. A null answer ("no such thing") is returned
- * as ok and never cached.
+ * as ok and never cached. Also news.ts's single cache path.
  */
-async function cachedEach<T>(
+export async function cachedEach<T>(
   kind: Kind,
   ids: string[],
   fetchMany: (ids: string[]) => Promise<Map<string, T | null>>,
-  d: Deps,
+  d: Pick<Deps, 'cache' | 'now' | 'memoryShare'>,
   ttl: (id: string) => number = () => KEY_TTL,
 ): Promise<Map<string, Got<T>>> {
   const key = (id: string) => `fund:v1:${kind}:${id}`
@@ -177,7 +203,7 @@ async function cachedEach<T>(
 }
 
 /** A one-id fetch as a batch: a failure leaves only that id out. */
-const eachOf =
+export const eachOf =
   <T>(kind: Kind, fetchOne: (id: string) => Promise<T | null>) =>
   async (ids: string[]): Promise<Map<string, T | null>> => {
     const got = await Promise.allSettled(ids.map((id) => fetchOne(id)))
@@ -252,6 +278,18 @@ function monthEnds(rates: Map<string, number> | null): [string, number][] {
   return [...last.values()]
 }
 
+/** The asked listing's profile, compact: Resumen's facts, its kind, an ETF's fund and a coin's market; no recommendation. */
+const profileOf = (d: Deps) => eachOf('profile', async (s): Promise<AssetProfile> => {
+  const p = await d.fetchYahooProfile(s)
+  return {
+    sector: p.sector, industry: p.industry, country: p.country, fullTimeEmployees: p.fullTimeEmployees, currency: p.currency,
+    fiftyTwoWeekLow: p.fiftyTwoWeekLow, fiftyTwoWeekHigh: p.fiftyTwoWeekHigh, targetMeanPrice: p.targetMeanPrice,
+    numberOfAnalystOpinions: p.numberOfAnalystOpinions, nextEarningsDate: p.nextEarningsDate, earnings: p.earnings,
+    kind: p.kind, marketCap: p.marketCap, regularMarketPrice: p.regularMarketPrice, dayChange: p.dayChange,
+    circulatingSupply: p.circulatingSupply, volume24h: p.volume24h, fund: p.fund,
+  }
+})
+
 function earliestEnd(tv: TvHistory | null, yahoo: YahooStatements | null): string | undefined {
   return [tv?.quarterly, tv?.annual, yahoo?.quarterly, yahoo?.annual]
     .flatMap((lines) => Object.values(lines ?? {}).map((s) => s?.[0]?.end))
@@ -270,20 +308,48 @@ export async function getAssetPage(rawTicker: string, rawVs: string[] | null = n
   const { name, exchange, price } = id.identity
   const page: AssetPage = {
     ticker, name, exchange: shortExchange(exchange), price, currency: null, dayChange: null, supported: true, listing: null, bymaListing: false,
-    listingCurrency: null, metrics: null, peers: [], sources: {},
+    listingCurrency: null, metrics: null, peers: [], sources: {}, profile: null,
+  }
+
+  // A coin (T10): outside TradingView's markets; its profile is its page, quote included.
+  if (exchange === CRYPTO_EXCHANGE) {
+    const sym = id.identity.yahooSymbol
+    const { value: p, status } = (await cachedEach('crypto', [sym], profileOf(d), d)).get(sym)!
+    return {
+      ...page, kind: p?.kind ?? 'crypto', supported: false, price: p?.regularMarketPrice ?? price, currency: p?.currency ?? null,
+      // A stale copy's change is not today's.
+      dayChange: status === 'ok' ? p?.dayChange ?? null : null, sources: { yahoo: status }, profile: p,
+    }
   }
 
   const asked = await refFor(ticker, d)
   if (!asked.value) return asked.status === 'ok' ? { ...page, supported: false } : { ...page, sources: { tradingview: 'error' } }
 
   let listing = asked.value
-  let snap = (await tvEach('snap', [listing], d.fetchTvSnapshots, d)).get(listing.tvSymbol)!
+  const askedYahoo = listing.yahooSymbol
+  // The profile alongside the first snapshot: its kind decides what else to read.
+  const [firstSnap, profile] = await Promise.all([
+    tvEach('snap', [listing], d.fetchTvSnapshots, d),
+    cachedEach('profile', [askedYahoo], profileOf(d), d),
+  ])
+  let snap = firstSnap.get(listing.tvSymbol)!
+  const { value: own, status: profileStatus } = profile.get(askedYahoo)!
   // A stale copy's change is not today's. Copies cached before T5b have no change fields.
-  const { close, currency = null, changePct, changeAbs } = snap.value ?? {}
+  const { close, currency = null, changePct, changeAbs, type } = snap.value ?? {}
   const quote = {
     price: close ?? price,
     currency,
     dayChange: snap.status === 'ok' && changePct != null && changeAbs != null ? { abs: changeAbs, pct: changePct / 100 } : null,
+  }
+  // Without its profile, TradingView's own type still tells a fund.
+  const kind = own?.kind ?? (type === 'fund' ? 'etf' : 'company')
+  const askedExchange = listing.tvSymbol.slice(0, listing.tvSymbol.indexOf(':'))
+  // An ETF has no statements: its fund is in the profile; no Números, peers or rates (T10).
+  if (kind === 'etf') {
+    return {
+      ...page, ...quote, kind, exchange: askedExchange, listing, listingCurrency: currency,
+      sources: { tradingview: snap.status, yahoo: profileStatus }, profile: own,
+    }
   }
   // An Argentine ADR (GGAL, YPF…) reads its BYMA listing: ARS price over ARS statements, amounts in CCL (S7).
   const { country, logoid } = snap.value ?? {}
@@ -332,30 +398,36 @@ export async function getAssetPage(rawTicker: string, rawVs: string[] | null = n
   )
   const rates = new Map([...fx].flatMap(([c, g]) => (g.value ? [[c, new Map(g.value)] as const] : [])))
 
-  const [own, ...others] = inputs
-  const from = earliestEnd(own.tv, own.yahoo)
+  const [self, ...others] = inputs
+  const from = earliestEnd(self.tv, self.yahoo)
   const bars = from ? (await d.getBars([listing.yahooSymbol], new Date(`${from}T00:00:00Z`))).get(listing.yahooSymbol)?.bars ?? [] : []
-  const run = (i: (typeof inputs)[number], priceOn: (date: string) => number | null) =>
-    computeMetrics({ today, snapshot: i.snap ?? EMPTY_SNAPSHOT, tv: i.tv, yahoo: i.yahoo, rates, priceOn })
+  const run = (i: (typeof inputs)[number], priceOn: (date: string) => number | null, target: number | null = null) =>
+    computeMetrics({ today, snapshot: i.snap ?? EMPTY_SNAPSHOT, tv: i.tv, yahoo: i.yahoo, rates, priceOn, target })
+  /** One company's sources; the listing's TradingView also answers for its default peers. */
+  const sourcesOf = (i: (typeof inputs)[number], ...tv: SourceStatus[]): AssetPage['sources'] => ({
+    tradingview: worst(snaps.get(i.ref.tvSymbol)!.status, histories.get(i.ref.tvSymbol)!.status, ...tv),
+    yahoo: statements.get(i.ref.yahooSymbol)!.status,
+    fx: worst(...currenciesOf(i).map((c) => fx.get(c)!.status)),
+  })
 
   return {
     ...page,
     ...quote,
-    exchange: asked.value.tvSymbol.slice(0, asked.value.tvSymbol.indexOf(':')),
+    kind,
+    exchange: askedExchange,
     listing,
     bymaListing: listing !== asked.value,
     listingCurrency: snap.value?.currency ?? null,
-    metrics: run(own, (date) => closeOnOrBefore(bars, date)),
+    // Números' target is Resumen's, analysts included (S5): the asked listing's, in its quote's currency.
+    metrics: run(self, (date) => closeOnOrBefore(bars, date), own?.numberOfAnalystOpinions ? own.targetMeanPrice : null),
     // Peers show today's values only, which price at today's quote, never a past close.
     peers: others.map((i) => ({
       tvSymbol: i.ref.tvSymbol,
       name: i.snap?.name ?? null,
       today: Object.fromEntries(Object.values(run(i, () => null)).map((m) => [m.id, m.today])) as PeerToday['today'],
+      sources: sourcesOf(i),
     })),
-    sources: {
-      tradingview: worst(snap.status, histories.get(listing.tvSymbol)!.status, peerStatus),
-      yahoo: statements.get(listing.yahooSymbol)!.status,
-      fx: worst(...currenciesOf(own).map((c) => fx.get(c)!.status)),
-    },
+    sources: sourcesOf(self, peerStatus),
+    profile: own,
   }
 }
