@@ -344,3 +344,9 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   - **D5.** "…" gap columns with "Sin datos entre …".
   - **Label column.** ≥ 14rem on desktop.
   - Browser re-check (MELI, NVDA, GGAL × 4 widths × 2 themes): no defects left.
+- L40 (2026-10-30) Stage-3 final check on cb7cb26:
+  - 3,656 tests pass (writer run); type-check and lint have 0 errors; `npm run build` OK.
+  - RDD assess 0f2a61c..HEAD: medium, under_budget, not due.
+  - The compose change (item 5) had its independent verifier pass (L38).
+  - Asked the user for the stage-3 merge OK.
+  - The SEC stays off in production until `SEC_USER_AGENT` is set in the server's .env (the user's decision).
