@@ -350,3 +350,4 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   - The compose change (item 5) had its independent verifier pass (L38).
   - Asked the user for the stage-3 merge OK.
   - The SEC stays off in production until `SEC_USER_AGENT` is set in the server's .env (the user's decision).
+- L41 (2026-10-30) User: "ok" → stage 3: push, CI, PR, squash merge, deploy check.
