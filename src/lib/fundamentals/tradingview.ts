@@ -56,6 +56,11 @@ export interface TvSnapshot {
   fundamentalCurrency: string | null
   close: number | null
   marketCap: number | null
+  /** The company: shared by its listings (NYSE:YPF and BCBA:YPFD are both `ypf`). */
+  logoid: string | null
+  /** `stock`, or `dr` for an ADR or a CEDEAR. */
+  type: string | null
+  country: string | null
   fields: Record<TvSnapshotField, number | null>
 }
 
@@ -141,28 +146,65 @@ export async function resolveTvSymbol(
   return rows[0]?.s ?? null
 }
 
+/** Today's values for many symbols of one market in one request, keyed by symbol; unknown ones are left out. */
+export async function fetchTvSnapshots(
+  tvSymbols: string[],
+  market: Market,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Map<string, TvSnapshot>> {
+  // An empty ticker list would make the scanner answer the whole market.
+  if (tvSymbols.length === 0) return new Map()
+  const meta = [
+    'description', 'sector', 'industry', 'currency', 'fundamental_currency_code', 'close', 'market_cap_basic',
+    'logoid', 'type', 'country',
+  ]
+  const rows = await scan(market, [...meta, ...TV_SNAPSHOT_FIELDS], { symbols: { tickers: tvSymbols } }, fetchImpl)
+  return new Map(
+    rows
+      .filter((r) => tvSymbols.includes(r.s))
+      .map(({ s, v }): [string, TvSnapshot] => [
+        s,
+        {
+          tvSymbol: s,
+          name: str(v.description),
+          sector: str(v.sector),
+          industry: str(v.industry),
+          currency: str(v.currency),
+          fundamentalCurrency: str(v.fundamental_currency_code),
+          close: num(v.close),
+          marketCap: num(v.market_cap_basic),
+          logoid: str(v.logoid),
+          type: str(v.type),
+          country: str(v.country),
+          fields: Object.fromEntries(TV_SNAPSHOT_FIELDS.map((f) => [f, num(v[f])])) as TvSnapshot['fields'],
+        },
+      ]),
+  )
+}
+
 /** Today's values for one symbol. Throws `not_found` when TradingView does not know it. */
 export async function fetchTvSnapshot(
   tvSymbol: string,
   market: Market,
   fetchImpl: typeof fetch = fetch,
 ): Promise<TvSnapshot> {
-  const meta = ['description', 'sector', 'industry', 'currency', 'fundamental_currency_code', 'close', 'market_cap_basic']
-  const rows = await scan(market, [...meta, ...TV_SNAPSHOT_FIELDS], { symbols: { tickers: [tvSymbol] } }, fetchImpl)
-  const row = rows.find((r) => r.s === tvSymbol)
-  if (!row) throw fail('not_found', `${tvSymbol} not in ${market}`)
-  const { v } = row
-  return {
-    tvSymbol,
-    name: str(v.description),
-    sector: str(v.sector),
-    industry: str(v.industry),
-    currency: str(v.currency),
-    fundamentalCurrency: str(v.fundamental_currency_code),
-    close: num(v.close),
-    marketCap: num(v.market_cap_basic),
-    fields: Object.fromEntries(TV_SNAPSHOT_FIELDS.map((f) => [f, num(v[f])])) as TvSnapshot['fields'],
-  }
+  const snap = (await fetchTvSnapshots([tvSymbol], market, fetchImpl)).get(tvSymbol)
+  if (!snap) throw fail('not_found', `${tvSymbol} not in ${market}`)
+  return snap
+}
+
+/**
+ * The company's own BYMA listing (`BCBA:YPFD` for logoid `ypf`), or null when it has none there:
+ * local stocks only, so a CEDEAR (type `dr`) never counts. Its plain listing is the shortest symbol.
+ */
+export async function findBymaListing(logoid: string, fetchImpl: typeof fetch = fetch): Promise<string | null> {
+  const rows = await scan(
+    'argentina',
+    ['logoid'],
+    { filter: [{ left: 'logoid', operation: 'equal', right: logoid }, LOCAL_STOCKS], sort: BY_MARKET_CAP, range: [0, 20] },
+    fetchImpl,
+  )
+  return rows.map((r) => r.s).sort((a, b) => a.length - b.length)[0] ?? null
 }
 
 /** Last day of the month `monthsBack` months before the month of `unixSec` (UTC), as YYYY-MM-DD. */

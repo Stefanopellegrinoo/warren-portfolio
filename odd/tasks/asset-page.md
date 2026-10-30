@@ -16,12 +16,12 @@ The design document is the detailed specification; each S# below names its secti
 - S4 History of every number. User (L5): "solo esos datos tenemos de las acciones? Quiero mas datos, tipo todos los financieros de los ultimos q de hace varios años para ver el cambio, lo mismop con los demas datos". Design: "One computation". Acceptance: group T metrics show up to 32 quarters / 20 years (TradingView), group Y up to 5 years / 6 quarters (Yahoo) with "historia desde <año>" when shorter.
 - S5 One number, one meaning. Design: Goal 4 and "One computation". Acceptance: for any metric, the list value equals its chart's "hoy" point and every peer's value comes from the same source and function; a metric never mixes sources across periods or companies; ADR/foreign ratios use market cap (no per-share ADR ratio), foreign statements converted at each period end's FX.
 - S6 The statistics the user asked for. User (L6, showing TradingView's Estadísticas): "todos estos datos podemos teneetr?". Design: "Metric catalog" (dropped: número de accionistas, valor liquidativo, VE/EBIT esperado).
-- S7 Argentine companies in dollars. User's choice (L9): "Dólares CCL". Acceptance: amounts and their growth for ARS reporters are converted at the CCL of each period's end (app's CCL history); ratios stay currency-neutral (ARS price over ARS statements); no ARS toggle; plain tickers of Argentine ADRs use the `BCBA:` listing for Números with the note "Datos de <empresa> en BYMA"; the IAS 29 question (as reported vs restated) is checked per source before converting.
+- S7 Argentine companies in dollars. User's choice (L9): "Dólares CCL". Acceptance: amounts and their growth for ARS reporters are converted at the CCL of each period's end (app's CCL history); ratios are computed in USD at each date (L11 #1, L13), so BYMA ratios can differ from TradingView's nominal-peso ones; no ARS toggle; plain tickers of Argentine ADRs use the `BCBA:` listing for Números with the note "Datos de <empresa> en BYMA"; the IAS 29 question (as reported vs restated) is checked per source before converting.
 - S8 Balances completos. User (L5) as S4. Design: Goal 5. Acceptance: link at the end of Números; Resultados / Balance / Flujo de caja tables, one row per line, one column per quarter or year, horizontal scroll inside the container only, ▲▼ vs the same period a year earlier, tap a row → its chart; per row one source (SEC for US 10-Q filers since ~2009, else Yahoo; TradingView rows for its eight lines in the 8-year range).
 - S9 Comparar. User (L3): "si le está yendo bien como empresa y si está cara, ratios, capaz poder compararla con otras empresas". Design: Goal 6 and "Peers". Acceptance: company + up to 5 peers (same industry and market by market cap; filled from the US market when a BYMA industry has fewer than 3) on P/E, P/E esperado, crecimiento de ventas, margen neto, ROE, deuda/patrimonio, capitalización; edits live in `?vs=` and apply to the whole page.
 - S10 Noticias. Design: Goal 7. Acceptance: Spanish first (Google News RSS es-419/AR), plus Yahoo English; newest first; de-duplicated by title; source and age; links out.
 - S11 Resumen. User (L3) as S9. Design: Goal 8. Acceptance: "¿Le va bien como empresa?" and "¿Está cara?" stated from data, never as advice; 52-week range; analysts' average target and count; next earnings date and the last four quarters' estimate vs actual; sector · industry · country · employees.
-- S12 Constraints. Design: "Constraints" and anti-goals. Acceptance: Redis only (no Supabase table or write); every key has a TTL and derives only from a ticker resolved by `resolveTickerIdentity` in a supported market; normalized payloads ≤ ~30 KB per company per source; per-user rate limit on the new routes; each section degrades on its own and serves its last good data; responsive 320–1920 with no horizontal page scroll; app tokens light/dark, IBM Plex, Spanish number format; no personal portfolio data in repo, tests, commits or PRs.
+- S12 Constraints. Design: "Constraints" and anti-goals. Acceptance: Redis only (no Supabase table or write); every key has a TTL and derives only from a ticker resolved by `resolveTickerIdentity` in a supported market, or from a symbol TradingView itself returned (default peers, L13); normalized payloads ≤ ~30 KB per company per source; per-user rate limit on the new routes; each section degrades on its own and serves its last good data; responsive 320–1920 with no horizontal page scroll; app tokens light/dark, IBM Plex, Spanish number format; no personal portfolio data in repo, tests, commits or PRs.
 
 ## Tasks
 
@@ -31,7 +31,7 @@ Routes: the parent session is past the ~150k context backstop, so implementation
 - [x] T1 · S4 S5 S6 S9 · delegated (parallel with T2) · TradingView source: today's catalog values, `_fq_h`/`_fy_h` history with period ends, peers by industry · 19 tests (RED first, 7 mutations caught)
 - [x] T2 · S4 S5 S7 · delegated (parallel with T1) · Yahoo source: normalized statements (quarterly/annual), profile, currency; FX at period ends (Yahoo FX for foreign, app CCL for ARS) · 18 tests (RED first); IAS 29 probe in L11
 - [x] T3 · S3 S4 S5 S6 · delegated · pure metrics module: catalog definitions, today + history per metric, peers, group T/Y source rule · 20 tests (RED first, 15 mutations caught) + ADR units fix inline (L12)
-- [ ] T4 · S1 S12 · delegated · service + API route: ticker validation and market check, Redis cache with TTLs and last-good fallback, rate limit, per-section errors
+- [x] T4 · S1 S12 · delegated · service + API route: ticker validation and market check, Redis cache with TTLs and last-good fallback, rate limit, per-section errors · 23 tests (RED first, 9 mutations caught), live smoke MELI/GGAL/TSM
 - [ ] T5 · S1 · delegated · page shell `/activo/[ticker]`, header, tabs, shell search with `/`, links from every ticker
 - [ ] T6 · S2 S3 · delegated · Números UI (mobile + desktop), "?" copy, history panel, peers bars
 - [ ] T7 · S9 · delegated · Comparar tab
@@ -77,3 +77,14 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   Fix, inline and test-first (RED seen): listed units now = TradingView's total_shares_outstanding (per listed unit), with market cap ÷ close only as a fallback; today's market cap = close × units.
   - Two tests now read the fixture's share count.
   - Per-share values no longer need a price.
+- L13 (2026-10-30) T4 done. New: service.ts (`getAssetPage`) and `GET /api/asset/[ticker]?vs=`. 80 tests pass.
+  - Live smoke: MELI and TSM match TradingView's P/E and net margin exactly. Payload is about 80 KB.
+  - Keys are `fund:v1:<kind>:<id>`, each holding `{at, value}` with a 7-day TTL. Fresh windows: snapshot 15 min; history, Yahoo, FX and peers 24 h. A stale copy is served when a source fails; null answers are never cached.
+  - FX is stored as month-end rates (8 KB instead of 180 KB per currency).
+  - Argentine ADRs move to their BYMA listing through TradingView `logoid` + `country`.
+
+  Decisions (mine):
+  1. BCBA:GGAL P/E is 39.8 in USD-at-each-date terms, vs 42.5 in nominal pesos and TradingView's 51.5. With high inflation, a TTM summed in nominal pesos understates current earnings. Converting each quarter at its CCL is the consistent measure, so S7's "ARS price over ARS statements" is replaced by L11 #1.
+  2. Default peers' keys come from TradingView's own answers, not free text, so they skip `resolveTickerIdentity`. S12 is amended to say so.
+
+  Open for T10: Yahoo `not_found` (ETFs) shows as `error`. A price status is not exposed; bars-cache serves its own last good copy.

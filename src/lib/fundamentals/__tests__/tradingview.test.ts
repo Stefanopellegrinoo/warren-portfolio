@@ -3,6 +3,8 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   resolveTvSymbol,
   fetchTvSnapshot,
+  fetchTvSnapshots,
+  findBymaListing,
   fetchTvHistory,
   fetchTvPeers,
   TV_SNAPSHOT_FIELDS,
@@ -106,6 +108,56 @@ describe('fetchTvSnapshot', () => {
     const err = await errorOf(fetchTvSnapshot('NASDAQ:ZZZZQ', 'america', scanner([])))
     expect(err).toBeInstanceOf(FundamentalsSourceError)
     expect(err).toMatchObject({ source: 'tradingview', code: 'not_found' })
+  })
+
+  it('reads the company id, listing type and country that pick the BYMA listing of an ADR', async () => {
+    const f = scanner([{ ...meliSnapshot, s: 'NASDAQ:GGAL', logoid: 'gpo-fin-galicia', type: 'dr', country: 'Argentina' }])
+    const snap = await fetchTvSnapshot('NASDAQ:GGAL', 'america', f)
+    expect(snap).toMatchObject({ logoid: 'gpo-fin-galicia', type: 'dr', country: 'Argentina' })
+  })
+})
+
+describe('fetchTvSnapshots', () => {
+  it('reads many symbols of one market in one request, leaving out the unknown ones', async () => {
+    const f = scanner([meliSnapshot, { ...meliSnapshot, s: 'NASDAQ:AMZN', description: 'Amazon.com, Inc.' }])
+
+    const snaps = await fetchTvSnapshots(['NASDAQ:MELI', 'NASDAQ:AMZN', 'NASDAQ:ZZZZQ'], 'america', f)
+
+    expect(f).toHaveBeenCalledTimes(1)
+    expect(sent(f).body.symbols).toEqual({ tickers: ['NASDAQ:MELI', 'NASDAQ:AMZN', 'NASDAQ:ZZZZQ'] })
+    expect([...snaps.keys()]).toEqual(['NASDAQ:MELI', 'NASDAQ:AMZN'])
+    expect(snaps.get('NASDAQ:AMZN')!.name).toBe('Amazon.com, Inc.')
+    expect(snaps.get('NASDAQ:MELI')).toEqual(await fetchTvSnapshot('NASDAQ:MELI', 'america', scanner([meliSnapshot])))
+  })
+
+  it('never sends an empty ticker list', async () => {
+    const f = scanner()
+    expect((await fetchTvSnapshots([], 'america', f)).size).toBe(0)
+    expect(f).not.toHaveBeenCalled()
+  })
+})
+
+describe('findBymaListing', () => {
+  it("asks argentina for the company's local stock listings and picks the plain one", async () => {
+    // Live 2026-10-30: logoid `ypf` on BYMA is YPFDB, YPFD, YPFD.CI, YPFDD, YPFDC (all type stock).
+    const f = scanner([
+      { s: 'BCBA:YPFDB', logoid: 'ypf' },
+      { s: 'BCBA:YPFD', logoid: 'ypf' },
+      { s: 'BCBA:YPFD.CI', logoid: 'ypf' },
+    ])
+
+    expect(await findBymaListing('ypf', f)).toBe('BCBA:YPFD')
+
+    const { url, body } = sent(f)
+    expect(url).toBe('https://scanner.tradingview.com/argentina/scan')
+    expect(body.filter).toEqual([
+      { left: 'logoid', operation: 'equal', right: 'ypf' },
+      { left: 'type', operation: 'equal', right: 'stock' },
+    ])
+  })
+
+  it('returns null when the company has no local stock on BYMA (MELI is only a CEDEAR there)', async () => {
+    expect(await findBymaListing('mercadolibre', scanner([]))).toBeNull()
   })
 })
 
