@@ -1,7 +1,8 @@
 /**
  * Balances completos (odd/tasks/asset-page.md T11 T12, S8): Resultados, Balance and Flujo de caja, one row per
  * line, one column per quarter or year. A row reads one source across all its columns: the SEC for a US 10-Q
- * filer's lines (since about 2009), else Yahoo, or TradingView for its eight lines from the 8-year range on.
+ * filer's lines (since about 2009), Yahoo, or TradingView for its eight lines from the 8-year range on, whichever
+ * runs unbroken longest to the latest period (`tableOf`).
  * Amounts and EPS go to USD at each period end through metrics' own conversion (L11, L21 a, L36); share counts
  * stay as reported.
  *
@@ -180,17 +181,36 @@ export interface StatementTable {
  */
 export const columnOf = (end: string, mode: StatementMode) => (mode === 'annual' ? end.slice(0, 4) : end.slice(0, 7))
 
+/** More than one period between two ends, 1,5 or more apart: a hole in a row, a "…" between two columns (L38). */
+export function isGap(older: string, newer: string, mode: StatementMode): boolean {
+  const months = (Number(newer.slice(0, 4)) - Number(older.slice(0, 4))) * 12 + Number(newer.slice(5, 7)) - Number(older.slice(5, 7))
+  return months > (mode === 'annual' ? 18 : 4.5)
+}
+
 /**
  * One statement as a table over `years` (Infinity: all): each row from one source over the range, and the columns
- * any row has. The SEC's lines win in every range; then TradingView's from the 8-year range on; then Yahoo.
+ * any row has. A row's source is the one with the longest unbroken run of periods, within the range, up to the
+ * latest period any of them has (L38 D2); a tie goes to the SEC, then TradingView (8-year range on only, S8), then
+ * Yahoo.
  */
 export function tableOf(s: AssetStatements, statement: StatementId, mode: StatementMode, years: number): StatementTable {
   const picked = LINES.filter((d) => d.statement === statement).flatMap((def): Omit<StatementRow, 'since'>[] => {
-    const has = (from: SourceStatements | null | undefined) => !!from?.[mode][def.id]?.length
-    const source = has(s.sec) ? 'sec' : years >= MAX_YEARS && def.tv && has(s.tradingview) ? 'tradingview' : 'yahoo'
-    const from = s[source]
-    const series = from?.[mode][def.id]
-    return from && series?.length ? [{ def, source, currency: from.currency, series }] : []
+    const options = (['sec', 'tradingview', 'yahoo'] as const)
+      .filter((source) => source !== 'tradingview' || (years >= MAX_YEARS && def.tv))
+      .flatMap((source) => {
+        const from = s[source]
+        const series = from?.[mode][def.id]
+        return from && series?.length ? [{ def, source, currency: from.currency, series }] : []
+      })
+    const latest = options.map((o) => columnOf(o.series[o.series.length - 1].end, mode)).sort().at(-1)
+    const run = (series: Series) => {
+      const shown = within(series, years)
+      if (columnOf(shown[shown.length - 1].end, mode) !== latest) return 0
+      let n = 1
+      while (n < shown.length && !isGap(shown[shown.length - n - 1].end, shown[shown.length - n].end, mode)) n++
+      return n
+    }
+    return options.length ? [options.reduce((a, b) => (run(b.series) > run(a.series) ? b : a))] : []
   })
   const latest = picked.map((r) => r.series[r.series.length - 1].end).sort().at(-1)
   const rows = picked.map((r) => ({ ...r, series: within(r.series, years, latest) })).filter((r) => r.series.length > 0)

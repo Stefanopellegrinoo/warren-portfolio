@@ -174,6 +174,56 @@ describe('tableOf with SEC (T12)', () => {
   })
 })
 
+describe('tableOf: one source per row, the longest unbroken run to the latest period (L38 D2)', () => {
+  const row = (t: ReturnType<typeof tableOf>, id: string) => t.rows.find((r) => r.def.id === id)!
+  // MELI's SEC revenue: 2016 … 2019-03, nothing until 2021-03, then every quarter to 2026-06.
+  const holed = SEC_QUARTERS.filter((e) => (e >= '2016-03-31' && e <= '2019-03-31') || e >= '2021-03-31')
+  const tvFcf = at(QUARTERS, QUARTERS.map((_, i) => 4e7 + i * 1e6))
+  const sec = (quarterly: Record<string, Series>) => ({
+    ...toStatements(tvHistory('USD', { ...tvUsd.quarterly, freeCashFlow: tvFcf }, tvUsd.annual), yahooUsd, new Map(), { quarterly, annual: {} }),
+    sources: { tradingview: 'ok', yahoo: 'ok', fx: 'ok', sec: 'ok' } as const,
+  })
+
+  it("a SEC row with a hole gives way to TradingView's unbroken eight years, in 8 años and in Todo", () => {
+    const s = sec({ revenue: at(holed, holed.map((_, i) => 1e8 + i * 1e7)) })
+
+    for (const years of [8, Infinity]) {
+      expect(row(tableOf(s, 'income', 'quarterly', years), 'revenue')).toMatchObject({ source: 'tradingview', since: null })
+      expect(row(tableOf(s, 'income', 'quarterly', years), 'revenue').series).toEqual(tvUsd.quarterly.revenue)
+    }
+    // In 5 años TradingView is no choice (S8): the SEC, unbroken there, against Yahoo's five quarters.
+    expect(row(tableOf(s, 'income', 'quarterly', 5), 'revenue').source).toBe('sec')
+  })
+
+  it("a shorter SEC row gives way too: its two years of free cash flow against TradingView's eight", () => {
+    const s = sec({ revenue: secLines().quarterly.revenue, operatingCashFlow: secLines().quarterly.operatingCashFlow, capitalExpenditure: secLines().quarterly.capitalExpenditure })
+
+    const t = tableOf(s, 'cashflow', 'quarterly', 8)
+
+    expect(row(t, 'freeCashFlow')).toMatchObject({ source: 'tradingview', since: null })
+    expect(row(t, 'freeCashFlow').series[0].end).toBe('2018-09-30')
+    // Operating cash flow, unbroken in the SEC, stays the SEC's; Yahoo's capex is shorter than the SEC's.
+    expect(row(t, 'operatingCashFlow').source).toBe('sec')
+    expect(row(t, 'capitalExpenditure').source).toBe('sec')
+  })
+
+  it('a tie goes to the SEC: as long as TradingView in 8 años, it keeps the row', () => {
+    const s = sec({ revenue: secLines().quarterly.revenue })
+
+    const t = tableOf(s, 'income', 'quarterly', 8)
+
+    expect(row(t, 'revenue').source).toBe('sec')
+    expect(row(t, 'revenue').series).toHaveLength(32)
+  })
+
+  it('a source that stopped before the latest period has no run: the one that reaches it wins', () => {
+    const s = sec({ revenue: secLines().quarterly.revenue })
+    s.tradingview!.quarterly.netIncome = at(QUARTERS.slice(0, -2), QUARTERS.slice(0, -2).map(() => 1e8))
+
+    expect(row(tableOf(s, 'income', 'quarterly', 8), 'netIncome').source).toBe('yahoo')
+  })
+})
+
 describe('tableOf', () => {
   it('in the 5-year range every row comes from Yahoo, its columns newest first', () => {
     const t = tableOf(statements(), 'income', 'quarterly', 5)

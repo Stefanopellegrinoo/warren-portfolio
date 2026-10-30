@@ -335,3 +335,12 @@ Routes: the parent session is past the ~150k context backstop, so implementation
     - (4) Thin the year labels to fit the width.
     - (5) Mark gaps of more than one period with a thin "…" column.
     - (6) Give the label column a minimum width on desktop.
+- L39 (2026-10-30) T12b done; 3,656 tests pass.
+  - **D1.** SEC ends snap to month ends after period lengths are computed. NVDA feb–abr 2021 now fills.
+  - **D2.** The per-row source is the longest unbroken run ending at the latest period (ties: SEC, TradingView, Yahoo). MELI Ventas 8 años 32/32; FCF back to 2018.
+    - Consequence: in Todo, MELI and NVDA Ventas come from TradingView (2018→), because both SEC revenue rows have a hole (MELI 2019–20, NVDA FY2019).
+  - **D3.** LineChart `clamp` only for unit ratio. Amounts are never pinned; P/E still is.
+  - **D4.** Year labels are thinned to 36 px each.
+  - **D5.** "…" gap columns with "Sin datos entre …".
+  - **Label column.** ≥ 14rem on desktop.
+  - Browser re-check (MELI, NVDA, GGAL × 4 widths × 2 themes): no defects left.

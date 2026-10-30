@@ -151,6 +151,17 @@ function stocks(facts: Fact[], quarterEnds: Set<string>, yearEnds: Set<string>):
 const lastEnd = (p: Periods) => [...p.keys()].sort().at(-1) ?? ''
 
 /**
+ * A period end as TradingView and Yahoo show it, on the nearest month end: day 7 or earlier is the previous month's,
+ * later its own. NVDA's quarter ending 2021-05-02 is 2021-04-30 (feb–abr), the column the other sources use.
+ */
+export function monthEnd(end: string): string {
+  const [y, m, d] = end.split('-').map(Number)
+  return new Date(Date.UTC(y, d <= 7 ? m - 1 : m, 0)).toISOString().slice(0, 10)
+}
+/** A line's periods on month ends, once their lengths were read on the filed dates; the later filed end wins a month. */
+const onMonthEnds = (p: Periods): Periods => new Map([...p].sort(([a], [b]) => (a < b ? -1 : 1)).map(([e, v]) => [monthEnd(e), v]))
+
+/**
  * The line's concept for this company: the first in the list among those that reach its newest period. One
  * concept, never two pieced together. Coverage decides only whether a concept is current: the list's order is the
  * line's definition. MELI tags both Revenues (28.893 M in 2025, what TradingView shows) and contract revenue
@@ -216,7 +227,7 @@ export function normalizeCompanyFacts(data: unknown): SecStatements | null {
     const minus = (a: Periods, b: Periods) => new Map([...a].flatMap(([e, v]) => (b.has(e) ? [[e, v - b.get(e)!] as const] : [])))
     built.set('workingCapital', { quarterly: minus(ca.quarterly, cl.quarterly), annual: minus(ca.annual, cl.annual) })
   }
-  const all = [...built]
+  const all = [...built].map(([l, b]) => [l, { quarterly: onMonthEnds(b.quarterly), annual: onMonthEnds(b.annual) }] as const)
   const out = { quarterly: table(all.map(([l, b]) => [l, b.quarterly])), annual: table(all.map(([l, b]) => [l, b.annual])) }
   return out.quarterly.ends.length || out.annual.ends.length ? out : null
 }

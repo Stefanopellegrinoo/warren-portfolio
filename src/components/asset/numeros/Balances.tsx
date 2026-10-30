@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useId, useRef, useState } from 'react'
+import { Fragment, useEffect, useId, useRef, useState } from 'react'
 import { ChevronLeft } from 'lucide-react'
 import { useCached } from '@/lib/client-cache'
 import { requestErrorMessage } from '@/lib/request-errors'
@@ -12,7 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { formatMetric, periodLabel, shortName } from '@/lib/fundamentals/explain'
 import { changeVsYearAgo } from '@/lib/fundamentals/metrics'
 import {
-  MAX_YEARS, STATEMENTS, columnOf, tableOf, trend,
+  MAX_YEARS, STATEMENTS, columnOf, isGap, tableOf, trend,
   type AssetStatements, type StatementId, type StatementMode, type StatementRow, type StatementTable,
 } from '@/lib/fundamentals/statements'
 import type { AssetPage } from '@/lib/fundamentals/service'
@@ -135,6 +135,8 @@ export function Balances({ page, onBack }: { page: AssetPage; onBack: () => void
 
 function Table({ table, mode, caption }: { table: StatementTable; mode: StatementMode; caption: string }) {
   const [chart, setChart] = useState<StatementRow | null>(null)
+  // Columns newest first; a "…" after one whose next (older) column is more than a period away (L38 D5).
+  const gapAfter = (i: number) => i + 1 < table.columns.length && isGap(table.columns[i + 1], table.columns[i], mode)
   return (
     <>
       {/*
@@ -147,12 +149,21 @@ function Table({ table, mode, caption }: { table: StatementTable; mode: Statemen
           <thead className="bg-surface-2 text-ink-2">
             <tr>
               <th scope="col" className="sticky left-0 z-10 bg-surface-2 px-3 py-2 text-left align-bottom font-semibold shadow-[1px_0_0_var(--line)]">US$ millones</th>
-              {table.columns.map((end) => {
+              {table.columns.map((end, i) => {
                 const [months, year] = periodLabel(end, mode).split(' ')
+                const missing = gapAfter(i) && `Sin datos entre ${periodLabel(table.columns[i + 1], mode)} y ${periodLabel(end, mode)}`
                 return (
-                  <th key={end} scope="col" className="whitespace-nowrap px-3 py-2 text-right align-bottom font-semibold last:pr-4">
-                    {year ? <><span className="block font-normal">{months}</span> {year}</> : months}
-                  </th>
+                  <Fragment key={end}>
+                    <th scope="col" className="whitespace-nowrap px-3 py-2 text-right align-bottom font-semibold last:pr-4">
+                      {year ? <><span className="block font-normal">{months}</span> {year}</> : months}
+                    </th>
+                    {missing && (
+                      <th scope="col" title={missing} className="border-x border-line px-1 py-2 text-center align-bottom font-normal text-ink-3">
+                        <span aria-hidden="true">…</span>
+                        <span className="sr-only"> {missing}</span>
+                      </th>
+                    )}
+                  </Fragment>
                 )
               })}
             </tr>
@@ -172,7 +183,8 @@ function Table({ table, mode, caption }: { table: StatementTable; mode: Statemen
                   The whole row is the 44 px target. A button is always an inline block, so the label is text, its last
                   word and "?" kept together as in Números, and the button an empty layer over the cell for the keyboard.
                 */}
-                <th scope="row" className="sticky left-0 z-10 h-11 min-w-[8.5rem] max-w-[11rem] bg-surface px-3 py-2 text-left align-middle font-medium leading-snug shadow-[1px_0_0_var(--line)] group-hover:bg-hover sm:max-w-[16rem]">
+                {/* On desktop the names keep room for a line each ("Costo de ventas") however many columns there are. */}
+                <th scope="row" className="sticky left-0 z-10 h-11 min-w-[8.5rem] max-w-[11rem] bg-surface px-3 py-2 text-left align-middle font-medium leading-snug shadow-[1px_0_0_var(--line)] group-hover:bg-hover sm:max-w-[16rem] lg:min-w-[14rem]">
                   <button type="button" aria-label={`${row.def.label}: ver su gráfico`} className="absolute inset-0 cursor-pointer focus-visible:outline-offset-[-2px]" />
                   {row.def.label.slice(0, row.def.label.lastIndexOf(' ') + 1)}
                   <span className="whitespace-nowrap">
@@ -181,7 +193,12 @@ function Table({ table, mode, caption }: { table: StatementTable; mode: Statemen
                   </span>
                   {row.since && <span className="block text-sm font-normal text-ink-2">desde {row.since}</span>}
                 </th>
-                {table.columns.map((end) => <Cell key={end} row={row} end={end} mode={mode} />)}
+                {table.columns.map((end, i) => (
+                  <Fragment key={end}>
+                    <Cell row={row} end={end} mode={mode} />
+                    {gapAfter(i) && <td aria-hidden="true" className="border-x border-line" />}
+                  </Fragment>
+                ))}
               </tr>
             ))}
           </tbody>

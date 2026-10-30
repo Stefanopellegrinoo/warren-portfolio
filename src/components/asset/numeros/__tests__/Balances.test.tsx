@@ -284,6 +284,27 @@ describe('Balances completos with the SEC (T12)', () => {
     expect(headers().at(-1)).toBe('2009')
   })
 
+  it('marks missing periods with a thin "…" column that says which (L38 D5)', async () => {
+    // MELI's SEC cash flows skip 2014–2016: oct–dic 2013, then ene–mar 2017.
+    const holed = SEC_Q.filter((e) => e <= '2013-12-31' || e >= '2017-03-31')
+    await render('/activo/MELI?vista=balances', { ...WITH_SEC, sec: { ...WITH_SEC.sec!, quarterly: { revenue: at(holed, holed.map((_, i) => 100e6 + i * 150e6)) } } })
+
+    click(radio('Todo'))
+
+    const gap = headers().indexOf('… Sin datos entre oct–dic 2013 y ene–mar 2017')
+    expect(gap).toBeGreaterThan(0)
+    expect(headers()[gap - 1]).toBe('ene–mar 2017')
+    expect(headers()[gap + 1]).toBe('oct–dic 2013')
+    expect(headers().filter((h) => h.startsWith('…'))).toHaveLength(1)
+    // Every row keeps its cells under their columns: one more cell, the gap's, empty.
+    expect(cells('Ventas')).toHaveLength(headers().length - 1)
+    expect(cells('Ventas')[gap - 1]).toBe('')
+    expect(cells('Ventas')[gap]).toBe('2.950▲ (sube)')
+    // Consecutive periods have none.
+    click(radio('5 años'))
+    expect(headers().some((h) => h.startsWith('…'))).toBe(false)
+  })
+
   it("a SEC row's chart names its source", async () => {
     await render('/activo/MELI?vista=balances', WITH_SEC)
 

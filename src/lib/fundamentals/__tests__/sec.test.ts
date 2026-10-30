@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { CONCEPTS, fetchSecStatements, fetchSecTickers, normalizeCompanyFacts, secSeries, secUserAgent } from '../sec'
 import { FundamentalsSourceError } from '../types'
+import { periodLabel } from '../explain'
 
 // Public company names only; every number is invented.
 const UA = 'WarrenPortfolio research contact@example.com'
@@ -77,8 +78,36 @@ describe('normalizeCompanyFacts: quarters and years', () => {
     ]
     const sec = secSeries(normalizeCompanyFacts(companyFacts({ Revenues: facts }))!)
 
-    expect(sec.quarterly.revenue!.at(-1)).toEqual({ end: '2026-01-25', value: 140 })
-    expect(sec.annual.revenue).toEqual([{ end: '2026-01-25', value: 470 }])
+    // Its period ends read as month ends (L38 D1): 2026-01-25 is January's.
+    expect(sec.quarterly.revenue!.at(-1)).toEqual({ end: '2026-01-31', value: 140 })
+    expect(sec.annual.revenue).toEqual([{ end: '2026-01-31', value: 470 }])
+  })
+
+  it("snaps each period end to the nearest month end, as TradingView: NVDA's 2021-05-02 is 2021-04-30, feb–abr 2021 (L38 D1)", () => {
+    // NVDA's fiscal 2022: Feb 1, 2021 – Jan 30, 2022. Day 7 or earlier is the previous month's end; day 8 on, its own.
+    const sec = secSeries(normalizeCompanyFacts(companyFacts({
+      Revenues: [
+        fact('2021-02-01', '2021-05-02', 100),
+        fact('2021-05-03', '2021-08-01', 110), fact('2021-02-01', '2021-08-01', 210),
+        fact('2021-08-02', '2021-10-31', 120), fact('2021-02-01', '2021-10-31', 330),
+        fact('2021-02-01', '2022-01-30', 470, '10-K'),
+        // A mid-month end (day 8 on) is its own month's: 2022-05-15 → 2022-05-31. Its length is read on the filed
+        // dates: 90 days, a quarter (106 days to the month end would not be).
+        fact('2022-02-14', '2022-05-15', 130),
+      ],
+      Assets: [fact(null, '2021-05-02', 1000), fact(null, '2021-08-01', 1100), fact(null, '2021-10-31', 1200), fact(null, '2022-01-30', 1300, '10-K'), fact(null, '2022-05-15', 1400)],
+    }))!)
+
+    expect(sec.quarterly.revenue).toEqual([
+      { end: '2021-04-30', value: 100 }, { end: '2021-07-31', value: 110 }, { end: '2021-10-31', value: 120 },
+      // Q4 is still the year minus the nine months.
+      { end: '2022-01-31', value: 140 }, { end: '2022-05-31', value: 130 },
+    ])
+    expect(sec.annual.revenue).toEqual([{ end: '2022-01-31', value: 470 }])
+    // Balances at the same ends, so one quarter is one column.
+    expect(sec.quarterly.totalAssets!.map((p) => p.end)).toEqual(['2021-04-30', '2021-07-31', '2021-10-31', '2022-01-31', '2022-05-31'])
+    expect(sec.annual.totalAssets).toEqual([{ end: '2022-01-31', value: 1300 }])
+    expect(periodLabel(sec.quarterly.revenue![0].end, 'quarterly')).toBe('feb–abr 2021')
   })
 
   it('takes balance lines directly at each period end; the year view reads them at fiscal year ends, and an odd date is no period', () => {

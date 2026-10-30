@@ -267,6 +267,21 @@ describe('NumerosTab history', () => {
     expect(text(panel())).toContain('a 41,0 en abr–jun 2026')
   })
 
+  it("pins a valuation ratio's far point to the chart's edge (MELI's 2019 P/E), never an amount's (L38 D3)", async () => {
+    const p = page()
+    const spike = withToday([1925.9, 1056.6, 808.2, 328.9, 135.3, 156.8, 90, 109.3, 80, 64.5, 80.7, 67.8, 59.6, 72.4, 45.1, 48, 64.5, 57, 51.1, 45.7, 46.2]
+      .map((value, i) => ({ end: QUARTER_ENDS[i + 3], value })), 44.5)
+    p.metrics!.pe = { ...p.metrics!.pe, today: 44.5, history: { quarterly: [], ttm: spike, annual: [] } }
+    p.metrics!.ev = { ...p.metrics!.ev, today: 44.5, history: { quarterly: [], ttm: spike, annual: [] } }
+    await act(async () => root.render(<NumerosTab page={p} />))
+
+    click(button(/^P\/E \(precio \/ ganancias\):/))
+    expect(panel()!.querySelectorAll('[data-slot="clipped"]').length).toBeGreaterThan(0)
+    click(button(/^Valor de empresa:/))
+    expect(text(panel()?.querySelector('h2'))).toBe('Valor de empresa')
+    expect(panel()!.querySelectorAll('[data-slot="clipped"]')).toHaveLength(0)
+  })
+
   it('wraps long peer names by their short name instead of cutting them', async () => {
     const p = page()
     p.peers = [...p.peers, peer('BCBA:GGAL', 'Grupo Financiero Galicia S.A.', { netMargin: 20 })]
