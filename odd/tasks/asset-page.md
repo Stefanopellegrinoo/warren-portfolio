@@ -33,7 +33,7 @@ Routes: the parent session is past the ~150k context backstop, so implementation
 - [x] T3 · S3 S4 S5 S6 · delegated · pure metrics module: catalog definitions, today + history per metric, peers, group T/Y source rule · 20 tests (RED first, 15 mutations caught) + ADR units fix inline (L12)
 - [x] T4 · S1 S12 · delegated · service + API route: ticker validation and market check, Redis cache with TTLs and last-good fallback, rate limit, per-section errors · 23 tests (RED first, 9 mutations caught), live smoke MELI/GGAL/TSM
 - [x] T5 · S1 · delegated · page shell `/activo/[ticker]`, header, tabs, shell search with `/`, links from every ticker · 112 tests in touched dirs, full suite 3397 green (6 mutations caught)
-- [ ] T6 · S2 S3 · delegated · Números UI (mobile + desktop), "?" copy, history panel, peers bars
+- [x] T6 · S2 S3 · delegated · Números UI (mobile + desktop), "?" copy, history panel, peers bars · 23 new tests (RED first); browser at 11 widths light/dark, no horizontal scroll
 - [ ] T7 · S9 · delegated · Comparar tab
 - [ ] T8 · S10 · delegated · Noticias
 - [ ] T9 · S11 · delegated · Resumen
@@ -98,3 +98,22 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   Follow-ups (T5b):
   1. `/activo` is missing from `src/middleware.ts` protectedPaths/matcher. Risk item 2: it gets its own commit and a verifier.
   2. The header price comes from the identity cache, up to 7 days old, and there is no day change. Use the TradingView snapshot close and change instead.
+- L15 (2026-10-30) b745db6: `/activo` added to the middleware's protectedPaths and matcher, test-first (RED seen). Risk item 2.
+  - The independent verifier PASSED, with no blockers. It ran a before/after probe with Next's own matcher.
+  - Signed out: `/activo`, `/activo/MELI`, `?vs=` and `BCBA%3AGGAL` all redirect with the return path. Signed in: 200.
+  - Every other path is unchanged.
+  - Advisory: the test covers only the signed-out case.
+  - The native review of b745db6 is deferred until the tree is stable after T6.
+- L16 (2026-10-30) T6 done.
+  - New: `explain.ts`, which holds all copy: "¿Qué es?" for the 44 metrics, "¿Cómo viene?" built only from the numbers, and a reason for every "—". Also `NumerosTab`, `HistoryPanel` and `LineChart` (inline SVG).
+  - The open metric lives in `?dato=`. The panel is sticky from 1024 px; below that it is full screen with "‹ Números".
+  - Writer checked a live MELI response in the browser at 11 widths, light and dark.
+  - Parent looked at the 1440 and 390 screenshots: they match the approved mockups.
+
+  Defects found by the parent:
+  - "▼ 2,6 puntos en un año" compares the hoy point (dated today) with the point a year before today (2025-09-30). The right comparison is the same period a year before the latest statements (2025-06-30, 8,5 % → 3,2 puntos).
+  - The writer reported that in quarterly mode the series ends with today's 12-month value, so per-share flows jump about ×4. Its UI drops that point (`ponytail:`); the fix belongs in `metrics.ts`.
+
+  → T6b fixes both in `metrics.ts` and removes the UI workaround.
+
+  Still open for later stages (service): a field for the listing currency (BYMA price target in pesos) and the analyst count. Both are needed by T9.

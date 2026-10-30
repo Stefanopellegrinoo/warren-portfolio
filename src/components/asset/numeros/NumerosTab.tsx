@@ -1,9 +1,229 @@
 'use client'
 
+import { Fragment, useEffect, useId, useRef, useState } from 'react'
+import { ChevronRight } from 'lucide-react'
 import type { AssetPage } from '@/lib/fundamentals/service'
+import { METRICS, type MetricDef, type MetricId, type Section } from '@/lib/fundamentals/catalog'
+import { explain, formatMetric, nullReason, peersLine, shortName } from '@/lib/fundamentals/explain'
+import { PERIOD_MODES, type MetricValue } from '@/lib/fundamentals/metrics'
+import { cn } from '@/lib/utils'
+import { HistoryPanel, peerName } from './HistoryPanel'
 
-/** The "Números" tab (odd/tasks/asset-page.md T6). Contract stub: T6 replaces the body. */
+/** Where the history becomes a panel beside the list instead of a screen of its own. */
+const WIDE = '(min-width: 1024px)'
+
+const hasHistory = (m: MetricValue) => PERIOD_MODES.some((k) => m.history[k].length > 0)
+const isMetricId = (v: string | null): v is MetricId => METRICS.some((d) => d.id === v)
+
+/**
+ * The "Números" tab (odd/tasks/asset-page.md T6, S2 S3): every catalog metric by section, each
+ * with its "?" and, when it has history, a click into it. The open metric lives in `?dato=`, so
+ * the phone's back button closes its screen.
+ */
 export function NumerosTab({ page }: { page: AssetPage }) {
-  void page
-  return null
+  const [dato, setDato] = useState<MetricId | null>(null)
+  const pushed = useRef(false)
+
+  useEffect(() => {
+    const read = () => {
+      const v = new URLSearchParams(window.location.search).get('dato')
+      setDato(isMetricId(v) ? v : null)
+    }
+    read()
+    window.addEventListener('popstate', read)
+    return () => window.removeEventListener('popstate', read)
+  }, [])
+
+  const metrics = page.metrics
+  if (!page.supported) return <p className="py-6 text-sm text-ink-2">Todavía no tenemos datos financieros de este mercado.</p>
+  if (!metrics) return <p className="py-6 text-sm text-ink-2">No pudimos traer los números de esta empresa. Probá de nuevo en un rato.</p>
+
+  const open = dato && hasHistory(metrics[dato]) ? dato : null
+  const selected = open ?? METRICS.find((d) => hasHistory(metrics[d.id]))?.id ?? null
+  const name = shortName(page.name)
+  // The price target is in the listing's currency: a BYMA listing quotes in pesos.
+  const currency = page.bymaListing ? 'ARS' : page.currency
+  const stale = Object.values(page.sources).includes('stale')
+
+  function show(id: MetricId) {
+    const url = new URL(window.location.href)
+    url.searchParams.set('dato', id)
+    // A phone opens a screen the back button closes; a desktop only swaps the panel.
+    if (window.matchMedia?.(WIDE).matches || open) window.history.replaceState(null, '', url)
+    else {
+      window.history.pushState(null, '', url)
+      pushed.current = true
+    }
+    setDato(id)
+  }
+
+  function back() {
+    if (pushed.current) {
+      pushed.current = false
+      window.history.back()
+      return
+    }
+    const url = new URL(window.location.href)
+    url.searchParams.delete('dato')
+    window.history.replaceState(null, '', url)
+    setDato(null)
+  }
+
+  const section = (s: Section, className?: string) => {
+    const defs: readonly MetricDef[] = METRICS.filter((d) => d.section === s)
+    return (
+      <section key={s} aria-labelledby={`numeros-${s}`} className={cn('rounded-lg border border-line bg-surface px-4 pb-1 pt-3', className)}>
+        <h3 id={`numeros-${s}`} className="text-[15px] font-semibold">{s}</h3>
+        <ul className={cn('mt-1', s === 'Por acción (US$)' && 'cq-wide:grid cq-wide:grid-cols-2 cq-wide:gap-x-6 cq-wide:[&>li:nth-child(2)]:border-t-0')}>
+          {defs.map((d, i) => (
+            <Fragment key={d.id}>
+              {d.subsection && d.subsection !== defs[i - 1]?.subsection && (
+                <li className="border-t border-line pb-1 pt-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-3">{d.subsection}</li>
+              )}
+              <Row page={page} def={d} name={name} currency={currency} selected={d.id === selected} onOpen={show} />
+            </Fragment>
+          ))}
+        </ul>
+      </section>
+    )
+  }
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem] xl:grid-cols-[minmax(0,1fr)_26rem] 2xl:grid-cols-[minmax(0,1fr)_28rem] lg:items-start lg:gap-5">
+      <div className="min-w-0 [container-type:inline-size]">
+        <p className="mb-3 text-[13px] text-ink-3">
+          {page.bymaListing && <>Datos de {name} en BYMA. </>}
+          Datos de hoy, montos en dólares{page.listing?.market === 'argentina' ? ' CCL' : ''}.{' '}
+          <span className="lg:hidden">Tocá el &quot;?&quot; para ver qué significa cada uno, y el dato para ver su historia.</span>
+          <span className="max-lg:hidden">Pasá el mouse por el &quot;?&quot; para ver qué significa; hacé click en cualquier dato para ver su historia a la derecha.</span>
+          {stale && ' Algunos datos son de la última vez que pudimos traerlos.'}
+        </p>
+        <div className="flex flex-col gap-4 cq-wide:grid cq-wide:grid-cols-2 cq-wide:items-start">
+          <div className="contents cq-wide:flex cq-wide:flex-col cq-wide:gap-4">
+            {section('Valoración')}
+            {section('Estadísticas clave', 'order-first cq-wide:order-none')}
+          </div>
+          <div className="contents cq-wide:flex cq-wide:flex-col cq-wide:gap-4">
+            {section('Rentabilidad')}
+            {section('Liquidez')}
+            {section('Solvencia')}
+            {section('Analistas y riesgo', 'order-last cq-wide:order-none')}
+          </div>
+          {section('Por acción (US$)', 'cq-wide:col-span-2')}
+        </div>
+      </div>
+      {selected && (
+        <HistoryPanel
+          page={page}
+          id={selected}
+          full={open !== null}
+          onBack={back}
+          className={cn(
+            'lg:sticky lg:top-4 lg:max-h-[calc(100dvh-2rem)] lg:overflow-y-auto',
+            open
+              ? 'max-lg:fixed max-lg:inset-0 max-lg:z-50 max-lg:overflow-y-auto max-lg:overscroll-contain max-lg:bg-canvas max-lg:pt-[max(1rem,env(safe-area-inset-top))]'
+              : 'max-lg:hidden',
+          )}
+        />
+      )}
+    </div>
+  )
+}
+
+/** One metric: label, "?", value; a button into its history when it has one. */
+function Row({ page, def, name, currency, selected, onOpen }: {
+  page: AssetPage
+  def: MetricDef
+  name: string
+  currency: string | null
+  selected: boolean
+  onOpen: (id: MetricId) => void
+}) {
+  const id = def.id as MetricId
+  const m = page.metrics![id]
+  // Pinned by a click or a tap; peeked by a mouse over the "?" (and over the tip it opens).
+  const [pinned, setPinned] = useState(false)
+  const [peek, setPeek] = useState(false)
+  const open = pinned || peek
+  const item = useRef<HTMLLIElement>(null)
+  const q = useRef<HTMLButtonElement>(null)
+  const tip = useId()
+
+  useEffect(() => {
+    if (!open) return
+    const close = () => {
+      setPinned(false)
+      setPeek(false)
+    }
+    const onDown = (e: Event) => {
+      if (!item.current?.contains(e.target as Node)) close()
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      close()
+      q.current?.focus()
+    }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const history = hasHistory(m)
+  const value = formatMetric(m.today, def.unit, currency)
+  const e = explain(id, name, m.today, currency)
+  const peers = peersLine(id, page.peers.map((p) => ({ name: peerName(p), value: p.today[id] })))
+
+  return (
+    <li ref={item} className="relative border-t border-line first:border-t-0" onPointerLeave={(ev) => ev.pointerType === 'mouse' && setPeek(false)}>
+      <div className={cn('relative -mx-4 flex min-h-9 items-center gap-2 px-4 py-1.5 max-[819px]:min-h-11', history && 'hover:bg-hover', selected && 'lg:bg-accent-soft lg:shadow-[inset_3px_0_0_var(--accent)]')}>
+        {history && (
+          <button
+            type="button"
+            aria-label={`${def.label}: ${value}. Ver su historia`}
+            aria-current={selected || undefined}
+            onClick={() => onOpen(id)}
+            className="absolute inset-0 cursor-pointer focus-visible:outline-offset-[-2px]"
+          />
+        )}
+        <span className="min-w-0 flex-1 text-sm leading-snug">
+          {def.label}
+          <button
+            ref={q}
+            type="button"
+            aria-label={`Qué es ${def.label}`}
+            aria-expanded={open}
+            aria-controls={tip}
+            onClick={() => {
+              if (pinned) setPeek(false)
+              setPinned(!pinned)
+            }}
+            onPointerEnter={(ev) => ev.pointerType === 'mouse' && setPeek(true)}
+            className="relative z-10 ml-1.5 inline-grid h-4 w-4 place-items-center rounded-full bg-surface-2 align-[1px] font-mono text-[10px] font-semibold leading-none text-ink-3 before:absolute before:-inset-3 before:content-[''] hover:bg-hover hover:text-ink aria-expanded:bg-ink aria-expanded:text-canvas"
+          >
+            ?
+          </button>
+        </span>
+        <span className="shrink-0 font-mono text-sm font-medium">{value}</span>
+        {history
+          ? <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-3" aria-hidden="true" />
+          : <span className="w-3.5 shrink-0" aria-hidden="true" />}
+      </div>
+      {open && (
+        <div id={tip} className="mb-2 rounded-md bg-ink p-3 text-[13px] leading-snug text-canvas shadow-pop lg:absolute lg:inset-x-0 lg:top-[calc(100%-4px)] lg:z-30">
+          <p>
+            <b>¿Qué es?</b> {e.what} {e.example ?? `${nullReason(id, page)}.`} <b>{e.read}</b>
+          </p>
+          {peers && <p className="mt-2 opacity-75">{peers}</p>}
+          {history && (
+            <button type="button" onClick={() => { setPinned(false); setPeek(false); onOpen(id) }} className="mt-1.5 min-h-8 font-medium text-accent-soft underline-offset-2 hover:underline">
+              Ver su historia →
+            </button>
+          )}
+        </div>
+      )}
+    </li>
+  )
 }
