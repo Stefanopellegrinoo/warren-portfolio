@@ -9,9 +9,9 @@ const CURRENCY: Record<string, string> = { USD: 'US$', ARS: '$' }
 
 /** Ticker, market, name and price, as in the approved mockup (odd/tasks/asset-page.md S1, S7). */
 export default function AssetHeader({ page }: { page: AssetPage }) {
-  const { ticker, exchange, listing, name, price, currency, bymaListing, dayChange } = page
-  // TradingView's market (NASDAQ, BCBA) when it is the asked listing, else Yahoo's name for it.
-  const market = listing && !bymaListing ? listing.tvSymbol.slice(0, listing.tvSymbol.indexOf(':')) : exchange
+  const { ticker, exchange, name, price, currency, bymaListing, dayChange } = page
+  // The asked listing's market; people know Buenos Aires' as BYMA.
+  const market = exchange === 'BCBA' ? 'BYMA' : exchange
   // Non-breaking space: the currency never wraps away from its amount.
   const shownPrice = currency ? `${CURRENCY[currency] ?? currency} ${priceText(price)}` : priceText(price)
   return (
@@ -25,6 +25,8 @@ export default function AssetHeader({ page }: { page: AssetPage }) {
         {bymaListing && <p className="mt-1 text-[13px] text-ink-3">Datos de {name} en BYMA</p>}
       </div>
       <div className="flex flex-none flex-col items-end gap-1 max-[819px]:items-start">
+        {/* A bare number would read as dollars: say whose price it is. */}
+        {!currency && <p className="text-[13px] text-ink-3">{exchange ? `Precio en ${exchange}` : 'Precio'}</p>}
         <p className="font-mono text-[2rem] font-semibold leading-tight tabular-nums max-[819px]:text-2xl">{shownPrice}</p>
         {dayChange && (
           <p className={`font-mono text-[13px] tabular-nums ${signTone(dayChange.abs)}`}>

@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { ChevronLeft } from 'lucide-react'
 import type { AssetPage } from '@/lib/fundamentals/service'
 import { METRICS, type MetricId } from '@/lib/fundamentals/catalog'
-import { explain, formatMetric, howItGoes, periodLabel, shortName } from '@/lib/fundamentals/explain'
+import { basisLabel, explain, formatMetric, howItGoes, shortName } from '@/lib/fundamentals/explain'
 import { PERIOD_MODES, changeVsYearAgo, type MetricValue, type PeriodMode } from '@/lib/fundamentals/metrics'
 import { Segmented } from '@/components/strategies/ui'
 import { cn, formatNumber } from '@/lib/utils'
@@ -91,9 +91,7 @@ export function HistoryPanel({ page, id, full, onBack, className }: {
       <div className="lg:flex lg:items-start lg:justify-between lg:gap-4">
         <div className="min-w-0">
           <h2 className="text-lg font-semibold leading-tight">{def.label}</h2>
-          <p className="mt-0.5 text-[13px] text-ink-3">
-            {basis ? `Últimos 12 meses a ${periodLabel(basis.end, 'ttm')}` : 'Últimos 12 meses'}
-          </p>
+          <p className="mt-0.5 text-[13px] text-ink-3">{basisLabel(id, basis?.end ?? null)}</p>
         </div>
         <div className="max-lg:mt-2 lg:shrink-0 lg:text-right">
           <p className="font-mono text-2xl font-semibold leading-tight">{formatMetric(m.today, def.unit)}</p>
@@ -134,7 +132,7 @@ export function HistoryPanel({ page, id, full, onBack, className }: {
         <ol className="mt-2 grid gap-1.5">
           {rows.map((r, i) => (
             <li key={`${r.name}-${i}`} data-slot="peer-bar" data-self={r.self || undefined} className={cn('grid grid-cols-[minmax(0,7rem)_minmax(0,1fr)_auto] items-center gap-3 text-[13px]', r.self && 'font-semibold')}>
-              <span className="truncate">{r.name}</span>
+              <span className="break-words leading-tight">{r.name}</span>
               <span aria-hidden="true" className="h-2 overflow-hidden rounded-full bg-surface-2">
                 <span
                   className={cn('block h-full rounded-full', r.value !== null && r.value < 0 ? 'bg-danger-dot' : r.self ? 'bg-accent' : 'bg-line-strong')}

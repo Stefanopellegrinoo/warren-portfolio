@@ -6,7 +6,7 @@
  * Pure, with type-only server imports: safe for the client bundle.
  */
 import { formatNumber } from '../utils'
-import { METRICS, type MetricId, type MetricUnit } from './catalog'
+import { METRICS, type MetricDef, type MetricId, type MetricUnit } from './catalog'
 import { bestPoint, changeVsYearAgo, type PeriodMode } from './metrics'
 import type { AssetPage } from './service'
 import type { Series } from './types'
@@ -363,7 +363,24 @@ export function nullReason(id: MetricId, page: Pick<AssetPage, 'metrics' | 'sour
   if (def.group !== 'snapshot' && page.sources.fx === 'error') return 'Sin datos: no pudimos pasar sus números a dólares'
   const negative = NEGATIVE_BASE[id]
   if (negative?.base.some((b) => (page.metrics?.[b].today ?? 0) < 0)) return negative.why
+  const history = page.metrics?.[id].history
+  if (history && Object.values(history).some((s) => s.length > 0)) return 'Falta el dato del último trimestre'
   return 'Sin datos'
+}
+
+/** True when the formula reads a flow (a period's sales, earnings, cash): else it is one date's balance. */
+function readsFlow(def: MetricDef): boolean {
+  let flow = false
+  const mark = () => ((flow = true), 1)
+  if ('formula' in def) def.formula({ flow: mark, yearly: mark, bal: () => 1, avg: () => 1, mcap: 1, units: 1 })
+  return flow
+}
+
+/** What the history panel's headline covers: a flow, the 12 months to `asOf`; a balance, its close then. */
+export function basisLabel(id: MetricId, asOf: string | null): string {
+  const when = asOf && periodLabel(asOf, 'ttm')
+  if (readsFlow(defOf(id))) return when ? `Últimos 12 meses a ${when}` : 'Últimos 12 meses'
+  return when ? `Al cierre de ${when}` : 'Al cierre del último balance'
 }
 
 const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']

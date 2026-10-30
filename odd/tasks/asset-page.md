@@ -175,3 +175,15 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   - **(e) Exchange and currency.** `exchange` is the asked listing's TradingView prefix. New optional `listingCurrency`.
   - **Item 4.** The "hoy" anchor is the source's latest period, so "—" appears only when that period lacks the input.
   - Decision (mine): the BCBA badge displays as "BYMA" (sent to T6d).
+- L23 (2026-10-30) T6d done (UI fixes). 57 tests pass in asset + explain.
+  - The chart splits runs at gaps over 1.5 periods.
+  - Outliers beyond 2 × IQR are pinned to the edge with ▲▼; their real value shows on hover and in the text alternative. MELI P/E axis is now about 170 instead of about 2.150.
+  - The default panel is Margen neto.
+  - Subtitles depend on the metric kind ("Últimos 12 meses a…" vs "Al cierre de…"), read from the catalog formula.
+  - The BYMA note appears once.
+  - "Falta el dato del último trimestre".
+  - ADR target reads "(en BYMA)" in pesos.
+  - "?" stays with its word; peer names wrap.
+  - "Precio en <exchange>" when there is no currency.
+  - Badge = `exchange`, BCBA shown as BYMA.
+  - The preview was re-recorded with the fixed metrics: MELI P/E 44,1; YPFD P/E 8,9, Deuda/acción 2,80; GGAL badge NASDAQ.

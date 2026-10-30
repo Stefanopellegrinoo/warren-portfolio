@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { METRICS, type MetricId } from '../catalog'
 import type { Metrics } from '../metrics'
-import { explain, formatMetric, howItGoes, nullReason, peersLine, periodLabel, shortName } from '../explain'
+import { basisLabel, explain, formatMetric, howItGoes, nullReason, peersLine, periodLabel, shortName } from '../explain'
 
 const plain = (s: string | null) => (s ?? '').replace(/[  ]/g, ' ')
 const BROKEN = /\{|\}|undefined|NaN|null|Infinity/
@@ -87,6 +87,29 @@ describe('nullReason', () => {
   it('blames the source when it did not answer, and otherwise just says there is no data', () => {
     expect(nullReason('roe', { metrics: metrics({}), sources: { yahoo: 'error' } })).toBe('Sin datos: la fuente no respondió')
     expect(nullReason('beta', { metrics: metrics({}), sources: {} })).toBe('Sin datos')
+  })
+
+  it('says the latest period lacks it when the row still has history', () => {
+    const m = metrics({})
+    m.capexPerShare = { ...m.capexPerShare, history: { quarterly: [{ end: '2026-03-31', value: 1.2 }], ttm: [], annual: [] } }
+    expect(nullReason('capexPerShare', { metrics: m, sources: {} })).toBe('Falta el dato del último trimestre')
+    // A loss still explains a missing P/E better than the missing quarter.
+    const loss = metrics({ netMargin: -2 })
+    loss.pe = { ...loss.pe, history: { quarterly: [], ttm: [{ end: '2026-03-31', value: 40 }], annual: [] } }
+    expect(nullReason('pe', { metrics: loss, sources: {} })).toBe('No aplica: la empresa perdió plata en los últimos 12 meses')
+  })
+})
+
+describe('basisLabel', () => {
+  it('a flow covers the 12 months to its latest period; a balance is that period\'s close', () => {
+    expect(basisLabel('netMargin', '2026-06-30')).toBe('Últimos 12 meses a abr–jun 2026')
+    expect(basisLabel('pe', '2026-06-30')).toBe('Últimos 12 meses a abr–jun 2026')
+    expect(basisLabel('roe', '2026-06-30')).toBe('Últimos 12 meses a abr–jun 2026')
+    for (const id of ['debtToAssets', 'debtToEquity', 'currentRatio', 'cashPerShare', 'bookPerShare', 'debtPerShare', 'pb', 'ev'] as const) {
+      expect(basisLabel(id, '2026-06-30')).toBe('Al cierre de abr–jun 2026')
+    }
+    expect(basisLabel('netMargin', null)).toBe('Últimos 12 meses')
+    expect(basisLabel('cashPerShare', null)).toBe('Al cierre del último balance')
   })
 })
 

@@ -7,6 +7,26 @@ import { formatNumber } from '@/lib/utils'
 import { bestPoint, type PeriodMode } from '@/lib/fundamentals/metrics'
 import type { Series } from '@/lib/fundamentals/types'
 
+const DAY_MS = 86_400_000
+/** More than 1,5 periods apart is a gap: the line breaks there instead of joining across it. */
+const GAP_DAYS: Record<PeriodMode, number> = { quarterly: 137, ttm: 137, annual: 548 }
+
+/**
+ * The range the axis shows: every value but the far ones, past the quartiles by more than twice the
+ * interquartile range (MELI's P/E of 1.925,9 next to years of 45–80). Those are pinned to the edge.
+ */
+function shownRange(values: number[]): [number, number] {
+  const s = [...values].sort((a, b) => a - b)
+  const q = (p: number) => {
+    const i = p * (s.length - 1)
+    const f = Math.floor(i)
+    return s[f] + (s[Math.ceil(i)] - s[f]) * (i - f)
+  }
+  const iqr = q(0.75) - q(0.25)
+  const kept = iqr > 0 ? s.filter((v) => v >= q(0.25) - 2 * iqr && v <= q(0.75) + 2 * iqr) : s
+  return [kept[0], kept[kept.length - 1]]
+}
+
 /** 1, 2, 2,5 or 5 × 10ⁿ: about four gridlines over `span`. */
 function niceStep(span: number): number {
   const raw = span / 4
@@ -36,16 +56,24 @@ export function LineChart({ series, unit, better, mode, today, label }: {
   const times = series.map((p) => Date.parse(p.end))
   const t0 = times[0]
   const span = times[times.length - 1] - t0 || 1
-  const values = series.map((p) => p.value)
-  let lo = Math.min(...values)
-  let hi = Math.max(...values)
-  const pad = (hi - lo) * 0.12 || Math.abs(hi) * 0.12 || 1
-  lo -= pad
-  hi += pad
+  const [low, high] = shownRange(series.map((p) => p.value))
+  const pad = (high - low) * 0.12 || Math.abs(high) * 0.12 || 1
+  const lo = low - pad
+  const hi = high + pad
   const x = (i: number) => ((times[i] - t0) / span) * 100
-  const y = (v: number) => ((hi - v) / (hi - lo)) * 100
+  // A value past the shown range sits on the edge.
+  const y = (v: number) => ((hi - Math.min(Math.max(v, lo), hi)) / (hi - lo)) * 100
   const base = y(Math.min(Math.max(0, lo), hi))
-  const line = series.map((p, i) => `${i ? 'L' : 'M'}${x(i)},${y(p.value)}`).join('')
+  // Runs of consecutive periods; hoy always continues the last one.
+  const runs: number[][] = []
+  series.forEach((p, i) => {
+    if (i === 0 || (p.end !== today && times[i] - times[i - 1] > GAP_DAYS[mode] * DAY_MS)) runs.push([i])
+    else runs[runs.length - 1].push(i)
+  })
+  const path = (run: number[]) => run.map((i, k) => `${k ? 'L' : 'M'}${x(i)},${y(series[i].value)}`).join('')
+  const line = runs.map(path).join('')
+  const area = runs.map((run) => `${path(run)}L${x(run[run.length - 1])},${base}L${x(run[0])},${base}Z`).join('')
+  const pinned = series.flatMap((p, i) => (p.value < low || p.value > high ? [i] : []))
   const step = niceStep(hi - lo)
   const ticks = Array.from({ length: Math.floor(hi / step) - Math.ceil(lo / step) + 1 }, (_, k) => (Math.ceil(lo / step) + k) * step)
   const firstYear = new Date(t0).getUTCFullYear() + 1
@@ -65,14 +93,16 @@ export function LineChart({ series, unit, better, mode, today, label }: {
   }
 
   const dot = (i: number, className: string) => (
-    <span aria-hidden="true" className={`absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-surface ${className}`} style={{ left: `${x(i)}%`, top: `${y(series[i].value)}%` }} />
+    <span key={`${i}-${className}`} aria-hidden="true" className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full ${className}`} style={{ left: `${x(i)}%`, top: `${y(series[i].value)}%` }} />
   )
+  const at = (end: string) => (end === today ? 'hoy' : `en ${name(end)}`)
+  const outside = pinned.map((i) => `${fmt(series[i].value)} ${at(series[i].end)}`).join(', ')
 
   return (
     <div className="pl-11 pr-2">
       <div
         role="img"
-        aria-label={`${label}: de ${fmt(series[0].value)} en ${name(series[0].end)} a ${fmt(series[last].value)} ${series[last].end === today ? 'hoy' : `en ${name(series[last].end)}`}. ${better === 'higher' ? 'Máximo' : 'Mínimo'}: ${fmt(best.value)} en ${name(best.end)}.`}
+        aria-label={`${label}: de ${fmt(series[0].value)} ${at(series[0].end)} a ${fmt(series[last].value)} ${at(series[last].end)}. ${better === 'higher' ? 'Máximo' : 'Mínimo'}: ${fmt(best.value)} ${at(best.end)}.${outside ? ` Fuera de escala: ${outside}.` : ''}`}
         data-points={series.length}
         onPointerMove={pick}
         onPointerDown={pick}
@@ -88,12 +118,24 @@ export function LineChart({ series, unit, better, mode, today, label }: {
           {ticks.map((t) => (
             <line key={t} x1="0" x2="100" y1={y(t)} y2={y(t)} vectorEffect="non-scaling-stroke" className={t === 0 ? 'stroke-line-strong' : 'stroke-line'} strokeDasharray={t === 0 ? '4 3' : undefined} />
           ))}
-          <path d={`${line}L${x(last)},${base}L0,${base}Z`} className="fill-accent-soft" />
+          <path d={area} className="fill-accent-soft" />
           <path d={line} fill="none" vectorEffect="non-scaling-stroke" strokeWidth="2" strokeLinejoin="round" className="stroke-accent" />
           {shown !== null && <line x1={x(shown)} x2={x(shown)} y1="0" y2="100" vectorEffect="non-scaling-stroke" className="stroke-ink-3" />}
         </svg>
-        {dot(series.indexOf(best), 'bg-ink')}
-        {dot(last, 'bg-accent')}
+        {runs.filter((run) => run.length === 1).map(([i]) => dot(i, 'h-1.5 w-1.5 bg-accent'))}
+        {pinned.map((i) => (
+          <span
+            key={i}
+            data-slot="clipped"
+            aria-hidden="true"
+            className={`absolute -translate-x-1/2 text-[9px] leading-none text-accent-ink ${series[i].value > high ? '' : '-translate-y-full'}`}
+            style={{ left: `${x(i)}%`, top: series[i].value > high ? '0%' : '100%' }}
+          >
+            {series[i].value > high ? '▲' : '▼'}
+          </span>
+        ))}
+        {dot(series.indexOf(best), 'h-2.5 w-2.5 ring-2 ring-surface bg-ink')}
+        {dot(last, 'h-2.5 w-2.5 ring-2 ring-surface bg-accent')}
         {shown !== null && (
           <span
             className="pointer-events-none absolute top-0 z-10 whitespace-nowrap rounded bg-ink px-2 py-1 text-[11px] leading-tight text-canvas"

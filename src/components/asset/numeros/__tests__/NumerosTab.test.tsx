@@ -113,11 +113,57 @@ describe('NumerosTab list', () => {
     click(q)
     expect(text(document.getElementById(q.getAttribute('aria-controls')!))).toContain('Sin datos')
   })
+
+  it('keeps the "?" on the line of the label\'s last word', () => {
+    const q = button(/^Qué es P\/E/)!
+    expect(q.parentElement!.className).toContain('whitespace-nowrap')
+    expect(q.parentElement!.textContent).toBe('ganancias)?')
+  })
+
+  it('leaves the BYMA note to the header', async () => {
+    await act(async () => root.render(<NumerosTab page={{ ...page(), bymaListing: true }} />))
+    expect(text(el)).not.toContain('Datos de MercadoLibre en BYMA')
+  })
+
+  it('shows an ADR\'s price target as its BYMA listing\'s, in pesos', async () => {
+    const p = { ...page(), ticker: 'GGAL', name: 'Grupo Financiero Galicia S.A.', currency: 'USD', bymaListing: true }
+    p.metrics!.priceTarget = { ...p.metrics!.priceTarget, today: 9581.1 }
+    await act(async () => root.render(<NumerosTab page={p} />))
+    const row = [...el.querySelectorAll('li')].find((li) => li.textContent?.startsWith('Precio objetivo'))
+    expect(text(row)).toContain('Precio objetivo promedio (en BYMA)')
+    // "(en BYMA)" and its "?" never split across lines.
+    expect(text(button(/^Qué es Precio objetivo/)!.parentElement)).toBe('(en BYMA)?')
+    expect(text(row)).toContain('$ 9.581')
+    expect(text(row)).not.toContain('US$')
+  })
+
+  it('formats the price target in the listing currency the page names', async () => {
+    const p = { ...page(), listingCurrency: 'EUR' } as AssetPage
+    p.metrics!.priceTarget = { ...p.metrics!.priceTarget, today: 12.5 }
+    await act(async () => root.render(<NumerosTab page={p} />))
+    const row = [...el.querySelectorAll('li')].find((li) => li.textContent?.startsWith('Precio objetivo'))
+    expect(text(row)).toContain('Precio objetivo promedio')
+    expect(text(row)).not.toContain('en BYMA')
+    expect(text(row)).toContain('EUR 12,50')
+  })
 })
 
 describe('NumerosTab history', () => {
-  it('shows the first row with history by default', () => {
+  it('opens Margen neto by default, as in the mockup', () => {
+    expect(text(panel()?.querySelector('h2'))).toBe('Margen neto')
+  })
+
+  it('falls back to the first row with history when Margen neto has none', async () => {
+    const p = page()
+    p.metrics!.netMargin = { ...p.metrics!.netMargin, history: { quarterly: [], ttm: [], annual: [] } }
+    await act(async () => root.render(<NumerosTab page={p} />))
     expect(text(panel()?.querySelector('h2'))).toBe('P/E (precio / ganancias)')
+  })
+
+  it('says a 12-month flow covers the last 12 months, and a balance its close', () => {
+    expect(text(panel()?.querySelector('h2 + p'))).toBe('Últimos 12 meses a abr–jun 2026')
+    click(button(/^Deuda \/ activos:/))
+    expect(text(panel()?.querySelector('h2 + p'))).toBe('Al cierre de abr–jun 2026')
   })
 
   it('opens the history of a clicked row and keeps it in the URL; a snapshot row has none', async () => {
@@ -185,6 +231,17 @@ describe('NumerosTab history', () => {
     // 8 años from the last quarter, 2026-06-30: the quarters from 2018-09-30, the last one included.
     expect(Number(panel()!.querySelector('[data-points]')!.getAttribute('data-points'))).toBe(QUARTER_ENDS.length)
     expect(text(panel())).toContain('a 41,0 en abr–jun 2026')
+  })
+
+  it('wraps long peer names by their short name instead of cutting them', async () => {
+    const p = page()
+    p.peers = [...p.peers, peer('BCBA:GGAL', 'Grupo Financiero Galicia S.A.', { netMargin: 20 })]
+    await act(async () => root.render(<NumerosTab page={p} />))
+    click(button(/^Margen neto: 5,3 %/))
+    const name = panel()!.querySelector('[data-slot="peer-bar"] span')!
+    expect(name.textContent).toBe('Grupo Financiero Galicia')
+    expect(name.className).not.toContain('truncate')
+    expect(name.className).toContain('break-words')
   })
 
   it('ranks the company among its peers by value, highlights it and leaves out peers with no value', () => {

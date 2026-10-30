@@ -5,7 +5,7 @@ import type { AssetPage } from '@/lib/fundamentals/service'
 
 // odd/tasks/asset-page.md S1 (T5b): the day change under the price, as in the mockup. Invented numbers.
 const PAGE: AssetPage = {
-  ticker: 'MELI', name: 'MercadoLibre, Inc.', exchange: 'NasdaqGS', price: 1660.13, currency: 'USD', supported: true,
+  ticker: 'MELI', name: 'MercadoLibre, Inc.', exchange: 'NASDAQ', price: 1660.13, currency: 'USD', supported: true,
   listing: { ticker: 'MELI', market: 'america', tvSymbol: 'NASDAQ:MELI', yahooSymbol: 'MELI' },
   bymaListing: false, metrics: null, peers: [], sources: {}, dayChange: null,
 }
@@ -32,5 +32,49 @@ describe('AssetHeader: day change', () => {
   it('nothing when there is no day change', () => {
     expect(change({ dayChange: null })).toBeNull()
     expect(change({ dayChange: undefined })).toBeNull()
+  })
+})
+
+describe('AssetHeader: a price with no known currency', () => {
+  const render = (over: Partial<AssetPage>) => {
+    const el = document.createElement('div')
+    el.innerHTML = renderToStaticMarkup(<AssetHeader page={{ ...PAGE, ...over }} />)
+    return (el.textContent ?? '').replace(/[  ]/g, ' ')
+  }
+  const TOYOTA = { ticker: '7203.T', name: 'Toyota Motor Corporation', exchange: 'Tokyo', price: 3070, currency: null, supported: false, listing: null }
+
+  it('says which market the bare number is from, so it does not read as dollars', () => {
+    const text = render(TOYOTA)
+    expect(text).toContain('Precio en Tokyo')
+    expect(text).toContain('3.070,00')
+    expect(text).not.toContain('US$')
+  })
+
+  it('just says "Precio" when the market is unknown too, and nothing when the currency is known', () => {
+    expect(render({ ...TOYOTA, exchange: null })).toContain('Precio')
+    expect(render({})).not.toContain('Precio')
+  })
+})
+
+describe('AssetHeader: market badge', () => {
+  const badge = (over: Partial<AssetPage>) => {
+    const el = document.createElement('div')
+    el.innerHTML = renderToStaticMarkup(<AssetHeader page={{ ...PAGE, ...over }} />)
+    return el.querySelector('h1 + span')?.textContent ?? null
+  }
+
+  it("shows the asked listing's exchange, and BCBA as BYMA, the name people know", () => {
+    expect(badge({})).toBe('NASDAQ')
+    expect(badge({ ticker: 'BCBA:YPFD', exchange: 'BCBA' })).toBe('BYMA')
+  })
+
+  it("keeps an ADR's own market though its numbers come from BYMA", () => {
+    const listing = { ticker: 'BCBA:GGAL', market: 'argentina' as const, tvSymbol: 'BCBA:GGAL', yahooSymbol: 'GGAL.BA' }
+    expect(badge({ ticker: 'GGAL', exchange: 'NASDAQ', bymaListing: true, listing })).toBe('NASDAQ')
+  })
+
+  it('shows a market outside TradingView as the page names it, and none when unknown', () => {
+    expect(badge({ exchange: 'Tokyo', listing: null, supported: false })).toBe('Tokyo')
+    expect(badge({ exchange: null, listing: null, supported: false })).toBeNull()
   })
 })

@@ -12,6 +12,9 @@ import { HistoryPanel, peerName } from './HistoryPanel'
 /** Where the history becomes a panel beside the list instead of a screen of its own. */
 const WIDE = '(min-width: 1024px)'
 
+/** The panel desktop opens on, as in the approved mockup; else the first row with history. */
+const FIRST: MetricId = 'netMargin'
+
 const hasHistory = (m: MetricValue) => PERIOD_MODES.some((k) => m.history[k].length > 0)
 const isMetricId = (v: string | null): v is MetricId => METRICS.some((d) => d.id === v)
 
@@ -39,10 +42,10 @@ export function NumerosTab({ page }: { page: AssetPage }) {
   if (!metrics) return <p className="py-6 text-sm text-ink-2">No pudimos traer los números de esta empresa. Probá de nuevo en un rato.</p>
 
   const open = dato && hasHistory(metrics[dato]) ? dato : null
-  const selected = open ?? METRICS.find((d) => hasHistory(metrics[d.id]))?.id ?? null
+  const selected = open ?? [FIRST, ...METRICS.map((d) => d.id)].find((id) => hasHistory(metrics[id])) ?? null
   const name = shortName(page.name)
-  // The price target is in the listing's currency: a BYMA listing quotes in pesos.
-  const currency = page.bymaListing ? 'ARS' : page.currency
+  // The price target is in the currency of the listing Números reads: a BYMA listing quotes in pesos.
+  const currency = page.listingCurrency ?? (page.bymaListing ? 'ARS' : page.currency)
   const stale = Object.values(page.sources).includes('stale')
 
   function show(id: MetricId) {
@@ -92,7 +95,6 @@ export function NumerosTab({ page }: { page: AssetPage }) {
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem] xl:grid-cols-[minmax(0,1fr)_26rem] 2xl:grid-cols-[minmax(0,1fr)_28rem] lg:items-start lg:gap-5">
       <div className="min-w-0 [container-type:inline-size]">
         <p className="mb-3 text-[13px] text-ink-3">
-          {page.bymaListing && <>Datos de {name} en BYMA. </>}
           Datos de hoy, montos en dólares{page.listing?.market === 'argentina' ? ' CCL' : ''}.{' '}
           <span className="lg:hidden">Tocá el &quot;?&quot; para ver qué significa cada uno, y el dato para ver su historia.</span>
           <span className="max-lg:hidden">Pasá el mouse por el &quot;?&quot; para ver qué significa; hacé click en cualquier dato para ver su historia a la derecha.</span>
@@ -172,6 +174,10 @@ function Row({ page, def, name, currency, selected, onOpen }: {
   }, [open])
 
   const history = hasHistory(m)
+  // An ADR's Números read its BYMA listing: so does the target, in pesos.
+  const label = id === 'priceTarget' && page.bymaListing ? `${def.label} (en\u00a0BYMA)` : def.label
+  // The "?" stays on the line of the label's last word.
+  const cut = label.lastIndexOf(' ') + 1
   const value = formatMetric(m.today, def.unit, currency)
   const e = explain(id, name, m.today, currency)
   const peers = peersLine(id, page.peers.map((p) => ({ name: peerName(p), value: p.today[id] })))
@@ -182,29 +188,32 @@ function Row({ page, def, name, currency, selected, onOpen }: {
         {history && (
           <button
             type="button"
-            aria-label={`${def.label}: ${value}. Ver su historia`}
+            aria-label={`${label}: ${value}. Ver su historia`}
             aria-current={selected || undefined}
             onClick={() => onOpen(id)}
             className="absolute inset-0 cursor-pointer focus-visible:outline-offset-[-2px]"
           />
         )}
         <span className="min-w-0 flex-1 text-sm leading-snug">
-          {def.label}
-          <button
-            ref={q}
-            type="button"
-            aria-label={`Qué es ${def.label}`}
-            aria-expanded={open}
-            aria-controls={tip}
-            onClick={() => {
-              if (pinned) setPeek(false)
-              setPinned(!pinned)
-            }}
-            onPointerEnter={(ev) => ev.pointerType === 'mouse' && setPeek(true)}
-            className="relative z-10 ml-1.5 inline-grid h-4 w-4 place-items-center rounded-full bg-surface-2 align-[1px] font-mono text-[10px] font-semibold leading-none text-ink-3 before:absolute before:-inset-3 before:content-[''] hover:bg-hover hover:text-ink aria-expanded:bg-ink aria-expanded:text-canvas"
-          >
-            ?
-          </button>
+          {label.slice(0, cut)}
+          <span className="whitespace-nowrap">
+            {label.slice(cut)}
+            <button
+              ref={q}
+              type="button"
+              aria-label={`Qué es ${label}`}
+              aria-expanded={open}
+              aria-controls={tip}
+              onClick={() => {
+                if (pinned) setPeek(false)
+                setPinned(!pinned)
+              }}
+              onPointerEnter={(ev) => ev.pointerType === 'mouse' && setPeek(true)}
+              className="relative z-10 ml-1.5 inline-grid h-4 w-4 place-items-center rounded-full bg-surface-2 align-[1px] font-mono text-[10px] font-semibold leading-none text-ink-3 before:absolute before:-inset-3 before:content-[''] hover:bg-hover hover:text-ink aria-expanded:bg-ink aria-expanded:text-canvas"
+            >
+              ?
+            </button>
+          </span>
         </span>
         <span className="shrink-0 font-mono text-sm font-medium">{value}</span>
         {history

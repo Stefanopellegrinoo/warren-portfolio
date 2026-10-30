@@ -18,7 +18,7 @@ const withNumbers = { pe: { id: 'pe', today: 45.2, history: { quarterly: [], ttm
 const onlySnapshot = { beta: { id: 'beta', today: 1.1, history: { quarterly: [], ttm: [], annual: [] }, since: null, source: 'snapshot' } } as unknown as Metrics
 
 const PAGE: AssetPage = {
-  ticker: 'MELI', name: 'MercadoLibre, Inc.', exchange: 'NasdaqGS', price: 1660.13, currency: 'USD', supported: true,
+  ticker: 'MELI', name: 'MercadoLibre, Inc.', exchange: 'NASDAQ', price: 1660.13, currency: 'USD', supported: true,
   listing: { ticker: 'MELI', market: 'america', tvSymbol: 'NASDAQ:MELI', yahooSymbol: 'MELI' },
   bymaListing: false, metrics: withNumbers, peers: [], sources: { tradingview: 'ok', yahoo: 'ok' },
 }
