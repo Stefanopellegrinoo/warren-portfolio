@@ -1,8 +1,9 @@
 /**
- * Balances completos (odd/tasks/asset-page.md T11, S8): Resultados, Balance and Flujo de caja, one row per
- * line, one column per quarter or year. A row reads one source across all its columns: Yahoo, or
- * TradingView for its eight lines in the 8-year range. Amounts go to USD at each period end through
- * metrics' own conversion (L11, L21 a); EPS and share counts stay as reported.
+ * Balances completos (odd/tasks/asset-page.md T11 T12, S8): Resultados, Balance and Flujo de caja, one row per
+ * line, one column per quarter or year. A row reads one source across all its columns: the SEC for a US 10-Q
+ * filer's lines (since about 2009), else Yahoo, or TradingView for its eight lines from the 8-year range on.
+ * Amounts and EPS go to USD at each period end through metrics' own conversion (L11, L21 a, L36); share counts
+ * stay as reported.
  *
  * Pure, with type-only server imports: safe for the client bundle.
  */
@@ -31,7 +32,7 @@ export interface LineDef {
   help: string
   /** The TradingView history line that replaces Yahoo's for the whole row in the 8-year range (S8). */
   tv?: TvHistoryLine
-  /** Not an amount, so never converted: EPS in the statements' currency, a count of shares. */
+  /** EPS goes to USD like amounts but keeps its cents; a count of shares is never converted. */
   unit?: 'perShare' | 'count'
 }
 
@@ -54,7 +55,7 @@ export const LINES: readonly LineDef[] = [
   income('netIncome', 'Ganancia neta', 'Lo que le quedó después de pagar todo, impuestos incluidos. En rojo, perdió plata.', { tv: 'netIncome' }),
   income('ebit', 'EBIT', 'Lo que gana el negocio antes de intereses e impuestos, sumando resultados que no son de su operación.'),
   income('ebitda', 'EBITDA', 'Lo que gana el negocio antes de intereses, impuestos y amortizaciones: el desgaste de lo que compró en otros años.', { tv: 'ebitda' }),
-  income('dilutedEps', 'Ganancia por acción (diluida)', 'La ganancia neta dividida por todas las acciones, contando las que podría emitir (opciones de empleados, bonos convertibles).', { tv: 'epsDiluted', unit: 'perShare' }),
+  income('dilutedEps', 'Ganancia por acción (US$)', 'La ganancia neta dividida por todas las acciones, contando las que podría emitir (opciones de empleados, bonos convertibles).', { tv: 'epsDiluted', unit: 'perShare' }),
   income('dilutedAverageShares', 'Acciones (promedio diluido)', 'Cuántas acciones hubo en promedio en el período, contando las que podría emitir. Si sube, cada acción es dueña de una parte más chica.', { unit: 'count' }),
   balance('totalAssets', 'Activos', 'Todo lo que la empresa tiene: plata, lo que le deben, mercadería, edificios, máquinas y empresas que compró.', { tv: 'totalAssets' }),
   balance('currentAssets', 'Activo corriente', 'Lo que tiene y puede convertir en plata en menos de un año.'),
@@ -84,7 +85,7 @@ export const LINES: readonly LineDef[] = [
 type Lines = Partial<Record<YahooLine, Series>>
 
 export interface SourceStatements {
-  /** The statements' own currency: amounts were converted from it, EPS is still in it. */
+  /** The statements' own currency: amounts and EPS were converted from it to USD. */
   currency: string | null
   quarterly: Lines
   annual: Lines
@@ -95,12 +96,15 @@ export interface AssetStatements {
   yahoo: SourceStatements | null
   /** Its eight history lines only. */
   tradingview: SourceStatements | null
-  sources: Partial<Record<'tradingview' | 'yahoo' | 'fx', SourceStatus>>
+  /** A US 10-Q filer's official lines, every period since about 2009 (T12). Absent while the SEC is off; null for anyone else. */
+  sec?: SourceStatements | null
+  sources: Partial<Record<'tradingview' | 'yahoo' | 'fx' | 'sec', SourceStatus>>
 }
 
-/** The points within `years` before `latest`: 8 years from 2026-06-30 starts at 2018-09-30. */
+/** The points within `years` before `latest`: 8 years from 2026-06-30 starts at 2018-09-30. Infinity keeps them all. */
 export function within(series: Series, years: number, latest = series.at(-1)?.end): Series {
   if (!latest) return []
+  if (years === Infinity) return series
   const cut = `${Number(latest.slice(0, 4)) - years}${latest.slice(4)}`
   return series.filter((p) => p.end > cut)
 }
@@ -113,40 +117,50 @@ export function freeCashFlow(ocf: Series = [], capex: Series = []): Series {
   })
 }
 
-/** Each source's shown lines, amounts in USD (whole dollars), at most MAX_YEARS: the route's whole payload. */
+/**
+ * Each source's shown lines, amounts in USD (whole dollars) and EPS in USD, at most MAX_YEARS (the SEC's all):
+ * the route's whole payload. `sec` is the SEC's lines in USD; leaving it out (SEC off) leaves the key out.
+ */
 export function toStatements(
   tv: TvHistory | null,
   yahoo: YahooStatements | null,
   rates: Map<string, Map<string, number>>,
-): Pick<AssetStatements, 'yahoo' | 'tradingview'> {
+  sec?: Pick<SourceStatements, 'quarterly' | 'annual'> | null,
+): Pick<AssetStatements, 'yahoo' | 'tradingview' | 'sec'> {
   const rateOn = ratesReader(rates)
-  function read<L extends string>(book: Book<L>, lineOf: (def: LineDef) => L | undefined): SourceStatements {
+  function read<L extends string>(book: Book<L>, lineOf: (def: LineDef) => L | undefined, years = MAX_YEARS): SourceStatements {
     const usd = inUsd(book, rateOn)
     const side = (mode: StatementMode): Lines =>
       Object.fromEntries(
         LINES.flatMap((def) => {
           const line = lineOf(def)
-          const series = line && (def.unit ? book[mode][line] : usd[mode][line]?.map((p) => ({ end: p.end, value: Math.round(p.value) })))
-          return series?.length ? [[def.id, within(series, MAX_YEARS)]] : []
+          const series = line && (def.unit === 'count' ? book[mode][line] : usd[mode][line]?.map((p) => ({ end: p.end, value: def.unit ? p.value : Math.round(p.value) })))
+          return series?.length ? [[def.id, within(series, years)]] : []
         }),
       )
     return { currency: book.currency, quarterly: side('quarterly'), annual: side('annual') }
   }
-  const y = yahoo && read(yahooBook(yahoo), (def) => def.id)
-  if (y) {
+  /** Flujo de caja libre is OCF − |CapEx| for every source that has both (L22), never a source's own line. */
+  function withFcf(s: SourceStatements): SourceStatements {
     for (const mode of STATEMENT_MODES) {
-      const { freeCashFlow: _, ...rest } = y[mode]
+      const { freeCashFlow: _, ...rest } = s[mode]
       const fcf = freeCashFlow(rest.operatingCashFlow, rest.capitalExpenditure)
-      y[mode] = fcf.length ? { ...rest, freeCashFlow: fcf } : rest
+      s[mode] = fcf.length ? { ...rest, freeCashFlow: fcf } : rest
     }
+    return s
   }
-  return { yahoo: y, tradingview: tv && read(tvBook(tv), (def) => def.tv) }
+  const out = {
+    yahoo: yahoo && withFcf(read(yahooBook(yahoo), (def) => def.id)),
+    tradingview: tv && read(tvBook(tv), (def) => def.tv),
+  }
+  if (sec === undefined) return out
+  return { ...out, sec: sec && withFcf(read({ currency: 'USD', ...sec, shares: () => null }, (def) => def.id, Infinity)) }
 }
 
 export interface StatementRow {
   def: LineDef
-  source: 'yahoo' | 'tradingview'
-  /** The statements' currency: EPS is in it. */
+  source: 'sec' | 'yahoo' | 'tradingview'
+  /** The statements' own currency, before the conversion to USD. */
   currency: string | null
   /** Oldest first, within the range. */
   series: Series
@@ -166,13 +180,17 @@ export interface StatementTable {
  */
 export const columnOf = (end: string, mode: StatementMode) => (mode === 'annual' ? end.slice(0, 4) : end.slice(0, 7))
 
-/** One statement as a table: each row from one source over the range, and the columns any row has. */
+/**
+ * One statement as a table over `years` (Infinity: all): each row from one source over the range, and the columns
+ * any row has. The SEC's lines win in every range; then TradingView's from the 8-year range on; then Yahoo.
+ */
 export function tableOf(s: AssetStatements, statement: StatementId, mode: StatementMode, years: number): StatementTable {
   const picked = LINES.filter((d) => d.statement === statement).flatMap((def): Omit<StatementRow, 'since'>[] => {
-    const fromTv = years >= MAX_YEARS && !!def.tv && !!s.tradingview?.[mode][def.id]?.length
-    const from = fromTv ? s.tradingview : s.yahoo
+    const has = (from: SourceStatements | null | undefined) => !!from?.[mode][def.id]?.length
+    const source = has(s.sec) ? 'sec' : years >= MAX_YEARS && def.tv && has(s.tradingview) ? 'tradingview' : 'yahoo'
+    const from = s[source]
     const series = from?.[mode][def.id]
-    return from && series?.length ? [{ def, source: fromTv ? 'tradingview' : 'yahoo', currency: from.currency, series }] : []
+    return from && series?.length ? [{ def, source, currency: from.currency, series }] : []
   })
   const latest = picked.map((r) => r.series[r.series.length - 1].end).sort().at(-1)
   const rows = picked.map((r) => ({ ...r, series: within(r.series, years, latest) })).filter((r) => r.series.length > 0)

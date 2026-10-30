@@ -42,7 +42,7 @@ Routes: the parent session is past the ~150k context backstop, so implementation
 - [x] T9 · S11 · delegated · Resumen + tab wiring · 3535 tests green; browser 4 tickers × 4 tabs × 6 widths × 2 themes (L30)
 - [x] T10 · S1 · delegated · ETFs, crypto, ON redirect, unsupported markets, target consistency · 3564 tests green; browser 4 × 4 widths × 2 themes (L31)
 - [x] T11 · S8 · delegated · Balances completos (Yahoo + TradingView rows) · 40 tests (RED first, 9 mutations); browser 3 tickers × 4 widths × 2 themes × 6 views (L36)
-- [ ] T12 · S8 · delegated · SEC source for Balances completos (US 10-Q filers)
+- [x] T12 · S8 · delegated · SEC source for Balances completos (US 10-Q filers) + EPS in US$ · 41 tests (RED first, 8 mutations); live MELI/NVDA/TSM (L37)
 
 ## Log
 
@@ -304,3 +304,17 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   - **Row sources:** in the 8-year range, TradingView's eight lines come from TradingView for every column; the other rows stay Yahoo with "desde <año>".
   - **Fixed in the browser check:** sr-only spans escaped the scroll box, so the box is now `relative`.
   - **Follow-up (mine), folded into T12:** a USD quarter inside a peso series leaves the EPS row in mixed currencies. Statement EPS (per ordinary share) is converted to USD at each period end through the same `inUsd`, like amounts, and labeled "US$ por acción".
+- L37 (2026-10-30) T12 done.
+  - **sec.ts.** Maps ticker → CIK, cached as `fund:v1:secmap:tickers`. Normalizes companyfacts to compact USD series, cached as `fund:v1:sec:<sym>` (20–29 KB), 24 h fresh, through `cachedEach`.
+    - One us-gaap concept per company per line, chosen from a definition-ordered list. Not by period count: MELI's contract revenue leaves out fintech income.
+    - Quarters come from same-start YTD differences (Q4 = FY − 9M). Only 10-K and 10-Q facts are used.
+    - 20-F and IFRS filers → null.
+    - EPS and share counts are never read from the SEC (pre-split mix).
+  - **Table.** SEC rows win across all columns; "Todo" appears when SEC rows exist; the note names the source.
+  - **EPS fix (L36).** "Ganancia por acción (US$)" goes through `inUsd`.
+  - **Config.** SEC is gated on env `SEC_USER_AGENT` (absent → no request). Documented in the README.
+  - **Live.**
+    - MELI and NVDA quarters back to 2008/09; revenue Q1–Q4 sum to the year (MELI 2025: 28.893 M; NVDA FY2026: 215.938 M). Restatements make MELI 2022 differ.
+    - TSM → null.
+    - Warm loader: 2 ms.
+  - **Risk item 5.** The env var must be passed through `docker-compose.yml` (own commit). The production `.env` value is the user's decision.

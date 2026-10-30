@@ -133,7 +133,7 @@ describe('Balances completos table', () => {
 
   it('Resultados by quarter: a row per line, newest period first, US$ millions, ▲▼ against the same quarter a year earlier', () => {
     expect(headers()).toEqual(['US$ millones', 'abr–jun 2026', 'ene–mar 2026', 'oct–dic 2025', 'jul–sep 2025', 'abr–jun 2025'])
-    expect(rowLabels()).toEqual(['Ventas', 'Gastos de venta y administración', 'Ganancia neta', 'Ganancia por acción (diluida)'])
+    expect(rowLabels()).toEqual(['Ventas', 'Gastos de venta y administración', 'Ganancia neta', 'Ganancia por acción (US$)'])
     // 10.169 against 6.790 a year earlier; the first quarter has no year earlier.
     expect(cells('Ventas')).toEqual(['10.169▲ (sube)', '8.845', '8.759', '7.409', '6.790'])
     // 466 against 523: ▼, though above the 417 just before.
@@ -233,13 +233,72 @@ describe('Balances completos states', () => {
     expect(text(el)).toContain('Todavía no tenemos balances de esta empresa.')
   })
 
-  it("an Argentine reporter's year view explains why Yahoo has none, and converts at CCL", async () => {
+  it("an Argentine reporter's year view explains why Yahoo has none, and converts at CCL, EPS included (L36)", async () => {
     const ars: AssetStatements = { ...STATEMENTS, yahoo: { ...STATEMENTS.yahoo!, currency: 'ARS', annual: {} } }
     await render('/activo/MELI?vista=balances', ars)
     expect(text(el)).toContain('Montos en millones de dólares CCL, al cierre de cada período.')
-    expect(text(el)).toContain('La ganancia por acción está en pesos, como la informa la empresa.')
+    // The route sends EPS already in dollars: it reads as dollars, never as pesos.
+    expect(text(el)).not.toContain('en pesos')
+    expect(cells('Ganancia por acción')[0]).toBe('US$ 9,19▼ (baja)')
     click(radio('Anual'))
     expect(table()).toBeNull()
     expect(text(el)).toContain('Yahoo no tiene balances anuales comparables de empresas que informan en pesos')
+  })
+})
+
+// SEC (T12): a US 10-Q filer's revenue for 70 quarters (2009 … 2026) and 17 years.
+const SEC_Q = Array.from({ length: 70 }, (_, i) => new Date(Date.UTC(2009, 3 + i * 3, 0)).toISOString().slice(0, 10))
+const SEC_Y = Array.from({ length: 17 }, (_, i) => `${2009 + i}-12-31`)
+const WITH_SEC: AssetStatements = {
+  ...STATEMENTS,
+  sec: {
+    currency: 'USD',
+    quarterly: { revenue: at(SEC_Q, SEC_Q.map((_, i) => 100e6 + i * 150e6)) },
+    annual: { revenue: at(SEC_Y, SEC_Y.map((_, i) => 1e9 + i * 1e9)) },
+  },
+  sources: { ...STATEMENTS.sources, sec: 'ok' },
+}
+
+describe('Balances completos with the SEC (T12)', () => {
+  it("a 10-Q filer's rows come from the SEC in every range, and the notes name it", async () => {
+    await render('/activo/MELI?vista=balances', WITH_SEC)
+
+    // 5 años: the SEC's 20 quarters, not Yahoo's 5.
+    expect(headers()).toHaveLength(21)
+    expect(cells('Ventas')[0]).toBe('10.450▲ (sube)')
+    expect(text(row('Ganancia neta')!.querySelector('th'))).toContain('desde 2025')
+    expect(text(el)).toContain('Fuente: SEC (EDGAR), datos oficiales desde 2021.')
+    expect(text(el)).toContain('De Yahoo Finance, desde 2025: Gastos de venta y administración, ganancia neta y ganancia por acción (US$).')
+  })
+
+  it('Todo shows every SEC period, since 2009', async () => {
+    await render('/activo/MELI?vista=balances', WITH_SEC)
+
+    click(radio('Todo'))
+
+    expect(headers()).toHaveLength(71)
+    expect(headers().at(-1)).toBe('ene–mar 2009')
+    expect(cells('Ventas').at(-1)).toBe('100')
+    expect(text(el)).toContain('Fuente: SEC (EDGAR), datos oficiales desde 2009.')
+    click(radio('Anual'))
+    expect(headers().at(-1)).toBe('2009')
+  })
+
+  it("a SEC row's chart names its source", async () => {
+    await render('/activo/MELI?vista=balances', WITH_SEC)
+
+    click(row('Ventas')!.querySelector('td'))
+    await settle()
+
+    expect(text(document.querySelector('[data-slot="dialog-content"]'))).toContain('SEC (EDGAR)')
+  })
+
+  it('without SEC rows there is no Todo, and a failed SEC is said', async () => {
+    await render('/activo/MELI?vista=balances', { ...STATEMENTS, sec: null, sources: { ...STATEMENTS.sources, sec: 'error' } })
+
+    expect(radio('Todo')).toBeUndefined()
+    expect(radio('8 años')).toBeDefined()
+    expect(text(el)).toContain('Fuente: Yahoo Finance, desde 2025.')
+    expect(text(el)).toContain('No pudimos traer los datos oficiales de la SEC')
   })
 })

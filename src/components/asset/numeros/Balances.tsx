@@ -20,13 +20,15 @@ import { cn, formatNumber } from '@/lib/utils'
 import { LineChart } from './LineChart'
 
 const MODES = [{ value: 'quarterly', label: 'Trimestral' }, { value: 'annual', label: 'Anual' }] as const
-const RANGES = [{ value: '5', label: '5 años' }, { value: '8', label: `${MAX_YEARS} años` }] as const
+// "Todo": since the SEC's first year (T12), offered only with SEC rows.
+const RANGES = [{ value: '5', label: '5 años' }, { value: '8', label: `${MAX_YEARS} años` }, { value: 'all', label: 'Todo' }] as const
 type Range = (typeof RANGES)[number]['value']
 const FAILED = 'No pudimos traer los balances.'
+const SOURCE_NAMES: Record<StatementRow['source'], string> = { sec: 'SEC (EDGAR)', tradingview: 'TradingView', yahoo: 'Yahoo Finance' }
 
-/** A cell: US$ millions (the header says so), EPS in its own currency, shares in millions. */
+/** A cell: US$ millions (the header says so), EPS in US$ (the route converts it), shares in millions. */
 function cellText(value: number, row: StatementRow): string {
-  if (row.def.unit === 'perShare') return formatMetric(value, 'price', row.currency)
+  if (row.def.unit === 'perShare') return formatMetric(value, 'price')
   if (row.def.unit === 'count') return formatMetric(value, 'count')
   const m = value / 1e6
   return formatNumber(m, { decimals: Math.abs(m) < 10 ? 1 : 0 })
@@ -43,19 +45,22 @@ function listed(labels: string[]): string {
 /** Where the rows come from, how far back, and in what money. */
 function notes(t: StatementTable, s: AssetStatements): string[] {
   const since = (rows: StatementRow[]) => rows.map((r) => r.series[0].end).sort()[0].slice(0, 4)
-  const tv = t.rows.filter((r) => r.source === 'tradingview')
-  const yahoo = t.rows.filter((r) => r.source === 'yahoo')
-  const out = [
-    tv.length === 0
-      ? `Fuente: Yahoo Finance, desde ${since(yahoo)}.`
-      : `${listed(tv.map((r) => r.def.label))} vienen de TradingView, desde ${since(tv)}${yahoo.length ? `; el resto, de Yahoo Finance, desde ${since(yahoo)}` : ''}.`,
-  ]
+  const [sec, tv, yahoo] = (['sec', 'tradingview', 'yahoo'] as const).map((source) => t.rows.filter((r) => r.source === source))
+  const out = sec.length
+    ? [
+        `Fuente: SEC (EDGAR), datos oficiales desde ${since(sec)}.`,
+        ...[tv, yahoo].filter((rows) => rows.length).map((rows) => `De ${SOURCE_NAMES[rows[0].source]}, desde ${since(rows)}: ${listed(rows.map((r) => r.def.label))}.`),
+      ]
+    : [
+        tv.length === 0
+          ? `Fuente: Yahoo Finance, desde ${since(yahoo)}.`
+          : `${listed(tv.map((r) => r.def.label))} vienen de TradingView, desde ${since(tv)}${yahoo.length ? `; el resto, de Yahoo Finance, desde ${since(yahoo)}` : ''}.`,
+      ]
   const from = [...new Set(t.rows.filter((r) => !r.def.unit).map((r) => r.currency))]
   if (from.includes('ARS')) out.push('Montos en millones de dólares CCL, al cierre de cada período.')
   else if (from.some((c) => c !== 'USD')) out.push(`Montos en millones de dólares, pasados de ${from.filter((c) => c !== 'USD').join(' y ')} al cierre de cada período.`)
   else out.push('Montos en millones de dólares.')
-  const eps = t.rows.find((r) => r.def.unit === 'perShare')
-  if (eps && eps.currency && eps.currency !== 'USD') out.push(`La ganancia por acción está en ${eps.currency === 'ARS' ? 'pesos' : eps.currency}, como la informa la empresa.`)
+  if (s.sources.sec === 'error') out.push('No pudimos traer los datos oficiales de la SEC: estas filas vienen de Yahoo Finance y TradingView.')
   if (s.sources.fx === 'error') out.push('No pudimos traer el tipo de cambio: faltan los montos que había que pasar a dólares.')
   if (Object.values(s.sources).includes('stale')) out.push('Algunos datos son de la última vez que pudimos traerlos.')
   return out
@@ -74,6 +79,7 @@ export function Balances({ page, onBack }: { page: AssetPage; onBack: () => void
   const [range, setRange] = useState<Range>('5')
   const title = useRef<HTMLHeadingElement>(null)
   const radios = useId()
+  const hasSec = !!data?.sec && [data.sec.quarterly, data.sec.annual].some((lines) => Object.keys(lines).length > 0)
 
   // Opened from the end of a long list: the reader lands on its title, announced, without a focus ring.
   useEffect(() => title.current?.focus(), [])
@@ -84,7 +90,7 @@ export function Balances({ page, onBack }: { page: AssetPage; onBack: () => void
     const failed = Object.values(data.sources).some((s) => s === 'error')
     body = failed ? <LoadError message={FAILED} onRetry={reload} /> : <p className="py-6 text-[15px] text-ink-2">Todavía no tenemos balances de esta empresa.</p>
   } else {
-    const t = tableOf(data, statement, mode, Number(range))
+    const t = tableOf(data, statement, mode, range === 'all' ? Infinity : Number(range))
     const label = STATEMENTS.find((x) => x.id === statement)!.label
     body = t.rows.length === 0 ? (
       <p className="max-w-prose py-6 text-[15px] leading-relaxed text-ink-2">
@@ -117,7 +123,10 @@ export function Balances({ page, onBack }: { page: AssetPage; onBack: () => void
       <div className="my-4 flex flex-wrap gap-2 [&_label]:text-[15px]">
         <Segmented name={`${radios}-statement`} legend="Estado" value={statement} onChange={setStatement} options={STATEMENTS.map((x) => ({ value: x.id, label: x.label }))} />
         <Segmented name={`${radios}-mode`} legend="Período" value={mode} onChange={setMode} options={[...MODES]} />
-        <Segmented name={`${radios}-range`} legend="Rango" value={range} onChange={setRange} options={[...RANGES]} />
+        <Segmented
+          name={`${radios}-range`} legend="Rango" value={range} onChange={setRange}
+          options={RANGES.filter((r) => r.value !== 'all' || hasSec)}
+        />
       </div>
       {body}
     </section>
@@ -229,10 +238,10 @@ function RowChart({ row, mode }: { row: StatementRow; mode: StatementMode }) {
       <div className="grid gap-4 p-5">
         <div>
           <p className="text-[15px] text-ink-2">
-            {periodLabel(last.end, mode)} · {row.source === 'tradingview' ? 'TradingView' : 'Yahoo Finance'}
+            {periodLabel(last.end, mode)} · {SOURCE_NAMES[row.source]}
           </p>
           <p className={cn('font-mono text-2xl font-semibold leading-tight', last.value < 0 && 'text-danger')}>
-            {formatMetric(last.value, unit === 'usdPerShare' ? 'price' : unit, row.currency)}
+            {formatMetric(last.value, unit === 'usdPerShare' ? 'price' : unit)}
           </p>
           {change !== null && (
             <p className={cn('mt-0.5 font-mono text-[15px] font-medium', change < 0 ? 'text-danger' : change > 0 ? 'text-ok' : 'text-ink-2')}>

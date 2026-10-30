@@ -53,8 +53,23 @@ describe('toStatements', () => {
     expect(tradingview!.currency).toBe('ARS')
     expect(tradingview!.quarterly.revenue).toEqual(at(ends, [6.215e12 / 1380, 6.6e12 / 1450, 6.951e12 / 1400, 9.284e12 / 1410, 6.557e9].map(Math.round)))
     expect(tradingview!.quarterly.netIncome!.at(-1)).toEqual({ end: '2026-09-30', value: 1.181e9 })
-    // EPS (and share counts) are never converted.
-    expect(tradingview!.quarterly.dilutedEps).toEqual(at(ends, [-66.53, -226, 154.6, 438.9, 0.3]))
+    // EPS too, through the same conversion (L36): the USD quarter stays as is, never a peso amount mixed with dollars.
+    expect(tradingview!.quarterly.dilutedEps).toEqual(at(ends, [-66.53 / 1380, -226 / 1450, 154.6 / 1400, 438.9 / 1410, 0.3]))
+  })
+
+  it('Ganancia por acción goes to US$ at each period end without rounding to whole dollars; share counts stay as reported', () => {
+    const ends = ['2026-03-31', '2026-06-30']
+    const y: YahooStatements = {
+      currency: 'TWD',
+      quarterly: { dilutedEps: at(ends, [12.8, 16]), dilutedAverageShares: at(ends, [2.6e10, 2.6e10]), revenue: at(ends, [3.2e11, 3.3e11]) },
+      annual: {},
+    }
+
+    const { yahoo } = toStatements(null, y, new Map([['TWD', new Map([['2026-03-31', 32], ['2026-06-30', 32]])]]))
+
+    expect(yahoo!.quarterly.dilutedEps).toEqual(at(ends, [0.4, 0.5]))
+    expect(yahoo!.quarterly.dilutedAverageShares).toEqual(at(ends, [2.6e10, 2.6e10]))
+    expect(yahoo!.quarterly.revenue).toEqual(at(ends, [1e10, 10312500000]))
   })
 
   it('a period with no rate is left out, never converted at an invented one', () => {
@@ -99,6 +114,65 @@ describe('toStatements', () => {
 })
 
 const statements = (): AssetStatements => ({ ...toStatements(tvUsd, yahooUsd, new Map()), sources: { tradingview: 'ok', yahoo: 'ok', fx: 'ok' } })
+
+// SEC (T12): 70 quarters, 2009-03-31 … 2026-06-30, and 17 years, 2009 … 2025.
+const SEC_QUARTERS = Array.from({ length: 70 }, (_, i) => new Date(Date.UTC(2009, 3 + i * 3, 0)).toISOString().slice(0, 10))
+const SEC_YEARS = Array.from({ length: 17 }, (_, i) => `${2009 + i}-12-31`)
+const secLines = () => ({
+  quarterly: {
+    revenue: at(SEC_QUARTERS, SEC_QUARTERS.map((_, i) => 2e8 + i * 1e8)),
+    operatingCashFlow: at(SEC_QUARTERS, SEC_QUARTERS.map((_, i) => 5e7 + i * 1e6)),
+    capitalExpenditure: at(SEC_QUARTERS.slice(-8), SEC_QUARTERS.slice(-8).map(() => -1e7)),
+  },
+  annual: { revenue: at(SEC_YEARS, SEC_YEARS.map((_, i) => 1e9 + i * 1e9)) },
+})
+const withSec = (): AssetStatements => ({
+  ...toStatements(tvUsd, yahooUsd, new Map(), secLines()),
+  sources: { tradingview: 'ok', yahoo: 'ok', fx: 'ok', sec: 'ok' },
+})
+
+describe('toStatements: SEC (T12)', () => {
+  it('keeps every SEC period, past the 8-year cut, in USD; Flujo de caja libre is OCF − |CapEx| as for Yahoo', () => {
+    const { sec } = toStatements(null, null, new Map(), secLines())
+
+    expect(sec!.currency).toBe('USD')
+    expect(sec!.quarterly.revenue).toEqual(secLines().quarterly.revenue)
+    expect(sec!.annual.revenue).toHaveLength(17)
+    expect(sec!.quarterly.freeCashFlow).toEqual(at(SEC_QUARTERS.slice(-8), SEC_QUARTERS.slice(-8).map((_, i) => 5e7 + (62 + i) * 1e6 - 1e7)))
+  })
+
+  it('with the SEC off, the payload is as before: no sec key', () => {
+    expect(toStatements(tvUsd, yahooUsd, new Map())).not.toHaveProperty('sec')
+    expect(toStatements(tvUsd, yahooUsd, new Map(), null)).toMatchObject({ sec: null })
+  })
+})
+
+describe('tableOf with SEC (T12)', () => {
+  const row = (t: ReturnType<typeof tableOf>, id: string) => t.rows.find((r) => r.def.id === id)!
+
+  it('a row the SEC has comes from the SEC over all its columns, in every range', () => {
+    for (const [years, first] of [[5, '2021-09-30'], [8, '2018-09-30'], [Infinity, '2009-03-31']] as const) {
+      const t = tableOf(withSec(), 'income', 'quarterly', years)
+
+      expect(row(t, 'revenue').source).toBe('sec')
+      expect(row(t, 'revenue').series[0].end).toBe(first)
+      expect(row(t, 'revenue').series.at(-1)).toEqual({ end: '2026-06-30', value: 2e8 + 69 * 1e8 })
+    }
+  })
+
+  it('Todo starts at the first SEC year; the rows the SEC lacks keep their source and say since when', () => {
+    const t = tableOf(withSec(), 'income', 'quarterly', Infinity)
+
+    expect(t.columns.at(-1)).toBe('2009-03-31')
+    expect(t.columns).toHaveLength(70)
+    // TradingView's EPS (eight years), Yahoo's net income (2025).
+    expect(row(t, 'dilutedEps')).toMatchObject({ source: 'tradingview', since: '2018' })
+    expect(row(t, 'netIncome')).toMatchObject({ source: 'yahoo', since: '2025' })
+    expect(tableOf(withSec(), 'income', 'annual', Infinity).columns.at(-1)).toBe('2009-12-31')
+    // In 5 años the EPS row is Yahoo's again, as without the SEC.
+    expect(row(tableOf(withSec(), 'income', 'quarterly', 5), 'dilutedEps').source).toBe('yahoo')
+  })
+})
 
 describe('tableOf', () => {
   it('in the 5-year range every row comes from Yahoo, its columns newest first', () => {

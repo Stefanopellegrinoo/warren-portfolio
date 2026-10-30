@@ -20,6 +20,7 @@ import {
   type TvHistory, type TvSnapshot,
 } from './tradingview'
 import { fetchYahooProfile, fetchYahooStatements, type AssetKind, type YahooProfile, type YahooStatements } from './yahoo'
+import { fetchSecStatements, fetchSecTickers, secSeries, secUserAgent, type SecStatements } from './sec'
 import { toStatements, type AssetStatements } from './statements'
 import type { AssetRef, Market } from './types'
 import { parseTicker } from './ticker'
@@ -101,12 +102,16 @@ const FRESH = {
   snap: 15 * MINUTE, tvh: DAY, yahoo: DAY, fx: DAY, peers: DAY, tvsym: 7 * DAY, byma: 7 * DAY, news: 30 * MINUTE, profile: 6 * HOUR,
   // A coin's profile carries its quote, which moves around the clock: as fresh as a listing's snapshot.
   crypto: 15 * MINUTE,
+  // The SEC's statements change quarterly; its ticker → CIK map (~155 KB, one key) changes with new listings.
+  sec: DAY, secmap: 7 * DAY,
 }
 type Kind = keyof typeof FRESH
 /** One key per copy, fresh or last good: Redis runs noeviction, so this is every key's TTL. */
 const KEY_TTL = 7 * DAY
 /** A ?vs= peer is a user's pick, not TradingView's: its copies keep one day of last good past the 24 h fresh, not six. */
 const PEER_TTL = 2 * DAY
+/** The SEC's ticker map is one key read only on a SEC miss: it keeps its last good copy past its week. */
+const SECMAP_TTL = 30 * DAY
 /** After a failed refresh, views serve the last good copy without asking that source again for this long. */
 const FAILED_TTL = 5 * MINUTE
 /**
@@ -133,6 +138,9 @@ const DEFAULTS = {
   fetchYahooProfile,
   fetchUsdRates,
   getBars,
+  secUserAgent,
+  fetchSecTickers,
+  fetchSecStatements,
   cache: { get: getCachedRoute, set: cacheRoute } as {
     get: <T>(key: string) => Promise<T | null>
     set: (key: string, value: unknown, ttlSeconds: number) => Promise<void>
@@ -363,6 +371,18 @@ async function identify(rawTicker: string, rawVs: string[] | null, d: Deps) {
 const NO_STATEMENTS: AssetStatements = { yahoo: null, tradingview: null, sources: {} }
 
 /**
+ * A US listing's SEC statements (T12), by its Yahoo symbol (the SEC's own form, BRK-B). The ticker map is read
+ * only here, on a miss. A 20-F filer's null is kept too ({ facts: null }), so its ~4 MB is not asked again daily.
+ */
+const secOf = (d: Deps, userAgent: string) =>
+  eachOf('sec', async (symbol): Promise<{ facts: SecStatements | null }> => {
+    const map = (await cachedEach('secmap', ['tickers'], eachOf('secmap', () => d.fetchSecTickers(userAgent)), d, () => SECMAP_TTL)).get('tickers')!
+    if (!map.value) throw new Error('no SEC ticker map')
+    const cik = map.value[symbol]
+    return { facts: cik ? await d.fetchSecStatements(cik, userAgent) : null }
+  })
+
+/**
  * Balances completos (T11, S8): the statements of the listing Números reads, in USD at each period end. Reads
  * the page's own copies (keys, fresh windows, memory guard, failure marks), so right after the page it asks no
  * source; cold, it asks only this listing's history, statements and rates.
@@ -375,17 +395,25 @@ export async function getAssetStatements(rawTicker: string, deps: AssetDeps = {}
   if (typeof at === 'string') return at === 'ok' ? NO_STATEMENTS : { ...NO_STATEMENTS, sources: { tradingview: 'error' } }
   if (at.kind === 'etf') return NO_STATEMENTS
   const { listing } = at
-  const [histories, statements] = await Promise.all([
+  // Only US listings file with the SEC; without SEC_USER_AGENT it is never asked, and the payload is as before.
+  const userAgent = listing.market === 'america' ? d.secUserAgent() : null
+  const [histories, statements, secs] = await Promise.all([
     tvEach('tvh', [listing], d.fetchTvHistory, d),
     cachedEach('yahoo', [listing.yahooSymbol], eachOf('yahoo', (s) => d.fetchYahooStatements(s)), d),
+    // Alongside the rest when cold; warm, one Redis read. A failure or timeout leaves only the SEC rows out.
+    userAgent ? cachedEach('sec', [listing.yahooSymbol], secOf(d, userAgent), d) : null,
   ])
   const tv = histories.get(listing.tvSymbol)!
   const yahoo = statements.get(listing.yahooSymbol)!
+  const sec = secs?.get(listing.yahooSymbol)
+  const facts = sec?.value?.facts
   const currencies = foreign(tv.value?.currency, yahoo.value?.currency)
   const { fx, rates } = await ratesOf(currencies, d)
   return {
-    ...toStatements(tv.value, yahoo.value, rates),
-    sources: { tradingview: tv.status, yahoo: yahoo.status, fx: worst(...currencies.map((c) => fx.get(c)!.status)) },
+    ...toStatements(tv.value, yahoo.value, rates, sec && (facts ? secSeries(facts) : null)),
+    sources: {
+      tradingview: tv.status, yahoo: yahoo.status, fx: worst(...currencies.map((c) => fx.get(c)!.status)), ...(sec && { sec: sec.status }),
+    },
   }
 }
 
