@@ -11,6 +11,7 @@ import { requestErrorMessage } from '@/lib/request-errors'
 import type { SearchResult } from '@/lib/market-data/types'
 import { field } from '@/components/ons/ui'
 import { cn } from '@/lib/utils'
+import { parseTicker } from '@/lib/fundamentals/ticker'
 import { peerName } from '../numeros/HistoryPanel'
 
 /** The design's Comparar ratios (odd/tasks/asset-page.md S9), with the short names their columns carry. */
@@ -33,13 +34,6 @@ const betterOf = (id: MetricId): Better => {
 }
 const unitOf = (id: MetricId) => METRICS.find((d) => d.id === id)!.unit
 
-// As service.ts's parseTicker (server only): GGAL.BA → BCBA:GGAL. Anything else is never written:
-// one bad ?vs= entry makes the whole page a 400.
-const TICKER = /^(BCBA:)?[A-Z0-9][A-Z0-9.-]{0,14}$/
-function toVs(symbol: string): string | null {
-  const t = symbol.trim().toUpperCase().replace(/^([A-Z0-9-]+)\.BA$/, 'BCBA:$1')
-  return TICKER.test(t) ? t : null
-}
 /** A peer's ticker as ?vs= takes it: NASDAQ:AMZN → AMZN; a BYMA share keeps BCBA:. */
 const vsOf = (tvSymbol: string) => (tvSymbol.startsWith('BCBA:') ? tvSymbol : tvSymbol.slice(tvSymbol.indexOf(':') + 1))
 
@@ -83,7 +77,7 @@ export function ComparaTab({ page }: { page: AssetPage }) {
     },
     ...page.peers.map((p, i) => ({
       key: p.tvSymbol, name: peerName(p), ticker: peers[i], own: false, values: p.today,
-      known: { metrics: Object.fromEntries(METRICS.map((d) => [d.id, { today: p.today[d.id] }])), sources: {} },
+      known: { metrics: Object.fromEntries(METRICS.map((d) => [d.id, { today: p.today[d.id] }])), sources: p.sources ?? {} },
     })),
   ]
   const order = sort ? ranked(companies, sort.id) : companies
@@ -294,7 +288,8 @@ function AddPeer({ taken, onPick, onClose }: { taken: string[]; onPick: (ticker:
 
   const answer = found?.q === q ? found : null
   const hits = (answer?.results ?? []).flatMap((r) => {
-    const t = toVs(r.symbol)
+    // The server's own rule (GGAL.BA → BCBA:GGAL): one bad ?vs= entry makes the whole page a 400.
+    const t = parseTicker(r.symbol)
     return (r.quoteType ?? 'EQUITY') === 'EQUITY' && t && !taken.includes(t) ? [{ ...r, ticker: t }] : []
   })
   const status = answer?.error ?? (hits.length ? null

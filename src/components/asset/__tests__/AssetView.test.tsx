@@ -5,14 +5,23 @@ import { forgetCached } from '@/lib/client-cache'
 import type { AssetPage } from '@/lib/fundamentals/service'
 import type { Metrics } from '@/lib/fundamentals/metrics'
 
-// odd/tasks/asset-page.md S1: the page shell. Números is T6's; here it only has to appear.
+// odd/tasks/asset-page.md S1: the page shell. Each tab is tested on its own; here it only has to appear.
 vi.mock('@/components/asset/numeros/NumerosTab', () => ({ NumerosTab: () => <p>Pestaña Números</p> }))
+vi.mock('@/components/asset/resumen/ResumenTab', () => ({
+  ResumenTab: ({ onOpen }: { onOpen: (id: string) => void }) => (
+    <p>Pestaña Resumen <button type="button" onClick={() => onOpen('pe')}>Ver P/E</button></p>
+  ),
+}))
+vi.mock('@/components/asset/comparar/ComparaTab', () => ({
+  ComparaTab: ({ page }: { page: AssetPage }) => <p>Pestaña Comparar con {page.peers.map((p) => p.tvSymbol).join(',') || 'nadie'}</p>,
+}))
+vi.mock('@/components/asset/noticias/NoticiasTab', () => ({ NoticiasTab: ({ ticker }: { ticker: string }) => <p>Pestaña Noticias de {ticker}</p> }))
 
 import AssetView, { AssetTabs } from '../AssetView'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-afterEach(() => { vi.unstubAllGlobals(); forgetCached(); document.body.innerHTML = '' })
+afterEach(() => { vi.unstubAllGlobals(); forgetCached(); document.body.innerHTML = ''; window.history.replaceState(null, '', '/') })
 
 const withNumbers = { pe: { id: 'pe', today: 45.2, history: { quarterly: [], ttm: [], annual: [] }, since: null, source: 'tradingview' } } as unknown as Metrics
 const onlySnapshot = { beta: { id: 'beta', today: 1.1, history: { quarterly: [], ttm: [], annual: [] }, since: null, source: 'snapshot' } } as unknown as Metrics
@@ -23,7 +32,7 @@ const PAGE: AssetPage = {
   bymaListing: false, metrics: withNumbers, peers: [], sources: { tradingview: 'ok', yahoo: 'ok' },
 }
 
-async function show(answer: Response | (() => Response), ticker = 'MELI', vs?: string) {
+async function show(answer: Response | (() => Response | Promise<Response>), ticker = 'MELI', vs?: string) {
   const urls: string[] = []
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     urls.push(url)
@@ -32,10 +41,17 @@ async function show(answer: Response | (() => Response), ticker = 'MELI', vs?: s
   const el = document.createElement('div')
   document.body.appendChild(el)
   const root = createRoot(el)
-  await act(async () => { root.render(<AssetView ticker={ticker} vs={vs} />) })
-  await act(async () => { await new Promise(r => setTimeout(r, 0)) })
-  return { el, urls, text: () => el.textContent ?? '', unmount: () => act(() => root.unmount()) }
+  const render = async (v = vs, t = ticker) => {
+    await act(async () => { root.render(<AssetView ticker={t} vs={v} />) })
+    await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+  }
+  await render()
+  return { el, urls, render, text: () => el.textContent ?? '', unmount: () => act(() => root.unmount()) }
 }
+
+const tabNames = (el: Element) => [...el.querySelectorAll('[role="tab"]')].map((t) => t.textContent)
+const selected = (el: Element) => el.querySelector('[role="tab"][aria-selected="true"]')?.textContent
+const tabButton = (el: Element, name: string) => [...el.querySelectorAll<HTMLElement>('[role="tab"]')].find((t) => t.textContent === name)!
 
 describe('AssetView', () => {
   it('shows the header: ticker, exchange, name and the price in its currency, es-AR', async () => {
@@ -56,11 +72,95 @@ describe('AssetView', () => {
     unmount()
   })
 
-  it('with only Números, shows its content and no tab bar', async () => {
+  it('with numbers, shows Resumen · Números · Comparar · Noticias, Resumen open by default', async () => {
     const { el, text, unmount } = await show(Response.json(PAGE))
-    expect(text()).toContain('Pestaña Números')
-    expect(el.querySelector('[role="tablist"]')).toBeNull()
+    expect(tabNames(el)).toEqual(['Resumen', 'Números', 'Comparar', 'Noticias'])
+    expect(selected(el)).toBe('Resumen')
+    expect(text()).toContain('Pestaña Resumen')
+    act(() => { tabButton(el, 'Noticias').click() })
+    expect(text()).toContain('Pestaña Noticias de MELI')
     unmount()
+  })
+
+  it('keeps the open tab in ?tab=: a click writes it, a reload and back read it, ?dato= alone means Números', async () => {
+    window.history.replaceState(null, '', '/activo/MELI?vs=AMZN')
+    let view = await show(Response.json(PAGE))
+    act(() => { tabButton(view.el, 'Comparar').click() })
+    expect(window.location.search).toBe('?vs=AMZN&tab=comparar')
+    view.unmount()
+
+    // A reload opens the tab the URL names.
+    view = await show(Response.json(PAGE))
+    expect(selected(view.el)).toBe('Comparar')
+    // Back and forward too.
+    act(() => {
+      window.history.replaceState(null, '', '/activo/MELI?tab=noticias')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    expect(selected(view.el)).toBe('Noticias')
+    // The default tab leaves the URL clean; leaving Números drops its open metric.
+    window.history.replaceState(null, '', '/activo/MELI?tab=numeros&dato=pe')
+    act(() => { tabButton(view.el, 'Resumen').click() })
+    expect(window.location.search).toBe('')
+    view.unmount()
+
+    // Números' own links (?dato=) keep opening Números.
+    window.history.replaceState(null, '', '/activo/MELI?dato=pe')
+    view = await show(Response.json(PAGE))
+    expect(selected(view.el)).toBe('Números')
+    view.unmount()
+  })
+
+  it("a Resumen number opens its row in Números, and back returns to Resumen", async () => {
+    window.history.replaceState(null, '', '/activo/MELI')
+    const { el, text, unmount } = await show(Response.json(PAGE))
+    const entries = window.history.length
+
+    act(() => { [...el.querySelectorAll('button')].find((b) => b.textContent === 'Ver P/E')!.click() })
+
+    expect(selected(el)).toBe('Números')
+    expect(window.location.search).toBe('?tab=numeros&dato=pe')
+    expect(window.history.length).toBe(entries + 1)
+    expect(text()).toContain('Pestaña Números')
+
+    await act(async () => {
+      const back = new Promise((r) => window.addEventListener('popstate', r, { once: true }))
+      window.history.back()
+      await back
+    })
+    expect(selected(el)).toBe('Resumen')
+    unmount()
+  })
+
+  it('keeps showing the page, on its tab, while a new ?vs= loads, then shows the new one', async () => {
+    window.history.replaceState(null, '', '/activo/MELI?tab=comparar')
+    let answer: (r: Response) => void = () => {}
+    const view = await show(Response.json(PAGE))
+    expect(view.text()).toContain('Pestaña Comparar con nadie')
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((r) => { answer = r })))
+
+    await view.render('AMZN')
+
+    expect(view.text()).toContain('Pestaña Comparar con nadie')
+    expect(view.el.querySelector('[aria-label="Cargando MELI"]')).toBeNull()
+    expect(selected(view.el)).toBe('Comparar')
+
+    const withAmazon = { ...PAGE, peers: [{ tvSymbol: 'NASDAQ:AMZN', name: 'Amazon.com, Inc.', today: {} }] }
+    await act(async () => { answer(Response.json(withAmazon)); await new Promise(r => setTimeout(r, 0)) })
+    expect(view.text()).toContain('Pestaña Comparar con NASDAQ:AMZN')
+    expect(selected(view.el)).toBe('Comparar')
+    view.unmount()
+  })
+
+  it('a different ticker never shows the previous asset while it loads', async () => {
+    const view = await show(Response.json(PAGE))
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})))
+
+    await view.render(undefined, 'GGAL')
+
+    expect(view.el.querySelector('[aria-label="Cargando GGAL"]')).not.toBeNull()
+    expect(view.text()).not.toContain('MercadoLibre')
+    view.unmount()
   })
 
   it('a market without fundamentals shows name and price, and says so', async () => {

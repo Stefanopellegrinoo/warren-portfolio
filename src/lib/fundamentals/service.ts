@@ -18,8 +18,11 @@ import {
   fetchTvHistory, fetchTvPeers, fetchTvSnapshots, findBymaListing, resolveTvSymbol,
   type TvHistory, type TvSnapshot,
 } from './tradingview'
-import { fetchYahooStatements, type YahooStatements } from './yahoo'
+import { fetchYahooProfile, fetchYahooStatements, type YahooProfile, type YahooStatements } from './yahoo'
 import type { AssetRef, Market } from './types'
+import { parseTicker } from './ticker'
+
+export { parseTicker }
 
 export type SourceStatus = 'ok' | 'stale' | 'error'
 
@@ -27,7 +30,16 @@ export interface PeerToday {
   tvSymbol: string
   name: string | null
   today: Record<MetricId, number | null>
+  /** Per source of this peer, as the page's own: Comparar says which "—" is a source that did not answer. */
+  sources?: AssetPage['sources']
 }
+
+/** Resumen's facts about the asked listing (S11), from Yahoo; prices in `currency`, the listing's quote's. No recommendation. */
+export type AssetProfile = Pick<
+  YahooProfile,
+  | 'sector' | 'industry' | 'country' | 'fullTimeEmployees' | 'currency' | 'fiftyTwoWeekLow' | 'fiftyTwoWeekHigh'
+  | 'targetMeanPrice' | 'numberOfAnalystOpinions' | 'nextEarningsDate' | 'earnings'
+>
 
 export interface AssetPage {
   /** As asked, normalized: `MELI`, `BCBA:GGAL`. */
@@ -56,6 +68,8 @@ export interface AssetPage {
   peers: PeerToday[]
   /** Per source of `listing`: `stale` serves its last good copy, `error` leaves its metrics null. */
   sources: Partial<Record<'tradingview' | 'yahoo' | 'fx', SourceStatus>>
+  /** The asked listing's (an ADR's own, like `price`), its last good copy when Yahoo fails; null when it never answered. */
+  profile?: AssetProfile | null
 }
 
 /** `invalid`: not a ticker (400). `not_found`: no such instrument (404). */
@@ -67,9 +81,12 @@ export class AssetError extends Error {
 }
 
 const MINUTE = 60
+const HOUR = 3_600
 const DAY = 86_400
 /** How long each copy is fresh. Every copy then lives on as its source's last good answer. */
-const FRESH = { snap: 15 * MINUTE, tvh: DAY, yahoo: DAY, fx: DAY, peers: DAY, tvsym: 7 * DAY, byma: 7 * DAY, news: 30 * MINUTE }
+const FRESH = {
+  snap: 15 * MINUTE, tvh: DAY, yahoo: DAY, fx: DAY, peers: DAY, tvsym: 7 * DAY, byma: 7 * DAY, news: 30 * MINUTE, profile: 6 * HOUR,
+}
 type Kind = keyof typeof FRESH
 /** One key per copy, fresh or last good: Redis runs noeviction, so this is every key's TTL. */
 const KEY_TTL = 7 * DAY
@@ -86,8 +103,6 @@ const MAX_MEMORY_SHARE = 0.5
 const MAX_PEERS = 5
 // TradingView keeps 20 fiscal years; the rates must reach the oldest one's end.
 const FX_YEARS = 21
-// Like the search route's cap, but strict: these become Redis keys and source requests.
-const TICKER = /^(BCBA:)?[A-Z0-9][A-Z0-9.-]{0,14}$/
 const CURRENCY = /^[A-Z]{3}$/
 
 const DEFAULTS = {
@@ -98,6 +113,7 @@ const DEFAULTS = {
   fetchTvPeers,
   findBymaListing,
   fetchYahooStatements,
+  fetchYahooProfile,
   fetchUsdRates,
   getBars,
   cache: { get: getCachedRoute, set: cacheRoute } as {
@@ -113,12 +129,6 @@ type Deps = typeof DEFAULTS
 
 /** Yahoo's exchange names, short: NasdaqGS/GM/CM → NASDAQ, NYQ → NYSE; the rest as Yahoo says them. */
 const shortExchange = (name: string | null) => (name && /^nasdaq/i.test(name) ? 'NASDAQ' : name === 'NYQ' ? 'NYSE' : name)
-
-/** `MELI`, `bcba:ggal`, `GGAL.BA` → `MELI`, `BCBA:GGAL`, `BCBA:GGAL`; null for anything else. */
-export function parseTicker(raw: string): string | null {
-  const t = raw.trim().toUpperCase().replace(/^([A-Z0-9-]+)\.BA$/, 'BCBA:$1')
-  return TICKER.test(t) ? t : null
-}
 
 interface Got<T> {
   value: T | null
@@ -270,7 +280,7 @@ export async function getAssetPage(rawTicker: string, rawVs: string[] | null = n
   const { name, exchange, price } = id.identity
   const page: AssetPage = {
     ticker, name, exchange: shortExchange(exchange), price, currency: null, dayChange: null, supported: true, listing: null, bymaListing: false,
-    listingCurrency: null, metrics: null, peers: [], sources: {},
+    listingCurrency: null, metrics: null, peers: [], sources: {}, profile: null,
   }
 
   const asked = await refFor(ticker, d)
@@ -307,10 +317,20 @@ export async function getAssetPage(rawTicker: string, rawVs: string[] | null = n
   const all = [listing, ...peerRefs]
   const listingIds = [listing.tvSymbol, listing.yahooSymbol]
   const ttl = (id: string) => (vs && !listingIds.includes(id) ? PEER_TTL : KEY_TTL)
-  const [snaps, histories, statements] = await Promise.all([
+  const profileOf = eachOf('profile', async (s): Promise<AssetProfile> => {
+    const p = await d.fetchYahooProfile(s)
+    return {
+      sector: p.sector, industry: p.industry, country: p.country, fullTimeEmployees: p.fullTimeEmployees, currency: p.currency,
+      fiftyTwoWeekLow: p.fiftyTwoWeekLow, fiftyTwoWeekHigh: p.fiftyTwoWeekHigh, targetMeanPrice: p.targetMeanPrice,
+      numberOfAnalystOpinions: p.numberOfAnalystOpinions, nextEarningsDate: p.nextEarningsDate, earnings: p.earnings,
+    }
+  })
+  const askedYahoo = asked.value.yahooSymbol
+  const [snaps, histories, statements, profile] = await Promise.all([
     tvEach('snap', peerRefs, d.fetchTvSnapshots, d, ttl),
     tvEach('tvh', all, d.fetchTvHistory, d, ttl),
     cachedEach('yahoo', [...new Set(all.map((r) => r.yahooSymbol))], eachOf('yahoo', (s) => d.fetchYahooStatements(s)), d, ttl),
+    cachedEach('profile', [askedYahoo], profileOf, d),
   ])
   snaps.set(listing.tvSymbol, snap)
   const inputs = all.map((ref) => ({
@@ -337,6 +357,12 @@ export async function getAssetPage(rawTicker: string, rawVs: string[] | null = n
   const bars = from ? (await d.getBars([listing.yahooSymbol], new Date(`${from}T00:00:00Z`))).get(listing.yahooSymbol)?.bars ?? [] : []
   const run = (i: (typeof inputs)[number], priceOn: (date: string) => number | null) =>
     computeMetrics({ today, snapshot: i.snap ?? EMPTY_SNAPSHOT, tv: i.tv, yahoo: i.yahoo, rates, priceOn })
+  /** One company's sources; the listing's TradingView also answers for its default peers. */
+  const sourcesOf = (i: (typeof inputs)[number], ...tv: SourceStatus[]): AssetPage['sources'] => ({
+    tradingview: worst(snaps.get(i.ref.tvSymbol)!.status, histories.get(i.ref.tvSymbol)!.status, ...tv),
+    yahoo: statements.get(i.ref.yahooSymbol)!.status,
+    fx: worst(...currenciesOf(i).map((c) => fx.get(c)!.status)),
+  })
 
   return {
     ...page,
@@ -351,11 +377,9 @@ export async function getAssetPage(rawTicker: string, rawVs: string[] | null = n
       tvSymbol: i.ref.tvSymbol,
       name: i.snap?.name ?? null,
       today: Object.fromEntries(Object.values(run(i, () => null)).map((m) => [m.id, m.today])) as PeerToday['today'],
+      sources: sourcesOf(i),
     })),
-    sources: {
-      tradingview: worst(snap.status, histories.get(listing.tvSymbol)!.status, peerStatus),
-      yahoo: statements.get(listing.yahooSymbol)!.status,
-      fx: worst(...currenciesOf(own).map((c) => fx.get(c)!.status)),
-    },
+    sources: sourcesOf(own, peerStatus),
+    profile: profile.get(askedYahoo)!.value,
   }
 }

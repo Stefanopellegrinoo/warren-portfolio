@@ -9,6 +9,12 @@ import type { Metrics } from '@/lib/fundamentals/metrics'
 const replace = vi.fn()
 let params = new URLSearchParams()
 vi.mock('next/navigation', () => ({ useRouter: () => ({ replace }), useSearchParams: () => params }))
+// The one client-safe rule (L29), watched: Comparar must not keep a copy of its own.
+vi.mock('@/lib/fundamentals/ticker', async (real) => {
+  const { parseTicker } = await real<typeof import('@/lib/fundamentals/ticker')>()
+  return { parseTicker: vi.fn(parseTicker) }
+})
+import { parseTicker } from '@/lib/fundamentals/ticker'
 
 import { ComparaTab } from '../ComparaTab'
 
@@ -168,6 +174,16 @@ describe('ComparaTab', () => {
     expect(text(offered[0])).toContain('GGAL.BA')
     click(offered[0])
     expect(written()).toBe('AMZN,SE,EBAY,BCBA:GGAL')
+    expect(parseTicker).toHaveBeenCalledWith('GGAL.BA')
+  })
+
+  it("says a peer's value is missing because its source did not answer", async () => {
+    const failed = { ...SE, today: values({ netMargin: 5.9 }), sources: { tradingview: 'ok' as const, yahoo: 'error' as const, fx: 'ok' as const } }
+    const el = await mount(page([AMZN, failed]))
+
+    // ROE is Yahoo's (group Y); P/E is TradingView's, which answered.
+    expect(cell(el, 2, 'ROE').querySelector('button')!.getAttribute('title')).toBe('Sin datos: la fuente no respondió')
+    expect(cell(el, 2, 'P/E').querySelector('button')!.getAttribute('title')).toBe('Sin datos')
   })
 
   it('goes back to the suggested peers by dropping ?vs=, offered only once they were edited', async () => {

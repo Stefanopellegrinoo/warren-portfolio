@@ -39,7 +39,7 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   Stage 1 delivered: PR #49, squash 73ff07d, deploy run 41081377001 OK (L27).
 - [x] T7 · S9 · delegated · Comparar tab · 15 tests (RED first); browser 6 widths × light/dark (L29)
 - [x] T8 · S10 · delegated · Noticias · 34 tests (RED first, 6 mutations caught); live MELI/GGAL/TSM/YPFD ok (L28)
-- [ ] T9 · S11 · delegated · Resumen
+- [x] T9 · S11 · delegated · Resumen + tab wiring · 3535 tests green; browser 4 tickers × 4 tabs × 6 widths × 2 themes (L30)
 - [ ] T10 · S1 · delegated · ETFs, crypto, ON redirect, unsupported markets
 - [ ] T11 · S8 · delegated · Balances completos (Yahoo + TradingView rows)
 - [ ] T12 · S8 · delegated · SEC source for Balances completos (US 10-Q filers)
@@ -249,3 +249,16 @@ Routes: the parent session is past the ~150k context backstop, so implementation
   - Follow-ups:
     - per-peer source status, so a missing value can say "la fuente no respondió";
     - a client-safe `parseTicker`.
+- L30 (2026-10-30) T9 done.
+  - **AssetPage additions:**
+    - `profile` (Yahoo, asked listing). Cached as `fund:v1:profile:<sym>`, 6 h fresh.
+    - `PeerToday.sources`, so a missing value can say "la fuente no respondió".
+    - A client-safe `parseTicker` in `ticker.ts`, re-exported by service.
+  - **summary.ts thresholds:**
+    - Growth labels: "Crece fuerte" ≥ 15 %, "Crece" ≥ 3 %, "Vende menos" ≤ −3 %.
+    - P/E vs the peers' median and vs its own 5-year median: ±15 % counts as "más cara/más barata". With a loss, P/S replaces P/E.
+    - Advice words are banned by test except in the footnote.
+  - **ResumenTab:** answer cards (mockup A), 52-week bar, analysts with footnote, results with estimate vs actual, company facts.
+  - **AssetView:** tabs Resumen (default), Números, Comparar, Noticias, kept in `?tab=`. The previous page is kept during a `?vs=` refetch.
+  - Parent looked at MELI at 1440 and 390: clear and legible.
+  - **Open:** S5 — the analyst target in Resumen (Yahoo, asked listing) can differ from Números' "Precio objetivo" (TradingView, numbers listing). It goes to T10.
