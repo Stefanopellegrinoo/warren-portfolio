@@ -15,7 +15,10 @@ export interface WatchlistItem {
   changePercent: number | null
 }
 
-// ── GET /api/watchlist?watchlistId= ──────────────────────────────────────────
+/** An item of `GET /api/watchlist?watchlistId=&fields=symbols`. */
+export type WatchlistSymbol = Pick<WatchlistItem, 'id' | 'symbol' | 'added_at'>
+
+// ── GET /api/watchlist?watchlistId=[&fields=symbols] ─────────────────────────
 export async function GET(req: NextRequest) {
   const authResult = await requireUser()
   if (isAuthFailure(authResult)) return authResult.error
@@ -46,6 +49,13 @@ export async function GET(req: NextRequest) {
 
   if (error) {
     return serverError('GET /api/watchlist', error)
+  }
+
+  // Mercado reads symbols only: no quote per item, and no price fields at all
+  // (null would claim "price unavailable" for a price never asked for).
+  if (req.nextUrl.searchParams.get('fields') === 'symbols') {
+    const items: WatchlistSymbol[] = (rows ?? []).map(({ id, symbol, added_at }) => ({ id, symbol, added_at }))
+    return NextResponse.json({ items })
   }
 
   const provider = getMarketDataProvider()
