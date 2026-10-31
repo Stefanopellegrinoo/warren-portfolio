@@ -1,10 +1,11 @@
-import { Home, LineChart, List, PieChart, Landmark, Bell, Wallet, type LucideIcon } from 'lucide-react'
+import { Home, CandlestickChart, LineChart, List, PieChart, Landmark, Bell, Wallet, type LucideIcon } from 'lucide-react'
 
 // `section`: the path prefix the entry owns when it differs from where it opens.
 export interface NavItem { href: string; label: string; icon: LucideIcon; section?: string }
 
 export const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', label: 'Resumen', icon: Home },
+  { href: '/mercado', label: 'Mercado', icon: CandlestickChart },
   { href: '/trading', label: 'Gráficos', icon: LineChart },
   { href: '/history', label: 'Operaciones', icon: List },
   { href: '/statistics', label: 'Rendimiento', icon: PieChart },

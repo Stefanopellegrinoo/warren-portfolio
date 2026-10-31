@@ -5,6 +5,7 @@ describe('NAV_ITEMS', () => {
   it('lists the approved menu in order', () => {
     expect(NAV_ITEMS.map(i => [i.label, i.href])).toEqual([
       ['Resumen', '/dashboard'],
+      ['Mercado', '/mercado'],
       ['Gráficos', '/trading'],
       ['Operaciones', '/history'],
       ['Rendimiento', '/statistics'],
