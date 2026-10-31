@@ -35,10 +35,12 @@ const typingIn = (t: EventTarget | null) =>
  * The shell's search (odd/tasks/asset-page.md S1): any asset opens its page, an ON opens /ons/<isin>.
  * Desktop: at the top of every page, "/" focuses it. Phone: a bar over the shell's own, opened by its button.
  */
-export default function ShellSearch({ inputRef, expanded = false, onCollapse = () => {} }: {
+export default function ShellSearch({ inputRef, expanded = false, onCollapse = () => {}, wide = false }: {
   inputRef?: React.RefObject<HTMLInputElement>
   expanded?: boolean
   onCollapse?: () => void
+  /** The Resumen's wider column (dashboard/page.tsx); every other page uses PAGE (components/ons/ui.tsx). */
+  wide?: boolean
 }) {
   const router = useRouter()
   const own = useRef<HTMLInputElement>(null)
@@ -130,7 +132,8 @@ export default function ShellSearch({ inputRef, expanded = false, onCollapse = (
 
   return (
     <div className={cn(
-      'mx-auto w-full max-w-[1240px] px-10 pt-4',
+      'mx-auto w-full pt-4',
+      wide ? 'max-w-[1680px] px-8 xl:px-10' : 'max-w-[1240px] px-10',
       'max-[819px]:fixed max-[819px]:inset-x-0 max-[819px]:top-0 max-[819px]:z-40 max-[819px]:flex max-[819px]:h-14 max-[819px]:items-center max-[819px]:border-b max-[819px]:border-line max-[819px]:bg-canvas max-[819px]:px-2 max-[819px]:pt-0',
       !expanded && 'max-[819px]:hidden',
     )}>

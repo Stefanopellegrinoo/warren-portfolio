@@ -298,7 +298,7 @@ export default function AppShell({ children, pathnameForTest, iconMenu: asked = 
       <AssetSearch open={searchOpen} onClose={() => setSearchOpen(false)} held={known ? heldOf(known) : askedHeld} />
 
       <main id="main" className="min-w-0">
-        {!ownPhoneBar && <ShellSearch inputRef={findInput} expanded={findOn === pathname} onCollapse={() => setFindOn(null)} />}
+        {!ownPhoneBar && <ShellSearch inputRef={findInput} expanded={findOn === pathname} onCollapse={() => setFindOn(null)} wide={current === '/dashboard'} />}
         <ShellMenu.Provider value={{ open, openMenu }}>{children}</ShellMenu.Provider>
       </main>
     </div>
