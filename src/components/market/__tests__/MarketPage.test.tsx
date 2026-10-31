@@ -161,6 +161,24 @@ describe('MarketPage', () => {
     expect(el.textContent).not.toContain('Renombrar')
   })
 
+  it('a page opened with the market closed starts showing live prices once BYMA opens', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    try {
+      const { el, fetchMock } = await mount(board({ marketOpen: false }))
+      const open = JSON.stringify(board({ marketOpen: true }))
+      fetchMock.mockImplementation(async (url: string) => new Response(url === '/api/market' ? open : '{}', { status: 200 }))
+      await act(async () => { vi.advanceTimersByTime(5 * 60_000) })
+      expect(el.textContent).toContain('Mercado abierto')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('counts the stocks held in Cartera before it is opened', async () => {
+    const { el } = await mount()
+    expect(listButton(el, 'Cartera').textContent).toBe('Cartera1')
+  })
+
   it('with the market closed it says the prices are the last close', async () => {
     const { el } = await mount(board({ marketOpen: false }))
     expect(el.textContent).toContain('Mercado cerrado, precios al cierre.')

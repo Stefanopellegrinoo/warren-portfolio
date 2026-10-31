@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { Search } from 'lucide-react'
-import { cachedValue, useCached } from '@/lib/client-cache'
+import { useCached } from '@/lib/client-cache'
 import { getPortfolio } from '@/lib/warren/positions'
 import { DEFAULT_CURRENCY, readCurrency, saveCurrency } from '@/lib/resumen/currency'
 import type { Currency } from '@/lib/multicurrency'
@@ -23,7 +23,8 @@ export interface WatchlistRow { id: string; name: string; item_count: number }
 
 export const CARTERA = 'cartera'
 const PAGE_SIZE = 100
-const REFRESH_MS = 60_000
+const OPEN_REFRESH_MS = 60_000
+const CLOSED_REFRESH_MS = 5 * 60_000
 const BOARD_KEY = 'market:board'
 export const LISTS_KEY = 'market:lists'
 export const itemsKey = (id: string) => `market:list:${id}`
@@ -37,7 +38,7 @@ async function getJson<T>(url: string): Promise<T> {
 const isMarket = (list: string): list is MarketList => list === 'lider' || list === 'cedears'
 
 const loadItems = (list: string): Promise<string[]> => list === CARTERA
-  ? getPortfolio().then((d) => d.positions.map((p) => p.ticker))
+  ? getPortfolio().then((d) => (d.positions ?? []).map((p) => p.ticker))
   : getJson<{ items: { symbol: string }[] }>(`/api/watchlist?watchlistId=${encodeURIComponent(list)}&fields=symbols`).then((d) => d.items.map((i) => i.symbol))
 
 /**
@@ -62,13 +63,20 @@ export default function MarketPage() {
   const items = useCached(isMarket(list) ? null : list === CARTERA ? 'market:cartera' : itemsKey(list), () => loadItems(list))
   const b = board.data ?? null
 
-  // About every minute while BYMA trades, only while the tab is in view.
-  const { reload } = board
+  // Held in Cartera, counted before Cartera is opened (S2: every list shows its count).
+  const cartera = useCached('market:cartera', () => loadItems(CARTERA))
+
+  // About every minute while BYMA trades, every few minutes while it is closed so a page left open
+  // sees the opening, and at once when the tab comes back (background timers sleep). Only in view.
+  const reloadBoard = useRef(board.reload)
+  useLayoutEffect(() => { reloadBoard.current = board.reload })
+  const open = b?.marketOpen ?? false
   useEffect(() => {
-    if (!b?.marketOpen) return
-    const timer = setInterval(() => { if (document.visibilityState === 'visible') reload() }, REFRESH_MS)
-    return () => clearInterval(timer)
-  }, [b?.marketOpen, reload])
+    const read = () => { if (document.visibilityState === 'visible') reloadBoard.current() }
+    const timer = setInterval(read, open ? OPEN_REFRESH_MS : CLOSED_REFRESH_MS)
+    document.addEventListener('visibilitychange', read)
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', read) }
+  }, [open])
 
   const push = (next: View) => {
     setView(next)
@@ -99,7 +107,7 @@ export default function MarketPage() {
     { key: 'cedears', name: 'CEDEARs', count: b.cedears.length },
   ]
   const mine: ListEntry[] = [
-    { key: CARTERA, name: 'Cartera', count: cachedValue<string[]>('market:cartera')?.length ?? null },
+    { key: CARTERA, name: 'Cartera', count: cartera.data?.length ?? null },
     ...(lists.data ?? []).map((l) => ({ key: l.id, name: l.name, count: l.item_count })),
   ]
   const current = [...market, ...mine].find((e) => e.key === list)
