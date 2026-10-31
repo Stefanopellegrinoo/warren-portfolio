@@ -180,7 +180,7 @@ export async function getAvailableCorporateBonds(): Promise<string[]> {
 
 // ── Peso-line prices (CEDEARs and local shares) ─────────────────────────────
 
-const LOCAL_FEEDS = {
+export const LOCAL_FEEDS = {
   cedears: 'https://data912.com/live/arg_cedears',
   stocks: 'https://data912.com/live/arg_stocks',
 } as const
@@ -193,7 +193,8 @@ const LOCAL_FETCH_TIMEOUT_MS = 10_000
  */
 export const localPriceKey = (symbol: string) => `local:${symbol}`
 
-async function fetchLocalFeed(url: string, fetchFn: typeof fetch): Promise<Data912RawQuote[]> {
+/** Every row of one peso-line feed: one GET with the client's timeout. Throws on a failed or non-array answer. */
+export async function fetchLocalFeed(url: string, fetchFn: typeof fetch): Promise<Data912RawQuote[]> {
   const res = await fetchFn(url, {
     signal: AbortSignal.timeout(LOCAL_FETCH_TIMEOUT_MS),
     headers: { 'Accept': 'application/json', 'User-Agent': 'Warren Portfolio/1.0' },

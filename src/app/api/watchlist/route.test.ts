@@ -192,6 +192,53 @@ describe('GET /api/watchlist', () => {
     const body = await res.json()
     expect(body.items).toEqual([])
   })
+
+  it('without fields=symbols, still prices every item (Gráficos’ read)', async () => {
+    mockFrom
+      .mockReturnValueOnce(buildOwnershipChain({ id: 'list-1', user_id: 'user-1', name: 'Tech US' }))
+      .mockReturnValueOnce(buildItemsSelectChain(fakeWatchlistItems))
+    mockGetQuote
+      .mockResolvedValueOnce(fakeQuoteAAPL)
+      .mockResolvedValueOnce(fakeQuoteMSFT)
+
+    const { GET } = await import('./route')
+    const res = await GET(makeGetRequest({ watchlistId: 'list-1' }))
+    expect(res.status).toBe(200)
+    expect(mockGetQuote).toHaveBeenCalledTimes(2)
+    expect(await res.json()).toEqual({
+      items: [
+        { id: 'id-1', symbol: 'AAPL', added_at: '2026-01-01T00:00:00Z', price: 150, changePercent: 1.5 },
+        { id: 'id-2', symbol: 'MSFT', added_at: '2026-01-02T00:00:00Z', price: 400, changePercent: -0.5 },
+      ],
+    })
+  })
+
+  it('with fields=symbols, returns symbols only and makes no provider call', async () => {
+    mockFrom
+      .mockReturnValueOnce(buildOwnershipChain({ id: 'list-1', user_id: 'user-1', name: 'Tech US' }))
+      .mockReturnValueOnce(buildItemsSelectChain(fakeWatchlistItems))
+
+    const { GET } = await import('./route')
+    const res = await GET(makeGetRequest({ watchlistId: 'list-1', fields: 'symbols' }))
+    expect(res.status).toBe(200)
+    expect(mockGetQuote).not.toHaveBeenCalled()
+    expect(await res.json()).toEqual({
+      items: [
+        { id: 'id-1', symbol: 'AAPL', added_at: '2026-01-01T00:00:00Z' },
+        { id: 'id-2', symbol: 'MSFT', added_at: '2026-01-02T00:00:00Z' },
+      ],
+    })
+  })
+
+  it('with fields=symbols, still returns 404 for another user’s list', async () => {
+    mockFrom.mockReturnValue(buildOwnershipChain(null, { code: 'PGRST116', message: 'Not found' }))
+
+    const { GET } = await import('./route')
+    const res = await GET(makeGetRequest({ watchlistId: 'list-other', fields: 'symbols' }))
+    expect(res.status).toBe(404)
+    expect(mockFrom).toHaveBeenCalledTimes(1)
+    expect(mockGetQuote).not.toHaveBeenCalled()
+  })
 })
 
 describe('POST /api/watchlist', () => {
