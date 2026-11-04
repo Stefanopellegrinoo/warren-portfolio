@@ -1,6 +1,7 @@
 import type { MarketDataProvider, Candle, CandleInterval, Quote, SearchResult } from '../types'
 import { MarketDataError } from '../types'
 import { normalizeTickerForYahoo, getYahooFinanceInstance } from '../../yahoo-finance'
+import { completeBars, type ChartResult } from '../daily-bars'
 import { getHistoricalCCL, getCCLRate } from '../../currency'
 
 // ── Helper: retry once on transient errors ───────────────────────────────────
@@ -48,9 +49,10 @@ export class YahooProvider implements MarketDataProvider {
     try {
       const yahooFinance = await getYahooFinanceInstance()
 
-      const result = await withRetry(() =>
-        yahooFinance.historical(symbol, { period1, period2, interval: yfInterval })
-      ) as any[]
+      // chart(), as the intraday path: see completeBars for why not historical().
+      const result = completeBars(await withRetry(() =>
+        yahooFinance.chart(symbol, { period1, period2, interval: yfInterval })
+      ) as ChartResult)
 
       // Normalize ARS → USD for BCBA tickers
       let hCcl: Map<string, number> | null = null

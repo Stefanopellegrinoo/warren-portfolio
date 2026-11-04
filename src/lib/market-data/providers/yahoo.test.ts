@@ -29,6 +29,9 @@ vi.mock('../../currency', () => ({
   getCCLRate: (...args: unknown[]) => mockGetCCLRate(...(args as [])),
 }))
 
+// The daily path reads chart() too: its rows arrive as `quotes`.
+const daily = (rows: any[]) => ({ quotes: rows })
+
 function makeFakeHistoricalRow(dateStr: string, overrides?: Partial<any>) {
   return {
     date: new Date(dateStr + 'T00:00:00Z'),
@@ -46,18 +49,18 @@ describe('YahooProvider.getCandles', () => {
     vi.clearAllMocks()
   })
 
-  it('calls historical with period1: new Date(0) when from is not provided', async () => {
+  it('asks chart() with period1: new Date(0) when from is not provided', async () => {
     const { YahooProvider } = await import('./yahoo')
     const provider = new YahooProvider()
 
-    mockHistorical.mockResolvedValue([
+    mockChart.mockResolvedValue(daily([
       makeFakeHistoricalRow('2024-01-15'),
       makeFakeHistoricalRow('2024-01-16'),
-    ])
+    ]))
 
     await provider.getCandles('AAPL', '1d')
 
-    expect(mockHistorical).toHaveBeenCalledWith(
+    expect(mockChart).toHaveBeenCalledWith(
       'AAPL',
       expect.objectContaining({
         period1: new Date(0),
@@ -69,9 +72,9 @@ describe('YahooProvider.getCandles', () => {
     const { YahooProvider } = await import('./yahoo')
     const provider = new YahooProvider()
 
-    mockHistorical.mockResolvedValue([
+    mockChart.mockResolvedValue(daily([
       makeFakeHistoricalRow('2024-01-15'),
-    ])
+    ]))
 
     const candles = await provider.getCandles('AAPL', '1d')
 
@@ -86,27 +89,55 @@ describe('YahooProvider.getCandles', () => {
     const provider = new YahooProvider()
     const fromDate = new Date('2023-01-01T00:00:00Z')
 
-    mockHistorical.mockResolvedValue([
+    mockChart.mockResolvedValue(daily([
       makeFakeHistoricalRow('2023-01-02'),
-    ])
+    ]))
 
     await provider.getCandles('AAPL', '1d', fromDate)
 
-    expect(mockHistorical).toHaveBeenCalledWith(
+    expect(mockChart).toHaveBeenCalledWith(
       'AAPL',
       expect.objectContaining({ period1: fromDate })
     )
+  })
+
+  it('keeps the series when Yahoo sends a bar with a null close, as it does for today mid-session', async () => {
+    const { YahooProvider } = await import('./yahoo')
+    // historical() rejects the whole series for one such bar: every daily chart failed while it was open.
+    mockHistorical.mockRejectedValue(new Error('Historical returned a result with SOME (but not all) null values.'))
+    mockChart.mockResolvedValue(daily([
+      makeFakeHistoricalRow('2024-01-15'),
+      makeFakeHistoricalRow('2024-01-16', { close: null }),
+    ]))
+
+    const candles = await new YahooProvider().getCandles('AAPL', '1d')
+
+    expect(candles).toEqual([{ time: '2024-01-15', open: 150, high: 155, low: 148, close: 152, volume: 1000000 }])
+    mockHistorical.mockReset()
+  })
+
+  it('closes today\'s bar at the live price when Yahoo leaves its close empty', async () => {
+    const { YahooProvider } = await import('./yahoo')
+    mockChart.mockResolvedValue({
+      quotes: [makeFakeHistoricalRow('2024-01-15'), makeFakeHistoricalRow('2024-01-16', { close: null })],
+      meta: { regularMarketPrice: 160, regularMarketTime: new Date('2024-01-16T21:00:00Z') },
+    })
+
+    const candles = await new YahooProvider().getCandles('AAPL', '1d')
+
+    expect(candles.map((c) => c.time)).toEqual(['2024-01-15', '2024-01-16'])
+    expect(candles[1]).toMatchObject({ open: 150, high: 160, low: 148, close: 160 })
   })
 
   it('maps 1w interval to 1wk for Yahoo Finance', async () => {
     const { YahooProvider } = await import('./yahoo')
     const provider = new YahooProvider()
 
-    mockHistorical.mockResolvedValue([makeFakeHistoricalRow('2024-01-15')])
+    mockChart.mockResolvedValue(daily([makeFakeHistoricalRow('2024-01-15')]))
 
     await provider.getCandles('AAPL', '1w')
 
-    expect(mockHistorical).toHaveBeenCalledWith(
+    expect(mockChart).toHaveBeenCalledWith(
       'AAPL',
       expect.objectContaining({ interval: '1wk' })
     )
@@ -171,20 +202,20 @@ describe('YahooProvider.getCandles — retry logic', () => {
     const { YahooProvider } = await import('./yahoo')
     const provider = new YahooProvider()
 
-    mockHistorical
+    mockChart
       .mockRejectedValueOnce(new Error('Network error'))
-      .mockResolvedValueOnce([makeFakeHistoricalRow('2024-01-15')])
+      .mockResolvedValueOnce(daily([makeFakeHistoricalRow('2024-01-15')]))
 
     const candles = await provider.getCandles('AAPL', '1d')
     expect(candles).toHaveLength(1)
-    expect(mockHistorical).toHaveBeenCalledTimes(2)
+    expect(mockChart).toHaveBeenCalledTimes(2)
   })
 
   it('throws MarketDataError with PROVIDER_UNAVAILABLE after 2 failures', async () => {
     const { YahooProvider } = await import('./yahoo')
     const provider = new YahooProvider()
 
-    mockHistorical
+    mockChart
       .mockRejectedValueOnce(new Error('Network error'))
       .mockRejectedValueOnce(new Error('Network error'))
 
@@ -203,7 +234,7 @@ describe('YahooProvider.getCandles — retry logic', () => {
     const { YahooProvider } = await import('./yahoo')
     const provider = new YahooProvider()
 
-    mockHistorical
+    mockChart
       .mockRejectedValueOnce(new Error('No data found for symbol'))
       .mockRejectedValueOnce(new Error('No data found for symbol'))
 
@@ -220,11 +251,11 @@ describe('YahooProvider.getCandles — a ticker Yahoo does not know', () => {
 
   it('is asked once, not twice: retrying cannot find it', async () => {
     const { YahooProvider } = await import('./yahoo')
-    mockHistorical.mockRejectedValue(new Error('No data found for symbol'))
+    mockChart.mockRejectedValue(new Error('No data found for symbol'))
 
     await expect(new YahooProvider().getCandles('INVALID', '1d')).rejects.toMatchObject({ code: 'NOT_FOUND' })
-    expect(mockHistorical).toHaveBeenCalledTimes(1)
-    mockHistorical.mockReset()
+    expect(mockChart).toHaveBeenCalledTimes(1)
+    mockChart.mockReset()
   })
 })
 
@@ -239,7 +270,7 @@ describe('YahooProvider.getCandles — ARS→USD normalization', () => {
     const provider = new YahooProvider()
 
     mockGetHistoricalCCL.mockResolvedValue(new Map([['2024-01-15', 1000]]))
-    mockHistorical.mockResolvedValue([makeFakeHistoricalRow('2024-01-15')])
+    mockChart.mockResolvedValue(daily([makeFakeHistoricalRow('2024-01-15')]))
 
     const candles = await provider.getCandles('BCBA:GGAL', '1d')
 
@@ -253,10 +284,10 @@ describe('YahooProvider.getCandles — ARS→USD normalization', () => {
     // Rate present for the 15th, missing for the 16th. Falling through on the
     // 16th used to leave that candle in pesos — a bar ~1000x its neighbour.
     mockGetHistoricalCCL.mockResolvedValue(new Map([['2024-01-15', 1000]]))
-    mockHistorical.mockResolvedValue([
+    mockChart.mockResolvedValue(daily([
       makeFakeHistoricalRow('2024-01-15'),
       makeFakeHistoricalRow('2024-01-16'),
-    ])
+    ]))
 
     await expect(provider.getCandles('BCBA:GGAL', '1d')).rejects.toMatchObject({
       code: 'PROVIDER_UNAVAILABLE',
@@ -269,7 +300,7 @@ describe('YahooProvider.getCandles — ARS→USD normalization', () => {
     const provider = new YahooProvider()
 
     mockGetHistoricalCCL.mockResolvedValue(new Map<string, number>())
-    mockHistorical.mockResolvedValue([makeFakeHistoricalRow('2024-01-15')])
+    mockChart.mockResolvedValue(daily([makeFakeHistoricalRow('2024-01-15')]))
 
     // classifyError returns a MarketDataError untouched; a plain Error would be
     // re-read by message and could come out as something else entirely.
@@ -280,7 +311,7 @@ describe('YahooProvider.getCandles — ARS→USD normalization', () => {
     const { YahooProvider } = await import('./yahoo')
     const provider = new YahooProvider()
 
-    mockHistorical.mockResolvedValue([makeFakeHistoricalRow('2024-01-15')])
+    mockChart.mockResolvedValue(daily([makeFakeHistoricalRow('2024-01-15')]))
 
     const candles = await provider.getCandles('AAPL', '1d')
 

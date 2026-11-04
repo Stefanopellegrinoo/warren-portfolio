@@ -14,7 +14,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-const mockHistorical = vi.fn()
+const mockBars = vi.fn()
 const mockGetHistoricalCCL = vi.fn()
 const mockGetCachedRoute = vi.fn()
 const mockCacheRoute = vi.fn()
@@ -33,7 +33,8 @@ vi.mock('../currency', () => ({
 vi.mock('yahoo-finance2', () => ({
   default: class {
     suppressNotices() {}
-    historical(...a: unknown[]) { return mockHistorical(...a) }
+    // fetchKlines reads chart(): its bars arrive as `quotes`.
+    chart(...a: unknown[]) { return Promise.resolve(mockBars(...a)).then((quotes) => ({ quotes })) }
   },
 }))
 
@@ -57,7 +58,7 @@ beforeEach(() => {
 describe('fetchKlines — BCBA normalization', () => {
   it('throws when a BCBA day has no CCL rate instead of returning the ARS candle as USD', async () => {
     const { fetchKlines } = await import('../yahoo-finance')
-    mockHistorical.mockResolvedValue([candle('2024-01-15'), candle('2024-01-16')])
+    mockBars.mockResolvedValue([candle('2024-01-15'), candle('2024-01-16')])
     // 2024-01-16 is deliberately missing from the CCL series.
     mockGetHistoricalCCL.mockResolvedValue(new Map([['2024-01-15', 1000]]))
 
@@ -68,7 +69,7 @@ describe('fetchKlines — BCBA normalization', () => {
 
   it('never caches a series it refused to normalise', async () => {
     const { fetchKlines } = await import('../yahoo-finance')
-    mockHistorical.mockResolvedValue([candle('2024-01-15')])
+    mockBars.mockResolvedValue([candle('2024-01-15')])
     mockGetHistoricalCCL.mockResolvedValue(new Map())
 
     await expect(
@@ -80,7 +81,7 @@ describe('fetchKlines — BCBA normalization', () => {
 
   it('lets the refusal escape the catch that swallows every other error into []', async () => {
     const { fetchKlines } = await import('../yahoo-finance')
-    mockHistorical.mockResolvedValue([candle('2024-01-15')])
+    mockBars.mockResolvedValue([candle('2024-01-15')])
     mockGetHistoricalCCL.mockResolvedValue(new Map())
 
     // Same guard as fetchHistoricalQuotes: without the re-throw the enclosing
@@ -96,7 +97,7 @@ describe('fetchKlines — BCBA normalization', () => {
 
   it('still swallows an unrelated transport failure into an empty series', async () => {
     const { fetchKlines } = await import('../yahoo-finance')
-    mockHistorical.mockRejectedValue(new Error('socket hang up'))
+    mockBars.mockRejectedValue(new Error('socket hang up'))
 
     // The guard must be narrow: only the CCL refusal escapes. Everything else
     // keeps degrading to [], which is what the signals worker expects.
@@ -107,7 +108,7 @@ describe('fetchKlines — BCBA normalization', () => {
 
   it('divides every OHLC leg by the day rate when the rate exists', async () => {
     const { fetchKlines } = await import('../yahoo-finance')
-    mockHistorical.mockResolvedValue([candle('2024-01-15')])
+    mockBars.mockResolvedValue([candle('2024-01-15')])
     mockGetHistoricalCCL.mockResolvedValue(new Map([['2024-01-15', 1000]]))
 
     const rows = await fetchKlines('BCBA:GGAL', '1d', new Date('2024-01-15'), new Date('2024-01-15'))
@@ -119,7 +120,7 @@ describe('fetchKlines — BCBA normalization', () => {
 
   it('leaves a non-BCBA ticker untouched and never asks for a CCL series', async () => {
     const { fetchKlines } = await import('../yahoo-finance')
-    mockHistorical.mockResolvedValue([candle('2024-01-15')])
+    mockBars.mockResolvedValue([candle('2024-01-15')])
 
     const rows = await fetchKlines('AAPL', '1d', new Date('2024-01-15'), new Date('2024-01-15'))
 
@@ -127,5 +128,16 @@ describe('fetchKlines — BCBA normalization', () => {
       { date: '2024-01-15', open: 5000, high: 5200, low: 4900, close: 5100, volume: 1234 },
     ])
     expect(mockGetHistoricalCCL).not.toHaveBeenCalled()
+  })
+})
+
+describe('fetchKlines — a bar Yahoo sends incomplete', () => {
+  it('drops that bar instead of losing the whole series (historical() rejected it whole)', async () => {
+    const { fetchKlines } = await import('../yahoo-finance')
+    mockBars.mockResolvedValue([candle('2026-11-02'), { ...candle('2026-11-03'), close: null }])
+
+    const rows = await fetchKlines('AAPL', '1d', new Date('2026-11-01'), new Date('2026-11-04'))
+
+    expect(rows.map((r) => r.date)).toEqual(['2026-11-02'])
   })
 })
