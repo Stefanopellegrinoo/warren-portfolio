@@ -148,3 +148,33 @@ During market hours the user opens Mercado and sees the Panel líder sorted by t
 - The row-action layout on desktop.
 - The empty states and texts.
 - The rename and delete affordance for a list in the column. Create, rename and delete must all exist, since Gráficos has them.
+
+## v2 (2026-11-03): a denser, paged page
+
+The owner saw v1 in production: "Quiero que mejores la ui, quedo muy floja, también que haya paginación, así no traes todo de una, que se pueda ordenar desde la tabla por nombre y cambio ( mejor y mayor)". They then made it precise: "no quiero resumen. Sino mejorarar en si la ui, las listas, poder ordenar la lista. Quiero que la paginacion y la lista sea un poco mas corto y que se de pagins no que cargue para abajo, tambien aprovecha mejor el espacio, que sea mas responsive, hagamos las cosas como pros". They approved the v2 mockup with "me gusta, hacelo con odd".
+
+Screenshots: `assets/2026-11-03-market-v2-desktop.png`, `assets/2026-11-03-market-v2-mobile.png`.
+
+- **Space:**
+  - The page uses the Resumen's wide column, and the shell search lines up with it.
+  - The title has the market state under it and the currency control on the same row.
+  - There is no summary block.
+- **Lists:**
+  - On desktop they sit in a compact card panel. Counts are in mono, and the selected list uses the accent's soft color.
+  - On phones they become pills that scroll sideways inside their row; "+" opens "Nueva lista".
+- **Table:**
+  - It sits inside a bordered card with a toolbar (search, the list's count).
+  - Rows are dense and start with the star.
+  - The ticker is bold with the name beside it. Precio and Var. $ are in mono, and Var. día is the chip.
+  - Gráfico and Ficha are icon buttons with accessible names and a tooltip.
+  - **Var. $** is new: today's change, in the chosen currency.
+- **Sort from the table:**
+  - Every header sorts: Nombre, Precio, Var. día and Var. $. The first tap puts the highest first and the next tap the lowest; Nombre goes A→Z, then Z→A.
+  - On phones the list's header row sorts by Nombre and Var. día. The "Ordenar por" select goes away.
+- **Pages:**
+  - 25 rows per page by default, or 50 or 100.
+  - Desktop footer: "1–25 de 380", numbered pages with an ellipsis and ‹ ›, and "Por página".
+  - Phone footer: "‹ Página 1 de 16 · 380 ›".
+  - The server returns only the page asked for (`GET /api/market?list=…|symbols=…&page&size&sort&q`).
+  - A call without those parameters still returns the full board, so tabs still running v1 keep working.
+  - List, sort, page and size are kept in the URL. A new search or a new sort goes back to page 1.
