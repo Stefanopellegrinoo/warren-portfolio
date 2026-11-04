@@ -99,7 +99,7 @@ const PRICE_VALUE = { source: 'price', target: 'value', timeframe: null, periods
 const alertsApi = { alerts: [] as unknown[], create: vi.fn(), save: vi.fn(async () => true), move: vi.fn(), rearm: vi.fn(), remove: vi.fn() }
 vi.mock('../useChartAlerts', () => ({ useChartAlerts: () => alertsApi }))
 vi.mock('../useChartTheme', () => ({
-  useChartTheme: () => ({ bg: '#fff', ink: '#000', ink2: '#111', ink3: '#222', line: '#ddd', lineStrong: '#ccc', grid: '#eee', accent: '#0a0', up: '#0f0', down: '#f00', font: 'sans' }),
+  useChartTheme: () => ({ bg: '#fff', ink: '#000', ink2: '#111', ink3: '#222', line: '#ddd', lineStrong: '#ccc', grid: '#eee', accent: '#0a0', amber: '#f59e0b', up: '#0f0', down: '#f00', font: 'sans' }),
 }))
 // The toolbar has its own tests; here it only switches the alert mode on, and shows where the
 // chart lets it float the favorites bar.
@@ -365,17 +365,18 @@ describe('TradingChart look (S6)', () => {
   it('the theme: TradingView candles for the chart only, the grid in the ink at 7 %, the background the app\'s', async () => {
     const { useChartTheme } = await vi.importActual<typeof import('../useChartTheme')>('../useChartTheme')
     const root = document.documentElement
-    ;[['--bg', '#faf9f7'], ['--ink', '#1c1a17'], ['--ok-dot', '#3f8c45'], ['--danger-dot', '#c8382a']].forEach(([k, v]) => root.style.setProperty(k, v))
+    ;[['--bg', '#faf9f7'], ['--ink', '#1c1a17'], ['--ok-dot', '#3f8c45'], ['--danger-dot', '#c8382a'], ['--amber', '#f59e0b']].forEach(([k, v]) => root.style.setProperty(k, v))
     let theme: ReturnType<typeof useChartTheme> = null
     const Probe = () => { theme = useChartTheme(); return null }
     const el = document.createElement('div')
     const r = createRoot(el)
     await act(async () => { r.render(<Probe />) })
 
-    expect(theme).toMatchObject({ bg: '#faf9f7', up: '#089981', down: '#F23645', grid: 'rgba(28, 26, 23, 0.07)' })
+    // The amber: the extended-hours line's (odd/tasks/extended-hours.md S2).
+    expect(theme).toMatchObject({ bg: '#faf9f7', up: '#089981', down: '#F23645', grid: 'rgba(28, 26, 23, 0.07)', amber: '#f59e0b' })
     expect(getComputedStyle(root).getPropertyValue('--ok-dot').trim()).toBe('#3f8c45')
     act(() => r.unmount())
-    ;['--bg', '--ink', '--ok-dot', '--danger-dot'].forEach((k) => root.style.removeProperty(k))
+    ;['--bg', '--ink', '--ok-dot', '--danger-dot', '--amber'].forEach((k) => root.style.removeProperty(k))
   })
 })
 
@@ -1710,6 +1711,134 @@ describe('TradingChart — Mi cartera without history', () => {
 
     expect(document.body.textContent).toContain('Todavía no hay historia de tu cartera')
     expect(document.body.textContent).not.toContain('__portfolio__')
+    unmount()
+  })
+})
+
+// odd/tasks/extended-hours.md S2: the pre- or post-market price on the chart, as TradingView shows it.
+describe('TradingChart — extended hours (S2)', () => {
+  type Ext = { session: 'pre' | 'post'; price: number; changePct: number }
+  const PRE: Ext = { session: 'pre', price: 130, changePct: -0.0686 }
+  async function mount(symbol: string, extended: Ext | null, timeframe: '1d' | '15m' = '1d') {
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    const show = (s: string, e: Ext | null) => act(async () => { root.render(<TradingChart symbol={s} timeframe={timeframe} extended={e} />) })
+    await show(symbol, extended)
+    return { show, unmount: () => act(() => root.unmount()) }
+  }
+  type Made = { options: Record<string, unknown>; line: { applyOptions: ReturnType<typeof vi.fn> } }
+  // The Pre and Post lines the chart made on the price, with the options they were made with.
+  const made = (): Made[] =>
+    (series.createPriceLine.mock.calls as unknown as [Record<string, unknown>][]).flatMap(([options], i) =>
+      options.title === 'Pre' || options.title === 'Post' ? [{ options, line: series.createPriceLine.mock.results[i].value as Made['line'] }] : [],
+    )
+  // Those still on the chart.
+  const shown = () => made().filter(({ line }) => !(series.removePriceLine.mock.calls as unknown[][]).some(([l]) => l === line))
+  const legend = () => document.querySelector<HTMLElement>('[data-ohlc]')!.textContent
+
+  it('draws a dashed orange line at the pre-market price, labeled Pre on the price axis, on every timeframe', async () => {
+    for (const timeframe of ['1d', '15m'] as const) {
+      vi.clearAllMocks()
+      const { unmount } = await mount('SPY', PRE, timeframe)
+
+      expect(shown().map((m) => m.options), timeframe).toEqual([{ price: 130, title: 'Pre', color: '#f59e0b', lineStyle: 2, lineWidth: 1, axisLabelVisible: true }])
+      unmount()
+    }
+  })
+
+  it('moves the same line on each quote', async () => {
+    const { show, unmount } = await mount('SPY', PRE)
+    const before = made().length
+    await show('SPY', { ...PRE, price: 131.5, changePct: -0.06 })
+
+    expect(made()).toHaveLength(before)
+    expect(shown()).toHaveLength(1)
+    expect(shown()[0].line.applyOptions).toHaveBeenLastCalledWith({ price: 131.5, title: 'Pre' })
+    unmount()
+  })
+
+  it('takes the line and its legend away when the extended price is gone', async () => {
+    const { show, unmount } = await mount('SPY', PRE)
+    expect(shown()).toHaveLength(1)
+    await show('SPY', null)
+
+    expect(shown()).toEqual([])
+    expect(legend()).not.toMatch(/Pre|Post/)
+    unmount()
+  })
+
+  it('a new session replaces the line: the pre-market gives way to the post-market', async () => {
+    const { show, unmount } = await mount('SPY', PRE)
+    await show('SPY', { session: 'post', price: 128, changePct: -0.015 })
+
+    expect(shown().map((m) => [m.options.title, m.options.price])).toEqual([['Post', 128]])
+    expect(legend()).toContain('Post 128,00 −1,50 %')
+    expect(legend()).not.toContain('Pre')
+    unmount()
+  })
+
+  it('a new symbol takes the line away, and draws its own only over its own bars', async () => {
+    const { show, unmount } = await mount('SPY', PRE)
+    // Right after the switch the bars on screen, and the quote, are still SPY's.
+    bars.key = 'SPY:1d'
+    await show('QQQ', PRE)
+    expect(shown()).toEqual([])
+    expect(legend()).not.toContain('Pre')
+
+    bars.key = undefined
+    await show('QQQ', { ...PRE, price: 480 })
+    expect(shown().map((m) => m.options.price)).toEqual([480])
+    unmount()
+  })
+
+  it('the legend reads Pre, its price and its % after the day\'s %, hovered or not', async () => {
+    bars.candles = [{ time: 86400, open: 100, high: 100, low: 100, close: 100 }, { time: 86400 * 2, open: 103, high: 104, low: 102, close: 103 }]
+    const { unmount } = await mount('SPY', PRE)
+
+    expect(legend()).toMatch(/\+3,00 %Pre 130,00 −6,86 %/)
+    const onMove = chart.subscribeCrosshairMove.mock.calls.at(-1)![0] as (p: unknown) => void
+    act(() => onMove({ seriesData: new Map([[series, bars.candles[0]]]) }))
+    expect(legend()).toContain('Pre 130,00 −6,86 %')
+    unmount()
+  })
+
+  it('with no extended price there is no line, and the legend is as it was', async () => {
+    const { unmount } = await mount('SPY', null)
+
+    expect(made()).toEqual([])
+    expect(legend()).toContain('Cie')
+    expect(legend()).not.toMatch(/Pre|Post/)
+    unmount()
+  })
+
+  it('Mi cartera has none', async () => {
+    const { unmount } = await mount('__portfolio__', PRE)
+
+    expect(made()).toEqual([])
+    expect(legend()).not.toContain('Pre')
+    unmount()
+  })
+
+  it('while comparing, a stock keeps it: its line is still in its own prices', async () => {
+    compare.status = 'ready'
+    compare.series = { SPY: { points: [{ time: '1970-01-01', value: 400 }] } }
+    useChartStore.setState({ compareSymbols: ['SPY'] })
+    const { unmount } = await mount('AAPL', PRE)
+
+    expect(shown()).toHaveLength(1)
+    unmount()
+  })
+
+  it('a peso chart drawn in dollars has none: its bars are no longer in its own prices', async () => {
+    compare.status = 'ready'
+    compare.series = { SPY: { points: [{ time: '1970-01-01', value: 400 }] } }
+    compare.ccl = [{ time: '1970-01-01', value: 2 }]
+    useChartStore.setState({ compareSymbols: ['SPY'] })
+    const { unmount } = await mount('GGAL.BA', PRE)
+
+    expect(made()).toEqual([])
+    expect(legend()).not.toContain('Pre')
     unmount()
   })
 })

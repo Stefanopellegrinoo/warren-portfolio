@@ -54,7 +54,7 @@ function Trading() {
       <div className="flex min-h-0 flex-1">
         {/* One chart instance: the list view only hides it, it never mounts twice. */}
         <div data-pane="chart" className={cn("flex min-h-0 min-w-0 flex-1 flex-col", view === "list" && "max-[1099px]:hidden")}>
-          <TradingChart symbol={symbol} timeframe={timeframe} phoneBar={drawingSlot} />
+          <TradingChart symbol={symbol} timeframe={timeframe} phoneBar={drawingSlot} extended={quote?.extended ?? null} />
         </div>
         <RightSidebar
           price={quote?.price ?? null}
