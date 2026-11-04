@@ -75,3 +75,18 @@ export function computeTwrSeries(
 
   return { series, intervalsUsed, intervalsSkipped }
 }
+
+/**
+ * The Mi cartera chart without a "today" that had no session (odd/tasks/day-change.md S4). The series
+ * always ends with today at the live price; on a weekend or a holiday that is the last close again, so
+ * the chart's last bar would read 0 %. Today goes on Saturdays and Sundays (Argentina's day) and on any
+ * day it did not move from the last session; a lone point stays.
+ */
+export function dropIdleToday<P extends { date: string; twrIndex: number }>(points: P[], today: string): P[] {
+  const last = points.at(-1)
+  const prev = points.at(-2)
+  if (!last || !prev || last.date !== today) return points
+  const weekday = new Date(`${today}T12:00:00Z`).getUTCDay()
+  const idle = weekday === 0 || weekday === 6 || Math.abs(last.twrIndex - prev.twrIndex) < 1e-12
+  return idle ? points.slice(0, -1) : points
+}
