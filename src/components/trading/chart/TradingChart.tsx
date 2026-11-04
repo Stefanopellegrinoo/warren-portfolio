@@ -827,10 +827,10 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 											<span className="text-ink-3">Máx <span className="text-ink">{priceText(shown.high)}</span></span>
 											<span className="text-ink-3">Mín <span className="text-ink">{priceText(shown.low)}</span></span>
 											<span className="text-ink-3">Cie <span className="text-ink">{priceText(shown.close)}</span></span>
-											{change !== null && Number.isFinite(change) && (
-												<span className={change >= 0 ? "text-ok" : "text-danger"}>{formatNumber(change * 100, { sign: true })} %</span>
-											)}
 										</>
+									)}
+									{change !== null && Number.isFinite(change) && (
+										<span className={change >= 0 ? "text-ok" : "text-danger"}>{formatNumber(change * 100, { sign: true })} %</span>
 									)}
 								</div>
 								{/* Chips that wrap, so on a phone three comparisons take two lines, not three. */}
