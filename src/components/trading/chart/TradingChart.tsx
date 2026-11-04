@@ -9,10 +9,10 @@ import {
 	LineSeries,
 	LineStyle,
 	PriceScaleMode,
-	TickMarkType,
 	createChart,
 	createSeriesMarkers,
 	type IChartApi,
+	type TickMarkType,
 	type IPriceLine,
 	type ISeriesMarkersPluginApi,
 	type ISeriesApi,
@@ -36,6 +36,7 @@ import { onTap, selectBeforeMove } from "@/lib/chart/select-before-move";
 import { applyRememberedStyles } from "@/lib/chart/remembered-style";
 import { tradeMarkers } from "@/lib/chart/trade-markers";
 import { PORTFOLIO_SERIES, isArsSymbol, seriesLabel } from "@/lib/compare-series";
+import { crosshairLabel, tickLabel } from "@/lib/chart/time-labels";
 import { COMPARE_RANGES, COMPARE_TIMEFRAMES, alignToBars, barChange, compareBase, pctFrom, scaleToBase, toUsdCandles, type CompareRange } from "@/lib/chart/compare";
 import type { Candle, Timeframe } from "@/lib/binance/types";
 import { cn, formatNumber } from "@/lib/utils";
@@ -54,7 +55,6 @@ import { CompareSheet } from "./CompareSheet";
 import { PaneLegends } from "./PaneLegends";
 import { ChartRangeBar, rangeChips, rangeFirstBar, type RangeChip, type ScaleMode } from "./ChartRangeBar";
 
-const TZ = "America/Argentina/Buenos_Aires";
 const INTRADAY: Timeframe[] = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h"];
 const VISIBLE_BARS = 160;
 const DRAG_THRESHOLD_PX = 3;
@@ -100,17 +100,6 @@ const percentFormat = (base: number) => ({
 const dayText = (time: number) => new Date(time * 1000).toLocaleDateString("es-AR", { timeZone: "UTC", day: "2-digit", month: "2-digit", year: "2-digit" });
 const ALERT_TITLES = { active: "Alerta", triggered: "Disparada", unavailable: "No se puede revisar" };
 
-const fmt = (opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("es-AR", { timeZone: TZ, ...opts });
-const DAY = fmt({ day: "numeric", month: "short", year: "numeric" });
-const DAY_TIME = fmt({ day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
-const TICK = {
-	[TickMarkType.Year]: fmt({ year: "numeric" }),
-	[TickMarkType.Month]: fmt({ month: "short" }),
-	[TickMarkType.DayOfMonth]: fmt({ day: "numeric", month: "short" }),
-	[TickMarkType.Time]: fmt({ hour: "2-digit", minute: "2-digit" }),
-	[TickMarkType.TimeWithSeconds]: fmt({ hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-};
-
 function chartOptions(t: ChartTheme, intraday: boolean) {
 	return {
 		layout: {
@@ -129,10 +118,15 @@ function chartOptions(t: ChartTheme, intraday: boolean) {
 			horzLine: { color: t.lineStrong, labelBackgroundColor: t.ink2 },
 		},
 		rightPriceScale: { borderColor: t.line },
-		timeScale: { borderColor: t.line, timeVisible: intraday, rightOffset: 6 },
+		timeScale: {
+			borderColor: t.line,
+			timeVisible: intraday,
+			rightOffset: 6,
+			tickMarkFormatter: (time: Time, type: TickMarkType) => tickLabel(time as number, type, intraday),
+		},
 		localization: {
 			locale: "es-AR",
-			timeFormatter: (time: Time) => (intraday ? DAY_TIME : DAY).format(new Date((time as number) * 1000)),
+			timeFormatter: (time: Time) => crosshairLabel(time as number, intraday),
 		},
 	};
 }
@@ -825,7 +819,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 							<>
 								{/* A computer always shows the candle data; a phone, whose header shows the price, while a finger is on the chart (S7). */}
 								<div data-ohlc className={cn("flex flex-wrap items-baseline gap-x-3 gap-y-0.5 px-1 tabular-nums max-[819px]:basis-full", !hover && "max-[819px]:hidden")}>
-									{hover && <span className="text-ink-3 min-[820px]:hidden">{intraday ? DAY_TIME.format(new Date(hover.time * 1000)) : dayText(hover.time)}</span>}
+									{hover && <span className="text-ink-3 min-[820px]:hidden">{intraday ? crosshairLabel(hover.time, true) : dayText(hover.time)}</span>}
 									{shown && line && <span className="text-ink-3">Valor <span className="text-ink">{priceText(shown.close)}</span></span>}
 									{shown && !line && (
 										<>
