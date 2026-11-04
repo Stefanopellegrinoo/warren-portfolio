@@ -2,6 +2,7 @@ import type { MarketDataProvider, Candle, CandleInterval, Quote, SearchResult } 
 import { MarketDataError } from '../types'
 import { normalizeTickerForYahoo, getYahooFinanceInstance } from '../../yahoo-finance'
 import { completeBars, foldLivePoint, type ChartResult } from '../daily-bars'
+import { extendedHours } from '../extended-hours'
 import { getHistoricalCCL, getCCLRate } from '../../currency'
 
 // ── Helper: retry once on transient errors ───────────────────────────────────
@@ -168,7 +169,10 @@ export class YahooProvider implements MarketDataProvider {
 
       const result = await withRetry(() =>
         yahooFinance.quote(symbol, {
-          fields: ['regularMarketPrice', 'regularMarketChange', 'regularMarketChangePercent', 'regularMarketPreviousClose'],
+          fields: [
+            'regularMarketPrice', 'regularMarketChange', 'regularMarketChangePercent', 'regularMarketPreviousClose', 'regularMarketTime',
+            'preMarketPrice', 'preMarketChangePercent', 'preMarketTime', 'postMarketPrice', 'postMarketChangePercent', 'postMarketTime',
+          ],
         })
       ) as any
 
@@ -197,6 +201,8 @@ export class YahooProvider implements MarketDataProvider {
         changePercent: (result.regularMarketChangePercent ?? 0),
         previousClose: result.regularMarketPreviousClose ?? price - change,
         updatedAt: now.toISOString(),
+        // BYMA has no extended hours, and a price from Yahoo there would be pesos.
+        extended: ticker.startsWith('BCBA:') ? null : extendedHours(result),
       }
     } catch (err) {
       throw classifyError(err)

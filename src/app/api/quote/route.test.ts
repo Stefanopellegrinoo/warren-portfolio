@@ -170,6 +170,24 @@ describe('GET /api/quote', () => {
     expect(body.error).not.toMatch(/CCL|ARS|BCBA/)
   })
 
+  // odd/tasks/extended-hours.md S1.
+  it('returns the extended-hours session, its price and % (percent units, as change_pct)', async () => {
+    const { GET } = await import('./route')
+    mockGetQuote.mockResolvedValue({ ...fakeQuote, extended: { session: 'pre', price: 151.2, changePercent: 0.47 } })
+
+    const data = await (await GET(makeRequest({ ticker: 'AAPL' }))).json()
+    expect(data[0].extended).toEqual({ session: 'pre', price: 151.2, change_pct: 0.47 })
+    expect(data[0]).toMatchObject({ price: 150.5, change: 1.2, change_pct: 0.008 })
+  })
+
+  it('extended is null when there is none, also for a quote cached before it existed', async () => {
+    const { GET } = await import('./route')
+    mockGetQuote.mockResolvedValueOnce({ ...fakeQuote, extended: null }).mockResolvedValueOnce({ ...fakeQuote, ticker: 'MSFT' })
+
+    const data = await (await GET(makeRequest({ tickers: 'AAPL,MSFT' }))).json()
+    expect(data.map((d: { extended: unknown }) => d.extended)).toEqual([null, null])
+  })
+
   it('one unavailable ticker does not blank the batch', async () => {
     const { GET } = await import('./route')
     mockGetQuote.mockImplementation(async (t: string) => {
@@ -182,7 +200,7 @@ describe('GET /api/quote', () => {
     const data = await res.json()
     expect(data).toHaveLength(2)
     expect(data[0]).toMatchObject({ ticker: 'AAPL', price: 150.5 })
-    expect(data[1]).toMatchObject({ ticker: 'BCBA:GGAL', price: null, unavailable: true })
+    expect(data[1]).toMatchObject({ ticker: 'BCBA:GGAL', price: null, extended: null, unavailable: true })
     expect(JSON.stringify(data[1])).not.toMatch(/CCL|ARS/)
   })
 })
