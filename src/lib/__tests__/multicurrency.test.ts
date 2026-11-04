@@ -311,7 +311,7 @@ describe('totals with cash', () => {
     expectAmounts(miss.cost, { ARS: 62_500, MEP: 62.5, CCL: 50 })
   })
 
-  it('day change: each position value × p / (1 + p) at today FX, and its share of invested', () => {
+  it('day change: each position value × p / (1 + p) at today FX, and its share of yesterday\'s value', () => {
     const v = buildCurrencyViews(input)
     // AAPL +25 % on the peso line: 284.200 × 0,25 / 1,25 = 56.840 ARS.
     // DIS −1 % (Yahoo): 480.000 × −0,01 / 0,99. YM34D +10 %: 16.500.000 × 0,1 / 1,1 = 1.500.000.
@@ -319,7 +319,10 @@ describe('totals with cash', () => {
     expectAmounts(v.positions.AAPL.dayChange, { ARS: 56_840, MEP: 56_840 / 1500, CCL: 35.525 })
     expect(v.positions.MISS.dayChange).toBeNull()
     expectAmounts(v.totals.dayChange, { ARS: dayArs, MEP: dayArs / 1500, CCL: dayArs / 1600 })
-    expectAmounts(v.totals.dayChangePct, { ARS: dayArs / 10_450_000, MEP: dayArs / 1500 / 10_450, CCL: dayArs / 1600 / 8360 })
+    // Today's move over what those positions were worth yesterday (value − day change), not over their cost:
+    // AAPL 284.200 + DIS 480.000 + YM34D 16.500.000 ARS today. Cash and MISS (no day change) stay out.
+    const pct = dayArs / (284_200 + 480_000 + 16_500_000 - dayArs)
+    expectAmounts(v.totals.dayChangePct, { ARS: pct, MEP: pct, CCL: pct })
   })
 
   it('flags the cost as estimated when the replayed quantity does not match the position', () => {
