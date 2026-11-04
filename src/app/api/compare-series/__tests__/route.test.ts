@@ -116,6 +116,21 @@ describe('GET /api/compare-series', () => {
     ])
   })
 
+  it('on a Saturday the portfolio does not end on today: that point is the last close again (odd/tasks/day-change.md S4)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-31T15:00:00Z')) // Saturday, noon in Buenos Aires
+    try {
+      mockLoadStocksTwr.mockResolvedValue([
+        { date: '2026-10-30', twrIndex: 1.05, twrPct: 5 },
+        { date: '2026-10-31', twrIndex: 1.05, twrPct: 5 },
+      ])
+      const body = await (await get('?symbols=__portfolio__')).json()
+      expect(body.series.__portfolio__.points).toEqual([{ time: '2026-10-30', value: 105 }])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('a portfolio without history is marked like a ticker without data', async () => {
     const body = await (await get('?symbols=__portfolio__')).json()
     expect(body.series.__portfolio__).toEqual({ error: 'no_data' })

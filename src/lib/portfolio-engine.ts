@@ -181,6 +181,8 @@ export function calculatePortfolioSummary(
   const on_day_pnl = onsWithPrices.reduce((s, p) => s + (p.day_change ?? 0), 0)
 
   const total_market_value = stock_market_value + on_market_value + cashBalance
+  // Today's % is today's move over yesterday's value (today's value − today's move), not over cost.
+  const dayPct = (day: number, value: number) => (value - day > 0 ? day / (value - day) : 0)
   const total_invested = stock_invested + on_invested
   const realized_pnl = stockRealizedPnl + onRealizedPnl
 
@@ -195,7 +197,7 @@ export function calculatePortfolioSummary(
       open_pnl: stock_pnl + on_pnl,
       open_pnl_pct: total_invested > 0 ? (stock_pnl + on_pnl) / total_invested : 0,
       day_pnl: stock_day_pnl + on_day_pnl,
-      day_pnl_pct: total_invested > 0 ? (stock_day_pnl + on_day_pnl) / total_invested : 0,
+      day_pnl_pct: dayPct(stock_day_pnl + on_day_pnl, stock_market_value + on_market_value),
       realized_pnl,
       realized_pnl_pct: total_invested > 0 ? realized_pnl / total_invested : 0,
       positions_count: enrichedStocks.length + enrichedONs.length,
@@ -207,7 +209,7 @@ export function calculatePortfolioSummary(
         pnl: stock_pnl,
         pnl_pct: stock_pnl_pct,
         day_pnl: stock_day_pnl,
-        day_pnl_pct: stock_invested > 0 ? stock_day_pnl / stock_invested : 0,
+        day_pnl_pct: dayPct(stock_day_pnl, stock_market_value),
         positions_count: enrichedStocks.length,
       },
       ons: {
@@ -216,7 +218,7 @@ export function calculatePortfolioSummary(
         pnl: on_pnl,
         pnl_pct: on_pnl_pct,
         day_pnl: on_day_pnl,
-        day_pnl_pct: on_invested > 0 ? on_day_pnl / on_invested : 0,
+        day_pnl_pct: dayPct(on_day_pnl, on_market_value),
         positions_count: enrichedONs.length,
       },
       cash: {

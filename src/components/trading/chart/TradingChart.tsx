@@ -36,7 +36,7 @@ import { onTap, selectBeforeMove } from "@/lib/chart/select-before-move";
 import { applyRememberedStyles } from "@/lib/chart/remembered-style";
 import { tradeMarkers } from "@/lib/chart/trade-markers";
 import { PORTFOLIO_SERIES, isArsSymbol, seriesLabel } from "@/lib/compare-series";
-import { COMPARE_RANGES, COMPARE_TIMEFRAMES, alignToBars, compareBase, pctFrom, scaleToBase, toUsdCandles, type CompareRange } from "@/lib/chart/compare";
+import { COMPARE_RANGES, COMPARE_TIMEFRAMES, alignToBars, barChange, compareBase, pctFrom, scaleToBase, toUsdCandles, type CompareRange } from "@/lib/chart/compare";
 import type { Candle, Timeframe } from "@/lib/binance/types";
 import { cn, formatNumber } from "@/lib/utils";
 import { useCandles } from "./useCandles";
@@ -775,8 +775,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 
 	const drawnLast = drawn.at(-1) ?? null;
 	const shown = hover ?? drawnLast;
-	const prevClose = drawn.at(-2)?.close;
-	const change = shown && prevClose && shown === drawnLast ? (shown.close - prevClose) / prevClose : shown ? (shown.close - shown.open) / shown.open : null;
+	const change = barChange(drawn, shown, line);
 	const at = hover?.time ?? null;
 	const comparingNow = comparing.length > 0;
 	const from = base?.time ?? null;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { COMPARE_TIMEFRAMES, COMPARE_RANGES, alignToBars, toUsdCandles, portfolioDayChangePct, pctFrom, rangeStart, compareBase, scaleToBase } from '../compare'
+import { COMPARE_TIMEFRAMES, COMPARE_RANGES, alignToBars, toUsdCandles, portfolioDayChangePct, pctFrom, rangeStart, compareBase, scaleToBase, barChange } from '../compare'
 import { toChartTime } from '../timeframes'
 
 const t = (day: string) => toChartTime(day)
@@ -52,7 +52,8 @@ describe('toUsdCandles', () => {
 
 describe('portfolioDayChangePct', () => {
   it('weights each position’s change by its market value', () => {
-    expect(portfolioDayChangePct([{ market_value: 300, day_change_pct: 2 }, { market_value: 100, day_change_pct: -2 }])).toBe(1)
+    // Fractions, as /api/positions sends them (0.02 = 2 %).
+    expect(portfolioDayChangePct([{ market_value: 300, day_change_pct: 0.02 }, { market_value: 100, day_change_pct: -0.02 }])).toBeCloseTo(0.01, 12)
   })
 
   it('is null with nothing held', () => {
@@ -147,5 +148,30 @@ describe('scaleToBase', () => {
 
   it('with no value on or after the base day there is nothing to draw', () => {
     expect(scaleToBase([{ time: 1, value: 400 }], 2, 100)).toEqual([])
+  })
+})
+
+describe('barChange', () => {
+  const bar = (time: number, open: number, close: number) => ({ time, open, close })
+  const candles = [bar(1, 100, 110), bar(2, 110, 99), bar(3, 99, 120)]
+  // Mi cartera: one value per day, drawn as flat bars (open = close).
+  const flat = [bar(1, 100, 100), bar(2, 104, 104), bar(3, 101.92, 101.92)]
+
+  it('the last bar reads its change against the bar before it', () => {
+    expect(barChange(candles, candles[2], false)).toBeCloseTo(120 / 99 - 1, 12)
+    expect(barChange(flat, flat[2], true)).toBeCloseTo(-0.02, 12)
+  })
+
+  it('a hovered bar of the flat portfolio series reads its change against the bar before it, not 0', () => {
+    expect(barChange(flat, flat[1], true)).toBeCloseTo(0.04, 12)
+  })
+
+  it('the first bar of the flat series has no change to read', () => {
+    expect(barChange(flat, flat[0], true)).toBeNull()
+  })
+
+  it('a hovered candle keeps reading its own move, open to close, as before', () => {
+    expect(barChange(candles, candles[1], false)).toBeCloseTo(99 / 110 - 1, 12)
+    expect(barChange(candles, null, false)).toBeNull()
   })
 })

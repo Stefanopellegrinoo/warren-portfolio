@@ -165,8 +165,9 @@ describe('Watchlist — removing a symbol', () => {
 
 describe('Watchlist — Cartera, the stocks held', () => {
   const POSITIONS = [
-    { ticker: 'AAPL', market_value: 300, day_change_pct: 2 },
-    { ticker: 'GGAL', market_value: 100, day_change_pct: -2 },
+    // As /api/positions sends it: a fraction (0.02 = 2 %).
+    { ticker: 'AAPL', market_value: 300, day_change_pct: 0.02 },
+    { ticker: 'GGAL', market_value: 100, day_change_pct: -0.02 },
   ]
   function stubPortfolio(positions: unknown[] = POSITIONS) {
     forgetCached()
@@ -188,7 +189,7 @@ describe('Watchlist — Cartera, the stocks held', () => {
 
     expect(rowNames(el)).toEqual([expect.stringContaining('Mi cartera'), expect.stringContaining('AAPL'), expect.stringContaining('GGAL')])
     expect(rowNames(el)[0]).toContain('Rendimiento de las acciones')
-    expect(rowNames(el)[0]).toContain('1,00')
+    expect(rowNames(el)[0]).toContain('+1,00 %')
     expect(el.querySelector('button[aria-label^="Quitar"]')).toBeNull()
     expect(el.querySelector('button[aria-label="Agregar símbolo"]')).toBeNull()
     expect(calls.some((u) => u.startsWith('/api/watchlist?'))).toBe(false)

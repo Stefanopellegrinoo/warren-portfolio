@@ -5,6 +5,8 @@ import { requireUser, isAuthFailure } from '@/lib/api-auth'
 import { getBars } from '@/lib/bars-cache'
 import { getHistoricalCCL } from '@/lib/currency'
 import { loadStocksTwr } from '@/lib/stocks-twr'
+import { dropIdleToday } from '@/lib/twr-series'
+import { argentinaDate } from '@/lib/utils'
 import {
   PORTFOLIO_SERIES,
   isArsSymbol,
@@ -54,7 +56,7 @@ export async function GET(req: NextRequest) {
     const series: Record<string, SeriesResult> = {}
     for (const symbol of symbols) {
       let points: SeriesPoint[]
-      if (symbol === PORTFOLIO_SERIES) points = (twr ?? []).map((p) => ({ time: p.date, value: p.twrIndex * 100 }))
+      if (symbol === PORTFOLIO_SERIES) points = dropIdleToday(twr ?? [], argentinaDate()).map((p) => ({ time: p.date, value: p.twrIndex * 100 }))
       else if (!isTicker(symbol)) points = []
       else {
         const daily = bars?.get(yahooSymbol(symbol))?.bars ?? []

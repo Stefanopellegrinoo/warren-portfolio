@@ -328,7 +328,7 @@ function MonthLine({ closes }: { closes: number[] }) {
   );
 }
 
-/** Mi cartera at the top of Cartera: the stock portfolio as one more asset, with today's change. */
+/** Mi cartera at the top of Cartera: the stock portfolio as one more asset, with today's change (`pct`: a fraction, 0.01 = 1 %). */
 function PortfolioRow({ active, pct, onSelect }: { active: boolean; pct: number | null; onSelect: () => void }) {
   return (
     <li className={cn("relative flex items-center border-b border-line hover:bg-hover", active && "bg-hover")}>
@@ -344,7 +344,7 @@ function PortfolioRow({ active, pct, onSelect }: { active: boolean; pct: number 
           <span className="truncate text-xs text-ink-3">Rendimiento de las acciones</span>
         </span>
         <span className="flex justify-end">
-          {pct !== null ? <Chip tone={toneOf(pct)}>{formatPct(pct / 100)}</Chip> : <span className="text-ink-3">—</span>}
+          {pct !== null ? <Chip tone={toneOf(pct)}>{formatPct(pct)}</Chip> : <span className="text-ink-3">—</span>}
         </span>
       </button>
     </li>

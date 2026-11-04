@@ -259,6 +259,8 @@ export function buildCurrencyViews(input: {
 
   const positions: Record<string, PositionView> = {}
   let stocks = ZERO, ons = ZERO, investedStocks = ZERO, investedOns = ZERO, dayChange = ZERO
+  // What the positions with a day change were worth yesterday: today's % is over that, not over cost.
+  let dayBase = ZERO
   let estimated = false
 
   const held = [
@@ -291,7 +293,7 @@ export function buildCurrencyViews(input: {
     if (!v.value) continue // unpriced: out of the totals, as the engine's 'drop' policy does
     if (p.kind === 'on') { ons = add(ons, v.value); investedOns = add(investedOns, cost) }
     else { stocks = add(stocks, v.value); investedStocks = add(investedStocks, cost) }
-    if (day) dayChange = add(dayChange, day)
+    if (day) { dayChange = add(dayChange, day); dayBase = add(dayBase, sub(v.value, day)) }
     estimated ||= v.estimated
   }
 
@@ -318,7 +320,7 @@ export function buildCurrencyViews(input: {
       openPnlPct: ratio(openPnl, invested),
       realized,
       dayChange,
-      dayChangePct: ratio(dayChange, invested),
+      dayChangePct: ratio(dayChange, dayBase),
       byClass: {
         stocks: { openPnl: sub(stocks, investedStocks), realized: realizedStocks },
         ons: { openPnl: sub(ons, investedOns), realized: realizedOns },
