@@ -26,10 +26,11 @@ describe('tickLabel', () => {
     expect(tickLabel(at('2026-11-03T16:00:00Z'), TickMarkType.Time, true)).toBe('13:00')
   })
 
-  it('an intraday day tick reads the Buenos Aires day, a month tick its month, a year tick its year', () => {
-    expect(tickLabel(at('2026-11-03T14:30:00Z'), TickMarkType.DayOfMonth, true)).toBe('3')
-    expect(tickLabel(at('2026-11-02T14:30:00Z'), TickMarkType.Month, true)).toMatch(/^nov/)
-    expect(tickLabel(at('2026-01-02T14:30:00Z'), TickMarkType.Year, true)).toBe('2026')
+  it('intraday day, month and year ticks keep the library\'s labels: it places them at UTC midnights', () => {
+    // A Buenos Aires name on a 00:00Z tick is the day before (21:00): "oct" where November starts, "3" twice.
+    expect(tickLabel(at('2026-11-01T00:00:00Z'), TickMarkType.Month, true)).toBeNull()
+    expect(tickLabel(at('2026-11-04T00:00:00Z'), TickMarkType.DayOfMonth, true)).toBeNull()
+    expect(tickLabel(at('2027-01-01T00:00:00Z'), TickMarkType.Year, true)).toBeNull()
   })
 
   it('daily and longer axes keep the library\'s own labels (null)', () => {
