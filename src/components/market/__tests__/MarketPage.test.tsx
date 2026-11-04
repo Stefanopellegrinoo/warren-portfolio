@@ -228,6 +228,14 @@ describe('MarketPage', () => {
     expect(lastMarketCall(fetchMock).get('page')).toBe('1')
   })
 
+  it('on the Panel líder, what the user already keeps in a list shows its star filled, without opening that list', async () => {
+    const { el } = await mount()
+    const star = (ticker: string) => [...el.querySelectorAll('table tbody tr')]
+      .find((tr) => tr.textContent?.includes(ticker))!.querySelector('button[aria-label]')!.getAttribute('aria-label')
+    expect(star('GGAL')).toBe('GGAL está en tus listas: cambiar')
+    expect(star('PAMP')).toBe('Agregar PAMP a una lista')
+  })
+
   it('a new list opens at once, and deleting the list on screen goes back to the Panel líder', async () => {
     const { el, fetchMock } = await mount()
     const nav = el.querySelector('nav[aria-label="Listas"]')!

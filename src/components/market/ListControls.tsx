@@ -23,7 +23,8 @@ async function send(url: string, method: string, body?: object): Promise<string 
   }
 }
 
-const itemsOf = (id: string) => load(itemsKey(id), async () => {
+/** A list's stored symbols, read once and shared by every star and the page (symbols only, no prices). */
+export const itemsOf = (id: string) => load(itemsKey(id), async () => {
   const res = await fetch(`/api/watchlist?watchlistId=${encodeURIComponent(id)}&fields=symbols`)
   if (!res.ok) throw new Error(String(res.status))
   return ((await res.json()) as { items: { symbol: string }[] }).items.map((i) => i.symbol)
@@ -36,10 +37,12 @@ function heldAs(row: ViewRow, stored: string[]): string[] {
 }
 
 /** S4: add the row's asset to any of the user's lists, or take it out; the same lists as Gráficos. */
-export function ListStar({ row, lists, onChanged, label = false }: {
+export function ListStar({ row, lists, held: page, onChanged, label = false }: {
   row: ViewRow
   lists: WatchlistRow[]
-  onChanged: (listId: string) => void
+  /** What each of the user's lists holds, read once by the page, so a star is filled before it is opened. */
+  held?: Record<string, string[]>
+  onChanged: (listId: string, items: string[]) => void
   /** With its word ("Listas"), as in a phone row's actions. */
   label?: boolean
 }) {
@@ -47,7 +50,7 @@ export function ListStar({ row, lists, onChanged, label = false }: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const known = (id: string) => held?.[id] ?? cachedValue<string[]>(itemsKey(id))
+  const known = (id: string) => held?.[id] ?? page?.[id] ?? cachedValue<string[]>(itemsKey(id))
   const inAny = lists.some((l) => heldAs(row, known(l.id) ?? []).length > 0)
 
   const open = async (isOpen: boolean) => {
@@ -78,7 +81,7 @@ export function ListStar({ row, lists, onChanged, label = false }: {
     const next = mine.length ? stored.filter((s) => !mine.includes(s)) : [...stored, row.stored]
     setCachedValue(itemsKey(id), next)
     setHeld((h) => ({ ...h, [id]: next }))
-    onChanged(id)
+    onChanged(id, next)
   }
 
   return (

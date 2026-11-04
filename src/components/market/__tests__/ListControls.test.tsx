@@ -66,7 +66,7 @@ describe('ListStar', () => {
     const [[url, init]] = calls(fetchMock, 'POST')
     expect(url).toBe('/api/watchlist')
     expect(JSON.parse(String((init as RequestInit).body))).toEqual({ symbol: 'BCBA:GGAL', watchlistId: 'l2' })
-    expect(onChanged).toHaveBeenCalledWith('l2')
+    expect(onChanged).toHaveBeenCalledWith('l2', ['BCBA:GGAL'])
   })
 
   it('removing deletes every stored spelling of the asset in that list, as stored', async () => {
