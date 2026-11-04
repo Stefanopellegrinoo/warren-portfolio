@@ -14,6 +14,9 @@ import { fetchTickerSearch } from "@/components/trading/chart/SymbolSelector";
  */
 export const NAME_FROM_PX = 360;
 export const LINE_FROM_PX = 460;
+// The "Ext" column (odd/tasks/extended-hours.md S3) from 375 px, the first width where a fourth chip still
+// leaves a 7-letter symbol with a 6-digit price unclipped, on a desktop and on a phone (wider remove button).
+export const EXT_FROM_PX = 375;
 // About a month of trading days, and the calendar days that hold them.
 const LINE_BARS = 22;
 const LINE_DAYS = 35;
@@ -103,6 +106,7 @@ export function useWatchlistExtras(symbols: string[], width: number) {
   return {
     showName,
     showLine,
+    showExt: width >= EXT_FROM_PX,
     name: (s: string) => (showName ? cachedValue<string>(nameKey(s)) || null : null),
     line: (s: string) => (showLine ? cachedValue<number[] | null>(lineKey(s)) ?? null : null),
   };

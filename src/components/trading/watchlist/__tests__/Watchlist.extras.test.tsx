@@ -128,6 +128,8 @@ describe('Watchlist — wider shows more, fetched only when that wide', () => {
     const { el, row, unmount } = await render(460)
 
     expect(el.textContent).toContain('1 mes')
+    // Not sortable (odd/tasks/extended-hours.md S4).
+    expect(el.querySelector('button[aria-label="Ordenar por 1 mes"]')).toBeNull()
     expect(urls).toContain('/api/klines?ticker=AAPL&interval=1d&days=35')
     const up = lineOf(row('AAPL'))!
     const down = lineOf(row('MSFT'))!
@@ -162,8 +164,8 @@ describe('Watchlist — wider shows more, fetched only when that wide', () => {
   it('rows keep their columns aligned: the same fixed grid on the header and on every row', async () => {
     const { el, unmount } = await render(500)
 
-    const grids = [el.querySelector('[aria-hidden="true"].grid')!, ...el.querySelectorAll('ul li > button:first-of-type')].map(n => n.className.match(/grid-cols-\[[^\]]+\]/)![0])
-    expect(new Set(grids)).toEqual(new Set(['grid-cols-[minmax(0,1fr)_76px_96px_76px]']))
+    const grids = [el.querySelector('[role="row"].grid')!, ...el.querySelectorAll('ul li > button:first-of-type')].map(n => n.className.match(/grid-cols-\[[^\]]+\]/)![0])
+    expect(new Set(grids)).toEqual(new Set(['grid-cols-[minmax(0,1fr)_76px_80px_76px_76px]']))
     unmount()
   })
 })
