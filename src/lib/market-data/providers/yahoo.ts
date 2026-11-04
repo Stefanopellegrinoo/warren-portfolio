@@ -1,7 +1,7 @@
 import type { MarketDataProvider, Candle, CandleInterval, Quote, SearchResult } from '../types'
 import { MarketDataError } from '../types'
 import { normalizeTickerForYahoo, getYahooFinanceInstance } from '../../yahoo-finance'
-import { completeBars, type ChartResult } from '../daily-bars'
+import { completeBars, foldLivePoint, type ChartResult } from '../daily-bars'
 import { getHistoricalCCL, getCCLRate } from '../../currency'
 
 // ── Helper: retry once on transient errors ───────────────────────────────────
@@ -49,10 +49,12 @@ export class YahooProvider implements MarketDataProvider {
     try {
       const yahooFinance = await getYahooFinanceInstance()
 
-      // chart(), as the intraday path: see completeBars for why not historical().
-      const result = completeBars(await withRetry(() =>
+      // chart(), as the intraday path: see completeBars for why not historical(); Yahoo's loose last
+      // trade folds into the current bar first (foldLivePoint).
+      const chart = await withRetry(() =>
         yahooFinance.chart(symbol, { period1, period2, interval: yfInterval })
-      ) as ChartResult)
+      ) as ChartResult
+      const result = completeBars({ ...chart, quotes: foldLivePoint(chart.quotes, yfInterval) })
 
       // Normalize ARS → USD for BCBA tickers
       let hCcl: Map<string, number> | null = null
@@ -119,7 +121,7 @@ export class YahooProvider implements MarketDataProvider {
         yahooFinance.chart(symbol, { period1, interval })
       ) as { quotes: any[] }
 
-      const rows = result.quotes.filter(
+      const rows = foldLivePoint(result.quotes, interval).filter(
         (q) => q.open != null && q.high != null && q.low != null && q.close != null
       )
 
