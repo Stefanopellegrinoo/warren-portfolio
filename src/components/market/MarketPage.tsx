@@ -12,7 +12,7 @@ import { cn, formatAge } from '@/lib/utils'
 import { CurrencySelector } from '@/components/resumen/SummaryHeader'
 import { field, Loading, LoadError } from '@/components/ons/ui'
 import MarketLists, { type ListEntry } from './MarketLists'
-import { ListActions, ListStar } from './ListControls'
+import { ListActions, ListStar, itemsOf } from './ListControls'
 import MarketTable from './MarketTable'
 import MarketPager from './MarketPager'
 import { CARTERA, CARTERA_KEY, LISTS_KEY, itemsKey, type MarketPageData, type WatchlistRow } from './keys'
@@ -31,7 +31,7 @@ const isMarket = (list: string): list is MarketList => list === 'lider' || list 
 
 const loadItems = (list: string): Promise<string[]> => list === CARTERA
   ? getPortfolio().then((d) => (d.positions ?? []).map((p) => p.ticker))
-  : getJson<{ items: { symbol: string }[] }>(`/api/watchlist?watchlistId=${encodeURIComponent(list)}&fields=symbols`).then((d) => d.items.map((i) => i.symbol))
+  : itemsOf(list)
 
 /** S10: the server answers only the page asked for: the list (or a list's symbols), page, size, sort and search. */
 function pageUrl(list: string, symbols: string[] | null, view: View, q: string): string {
@@ -86,6 +86,10 @@ export default function MarketPage() {
   // Held in Cartera, counted before Cartera is opened (S2: every list shows its count).
   const cartera = useCached(CARTERA_KEY, () => loadItems(CARTERA))
   const items = useCached(isMarket(list) || list === CARTERA ? null : itemsKey(list), () => loadItems(list))
+  // What every list of the user holds, read once (symbols only), so the stars on any list show it.
+  const listIds = (lists.data ?? []).map((l) => l.id)
+  const held = useCached(listIds.length ? `market:held:${listIds.join(',')}` : null, () =>
+    Promise.all(listIds.map(async (id) => [id, await itemsOf(id)] as const)).then((all) => Object.fromEntries(all) as Record<string, string[]>))
   const symbols = isMarket(list) ? null : list === CARTERA ? cartera.data ?? null : items.data ?? null
   const waiting = !isMarket(list) && symbols === null
   const url = waiting || symbols?.length === 0 ? null : pageUrl(list, symbols, view, q)
@@ -132,7 +136,11 @@ export default function MarketPage() {
   const current = [...market, ...mine].find((e) => e.key === list)
   const ownList = userLists.find((l) => l.id === list)
   // An edit made here is the same list in Gráficos: re-read the counts, and the items on screen.
-  const listChanged = (id: string) => { lists.reload(); if (id === list) items.reload() }
+  const listChanged = (id: string, next: string[]) => {
+    held.mutate({ ...held.data, [id]: next })
+    lists.reload()
+    if (id === list) items.reload()
+  }
   const empty = q ? 'Sin resultados. Probá con otra búsqueda.'
     : list === CARTERA ? 'No tenés acciones ni CEDEARs en cartera.'
       : 'Esta lista está vacía. Agregá activos con la estrella de cada fila.'
@@ -175,7 +183,7 @@ export default function MarketPage() {
               : (
                 <div className={cn(page.loading && data && 'opacity-60 transition-opacity')}>
                   <MarketTable rows={shown?.rows ?? []} sort={view.sort} onSort={onSort} currency={currency} fx={shown?.fx ?? { mep: null, ccl: null }}
-                    empty={empty} star={(row, label) => <ListStar row={row} lists={userLists} onChanged={listChanged} label={label} />} />
+                    empty={empty} star={(row, label) => <ListStar row={row} lists={userLists} held={held.data} onChanged={listChanged} label={label} />} />
                 </div>
               )}
           {shown && (
