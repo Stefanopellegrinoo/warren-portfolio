@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { MarketBoard } from './market-board'
 import {
-  DEFAULT_SORT, filterRows, inCurrency, listRows, marketRows, parseView, serializeView, sortRows, type ViewRow,
+  DEFAULT_SORT, dayChange, filterRows, inCurrency, listRows, marketRows, pageRows, parseView, serializeView, sortRows, type ViewRow,
 } from './market-view'
 
 // Invented prices and names: no real portfolio data.
@@ -26,6 +26,8 @@ const board: MarketBoard = {
 }
 
 const tickers = (rows: ViewRow[]) => rows.map((r) => r.ticker)
+const row = (ticker: string, price: number | null, changePct: number | null): ViewRow =>
+  ({ key: ticker, ticker, stored: ticker, name: null, price, changePct, note: null, line: null })
 
 describe('marketRows', () => {
   it('the Panel líder rows link and store a local share as BCBA:X, a member without a price included', () => {
@@ -89,6 +91,41 @@ describe('sortRows', () => {
   it('by ticker, A to Z', () => {
     expect(tickers(sortRows(rows, { key: 'ticker', dir: 'asc' }))).toEqual(['GFVA', 'GGAL', 'PAMP'])
   })
+
+  it('by today’s change in money, not in percent, rows without a value last in either direction', () => {
+    const rows = [row('SMALL', 100, 0.1), row('NONE', null, null), row('BIG', 10000, 0.01)]
+    expect(tickers(sortRows(rows, { key: 'abs', dir: 'desc' }))).toEqual(['BIG', 'SMALL', 'NONE'])
+    expect(tickers(sortRows(rows, { key: 'abs', dir: 'asc' }))).toEqual(['SMALL', 'BIG', 'NONE'])
+  })
+})
+
+describe('dayChange', () => {
+  it('is today’s change in pesos: the price less yesterday’s close', () => {
+    expect(dayChange(row('X', 1050, 0.05))).toBeCloseTo(50, 9)
+    expect(dayChange(row('Y', 990, -0.01))).toBeCloseTo(-10, 9)
+  })
+
+  it('no price or no change is no number', () => {
+    expect(dayChange(row('X', null, 0.05))).toBeNull()
+    expect(dayChange(row('X', 1050, null))).toBeNull()
+  })
+})
+
+describe('pageRows', () => {
+  const seven = [1, 2, 3, 4, 5, 6, 7]
+
+  it('cuts the asked page and counts the pages', () => {
+    expect(pageRows(seven, 2, 3)).toEqual({ rows: [4, 5, 6], page: 2, total: 7, pages: 3 })
+  })
+
+  it('takes a page before the first as the first, and one past the end as the last', () => {
+    expect(pageRows(seven, 0, 3)).toEqual({ rows: [1, 2, 3], page: 1, total: 7, pages: 3 })
+    expect(pageRows(seven, 9, 3)).toEqual({ rows: [7], page: 3, total: 7, pages: 3 })
+  })
+
+  it('an empty list is one empty page', () => {
+    expect(pageRows([], 4, 25)).toEqual({ rows: [], page: 1, total: 0, pages: 1 })
+  })
 })
 
 describe('filterRows', () => {
@@ -101,15 +138,27 @@ describe('filterRows', () => {
 })
 
 describe('the view in the URL', () => {
-  it('defaults to the Panel líder by the day’s change, and writes nothing for the default', () => {
+  it('defaults to the Panel líder by the day’s change, first page of 25, and writes nothing for the default', () => {
     const view = parseView(new URLSearchParams(''))
-    expect(view).toEqual({ list: 'lider', sort: DEFAULT_SORT })
+    expect(view).toEqual({ list: 'lider', sort: DEFAULT_SORT, page: 1, size: 25 })
     expect(serializeView(view)).toBe('')
   })
 
   it('round-trips a list and a sort', () => {
-    const view = { list: 'cedears', sort: { key: 'ticker' as const, dir: 'asc' as const } }
+    const view = { list: 'cedears', sort: { key: 'ticker' as const, dir: 'asc' as const }, page: 1, size: 25 }
     expect(parseView(new URLSearchParams(serializeView(view)))).toEqual(view)
+  })
+
+  it('round-trips a page, a page size and the sort by today’s change in money', () => {
+    const view = { list: 'lider', sort: { key: 'abs' as const, dir: 'asc' as const }, page: 3, size: 50 }
+    expect(serializeView(view)).toBe('orden=abs%3Aasc&pagina=3&por=50')
+    expect(parseView(new URLSearchParams(serializeView(view)))).toEqual(view)
+  })
+
+  it('takes a page that is not a whole number from 1 as the first, and a size it does not offer as 25', () => {
+    for (const pagina of ['0', '-2', 'abc', '2.5']) expect(parseView(new URLSearchParams({ pagina })).page).toBe(1)
+    expect(parseView(new URLSearchParams('por=30')).size).toBe(25)
+    expect(parseView(new URLSearchParams('por=100')).size).toBe(100)
   })
 
   it('ignores a sort it does not know', () => {

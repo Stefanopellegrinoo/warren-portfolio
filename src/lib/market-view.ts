@@ -23,13 +23,16 @@ export interface ViewRow {
   line: { kind: 'local' | 'cedear'; line: string } | null
 }
 
-export type SortKey = 'ticker' | 'price' | 'change'
+/** `abs` is today's change in money (`dayChange`). */
+export type SortKey = 'ticker' | 'price' | 'change' | 'abs'
 export interface Sort { key: SortKey; dir: 'asc' | 'desc' }
-export interface View { list: string; sort: Sort }
+export interface View { list: string; sort: Sort; page: number; size: number }
 
 export const DEFAULT_LIST = 'lider'
 export const DEFAULT_SORT: Sort = { key: 'change', dir: 'desc' }
-const SORT_KEYS: SortKey[] = ['ticker', 'price', 'change']
+export const PAGE_SIZES = [25, 50, 100] as const
+export const DEFAULT_PAGE_SIZE = 25
+const SORT_KEYS: SortKey[] = ['ticker', 'price', 'change', 'abs']
 
 const fromLine = (kind: 'local' | 'cedear', r: MarketRow): ViewRow => {
   const stored = storedSymbolFor(kind, r.symbol)
@@ -68,8 +71,14 @@ export function inCurrency(ars: number | null, currency: Currency, fx: { mep: nu
   return rate ? ars / rate : null
 }
 
+/** Today's change in pesos: the price less yesterday's close (`price / (1 + changePct)`). */
+export function dayChange(r: ViewRow): number | null {
+  if (r.price === null || r.changePct === null) return null
+  return r.price - r.price / (1 + r.changePct)
+}
+
 // Pesos order the rows the same as either dollar: the rate divides every price alike.
-const valueOf = (r: ViewRow, key: SortKey) => (key === 'price' ? r.price : r.changePct)
+const valueOf = (r: ViewRow, key: SortKey) => (key === 'price' ? r.price : key === 'abs' ? dayChange(r) : r.changePct)
 
 /** Rows without a value go last in either direction. */
 export function sortRows(rows: ViewRow[], sort: Sort): ViewRow[] {
@@ -91,15 +100,45 @@ export function filterRows(rows: ViewRow[], query: string): ViewRow[] {
   return rows.filter((r) => plain(r.ticker).includes(q) || (r.name !== null && plain(r.name).includes(q)))
 }
 
+/** One page of rows; a page out of range is the nearest one, and an empty list is one empty page. */
+export function pageRows<T>(rows: T[], page: number, size: number): { rows: T[]; page: number; total: number; pages: number } {
+  const pages = Math.max(1, Math.ceil(rows.length / size))
+  const p = Math.min(Math.max(1, Math.trunc(page) || 1), pages)
+  return { rows: rows.slice((p - 1) * size, p * size), page: p, total: rows.length, pages }
+}
+
+/** `<key>:<asc|desc>`; anything else is the default sort. */
+export function parseSort(raw: string | null): Sort {
+  const [key, dir] = (raw ?? '').split(':')
+  return SORT_KEYS.includes(key as SortKey) && (dir === 'asc' || dir === 'desc') ? { key: key as SortKey, dir } : DEFAULT_SORT
+}
+
+/** A whole number from 1; anything else is the first page. */
+export function parsePage(raw: string | null): number {
+  const n = Number(raw)
+  return Number.isInteger(n) && n >= 1 ? n : 1
+}
+
+/** One of PAGE_SIZES; anything else is the default. */
+export function parseSize(raw: string | null): number {
+  const n = Number(raw)
+  return (PAGE_SIZES as readonly number[]).includes(n) ? n : DEFAULT_PAGE_SIZE
+}
+
 export function parseView(params: URLSearchParams): View {
-  const [key, dir] = (params.get('orden') ?? '').split(':')
-  const sort: Sort = SORT_KEYS.includes(key as SortKey) && (dir === 'asc' || dir === 'desc') ? { key: key as SortKey, dir } : DEFAULT_SORT
-  return { list: params.get('lista') || DEFAULT_LIST, sort }
+  return {
+    list: params.get('lista') || DEFAULT_LIST,
+    sort: parseSort(params.get('orden')),
+    page: parsePage(params.get('pagina')),
+    size: parseSize(params.get('por')),
+  }
 }
 
 export function serializeView(view: View): string {
   const q = new URLSearchParams()
   if (view.list !== DEFAULT_LIST) q.set('lista', view.list)
   if (view.sort.key !== DEFAULT_SORT.key || view.sort.dir !== DEFAULT_SORT.dir) q.set('orden', `${view.sort.key}:${view.sort.dir}`)
+  if (view.page !== 1) q.set('pagina', String(view.page))
+  if (view.size !== DEFAULT_PAGE_SIZE) q.set('por', String(view.size))
   return q.toString()
 }

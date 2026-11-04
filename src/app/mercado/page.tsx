@@ -1,11 +1,11 @@
 import { Suspense } from 'react'
 import MarketPage from '@/components/market/MarketPage'
-import { PAGE, PageHeader } from '@/components/ons/ui'
+import { WIDE_PAGE } from '@/components/ons/ui'
 
+// S8: the Resumen's wide column; the page draws its own header (title, market state, currency).
 export default function MercadoPage() {
   return (
-    <div className={PAGE}>
-      <PageHeader title="Mercado" intro="Cómo vienen hoy el Panel líder, los CEDEARs y tus listas." />
+    <div className={WIDE_PAGE}>
       <Suspense fallback={null}>
         <MarketPage />
       </Suspense>
