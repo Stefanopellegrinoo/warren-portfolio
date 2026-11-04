@@ -119,9 +119,9 @@ export class YahooProvider implements MarketDataProvider {
       const yahooFinance = await getYahooFinanceInstance()
       const result = await withRetry(() =>
         yahooFinance.chart(symbol, { period1, interval })
-      ) as { quotes: any[] }
+      ) as { quotes: any[]; meta?: ChartResult['meta'] }
 
-      const rows = foldLivePoint(result.quotes, interval).filter(
+      const rows = foldLivePoint(result.quotes, interval, result.meta?.regularMarketTime).filter(
         (q) => q.open != null && q.high != null && q.low != null && q.close != null
       )
 

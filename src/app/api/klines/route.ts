@@ -67,7 +67,9 @@ export async function GET(req: NextRequest) {
   try {
     const provider = getMarketDataProvider()
     const ttl = daysParam != null ? RECENT_TTL : HISTORY_TTL
-    const candles = await cached(`klines:${ticker}:${interval}:${days ?? 'all'}`, ttl, () =>
+    // v2: bars with Yahoo's loose last trade folded in (odd/tasks/chart-display.md S3); a v1 history cached
+    // across the deploy would not continue a v2 window, and the chart would reload on every poll.
+    const candles = await cached(`klines:v2:${ticker}:${interval}:${days ?? 'all'}`, ttl, () =>
       provider.getCandles(ticker, interval, from)
     )
     return NextResponse.json(candles)

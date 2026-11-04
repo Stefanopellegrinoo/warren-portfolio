@@ -74,6 +74,43 @@ describe('foldLivePoint', () => {
     expect(foldLivePoint([pad, real], '1h')).toEqual([pad, real])
   })
 
+  it('1h: a real bar 30 minutes after an extended-hours bar is a bar, not a live point (bars start on a quarter hour)', () => {
+    const out = foldLivePoint([q('2026-11-04T14:00:00Z', 1, 1, 1, 1), q('2026-11-04T14:30:00Z', 2, 2, 2, 2)], '1h')
+    expect(out).toHaveLength(2)
+  })
+
+  it('a closing print stamped on a quarter hour still folds when it is Yahoo\'s last trade (meta.regularMarketTime)', () => {
+    const series = [q('2026-11-03T20:30:00Z', 1, 1, 1, 1), q('2026-11-03T20:45:00Z', 2, 2.5, 1.9, 2.1), q('2026-11-03T21:00:00Z', 2.2, 2.2, 2.2, 2.2, 0)]
+    expect(foldLivePoint(series, '15m', new Date('2026-11-03T21:00:00Z'))).toHaveLength(2)
+    expect(foldLivePoint(series, '15m', new Date('2026-11-03T21:00:00Z'))[1]).toMatchObject({ close: 2.2, high: 2.5 })
+    // Without the last trade's time it reads as a bar, as a post-market 21:00 bar would be.
+    expect(foldLivePoint(series, '15m')).toHaveLength(3)
+  })
+
+  it('the first trade of an intraday bar Yahoo has not drawn yet waits for it, instead of a sliver off the grid', () => {
+    // 12:00:28: the 12:00 bar does not exist yet, so the point lies past the 11:45 bar.
+    expect(foldLivePoint([q('2026-11-04T11:30:00Z', 1, 1, 1, 1), q('2026-11-04T11:45:00Z', 2, 2, 2, 2), q('2026-11-04T12:00:28Z', 3, 3, 3, 3)], '15m').map((b) => b.date.toISOString().slice(11, 16))).toEqual(['11:30', '11:45'])
+    expect(foldLivePoint([q('2026-11-04T10:00:00Z', 1, 1, 1, 1), q('2026-11-04T11:00:00Z', 2, 2, 2, 2), q('2026-11-04T12:00:19Z', 3, 3, 3, 3)], '1h')).toHaveLength(2)
+    // A daily, weekly or monthly bar past the last one is a real bar.
+    expect(foldLivePoint([q('2026-11-02T14:30:00Z', 1, 1, 1, 1), q('2026-11-03T14:30:00Z', 2, 2, 2, 2)], '1d')).toHaveLength(2)
+  })
+
+  it('a week or month bar that does not count the last session yet takes the point\'s volume too', () => {
+    // GGAL.BA in November: the month bar holds 2026-11-02 (close 5200), the point 2026-11-03 (close 5255).
+    const out = foldLivePoint([q('2026-10-01T03:00:00Z', 5000, 6000, 4800, 5100, 90_000_000), q('2026-11-01T03:00:00Z', 5375, 5400, 5095, 5200, 3_330_711), q('2026-11-03T20:59:58Z', 5250, 5500, 5200, 5255, 2_852_710)], '1mo')
+    expect(out[1]).toMatchObject({ close: 5255, high: 5500, volume: 3_330_711 + 2_852_710 })
+  })
+
+  it('a bar without volume takes the point\'s', () => {
+    const out = foldLivePoint([q('2026-11-02T14:30:00Z', 1, 1, 1, 1), { ...q('2026-11-03T14:30:00Z', 135.99, 142.4, 135.99, null), volume: null }, q('2026-11-03T21:00:03Z', 139.59, 139.59, 139.59, 139.59, 5_863_721)], '1d')
+    expect(out[1]).toMatchObject({ close: 139.59, volume: 5_863_721 })
+  })
+
+  it('folds a Sunday point into its week on a 24/7 series, and a late point into its day', () => {
+    expect(foldLivePoint([q('2026-11-02T00:00:00Z', 1, 1, 1, 1), q('2026-11-08T20:00:00Z', 2, 2, 2, 2)], '1wk')).toHaveLength(1)
+    expect(foldLivePoint([q('2026-11-04T00:00:00Z', 1, 1, 1, 1), q('2026-11-04T21:30:17Z', 2, 2, 2, 2)], '1d')).toHaveLength(1)
+  })
+
   it('leaves a series of one bar, or none, as it is', () => {
     expect(foldLivePoint([], '1d')).toEqual([])
     const one = [q('2026-11-03T14:30:00Z', 1, 1, 1, 1)]
