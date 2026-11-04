@@ -1,3 +1,4 @@
+import type { ExtendedHours } from './extended-hours'
 // ── Market Data Types ───────────────────────────────────────────────────────
 // Candle: compatible with yahoo-finance2 historical() output and lightweight-charts.
 // lightweight-charts requires `time` as UTCTimestamp (seconds) or business-day string YYYY-MM-DD.
@@ -20,6 +21,8 @@ export interface Quote {
   changePercent: number
   previousClose: number
   updatedAt: string    // ISO
+  /** Pre- or post-market trading (odd/tasks/extended-hours.md S1); absent on a quote cached before it existed. */
+  extended?: ExtendedHours | null
 }
 
 export interface SearchResult {

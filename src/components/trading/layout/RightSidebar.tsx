@@ -27,7 +27,7 @@ export function RightSidebar({ price, onSelectSymbol, className }: RightSidebarP
       ref={ref}
       aria-label="Lista y posición"
       style={style}
-      className={cn("relative flex min-h-0 w-[280px] flex-none flex-col border-l border-line bg-canvas max-[1099px]:w-full max-[1099px]:border-l-0", className)}
+      className={cn("relative flex min-h-0 w-[380px] flex-none flex-col border-l border-line bg-canvas max-[1099px]:w-full max-[1099px]:border-l-0", className)}
     >
       {wide && (
         <div

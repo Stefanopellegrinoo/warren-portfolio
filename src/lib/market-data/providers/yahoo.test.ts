@@ -514,3 +514,26 @@ describe('YahooProvider.getQuote without a CCL rate', () => {
     await expect(new YahooProvider().getQuote('BCBA:GGAL')).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE' })
   })
 })
+
+// odd/tasks/extended-hours.md S1.
+describe('YahooProvider.getQuote extended hours', () => {
+  const pre = { preMarketPrice: 129.88, preMarketChangePercent: -6.95, preMarketTime: new Date('2026-11-04T12:58:48Z') }
+
+  it('asks Yahoo for the pre- and post-market fields and returns the session traded after the close', async () => {
+    const { YahooProvider } = await import('./yahoo')
+    const quote = vi.fn().mockResolvedValue({ regularMarketPrice: 139.59, regularMarketChange: 4.98, regularMarketChangePercent: 3.7, regularMarketPreviousClose: 134.61, regularMarketTime: new Date('2026-11-03T21:00:03Z'), ...pre })
+    ;(mockYahooInstance as any).quote = quote
+    const q = await new YahooProvider().getQuote('VST')
+    expect(quote.mock.calls[0][1].fields).toEqual(expect.arrayContaining(['regularMarketTime', 'preMarketPrice', 'preMarketChangePercent', 'preMarketTime', 'postMarketPrice', 'postMarketChangePercent', 'postMarketTime']))
+    expect(q.extended).toEqual({ session: 'pre', price: 129.88, changePercent: -6.95 })
+    expect(q).toMatchObject({ price: 139.59, change: 4.98, changePercent: 3.7, previousClose: 134.61 })
+  })
+
+  it('an Argentine stock has none, even if Yahoo sent one: its prices are pesos', async () => {
+    const { YahooProvider } = await import('./yahoo')
+    ;(mockYahooInstance as any).quote = vi.fn().mockResolvedValue({ regularMarketPrice: 8000, regularMarketChange: 10, regularMarketTime: new Date('2026-11-03T20:00:00Z'), ...pre })
+    mockGetCCLRate.mockResolvedValueOnce(1500 as any)
+    expect((await new YahooProvider().getQuote('BCBA:GGAL')).extended).toBeNull()
+  })
+})
+

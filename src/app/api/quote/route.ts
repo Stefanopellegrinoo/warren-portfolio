@@ -58,6 +58,8 @@ export async function GET(req: NextRequest) {
         change: q.change ?? 0,
         change_pct: q.changePercent,
         last_updated: q.updatedAt,
+        // Pre- or post-market (odd/tasks/extended-hours.md S1); change_pct in percent units, as above.
+        extended: q.extended ? { session: q.extended.session, price: q.extended.price, change_pct: q.extended.changePercent } : null,
       }
     })
   )
@@ -65,7 +67,7 @@ export async function GET(req: NextRequest) {
   const results = settled.map((r, i) =>
     r.status === 'fulfilled'
       ? r.value
-      : { ticker: tickers[i], price: null, change: 0, change_pct: null, last_updated: null, unavailable: true }
+      : { ticker: tickers[i], price: null, change: 0, change_pct: null, last_updated: null, extended: null, unavailable: true }
   )
   const failures = settled.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
   failures.forEach(f => console.error('[/api/quote]', f.reason instanceof MarketDataError ? `${f.reason.code}: ${f.reason.message}` : f.reason))

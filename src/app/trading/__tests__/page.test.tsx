@@ -13,7 +13,7 @@ vi.hoisted(() => {
 })
 
 // The URL's query and every symbol the chart was mounted with, for the ?symbol= tests.
-const nav = vi.hoisted(() => ({ query: new URLSearchParams(), charts: [] as string[], phoneBar: null as HTMLElement | null }))
+const nav = vi.hoisted(() => ({ query: new URLSearchParams(), charts: [] as string[], phoneBar: null as HTMLElement | null, extended: undefined as unknown }))
 vi.mock('next/navigation', () => ({
   usePathname: () => '/trading',
   useSearchParams: () => nav.query,
@@ -21,7 +21,7 @@ vi.mock('next/navigation', () => ({
 }))
 // The chart core has its own tests; here it only has to mount once.
 vi.mock('@/components/trading/chart/TradingChart', () => ({
-  TradingChart: ({ symbol, phoneBar }: { symbol: string; phoneBar?: HTMLElement | null }) => { nav.charts.push(symbol); nav.phoneBar = phoneBar ?? null; return <div data-chart={symbol} /> },
+  TradingChart: ({ symbol, phoneBar, extended }: { symbol: string; phoneBar?: HTMLElement | null; extended?: unknown }) => { nav.charts.push(symbol); nav.phoneBar = phoneBar ?? null; nav.extended = extended; return <div data-chart={symbol} /> },
 }))
 
 import TradingPage from '../page'
@@ -253,5 +253,23 @@ describe('TradingPage — indicators in the account', () => {
 
     const s = store.getState()
     expect([s.indicators.rsi, s.indicators.obv, s.hidden.obv]).toEqual([false, true, true])
+  })
+})
+
+// odd/tasks/extended-hours.md S2: the page's one quote poll hands the chart its pre- or post-market price.
+describe('TradingPage — extended hours', () => {
+  it('hands the chart the extended price, and the top bar the quote as before', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => ok(
+      String(url) === '/api/quote?tickers=SPY'
+        ? [{ ticker: 'SPY', price: 140, change_pct: 1.5, extended: { session: 'pre', price: 130, change_pct: -6.86 } }]
+        : String(url).includes('/lists') ? { lists: [] } : [],
+    )))
+    await act(async () => { root.render(<TradingPage />) })
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+
+    expect(nav.extended).toEqual({ session: 'pre', price: 130, changePct: expect.closeTo(-0.0686, 10) })
+    const header = host.querySelector('header')!.textContent
+    expect(header).toContain('140,00')
+    expect(header).toContain('+1,50 %')
   })
 })

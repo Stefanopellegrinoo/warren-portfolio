@@ -3,12 +3,23 @@
 import { useEffect, useState } from "react";
 import { fetchTicker24h } from "@/lib/binance/rest";
 import { getProviderForSymbol } from "@/lib/market-data/resolver";
+import type { ExtendedSession } from "@/lib/market-data/extended-hours";
 
 /** Last price and day change (a fraction) of the chart's symbol. */
 export interface Quote {
   price: number;
   changePct: number;
+  /** Pre- or post-market, its change from the close a fraction too; null in the session and for crypto
+   *  (odd/tasks/extended-hours.md S2). */
+  extended: { session: ExtendedSession; price: number; changePct: number } | null;
 }
+
+type ApiQuote = {
+  price: number | null;
+  change_pct: number | null;
+  // Absent on a quote cached before it existed.
+  extended?: { session: ExtendedSession; price: number; change_pct: number } | null;
+};
 
 const BINANCE_POLL_MS = 5_000;
 const YAHOO_POLL_MS = 15_000; // /api/quote is cached 15 s on the server
@@ -16,12 +27,18 @@ const YAHOO_POLL_MS = 15_000; // /api/quote is cached 15 s on the server
 async function load(symbol: string): Promise<Quote | null> {
   if (getProviderForSymbol(symbol) === "binance") {
     const t = await fetchTicker24h(symbol);
-    return { price: t.lastPrice, changePct: t.priceChangePercent / 100 };
+    return { price: t.lastPrice, changePct: t.priceChangePercent / 100, extended: null };
   }
   const res = await fetch(`/api/quote?tickers=${encodeURIComponent(symbol)}`);
   if (!res.ok) return null;
-  const [q] = (await res.json()) as Array<{ price: number | null; change_pct: number | null }>;
-  return q && q.price !== null ? { price: q.price, changePct: (q.change_pct ?? 0) / 100 } : null;
+  const [q] = (await res.json()) as ApiQuote[];
+  if (!q || q.price === null) return null;
+  const ext = q.extended;
+  return {
+    price: q.price,
+    changePct: (q.change_pct ?? 0) / 100,
+    extended: ext ? { session: ext.session, price: ext.price, changePct: ext.change_pct / 100 } : null,
+  };
 }
 
 // The one quote poll of the page: the top bar and the position panel share it.

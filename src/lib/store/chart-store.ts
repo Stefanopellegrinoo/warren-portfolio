@@ -6,6 +6,7 @@ import type { Timeframe } from "@/lib/binance/types";
 // Relative: the price worker reaches this module and its image has no `@/` paths.
 import { MAX_COMPARE, PORTFOLIO_SERIES } from "../compare-series";
 import type { CompareRange } from "../chart/compare";
+import type { WatchlistSort } from "../watchlist-sort";
 
 export { MAX_COMPARE };
 /** Mi cartera as a chart symbol: the stock portfolio's return. */
@@ -103,6 +104,8 @@ interface ChartState {
   config: IndicatorConfig;
   watchlist: string[];
   activeWatchlistId: string | null;
+  /** One watchlist sort for every list, on this device; null: each list's own order (odd/tasks/extended-hours.md S4). */
+  watchlistSort: WatchlistSort | null;
   showPortfolioOverlay: boolean;
   /** The user's buys and sells as arrows on the candles ("Mostrar operaciones"). */
   showTrades: boolean;
@@ -133,6 +136,7 @@ interface ChartState {
   setCompareSymbols: (symbols: string[]) => void;
   setCompareRange: (range: CompareRange) => void;
   setActiveWatchlistId: (id: string | null) => void;
+  setWatchlistSort: (sort: WatchlistSort | null) => void;
   watchlistRefreshTick: number;
   bumpWatchlistRefresh: () => void;
 }
@@ -159,6 +163,7 @@ export const useChartStore = create<ChartState>()(
       config: { ...DEFAULT_CONFIG },
       watchlist: DEFAULT_WATCHLIST,
       activeWatchlistId: null,
+      watchlistSort: null,
       showPortfolioOverlay: true,
       showTrades: true,
       compareSymbols: [],
@@ -212,6 +217,7 @@ export const useChartStore = create<ChartState>()(
       setCompareSymbols: (symbols) => set({ compareSymbols: [...new Set(symbols)].slice(0, MAX_COMPARE) }),
       setCompareRange: (compareRange) => set({ compareRange }),
       setActiveWatchlistId: (activeWatchlistId) => set({ activeWatchlistId }),
+      setWatchlistSort: (watchlistSort) => set({ watchlistSort }),
       bumpWatchlistRefresh: () =>
         set((s) => ({ watchlistRefreshTick: s.watchlistRefreshTick + 1 })),
     }),
@@ -227,6 +233,8 @@ export const useChartStore = create<ChartState>()(
         config: s.config,
         watchlist: s.watchlist,
         activeWatchlistId: s.activeWatchlistId,
+        // A state saved before it has none: the merge keeps the default (no sort).
+        watchlistSort: s.watchlistSort,
         showPortfolioOverlay: s.showPortfolioOverlay,
         // A state saved before it has none: the merge keeps the default (on), no migration needed.
         showTrades: s.showTrades,

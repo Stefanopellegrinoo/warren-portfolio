@@ -54,6 +54,7 @@ import { useCompareSeries } from "./useCompareSeries";
 import { CompareSheet } from "./CompareSheet";
 import { PaneLegends } from "./PaneLegends";
 import { ChartRangeBar, rangeChips, rangeFirstBar, type RangeChip, type ScaleMode } from "./ChartRangeBar";
+import type { Quote } from "../layout/useQuote";
 
 const INTRADAY: Timeframe[] = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h"];
 const VISIBLE_BARS = 160;
@@ -99,6 +100,7 @@ const percentFormat = (base: number) => ({
 });
 const dayText = (time: number) => new Date(time * 1000).toLocaleDateString("es-AR", { timeZone: "UTC", day: "2-digit", month: "2-digit", year: "2-digit" });
 const ALERT_TITLES = { active: "Alerta", triggered: "Disparada", unavailable: "No se puede revisar" };
+const EXTENDED_TITLES = { pre: "Pre", post: "Post" };
 
 function chartOptions(t: ChartTheme, intraday: boolean) {
 	return {
@@ -226,14 +228,26 @@ function syncIndicators(
 	return rebuild;
 }
 
-/** `phoneBar`: where the page wants the phone's drawing controls, in its bottom bar. */
-export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: string; timeframe: Timeframe; phoneBar?: HTMLElement | null }) {
+/** `phoneBar`: where the page wants the phone's drawing controls, in its bottom bar. `extended`: the symbol's
+ *  pre- or post-market price, from the page's quote. */
+export function TradingChart({
+	symbol,
+	timeframe,
+	phoneBar = null,
+	extended = null,
+}: {
+	symbol: string;
+	timeframe: Timeframe;
+	phoneBar?: HTMLElement | null;
+	extended?: Quote["extended"];
+}) {
 	const boxRef = useRef<HTMLDivElement>(null);
 	const chartRef = useRef<IChartApi | null>(null);
 	// Candles, or a line for Mi cartera, which has one value a day and no open, high or low.
 	const seriesRef = useRef<ISeriesApi<"Candlestick"> | ISeriesApi<"Line"> | null>(null);
 	const indicatorsRef = useRef<{ signature: string; list: IndicatorSeries[] }>({ signature: "", list: [] });
 	const alertLinesRef = useRef(new Map<string, IPriceLine>());
+	const extendedLineRef = useRef<IPriceLine | null>(null);
 	const fittedRef = useRef("");
 	const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
 	// The last press on the chart: whether something took it (an armed tool, the alert placement,
@@ -759,6 +773,32 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 		setSheet(null);
 	}, [symbol]);
 
+	// The pre- or post-market price, a dashed line on the price as TradingView draws it (odd/tasks/extended-hours.md S2).
+	// Only over this chart's own bars in the stock's own prices: never on Mi cartera, a peso chart drawn in dollars,
+	// or the last symbol's bars right after a switch.
+	const ext = fresh && !line && !usd ? extended : null;
+	const extSession = ext?.session ?? null;
+	const amber = theme?.amber;
+	// Taken away when the price is gone, the session changes, or the series it sits on is rebuilt.
+	useEffect(() => {
+		const series = seriesRef.current;
+		if (!series || !extSession) return;
+		return () => {
+			const made = extendedLineRef.current;
+			extendedLineRef.current = null;
+			// After the chart is gone (unmount) there is nothing to remove it from.
+			if (made && chartRef.current) series.removePriceLine(made);
+		};
+	}, [extSession, amber, manager]);
+	// Made on the first quote, moved in place on each one after.
+	useEffect(() => {
+		const series = seriesRef.current;
+		if (!series || !amber || !ext) return;
+		const at = { price: ext.price, title: EXTENDED_TITLES[ext.session] };
+		if (extendedLineRef.current) extendedLineRef.current.applyOptions(at);
+		else extendedLineRef.current = series.createPriceLine({ ...at, color: amber, lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: true });
+	}, [ext, amber, manager]);
+
 	// A line's last value on the chart, for the sheet to start from: the price, or an indicator's.
 	const lastValue = (line: string) => {
 		if (line === "price") return last?.close ?? null;
@@ -831,6 +871,11 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 									)}
 									{change !== null && Number.isFinite(change) && (
 										<span className={change >= 0 ? "text-ok" : "text-danger"}>{formatNumber(change * 100, { sign: true })} %</span>
+									)}
+									{ext && (
+										<span className="text-warn">
+											{EXTENDED_TITLES[ext.session]} {priceText(ext.price)} {formatNumber(ext.changePct * 100, { sign: true })} %
+										</span>
 									)}
 								</div>
 								{/* Chips that wrap, so on a phone three comparisons take two lines, not three. */}

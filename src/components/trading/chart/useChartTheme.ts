@@ -15,6 +15,8 @@ export interface ChartTheme {
 	up: string;
 	down: string;
 	accent: string;
+	/** The pre- and post-market line (odd/tasks/extended-hours.md S2). */
+	amber: string;
 	font: string;
 }
 
@@ -42,6 +44,7 @@ function readTheme(): ChartTheme {
 		up: CANDLE_COLORS.up,
 		down: CANDLE_COLORS.down,
 		accent: v("--accent"),
+		amber: v("--amber"),
 		font: getComputedStyle(document.body).fontFamily,
 	};
 }

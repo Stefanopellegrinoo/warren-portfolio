@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, X, Loader2 } from "lucide-react";
+import { Plus, X, Loader2, ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import { toast } from "sonner";
 import { fetchTickers24h } from "@/lib/binance/rest";
 import { getBinanceWS } from "@/lib/binance/ws";
@@ -17,6 +17,7 @@ import { getProviderForSymbol } from "@/lib/market-data/resolver";
 import { addSymbolToCurrentWatchlist } from "@/lib/warren/watchlist";
 import { requestErrorMessage } from "@/lib/request-errors";
 import { LoadError } from "@/components/ons/ui";
+import { nextSort, sortSymbols, type WatchlistSort, type WatchlistSortKey } from "@/lib/watchlist-sort";
 import { WatchlistSelector } from "./WatchlistSelector";
 import { useWatchlistExtras } from "./useWatchlistExtras";
 
@@ -24,6 +25,8 @@ interface Row {
   symbol: string;
   price: number;
   pct: number;
+  /** The pre- or post-market % (percent units, like `pct`); null in the regular session and for crypto (odd/tasks/extended-hours.md S3). */
+  ext: number | null;
 }
 
 interface WatchlistProps {
@@ -40,6 +43,9 @@ export function Watchlist({ onSelectSymbol, width = 0 }: WatchlistProps = {}) {
   const setSymbol = useChartStore((s) => s.setSymbol);
   const removeFromLocal = useChartStore((s) => s.removeFromWatchlist);
   const openSymbolDialog = useChartStore((s) => s.setSymbolDialogOpen);
+  const sort = useChartStore((s) => s.watchlistSort);
+  const setSort = useChartStore((s) => s.setWatchlistSort);
+  const onSort = (k: WatchlistSortKey) => setSort(nextSort(sort, k));
 
   const [currentList, setCurrentList] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -52,8 +58,13 @@ export function Watchlist({ onSelectSymbol, width = 0 }: WatchlistProps = {}) {
   const cartera = activeId === CARTERA_LIST_ID;
   const [positions, setPositions] = useState<Position[]>([]);
   const extras = useWatchlistExtras(currentList, width);
-  // Fixed columns once the line is there, so every row's line and price sit under their headers.
-  const cols = extras.showLine ? "grid-cols-[minmax(0,1fr)_76px_96px_76px]" : "grid-cols-[minmax(0,1fr)_auto_76px]";
+  // Fixed columns once the line is there, so every row's line and price sit under their headers; the
+  // price gave 16 px of its 96 to the Ext column (odd/tasks/extended-hours.md S3).
+  const cols = extras.showLine
+    ? "grid-cols-[minmax(0,1fr)_76px_80px_76px_76px]"
+    : extras.showExt ? "grid-cols-[minmax(0,1fr)_auto_76px_76px]" : "grid-cols-[minmax(0,1fr)_auto_76px]";
+  // A sort by Ext while its column is hidden would order the list by something not on screen.
+  const shownSort = sort?.key === "ext" && !extras.showExt ? null : sort;
 
   // Effect A — local watchlist mirror (only when no activeId)
   useEffect(() => {
@@ -119,7 +130,7 @@ export function Watchlist({ onSelectSymbol, width = 0 }: WatchlistProps = {}) {
           setRows((prev) => {
             const next = { ...prev };
             tickers.forEach((t) => {
-              next[t.symbol] = { symbol: t.symbol, price: t.lastPrice, pct: t.priceChangePercent };
+              next[t.symbol] = { symbol: t.symbol, price: t.lastPrice, pct: t.priceChangePercent, ext: null };
             });
             return next;
           });
@@ -139,7 +150,7 @@ export function Watchlist({ onSelectSymbol, width = 0 }: WatchlistProps = {}) {
               setTimeout(() => setFlash((f) => ({ ...f, [tick.symbol]: null })), 300);
             }
           }
-          return { ...prev, [tick.symbol]: { symbol: tick.symbol, price: tick.close, pct: tick.pct } };
+          return { ...prev, [tick.symbol]: { symbol: tick.symbol, price: tick.close, pct: tick.pct, ext: null } };
         });
       });
       teardowns.push(unsub);
@@ -154,9 +165,9 @@ export function Watchlist({ onSelectSymbol, width = 0 }: WatchlistProps = {}) {
           const data = await res.json();
           setRows((prev) => {
             const next = { ...prev };
-            data.forEach((q: { ticker: string; price: number | null; change_pct: number }) => {
+            data.forEach((q: { ticker: string; price: number | null; change_pct: number; extended?: { change_pct: number } | null }) => {
               if (q.price === null) return // unavailable: keep the last row
-              next[q.ticker] = { symbol: q.ticker, price: q.price, pct: q.change_pct ?? 0 };
+              next[q.ticker] = { symbol: q.ticker, price: q.price, pct: q.change_pct ?? 0, ext: q.extended?.change_pct ?? null };
             });
             return next;
           });
@@ -221,11 +232,13 @@ export function Watchlist({ onSelectSymbol, width = 0 }: WatchlistProps = {}) {
         )}
       </div>
 
-      <div aria-hidden="true" className={cn("grid gap-2 border-b border-line py-1.5 pl-4 pr-10 text-xs text-ink-3", cols)}>
-        <span>Símbolo</span>
-        {extras.showLine && <span className="text-center">1 mes</span>}
-        <span className="text-right">Precio</span>
-        <span className="text-right">Var. día</span>
+      {/* Sortable headers, as Mercado's (odd/tasks/extended-hours.md S4); "1 mes" is not. */}
+      <div role="row" className={cn("grid gap-2 border-b border-line py-1.5 pl-4 pr-10 text-xs text-ink-3 max-[819px]:py-0", cols)}>
+        <SortHeader k="symbol" label="Símbolo" sort={sort} onSort={onSort} />
+        {extras.showLine && <span role="columnheader" className="self-center text-center">1 mes</span>}
+        <SortHeader k="price" label="Precio" sort={sort} onSort={onSort} end />
+        <SortHeader k="pct" label="Var. día" sort={sort} onSort={onSort} end />
+        {extras.showExt && <SortHeader k="ext" label="Ext" sort={sort} onSort={onSort} end />}
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
@@ -242,9 +255,9 @@ export function Watchlist({ onSelectSymbol, width = 0 }: WatchlistProps = {}) {
         ) : (
           <ul aria-label="Símbolos de la lista">
             {cartera && currentList.length > 0 && (
-              <PortfolioRow active={symbol === PORTFOLIO_SYMBOL} pct={portfolioDayChangePct(positions)} onSelect={() => { setSymbol(PORTFOLIO_SYMBOL); onSelectSymbol?.(PORTFOLIO_SYMBOL); }} />
+              <PortfolioRow ext={extras.showExt} active={symbol === PORTFOLIO_SYMBOL} pct={portfolioDayChangePct(positions)} onSelect={() => { setSymbol(PORTFOLIO_SYMBOL); onSelectSymbol?.(PORTFOLIO_SYMBOL); }} />
             )}
-            {currentList.map((s) => {
+            {sortSymbols(currentList, rows, shownSort).map((s) => {
               const row = rows[s];
               const isActive = s === symbol;
               const f = flash[s];
@@ -278,6 +291,9 @@ export function Watchlist({ onSelectSymbol, width = 0 }: WatchlistProps = {}) {
                     <span className="flex justify-end">
                       {row ? <Chip tone={toneOf(row.pct)}>{formatPct(row.pct / 100)}</Chip> : <span className="text-ink-3">—</span>}
                     </span>
+                    {extras.showExt && <span className="flex justify-end">
+                      {row?.ext != null ? <Chip tone={toneOf(row.ext)}>{formatPct(row.ext / 100)}</Chip> : <span className="text-ink-3">—</span>}
+                    </span>}
                   </button>
                   {/* Cartera has nothing to remove, but keeps the column so prices sit under their headers. */}
                   {cartera && <span data-remove-slot aria-hidden="true" className="mx-1 h-8 w-8 flex-none max-[819px]:h-11 max-[819px]:w-11" />}
@@ -316,6 +332,24 @@ export function Watchlist({ onSelectSymbol, width = 0 }: WatchlistProps = {}) {
   );
 }
 
+function SortHeader({ k, label, sort, onSort, end }: { k: WatchlistSortKey; label: string; sort: WatchlistSort | null; onSort: (k: WatchlistSortKey) => void; end?: boolean }) {
+  const dir = sort?.key === k ? sort.dir : null;
+  const Arrow = !dir ? ArrowUpDown : dir === "asc" ? ArrowUp : ArrowDown;
+  return (
+    <span role="columnheader" aria-sort={!dir ? "none" : dir === "asc" ? "ascending" : "descending"} className={cn("flex min-w-0", end && "justify-end")}>
+      <button
+        type="button"
+        aria-label={`Ordenar por ${label}`}
+        onClick={() => onSort(k)}
+        className={cn("inline-flex min-w-0 items-center gap-1 rounded-sm hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring max-[819px]:min-h-11", dir && "text-ink")}
+      >
+        <span className="truncate">{label}</span>
+        <Arrow aria-hidden="true" className={cn("h-3.5 w-3.5 flex-none", !dir && "opacity-50")} strokeWidth={1.5} />
+      </button>
+    </span>
+  );
+}
+
 /** The last month's daily closes as a line, green when it ended up and red when down. */
 function MonthLine({ closes }: { closes: number[] }) {
   const w = 72, h = 24;
@@ -329,7 +363,7 @@ function MonthLine({ closes }: { closes: number[] }) {
 }
 
 /** Mi cartera at the top of Cartera: the stock portfolio as one more asset, with today's change (`pct`: a fraction, 0.01 = 1 %). */
-function PortfolioRow({ active, pct, onSelect }: { active: boolean; pct: number | null; onSelect: () => void }) {
+function PortfolioRow({ ext, active, pct, onSelect }: { ext: boolean; active: boolean; pct: number | null; onSelect: () => void }) {
   return (
     <li className={cn("relative flex items-center border-b border-line hover:bg-hover", active && "bg-hover")}>
       {active && <span aria-hidden="true" className="absolute inset-y-1.5 left-0 w-0.5 rounded bg-accent" />}
@@ -337,7 +371,7 @@ function PortfolioRow({ active, pct, onSelect }: { active: boolean; pct: number 
         type="button"
         aria-current={active || undefined}
         onClick={onSelect}
-        className="grid min-h-10 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_76px] items-center gap-2 py-1.5 pl-4 pr-10 text-left text-[13px] tabular-nums focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring max-[819px]:min-h-11"
+        className={cn("grid min-h-10 min-w-0 flex-1 items-center gap-2 py-1.5 pl-4 pr-10 text-left text-[13px] tabular-nums focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring max-[819px]:min-h-11", ext ? "grid-cols-[minmax(0,1fr)_76px_76px]" : "grid-cols-[minmax(0,1fr)_76px]")}
       >
         <span className="flex min-w-0 flex-col">
           <span className={cn("truncate text-ink", active && "font-semibold")}>Mi cartera</span>
@@ -346,6 +380,8 @@ function PortfolioRow({ active, pct, onSelect }: { active: boolean; pct: number 
         <span className="flex justify-end">
           {pct !== null ? <Chip tone={toneOf(pct)}>{formatPct(pct)}</Chip> : <span className="text-ink-3">—</span>}
         </span>
+        {/* No extended hours for the portfolio: its day % stays under "Var. día". */}
+        {ext && <span className="flex justify-end text-ink-3">—</span>}
       </button>
     </li>
   );

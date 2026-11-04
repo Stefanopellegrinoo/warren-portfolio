@@ -84,13 +84,15 @@ async function drag(el: Element, from: number, to: number) {
 const key = (el: Element, k: string) => act(() => { el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })) })
 
 describe('RightSidebar — the list is resized by dragging its left edge (from 1100 px)', () => {
-  it('starts at 280 px with a focusable vertical separator that says its width and limits', async () => {
-    const { aside, handle, unmount } = await render()
+  // 380 px: the Ext column fits from 375 px (odd/tasks/extended-hours.md S3, owner's choice in L7).
+  it('starts at 380 px with a focusable vertical separator that says its width and limits', async () => {
+    const { aside, handle, row, unmount } = await render()
 
-    expect(aside().style.width).toBe('280px')
+    expect(aside().style.width).toBe('380px')
+    expect([...row.querySelectorAll('[role="columnheader"]')].map((h) => h.textContent)).toContain('Ext')
     expect(handle()!.getAttribute('aria-orientation')).toBe('vertical')
     expect(handle()!.tabIndex).toBe(0)
-    expect(handle()!.getAttribute('aria-valuenow')).toBe('280')
+    expect(handle()!.getAttribute('aria-valuenow')).toBe('380')
     expect(handle()!.getAttribute('aria-valuemin')).toBe('220')
     expect(handle()!.getAttribute('aria-valuemax')).toBe('640')
     expect(handle()!.className).toContain('cursor-col-resize')
@@ -103,8 +105,8 @@ describe('RightSidebar — the list is resized by dragging its left edge (from 1
 
     await drag(handle()!, 1000, 900)
 
-    expect(aside().style.width).toBe('380px')
-    expect(handle()!.getAttribute('aria-valuenow')).toBe('380')
+    expect(aside().style.width).toBe('480px')
+    expect(handle()!.getAttribute('aria-valuenow')).toBe('480')
     expect(Element.prototype.setPointerCapture).toHaveBeenCalledWith(1)
     unmount()
   })
@@ -137,10 +139,10 @@ describe('RightSidebar — the list is resized by dragging its left edge (from 1
     const { aside, handle, unmount } = await render()
 
     key(handle()!, 'ArrowLeft')
-    expect(aside().style.width).toBe('296px')
+    expect(aside().style.width).toBe('396px')
     key(handle()!, 'ArrowRight')
     key(handle()!, 'ArrowRight')
-    expect(aside().style.width).toBe('264px')
+    expect(aside().style.width).toBe('364px')
     for (let i = 0; i < 10; i++) key(handle()!, 'ArrowRight')
     expect(aside().style.width).toBe('220px')
     unmount()
@@ -149,34 +151,35 @@ describe('RightSidebar — the list is resized by dragging its left edge (from 1
   it('the width is remembered on this device and comes back on the next visit', async () => {
     const first = await render()
     await drag(first.handle()!, 1000, 850)
-    expect(localStorage.getItem(WIDTH_KEY)).toBe('430')
+    expect(localStorage.getItem(WIDTH_KEY)).toBe('530')
     first.unmount()
 
     const again = await render()
-    expect(again.aside().style.width).toBe('430px')
+    expect(again.aside().style.width).toBe('530px')
     again.unmount()
   })
 
-  it('a broken or out-of-range remembered width falls back to 280 px', async () => {
+  it('a broken or out-of-range remembered width falls back to 380 px', async () => {
     localStorage.setItem(WIDTH_KEY, 'wide')
     const { aside, unmount } = await render()
 
-    expect(aside().style.width).toBe('280px')
+    expect(aside().style.width).toBe('380px')
     unmount()
   })
 
-  it('a double click goes back to 280 px, and that is remembered too', async () => {
+  it('a double click goes back to 380 px, and that is remembered too', async () => {
     const { aside, handle, unmount } = await render()
     await drag(handle()!, 1000, 700)
 
     act(() => { handle()!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })) })
 
-    expect(aside().style.width).toBe('280px')
-    expect(localStorage.getItem(WIDTH_KEY)).toBe('280')
+    expect(aside().style.width).toBe('380px')
+    expect(localStorage.getItem(WIDTH_KEY)).toBe('380')
     unmount()
   })
 
   it('a wider list shows the asset name, fetched only once it is that wide', async () => {
+    localStorage.setItem(WIDTH_KEY, '300')
     const { row, handle, unmount } = await render()
     expect(urls.some(u => u.startsWith('/api/ticker/search') || u.startsWith('/api/klines'))).toBe(false)
     expect(row.textContent).not.toContain('Apple Inc.')
@@ -209,7 +212,7 @@ describe('RightSidebar — below 1100 px the list is full width in its own view'
     expect(handle()).toBeNull()
     expect(aside().style.width).toBe('')
     expect(aside().style.maxWidth).toBe('')
-    expect(aside().className).toContain('w-[280px]')
+    expect(aside().className).toContain('w-[380px]')
     expect(aside().className).toContain('max-[1099px]:w-full')
     unmount()
   })

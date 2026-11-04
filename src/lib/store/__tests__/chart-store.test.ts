@@ -120,3 +120,26 @@ describe('chart store: minimized panes', () => {
     expect([s().indicators.obv, s().hidden.obv, s().minimized.obv]).toEqual([false, false, false])
   })
 })
+
+// odd/tasks/extended-hours.md S4: one watchlist sort for every list, kept on this device.
+describe('chart store: the watchlist sort', () => {
+  it('starts off, and a device saved before it loads with what it had and no sort', async () => {
+    data.set(KEY, JSON.stringify({ state: { symbol: 'MSFT', watchlist: ['MSFT', 'AAPL'], activeWatchlistId: 'w1', compareRange: '3M' }, version: 0 }))
+
+    await useChartStore.persist.rehydrate()
+
+    const s = useChartStore.getState()
+    expect([s.symbol, s.watchlist, s.activeWatchlistId, s.compareRange]).toEqual(['MSFT', ['MSFT', 'AAPL'], 'w1', '3M'])
+    expect(s.watchlistSort).toBeNull()
+  })
+
+  it('a sort is kept on this device, and clearing it too', async () => {
+    useChartStore.getState().setWatchlistSort({ key: 'ext', dir: 'desc' })
+    expect(JSON.parse(data.get(KEY)!).state.watchlistSort).toEqual({ key: 'ext', dir: 'desc' })
+    await useChartStore.persist.rehydrate()
+    expect(useChartStore.getState().watchlistSort).toEqual({ key: 'ext', dir: 'desc' })
+
+    useChartStore.getState().setWatchlistSort(null)
+    expect(JSON.parse(data.get(KEY)!).state.watchlistSort).toBeNull()
+  })
+})
