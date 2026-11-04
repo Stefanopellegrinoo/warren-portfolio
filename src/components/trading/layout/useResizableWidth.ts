@@ -5,10 +5,10 @@ import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, 
 /**
  * The list's width beside the chart (odd/tasks/chart-pro-redesign.md S5): its left edge is dragged,
  * 220–640 px, never leaving the chart under 420 px, kept per device; a double click goes back to
- * 280 px. Below 1100 px the list is full width in its own view: nothing to drag, only its width read.
+ * 380 px, where the Ext column fits (odd/tasks/extended-hours.md S3). Below 1100 px the list is full width in its own view: nothing to drag, only its width read.
  */
 const STORAGE_KEY = "warren:watchlist-width";
-const DEFAULT_PX = 280;
+const DEFAULT_PX = 380;
 const MIN_PX = 220;
 const MAX_PX = 640;
 const KEY_STEP_PX = 16;
