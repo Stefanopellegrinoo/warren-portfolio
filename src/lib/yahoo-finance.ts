@@ -4,6 +4,7 @@
  */
 
 import { getRedis, isRedisReady, ensureRedisConnected } from './redis'
+import { completeBars, type ChartResult } from './market-data/daily-bars'
 import type { Quote } from '@/types'
 import { getCCLRate } from './currency'
 import { alertJobFailure } from './job-health'
@@ -470,11 +471,8 @@ export async function fetchKlines(
     // Map interval to Yahoo Finance format
     const yfInterval = interval === '1w' ? '1wk' : '1d'
 
-    const result = await yahooFinance.historical(symbol, {
-      period1,
-      period2,
-      interval: yfInterval
-    })
+    // chart(), not historical(): see completeBars (one incomplete bar used to empty the whole series).
+    const result = completeBars(await yahooFinance.chart(symbol, { period1, period2, interval: yfInterval }) as ChartResult)
 
     // 2. Normalize to USD if it's Argentine stock (BCBA)
     let hCcl: Map<string, number> | null = null
