@@ -39,7 +39,7 @@ export default function ShellSearch({ inputRef, expanded = false, onCollapse = (
   inputRef?: React.RefObject<HTMLInputElement>
   expanded?: boolean
   onCollapse?: () => void
-  /** The Resumen's wider column (dashboard/page.tsx); every other page uses PAGE (components/ons/ui.tsx). */
+  /** The wide column (the Resumen, Mercado: WIDE_PAGE); every other page uses PAGE (components/ons/ui.tsx). */
   wide?: boolean
 }) {
   const router = useRouter()

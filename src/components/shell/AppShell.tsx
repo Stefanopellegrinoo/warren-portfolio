@@ -27,6 +27,8 @@ const iconHidden = 'min-[820px]:[[data-menu=icons]_&]:hidden'
 // Gráficos keeps the whole phone screen for the chart: its own bar carries the menu button
 // (odd/tasks/grafico-espacio.md S2), so the shell draws no bar there.
 const OWN_PHONE_BAR = ['/trading']
+// Pages on the wide column (dashboard/page.tsx, components/ons/ui.tsx WIDE_PAGE): the search lines up with them.
+const WIDE_PAGES = ['/dashboard', '/mercado']
 const ShellMenu = createContext<{ open: boolean; openMenu: (from: HTMLElement) => void }>({ open: false, openMenu: () => {} })
 export const useShellMenu = () => useContext(ShellMenu)
 
@@ -298,7 +300,7 @@ export default function AppShell({ children, pathnameForTest, iconMenu: asked = 
       <AssetSearch open={searchOpen} onClose={() => setSearchOpen(false)} held={known ? heldOf(known) : askedHeld} />
 
       <main id="main" className="min-w-0">
-        {!ownPhoneBar && <ShellSearch inputRef={findInput} expanded={findOn === pathname} onCollapse={() => setFindOn(null)} wide={current === '/dashboard'} />}
+        {!ownPhoneBar && <ShellSearch inputRef={findInput} expanded={findOn === pathname} onCollapse={() => setFindOn(null)} wide={WIDE_PAGES.includes(current ?? '')} />}
         <ShellMenu.Provider value={{ open, openMenu }}>{children}</ShellMenu.Provider>
       </main>
     </div>

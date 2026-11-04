@@ -7,6 +7,8 @@ import { fmtPct } from '@/lib/on-format'
 // Shared pieces of the ON pages, on the same tokens and idioms as the Resumen.
 
 export const PAGE = 'mx-auto w-full max-w-[1240px] px-10 pb-16 pt-8 max-[819px]:px-4 max-[819px]:pb-24 max-[819px]:pt-5'
+/** The Resumen's wide column (dashboard/page.tsx), for pages whose table needs the room. */
+export const WIDE_PAGE = 'mx-auto w-full max-w-[1680px] px-4 pb-24 pt-5 sm:px-6 min-[820px]:px-8 min-[820px]:pb-16 min-[820px]:pt-8 xl:px-10'
 
 export const field =
   'min-h-9 w-full rounded-md border border-line-strong bg-surface px-3 text-sm text-ink placeholder:text-ink-3 hover:border-ink-3 ' +

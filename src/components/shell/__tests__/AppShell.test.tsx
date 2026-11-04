@@ -67,6 +67,7 @@ describe('AppShell', () => {
   it('lines the search up with the page below it: the Resumen column is wider than the rest', () => {
     const column = (path: string) => render(path).match(/<div class="([^"]*)"><div role="search"/)?.[1] ?? ''
     expect(column('/dashboard')).toContain('max-w-[1680px]')
+    expect(column('/mercado')).toContain('max-w-[1680px]')
     expect(column('/history')).toContain('max-w-[1240px]')
   })
 

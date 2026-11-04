@@ -3,7 +3,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { ListActions, ListStar, NewList } from '../ListControls'
 import { forgetCached, setCachedValue } from '@/lib/client-cache'
-import { itemsKey } from '../MarketPage'
+import { itemsKey } from '../keys'
 import type { ViewRow } from '@/lib/market-view'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -16,7 +16,6 @@ afterEach(async () => {
   forgetCached()
 })
 
-const symbols = { locals: new Set(['GGAL']), cedears: new Set(['AAPL']) }
 const ggal: ViewRow = { key: 'BCBA:GGAL', ticker: 'GGAL', stored: 'BCBA:GGAL', name: 'Grupo Galicia', price: 6000, changePct: 0.03, note: null, line: { kind: 'local', line: 'GGAL' } }
 const lists = [{ id: 'l1', name: 'Bancos', item_count: 2 }, { id: 'l2', name: 'Energía', item_count: 0 }]
 
@@ -52,7 +51,7 @@ const box = (name: string) => [...document.body.querySelectorAll('label')].find(
 describe('ListStar', () => {
   it('shows which of the user’s lists hold the asset, either spelling counted', async () => {
     stubFetch({ l1: ['GGAL.BA'] })
-    const el = await mount(<ListStar row={ggal} lists={lists} symbols={symbols} onChanged={vi.fn()} />)
+    const el = await mount(<ListStar row={ggal} lists={lists} onChanged={vi.fn()} />)
     await click(el.querySelector('button')!)
     expect(box('Bancos').checked).toBe(true)
     expect(box('Energía').checked).toBe(false)
@@ -61,7 +60,7 @@ describe('ListStar', () => {
   it('adding writes the symbol Gráficos uses for a BYMA share', async () => {
     const fetchMock = stubFetch({ l1: [] })
     const onChanged = vi.fn()
-    const el = await mount(<ListStar row={ggal} lists={lists} symbols={symbols} onChanged={onChanged} />)
+    const el = await mount(<ListStar row={ggal} lists={lists} onChanged={onChanged} />)
     await click(el.querySelector('button')!)
     await click(box('Energía'))
     const [[url, init]] = calls(fetchMock, 'POST')
@@ -72,7 +71,7 @@ describe('ListStar', () => {
 
   it('removing deletes every stored spelling of the asset in that list, as stored', async () => {
     const fetchMock = stubFetch({ l1: ['GGAL.BA', 'BCBA:GGAL', 'GGAL'] })
-    const el = await mount(<ListStar row={ggal} lists={lists} symbols={symbols} onChanged={vi.fn()} />)
+    const el = await mount(<ListStar row={ggal} lists={lists} onChanged={vi.fn()} />)
     await click(el.querySelector('button')!)
     await click(box('Bancos'))
     expect(calls(fetchMock, 'DELETE').map(([u]) => u)).toEqual([
@@ -84,7 +83,7 @@ describe('ListStar', () => {
   it('a star already known as held reads filled before opening', async () => {
     stubFetch()
     setCachedValue(itemsKey('l1'), ['BCBA:GGAL'])
-    const el = await mount(<ListStar row={ggal} lists={lists} symbols={symbols} onChanged={vi.fn()} />)
+    const el = await mount(<ListStar row={ggal} lists={lists} onChanged={vi.fn()} />)
     expect(el.querySelector('button')!.getAttribute('aria-label')).toBe('GGAL está en tus listas: cambiar')
   })
 })

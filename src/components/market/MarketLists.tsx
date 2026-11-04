@@ -1,8 +1,9 @@
 'use client'
 
-import type { ReactNode } from 'react'
+import { useState } from 'react'
+import { Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { field, label as labelCls } from '@/components/ons/ui'
+import { NewList } from './ListControls'
 
 export interface ListEntry { key: string; name: string; count: number | null }
 
@@ -11,56 +12,66 @@ interface Props {
   mine: ListEntry[]
   selected: string
   onSelect: (key: string) => void
-  /** Under the user's lists: "Nueva lista" (odd/tasks/market-page.md T5). */
-  footer?: ReactNode
+  onCreated: (id: string, name: string) => void
 }
 
-// The look of the app's own menu (components/shell/AppShell.tsx): the same rows and section titles.
-const ITEM = 'relative flex min-h-8 w-full items-center justify-between gap-2 rounded-md px-2 text-left text-sm text-ink-2 hover:bg-hover hover:text-ink'
-const SECTION = 'mb-1 px-2 text-xs font-medium uppercase tracking-[0.06em] text-ink-3'
+const SECTION = 'px-2.5 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-[0.06em] text-ink-3'
+const COUNT = 'flex-none font-mono text-[11px] tabular-nums'
 
 function Group({ title, entries, selected, onSelect }: Pick<Props, 'selected' | 'onSelect'> & { title: string; entries: ListEntry[] }) {
   return (
     <div>
       <p className={SECTION}>{title}</p>
-      <ul className="grid gap-0.5">
-        {entries.map((e) => (
-          <li key={e.key}>
-            <button type="button" onClick={() => onSelect(e.key)} aria-current={e.key === selected ? 'true' : undefined}
-              className={cn(ITEM, e.key === selected && 'bg-hover font-medium text-ink')}>
-              <span className="truncate">{e.name}</span>
-              {e.count !== null && <span className="flex-none text-xs tabular-nums text-ink-3">{e.count}</span>}
-            </button>
-          </li>
-        ))}
+      <ul className="grid grid-cols-[minmax(0,1fr)] gap-px">
+        {entries.map((e) => {
+          const on = e.key === selected
+          return (
+            <li key={e.key}>
+              <button type="button" onClick={() => onSelect(e.key)} aria-current={on ? 'true' : undefined}
+                className={cn('flex h-8 w-full items-center justify-between gap-2 rounded-md px-2.5 text-left text-sm',
+                  on ? 'bg-accent-soft font-medium text-accent-ink' : 'text-ink-2 hover:bg-hover hover:text-ink')}>
+                <span className="truncate">{e.name}</span>
+                {e.count !== null && <span className={cn(COUNT, on ? 'text-accent-ink' : 'text-ink-3')}>{e.count}</span>}
+              </button>
+            </li>
+          )
+        })}
       </ul>
     </div>
   )
 }
 
-/** Layout B: the lists in a column at 1080 px and up, a dropdown below it. */
-export default function MarketLists({ market, mine, selected, onSelect, footer }: Props) {
+/** S11: a compact card panel at 1080 px and up; below it, pills that scroll sideways inside their row. */
+export default function MarketLists({ market, mine, selected, onSelect, onCreated }: Props) {
+  const [creating, setCreating] = useState(false)
   const all = [...market, ...mine]
   return (
     <>
-      <nav aria-label="Listas" className="grid content-start gap-5 max-[1079px]:hidden">
+      <nav aria-label="Listas" className="sticky top-3 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 rounded-lg border border-line bg-surface p-1.5 max-[1079px]:hidden">
         <Group title="Mercado" entries={market} selected={selected} onSelect={onSelect} />
-        <div className="grid gap-1">
-          <Group title="Mis listas" entries={mine} selected={selected} onSelect={onSelect} />
-          {footer}
-        </div>
+        <hr className="mx-1 border-line" />
+        <Group title="Mis listas" entries={mine} selected={selected} onSelect={onSelect} />
+        <NewList onCreated={onCreated} />
       </nav>
-      <div className="grid gap-2 min-[1080px]:hidden">
-        <div className="flex min-w-0 items-center gap-2">
-          <label htmlFor="market-list" className={cn(labelCls, 'flex-none')}>Lista</label>
-          <select id="market-list" className={cn(field, 'min-w-0 flex-1')} value={all.some((e) => e.key === selected) ? selected : ''}
-            onChange={(e) => onSelect(e.target.value)}>
-            {!all.some((e) => e.key === selected) && <option value="" disabled>Cargando…</option>}
-            <optgroup label="Mercado">{market.map((e) => <option key={e.key} value={e.key}>{e.name}</option>)}</optgroup>
-            <optgroup label="Mis listas">{mine.map((e) => <option key={e.key} value={e.key}>{e.name}{e.count !== null ? ` (${e.count})` : ''}</option>)}</optgroup>
-          </select>
+      <div className="grid min-w-0 gap-2 min-[1080px]:hidden">
+        <div role="group" aria-label="Elegí una lista" className="flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none]">
+          {all.map((e) => {
+            const on = e.key === selected
+            return (
+              <button key={e.key} type="button" aria-pressed={on} onClick={() => onSelect(e.key)}
+                className={cn('flex h-11 flex-none items-center gap-1.5 rounded-full border px-3.5 text-[13.5px]',
+                  on ? 'border-transparent bg-accent-soft font-medium text-accent-ink' : 'border-line bg-surface text-ink-2')}>
+                {e.name}
+                {e.count !== null && <span className={cn(COUNT, on ? 'text-accent-ink' : 'text-ink-3')}>{e.count}</span>}
+              </button>
+            )
+          })}
+          <button type="button" aria-label="Nueva lista" aria-expanded={creating} onClick={() => setCreating((c) => !c)}
+            className="grid h-11 w-11 flex-none place-items-center rounded-full border border-line bg-surface text-ink-2">
+            <Plus className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+          </button>
         </div>
-        {footer}
+        {creating && <NewList formOnly onClose={() => setCreating(false)} onCreated={onCreated} />}
       </div>
     </>
   )
