@@ -152,26 +152,29 @@ describe('scaleToBase', () => {
 })
 
 describe('barChange', () => {
+  // odd/tasks/chart-display.md S2: one % per bar, against the previous close, as the header reads it.
   const bar = (time: number, open: number, close: number) => ({ time, open, close })
-  const candles = [bar(1, 100, 110), bar(2, 110, 99), bar(3, 99, 120)]
+  // VST: 2026-10-30 closed 138.37, 2026-11-02 opened 140 and closed 134.61, 2026-11-03 opened 135.995 and closed 139.59.
+  const candles = [bar(1, 136.95, 138.37), bar(2, 140, 134.61), bar(3, 135.995, 139.59)]
   // Mi cartera: one value per day, drawn as flat bars (open = close).
   const flat = [bar(1, 100, 100), bar(2, 104, 104), bar(3, 101.92, 101.92)]
 
-  it('the last bar reads its change against the bar before it', () => {
-    expect(barChange(candles, candles[2], false)).toBeCloseTo(120 / 99 - 1, 12)
-    expect(barChange(flat, flat[2], true)).toBeCloseTo(-0.02, 12)
+  it('the last candle reads +3,70 %, hovered or not, against the previous close (not +2,64 % open to close)', () => {
+    expect(barChange(candles, candles[2])).toBeCloseTo(139.59 / 134.61 - 1, 12)
+    expect(barChange(candles, { ...candles[2] })).toBeCloseTo(139.59 / 134.61 - 1, 12)
   })
 
-  it('a hovered bar of the flat portfolio series reads its change against the bar before it, not 0', () => {
-    expect(barChange(flat, flat[1], true)).toBeCloseTo(0.04, 12)
+  it('a hovered older candle reads its change against the close before it', () => {
+    expect(barChange(candles, candles[1])).toBeCloseTo(134.61 / 138.37 - 1, 12)
   })
 
-  it('the first bar of the flat series has no change to read', () => {
-    expect(barChange(flat, flat[0], true)).toBeNull()
+  it('the flat portfolio series reads the same way', () => {
+    expect(barChange(flat, flat[1])).toBeCloseTo(0.04, 12)
+    expect(barChange(flat, flat[2])).toBeCloseTo(-0.02, 12)
   })
 
-  it('a hovered candle keeps reading its own move, open to close, as before', () => {
-    expect(barChange(candles, candles[1], false)).toBeCloseTo(99 / 110 - 1, 12)
-    expect(barChange(candles, null, false)).toBeNull()
+  it('the first bar has no previous close: no %', () => {
+    expect(barChange(candles, candles[0])).toBeNull()
+    expect(barChange(candles, null)).toBeNull()
   })
 })

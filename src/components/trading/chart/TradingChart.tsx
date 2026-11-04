@@ -769,7 +769,7 @@ export function TradingChart({ symbol, timeframe, phoneBar = null }: { symbol: s
 
 	const drawnLast = drawn.at(-1) ?? null;
 	const shown = hover ?? drawnLast;
-	const change = barChange(drawn, shown, line);
+	const change = barChange(drawn, shown);
 	const at = hover?.time ?? null;
 	const comparingNow = comparing.length > 0;
 	const from = base?.time ?? null;
