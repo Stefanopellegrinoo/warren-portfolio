@@ -437,6 +437,19 @@ describe('TradingChart legends (S1, S7)', () => {
     expect(ohlc().textContent).toContain('04/01/70')
     unmount()
   })
+
+  // odd/tasks/chart-display.md S2: the flat Mi cartera line reads its % as the candles do.
+  it('Mi cartera reads each day\'s % against the day before, hovered or not', async () => {
+    bars.candles = [{ time: 86400, open: 100, high: 100, low: 100, close: 100 }, { time: 86400 * 2, open: 103, high: 103, low: 103, close: 103 }, { time: 86400 * 3, open: 101.97, high: 101.97, low: 101.97, close: 101.97 }]
+    const { unmount } = await render('__portfolio__')
+    const ohlc = () => priceLegend().querySelector<HTMLElement>('[data-ohlc]')!
+
+    expect(ohlc().textContent).toContain('−1,00 %')
+    const onMove = chart.subscribeCrosshairMove.mock.calls.at(-1)![0] as (p: unknown) => void
+    act(() => onMove({ seriesData: new Map([[series, { time: 86400 * 2, value: 103 }]]) }))
+    expect(ohlc().textContent).toContain('+3,00 %')
+    unmount()
+  })
 })
 
 // odd/tasks/chart-pro-redesign.md S6: the range chips and the price scale's mode under the chart, and the credit.

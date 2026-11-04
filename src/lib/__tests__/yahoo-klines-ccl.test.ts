@@ -141,3 +141,19 @@ describe('fetchKlines — a bar Yahoo sends incomplete', () => {
     expect(rows.map((r) => r.date)).toEqual(['2026-11-02'])
   })
 })
+
+describe('fetchKlines — Yahoo\'s loose live point (odd/tasks/chart-display.md S3)', () => {
+  it('weekly: the last trade after the current week folds into it, as the chart reads it', async () => {
+    const { fetchKlines } = await import('../yahoo-finance')
+    mockBars.mockResolvedValue([
+      { ...candle('2026-10-26'), date: new Date('2026-10-26T04:00:00Z') },
+      { ...candle('2026-11-02'), date: new Date('2026-11-02T05:00:00Z') },
+      { ...candle('2026-11-03'), date: new Date('2026-11-03T21:00:03Z'), close: 5300 },
+    ])
+
+    const rows = await fetchKlines('AAPL', '1w', new Date('2026-10-20'), new Date('2026-11-04'))
+
+    expect(rows.map((r) => r.date)).toEqual(['2026-10-26', '2026-11-02'])
+    expect(rows[1].close).toBe(5300)
+  })
+})

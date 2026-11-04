@@ -166,7 +166,9 @@ describe('YahooProvider.getCandles — intraday', () => {
 
   it('drops the empty bars chart() returns for gaps', async () => {
     const { YahooProvider } = await import('./yahoo')
-    mockChart.mockResolvedValue({ quotes: [bar('2026-10-20T14:30:00Z', null), bar('2026-10-20T14:45:00Z')] })
+    // Yahoo pads a gap with a bar whose every price is null.
+    const pad = { date: new Date('2026-10-20T14:30:00Z'), open: null, high: null, low: null, close: null, volume: null }
+    mockChart.mockResolvedValue({ quotes: [pad, bar('2026-10-20T14:45:00Z')] })
 
     const candles = await new YahooProvider().getCandles('AAPL', '1h', new Date('2026-09-01'))
 
@@ -190,6 +192,37 @@ describe('YahooProvider.getCandles — intraday', () => {
     mockChart.mockResolvedValue({ quotes: [bar('2026-10-20T15:00:00Z', 3000), bar('2026-10-21T15:00:00Z', 3000)] })
 
     await expect(new YahooProvider().getCandles('BCBA:GGAL', '15m', new Date('2026-10-01'))).rejects.toThrow(/No historical CCL rate/)
+  })
+})
+
+describe('YahooProvider.getCandles — Yahoo\'s loose live point (odd/tasks/chart-display.md S3, S5)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('weekly: the last trade after the current week folds into it, no second candle', async () => {
+    const { YahooProvider } = await import('./yahoo')
+    mockChart.mockResolvedValue(daily([
+      { ...makeFakeHistoricalRow('2026-10-26'), date: new Date('2026-10-26T04:00:00Z') },
+      { ...makeFakeHistoricalRow('2026-11-02'), date: new Date('2026-11-02T05:00:00Z'), close: 139.59 },
+      { ...makeFakeHistoricalRow('2026-11-03'), date: new Date('2026-11-03T21:00:03Z'), open: 135.99, close: 139.59 },
+    ]))
+
+    const candles = await new YahooProvider().getCandles('AAPL', '1w')
+
+    expect(candles.map((c) => c.time)).toEqual(['2026-10-26', '2026-11-02'])
+    expect(candles[1].close).toBe(139.59)
+  })
+
+  it('15m: the trailing point updates the current bar instead of drawing a sliver', async () => {
+    const { YahooProvider } = await import('./yahoo')
+    const at = (iso: string, close: number) => ({ date: new Date(iso), open: 136.9, high: 137, low: 136.3, close, volume: 0 })
+    mockChart.mockResolvedValue({ quotes: [at('2026-11-04T15:00:00Z', 136.27), at('2026-11-04T15:15:00Z', 136.4), at('2026-11-04T15:16:19Z', 136.26)] })
+
+    const candles = await new YahooProvider().getCandles('AAPL', '15m', new Date('2026-11-04'))
+
+    expect(candles).toHaveLength(2)
+    expect(candles[1]).toMatchObject({ time: Date.parse('2026-11-04T15:15:00Z') / 1000, close: 136.26, low: 136.26 })
   })
 })
 

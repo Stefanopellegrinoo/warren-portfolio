@@ -49,19 +49,13 @@ export function portfolioDayChangePct(positions: { market_value?: number; day_ch
 }
 
 /**
- * The legend's change for the bar shown: the last bar against the one before it; a hovered candle by its
- * own move (open to close); a hovered bar of a flat series (Mi cartera: open = close) against the bar
- * before it, since its own move is always 0. Null when there is nothing to read.
+ * The legend's % for the bar shown, hovered or not: its close against the previous bar's close, as the
+ * header reads today's change (odd/tasks/chart-display.md S2). Null for the first bar, or nothing shown.
  */
-export function barChange<B extends { time: number; open: number; close: number }>(bars: B[], shown: B | null, flat: boolean): number | null {
+export function barChange<B extends { time: number; close: number }>(bars: B[], shown: B | null): number | null {
   if (!shown) return null
-  const isLast = shown === bars.at(-1)
-  if (isLast || flat) {
-    const prev = isLast ? bars.at(-2)?.close : bars.findLast((b) => b.time < shown.time)?.close
-    if (prev) return (shown.close - prev) / prev
-    if (flat) return null
-  }
-  return (shown.close - shown.open) / shown.open
+  const prev = bars.findLast((b) => b.time < shown.time)?.close
+  return prev ? (shown.close - prev) / prev : null
 }
 
 /**
