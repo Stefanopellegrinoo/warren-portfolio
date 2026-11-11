@@ -83,3 +83,77 @@ describe('refreshLocalPrices', () => {
     expect(fetchFn).not.toHaveBeenCalled()
   })
 })
+
+// After an Argentine holiday the CEDEAR feed's pct_change is measured against the last AR close,
+// several US sessions back. "Today" is then the US session's own change.
+describe('refreshLocalPrices — day change after an Argentine holiday', () => {
+  const HISTORY = 'https://data912.com/historical/cedears/SPY'
+  const bars = (...dates: string[]) => dates.map(date => ({ date, c: 1 }))
+  const us = new Map([['NVDA', { changePercent: 0.027 }], ['AAPL', { changePercent: -0.01 }]])
+  // 12:30 in Buenos Aires.
+  const at = (day: string) => new Date(`${day}T15:30:00Z`)
+
+  it('the first session after an AR holiday takes the US change of the day, and keeps the peso price', async () => {
+    const fetchFn = feeds({
+      [CEDEARS]: [row('NVDA', 12_140, -6.9)],
+      // Last AR session Friday 06/11; Monday 09/11 and Tuesday 10/11 had no AR market.
+      [HISTORY]: bars('2026-11-05', '2026-11-06'),
+    })
+
+    expect(await refreshLocalPrices(['NVDA'], fetchFn as unknown as typeof fetch, us, at('2026-11-11'))).toBe(1)
+
+    const [key, q] = mockCachePrice.mock.calls[0]
+    expect(key).toBe('local:NVDA')
+    expect(q.price).toBe(12_140)
+    expect(q.changePercent).toBeCloseTo(0.027, 12)
+    expect(q.previousClose).toBeCloseTo(12_140 / 1.027, 9)
+    expect(q.change).toBeCloseTo(12_140 - 12_140 / 1.027, 9)
+  })
+
+  it('a normal day keeps the feed change: the last AR session is the previous weekday', async () => {
+    const fetchFn = feeds({
+      [CEDEARS]: [row('NVDA', 12_140, 1.5)],
+      [HISTORY]: bars('2026-11-12', '2026-11-13'),
+    })
+
+    // Monday 16/11: the previous weekday is Friday 13/11, an AR session.
+    await refreshLocalPrices(['NVDA'], fetchFn as unknown as typeof fetch, us, at('2026-11-16'))
+
+    expect(mockCachePrice.mock.calls[0][1].changePercent).toBeCloseTo(0.015, 12)
+  })
+
+  it('a bar of today in the history does not hide the holiday', async () => {
+    const fetchFn = feeds({
+      [CEDEARS]: [row('NVDA', 12_140, -6.9)],
+      [HISTORY]: bars('2026-11-06', '2026-11-18'),
+    })
+
+    // Wednesday 18/11 after a made-up AR holiday on Tuesday 17/11.
+    await refreshLocalPrices(['NVDA'], fetchFn as unknown as typeof fetch, us, at('2026-11-18'))
+
+    expect(mockCachePrice.mock.calls[0][1].changePercent).toBeCloseTo(0.027, 12)
+  })
+
+  it('a failed history request keeps the feed change', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const fetchFn = feeds({ [CEDEARS]: [row('NVDA', 12_140, -6.9)], [HISTORY]: new Error('timeout') })
+
+    await refreshLocalPrices(['NVDA'], fetchFn as unknown as typeof fetch, us, at('2026-11-19'))
+
+    expect(mockCachePrice.mock.calls[0][1].changePercent).toBeCloseTo(-0.069, 12)
+  })
+
+  it('a CEDEAR without a US quote and a local share keep the feed change', async () => {
+    const fetchFn = feeds({
+      [CEDEARS]: [row('MSFT', 28_840, 4)],
+      [STOCKS]: [row('GGAL', 7000, 5)],
+      [HISTORY]: bars('2026-11-06'),
+    })
+
+    await refreshLocalPrices(['MSFT', 'BCBA:GGAL'], fetchFn as unknown as typeof fetch, us, at('2026-11-20'))
+
+    const cached = Object.fromEntries(mockCachePrice.mock.calls.map(([k, q]) => [k, q]))
+    expect(cached['local:MSFT'].changePercent).toBeCloseTo(0.04, 12)
+    expect(cached['local:GGAL'].changePercent).toBeCloseTo(0.05, 12)
+  })
+})

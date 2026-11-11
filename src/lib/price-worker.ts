@@ -243,9 +243,9 @@ export async function evaluatePriceAlerts(
  * Peso-line prices for the Pesos / MEP / Cable views. A data912 failure must
  * never fail the price cycle: it is logged and the last-known prices stay.
  */
-async function refreshPesoPrices(tickers: string[]): Promise<void> {
+async function refreshPesoPrices(tickers: string[], usQuotes: ReadonlyMap<string, { changePercent: number }>): Promise<void> {
   try {
-    const n = await refreshLocalPrices(tickers)
+    const n = await refreshLocalPrices(tickers, fetch, usQuotes)
     console.log(`[Worker] data912 peso prices: ${n} cached`)
   } catch (err) {
     console.error('[Worker] data912 peso prices failed, last-known prices kept:', err)
@@ -470,7 +470,7 @@ const worker = new Worker(
     }
 
     // 3b. PESO-LINE PRICES (data912) — the periodic cycle only
-    if (job.name === PRICE_REPEAT_JOB_NAME && tickers.length > 0) await refreshPesoPrices(tickers)
+    if (job.name === PRICE_REPEAT_JOB_NAME && tickers.length > 0) await refreshPesoPrices(tickers, allPrices)
 
     const missing = [...tickers, ...onTickers].filter(t => !allPrices.has(t))
     if (missing.length > 0) {
@@ -571,7 +571,7 @@ async function main() {
       }
     }
 
-    if (tickers.length) await refreshPesoPrices(tickers)
+    if (tickers.length) await refreshPesoPrices(tickers, allPrices)
 
     // Log tickers that have no price at all (neither LKP nor fresh)
     const missing = [...tickers, ...onTickers].filter(t => !allPrices.has(t))

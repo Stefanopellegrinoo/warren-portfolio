@@ -62,6 +62,8 @@ describe('periodic price cycle and peso-line prices', () => {
     expect(mockRefreshLocal).toHaveBeenCalledTimes(1)
     expect((mockRefreshLocal.mock.calls[0][0] as string[]).sort()).toEqual(['AAPL', 'BCBA:GGAL'])
     expect(mockRefreshLocal.mock.invocationCallOrder[0]).toBeLessThan(mockCacheSummaries.mock.invocationCallOrder[0])
+    // The cycle's US quotes go along: a CEDEAR's day change after an AR holiday.
+    expect((mockRefreshLocal.mock.calls[0][2] as Map<string, { price: number }>).get('AAPL')!.price).toBe(200)
     expect(mockCacheSummaries).toHaveBeenCalledTimes(1)
     expect((mockCacheSummaries.mock.calls[0][0] as Map<string, { price: number }>).get('AAPL')!.price).toBe(200)
   })
