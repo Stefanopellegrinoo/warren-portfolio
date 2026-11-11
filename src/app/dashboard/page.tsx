@@ -107,15 +107,29 @@ export default function DashboardPage() {
     loadNames().then(setNames).catch(() => {})
   }, [])
 
+  // Auto-refresh follows the market: on at the open (the app may have been opened before it),
+  // off at the close. A pause the user chose holds until then.
   useEffect(() => {
+    let wasOpen = isMarketOpen()
     const check = () => {
       const open = isMarketOpen()
       setMarketOpen(open)
-      if (!open) setAutoRefresh(false)
+      if (open !== wasOpen) setAutoRefresh(open)
+      wasOpen = open
+    }
+    // Coming back to the app (a phone freezes a page in the background): fresh numbers at once.
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      check()
+      fetchPositions()
     }
     const timer = setInterval(check, 60_000)
-    return () => clearInterval(timer)
-  }, [])
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [fetchPositions])
 
   function sell(ticker: string) {
     const on = data?.onPositions?.find(p => p.ticker === ticker)
