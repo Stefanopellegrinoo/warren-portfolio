@@ -212,16 +212,29 @@ export async function fetchLocalFeed(url: string, fetchFn: typeof fetch): Promis
  * logged and its symbols keep their last-known price. Returns how many prices
  * were cached.
  */
-export async function refreshLocalPrices(tickers: string[], fetchFn: typeof fetch = fetch): Promise<number> {
+export async function refreshLocalPrices(
+  tickers: string[],
+  fetchFn: typeof fetch = fetch,
+  /** The cycle's US quotes by ticker: a CEDEAR's day change after an AR holiday. */
+  usQuotes?: ReadonlyMap<string, { changePercent: number }>,
+  now: Date = new Date(),
+): Promise<number> {
   const wanted = { cedears: new Set<string>(), stocks: new Set<string>() }
+  // CEDEAR symbol -> its US quote's change of the day.
+  const usChange = new Map<string, number>()
   for (const t of tickers) {
     const isShare = t.trim().toUpperCase().startsWith('BCBA:')
     wanted[isShare ? 'stocks' : 'cedears'].add(localSymbol(t))
+    const pct = usQuotes?.get(t)?.changePercent
+    if (!isShare && typeof pct === 'number' && isFinite(pct)) usChange.set(localSymbol(t), pct)
   }
   const kinds = (Object.keys(wanted) as (keyof typeof wanted)[]).filter(k => wanted[k].size > 0)
   if (kinds.length === 0) return 0
 
-  const feeds = await Promise.allSettled(kinds.map(k => fetchLocalFeed(LOCAL_FEEDS[k], fetchFn)))
+  const [feeds, afterHoliday] = await Promise.all([
+    Promise.allSettled(kinds.map(k => fetchLocalFeed(LOCAL_FEEDS[k], fetchFn))),
+    usChange.size > 0 ? firstSessionAfterArHoliday(now, fetchFn) : Promise.resolve(false),
+  ])
   const updatedAt = new Date().toISOString()
   let cached = 0
 
@@ -234,8 +247,10 @@ export async function refreshLocalPrices(tickers: string[], fetchFn: typeof fetc
     for (const r of feed.value) {
       const price = Number(r.c)
       if (!wanted[kinds[i]].has(r.symbol) || !(price > 0)) continue
-      // FRACTION convention (0.005 = 0.5%), as every LKP writer.
-      const changePercent = Number(r.pct_change) / 100 || 0
+      // FRACTION convention (0.005 = 0.5%), as every LKP writer. After an AR holiday the feed's
+      // change spans every US session since the last AR close; a CEDEAR shows today's US change.
+      const us = kinds[i] === 'cedears' && afterHoliday ? usChange.get(r.symbol) : undefined
+      const changePercent = us ?? (Number(r.pct_change) / 100 || 0)
       const previousClose = price / (1 + changePercent)
       await cachePrice(localPriceKey(r.symbol), {
         ticker: r.symbol, price, change: price - previousClose, changePercent, previousClose, updatedAt,
@@ -244,6 +259,46 @@ export async function refreshLocalPrices(tickers: string[], fetchFn: typeof fetc
     }
   }
   return cached
+}
+
+/** The dated AR closes of one liquid CEDEAR: the AR sessions, holidays included, as BYMA traded them. */
+export const AR_SESSIONS_URL = 'https://data912.com/historical/cedears/SPY'
+
+// Answered once per Buenos Aires day; a failed request is asked again next cycle.
+let afterHolidayMemo: { day: string; value: boolean } | null = null
+
+/**
+ * True when the last AR session before today is older than the previous weekday, so at least one
+ * US session went by without an AR one (an AR holiday). False when the history cannot be read.
+ * ponytail: no US holiday calendar; a US-only holiday never makes this true, it is harmless.
+ */
+export async function firstSessionAfterArHoliday(now: Date, fetchFn: typeof fetch): Promise<boolean> {
+  const today = new Date(now.getTime() - 3 * 3_600_000).toISOString().slice(0, 10)
+  if (afterHolidayMemo?.day === today) return afterHolidayMemo.value
+  try {
+    const res = await fetchFn(AR_SESSIONS_URL, {
+      signal: AbortSignal.timeout(LOCAL_FETCH_TIMEOUT_MS),
+      headers: { 'Accept': 'application/json', 'User-Agent': 'Warren Portfolio/1.0' },
+    })
+    if (!res.ok) throw new Error(`${AR_SESSIONS_URL}: HTTP ${res.status}`)
+    const bars = await res.json()
+    if (!Array.isArray(bars)) throw new Error(`${AR_SESSIONS_URL}: non-array response`)
+    const lastAr = bars.map(b => String(b?.date ?? '')).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d) && d < today).sort().pop()
+    if (!lastAr) throw new Error(`${AR_SESSIONS_URL}: no session before ${today}`)
+    const value = lastAr < previousWeekday(today)
+    afterHolidayMemo = { day: today, value }
+    return value
+  } catch (err) {
+    console.error('[Data912] AR session history failed, feed day change kept:', err)
+    return false
+  }
+}
+
+function previousWeekday(iso: string): string {
+  const d = new Date(`${iso}T12:00:00Z`)
+  do d.setUTCDate(d.getUTCDate() - 1)
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6)
+  return d.toISOString().slice(0, 10)
 }
 
 /**
