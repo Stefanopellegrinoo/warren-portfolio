@@ -23,7 +23,7 @@ Specs S1-S11 come from the 2026-10-23 audit (two read-only audits plus live chec
 
 ## Tasks
 
-- [x] T1 · S1 · inline · `requireUser` verifies with `auth.getUser()` · Risk item 2 · `2609296` (RED 2/3 → GREEN 3/3)
+- [x] T1 · S1 · inline · `requireUser` verifies with `auth.getUser()` (since L19: `getClaims()`, local ES256 check) · Risk item 2 · `2609296` (RED 2/3 → GREEN 3/3)
 - [x] T2 · S2 · inline · import status owner check + 5 MB upload cap · `d755548` (RED 3/4 → GREEN 4/4)
 - [x] T3 · S3 · inline · `images.unoptimized: true` · `897a3b4` (no test: one config line; guard read in `next/dist/server/next-server.js:166`)
 - [x] T4 · S4 · inline · migration 048 function grants · `9e65eea` (RED ENOENT → GREEN 7/7). APPLIED to prod 2026-10-23 (L5)
@@ -152,3 +152,5 @@ Owner actions (outside the code): rotate the Redis password found in public git 
   - R4, the rollback restores only SELECT. Already noted in L17.
   - R4, the worker imports `supabase-server`. Checked and dismissed: `price-worker`, `summary-cache` and `user-portfolios` already imported it before this change, the 5 worker modules load under `tsx` outside Next, and the worker container has `SUPABASE_SERVICE_ROLE_KEY`.
   - Next step: push `security/market-data`, open a PR, and have the user merge and deploy. Then check pg_stat_statements deltas, and apply 049 only with an explicit OK.
+- L19 (2026-11-13) — S1 revisited for speed. The user reported the Resumen takes about 3 s. A read-only measurement in prod showed that each `getUser()` costs ~100 ms warm and ~600 ms on a new connection, paid by every API call. The project's JWKS publishes an ES256 key, so `requireUser` now calls `getClaims()`, which checks the JWT signature and expiry locally against the JWKS (cached for 10 min). Accepted tradeoff, approved by the user ("dale"): a signed-out or banned user's JWT stays valid until it expires (1 h). An expired JWT makes `getClaims` throw a plain Error; that is now a 401 and no longer a 500. Tests sign real ES256 JWTs and cover: valid, forged with the same kid, and expired.
+- L20 (2026-11-13) — Follow-ups from the L19 review. Only the errors getClaims throws for a bad JWT map to 401: SyntaxError, DOMException, 'JWT has expired', 'Missing exp claim' and 'Invalid alg claim'. Any other throw (SDK or WebCrypto) propagates as a server error, so it no longer logs the user out. New tests use the real client: a JWKS fetch that fails by network or with a 503 answers 503. The expired-JWT test asserts the SESSION_EXPIRED body.
