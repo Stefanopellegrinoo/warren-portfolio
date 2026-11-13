@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { forgetCached, setCachedValue } from '@/lib/client-cache'
 import { getPortfolio, POSITIONS_KEY } from '@/lib/warren/positions'
+import { RESUMEN_FIRST_REQUESTS } from '@/lib/resumen/first-requests'
 
 const renders = { distribution: 0 }
 for (const m of ['HoldingsList', 'HoldingsTable', 'AdjustCashDialog']) {
@@ -53,6 +54,15 @@ async function mount(positions: () => Promise<Response>) {
 const flush = () => act(async () => { await new Promise(r => setTimeout(r, 0)) })
 
 describe('Resumen loads fast', () => {
+  // The layout preloads these from the HTML: a URL the page does not ask for is wasted, and one it
+  // asks for that is missing waits for the JS to download and start.
+  it('makes on a cold load exactly the requests the layout preloads', async () => {
+    const { urls, unmount } = await mount(async () => json(PORTFOLIO))
+    await flush()
+    expect([...new Set(urls)].sort()).toEqual([...RESUMEN_FIRST_REQUESTS].sort())
+    unmount()
+  })
+
   it('asks for the portfolio once when another part of the tab is already asking for it', async () => {
     const positions = held()
     vi.stubGlobal('fetch', vi.fn(async () => positions.answer))
